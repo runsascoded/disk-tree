@@ -1,5 +1,6 @@
 click
 humanize
+kaleido
 pandas
+plotly
 utz==0.3.18
-

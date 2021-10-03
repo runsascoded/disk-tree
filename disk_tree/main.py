@@ -1,15 +1,17 @@
 from click import argument, command, option
 from humanize import naturalsize
 import os
-from os import stat
+from os import makedirs, stat
 from os.path import abspath, exists, isfile, join
 import pandas as pd
 from pandas import to_datetime as to_dt
 from pathlib import Path
+import plotly.express as px
 import re
 from re import fullmatch
+from subprocess import check_call
 
-from utz import basename, concat, DF, dirname, dt, env, exists, o, process, splitext, sxs, urlparse
+from utz import basename, concat, DF, dirname, dt, env, exists, o, process, singleton, splitext, sxs, urlparse
 
 
 LINE_RGX = '(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
@@ -31,14 +33,17 @@ def parse_s3_line(line):
     mtime = to_dt(m['mtime'])
     size = int(m['size'])
     key = m['key']
-    return o(mtime=mtime, size=size, key=key)
+    parent = dirname(key)
+    return o(mtime=mtime, size=size, key=key, parent=parent)
 
 
 def path_metadata(path):
     stat = os.stat(path)
     mtime = to_dt(stat.st_mtime, unit='s')
     size = stat.st_size
-    return o(mtime=mtime, size=size, path=path, abspath=abspath(path))
+    path = abspath(path)
+    parent = dirname(path)
+    return o(mtime=mtime, size=size, path=path, parent=parent)
 
 
 def dirs(file, root=None):
@@ -70,7 +75,7 @@ def expand_file_row(r, root=None):
     path = r['path']
     file_df = r.to_frame().transpose()
     ancestors = dirs(path, root=root)[:-1]
-    dirs_df = DF([ dict(mtime=r['mtime'], size=r['size'], path=dir, type='dir') for dir in ancestors ])
+    dirs_df = DF([ dict(mtime=r['mtime'], size=r['size'], path=dir, type='dir', parent=dirname(dir)) for dir in ancestors ])
     rows = concat([file_df, dirs_df]).reset_index(drop=True)
     return rows
 
@@ -83,8 +88,9 @@ def agg_dirs(files, k='path', root=None,):
         return files
     sizes = groups['size'].sum()
     mtimes = groups['mtime'].max()
+    parents = groups.apply(lambda df: singleton(df['parent'])).rename('parent')
     num_descendents = groups.size().rename('num_descendents')
-    aggd = sxs(mtimes, sizes, num_descendents).reset_index()
+    aggd = sxs(mtimes, sizes, num_descendents, parents).reset_index()
     return aggd
 
 
@@ -122,7 +128,7 @@ def main(path, profile=None):
     elif not url.scheme:
         # Local filesystem
         now = to_dt(dt.now())
-        root = path
+        root = abspath(path)
         paths = [ str(p) for p in Path(path).glob("**/*") ]
         files = DF([ path_metadata(p) for p in paths if isfile(p) ])
         aggd = agg_dirs(files, root=root).sort_values('path')
@@ -135,25 +141,26 @@ def main(path, profile=None):
 
 
 @command('disk-tree')
-@option('--format', default='sql', help=f'Format to write output/metadata in: `sql` or `pqt`')
-@option('-o', '--output-dir', help=f'Location to store disk-tree metadata. Default: ${DISK_TREE_ROOT_VAR}, $HOME/.config/disk-tree, or $HOME/.disk-tree')
-@option('-O', '--no-output', is_flag=True, help=f'Disable writing results to {DEFAULT_ROOT}')
+@option('--db-dir', help=f'Location to store disk-tree metadata. Default: ${DISK_TREE_ROOT_VAR}, $HOME/.config/disk-tree, or $HOME/.disk-tree')
+@option('--db-format', default='sql', help=f'Format to write output/metadata in: `sql` or `pqt`')
+@option('-o', '--out-path', multiple=True, help='Format(s) to write output to: "jpg", "png", "svg"')
+@option('-O', '--no-db', is_flag=True, help=f'Disable writing results to {DEFAULT_ROOT}')
 @option('-p', '--s3-profile', help='AWS profile to use')
 @argument('path')
-def cli(path, format, output_dir, no_output, s3_profile):
+def cli(path, db_format, out_path, db_dir, no_db, s3_profile):
     root, bucket, aggd = main(path, profile=s3_profile)
 
-    if not output_dir:
-        output_dir = DEFAULT_ROOT
+    if not db_dir:
+        db_dir = DEFAULT_ROOT
 
-    if format == 'sql':
-        output_path = join(output_dir, 'disk-tree.db')
-    elif format == 'pqt':
-        output_path = join(output_dir, 'disk-tree.pqt')
+    if db_format == 'sql':
+        output_path = join(db_dir, 'disk-tree.db')
+    elif db_format == 'pqt':
+        output_path = join(db_dir, 'disk-tree.pqt')
     else:
-        raise ValueError(f'Unrecognized output metadata format: {format}')
+        raise ValueError(f'Unrecognized output metadata format: {db_format}')
 
-    if not no_output:
+    if not no_db:
 
         def merge(prev, cur):
             passthrough = prev[(prev.bucket != bucket)]
@@ -163,29 +170,40 @@ def cli(path, format, output_dir, no_output, s3_profile):
             num_passthrough = len(passthrough)
             num_overwritten = len(prev) - num_passthrough
             num_new = len(cur) - num_overwritten
-            print(f"Overwriting {output_dir}: {len(prev)} previous records, {num_passthrough} passing through, {num_overwritten} overwritten {num_new} new")
+            print(f"Overwriting {db_dir}: {len(prev)} previous records, {num_passthrough} passing through, {num_overwritten} overwritten {num_new} new")
             return merged
 
         base, ext = splitext(output_path)
-        if format == 'sql':
+        if db_format == 'sql':
             sqlite_url = f'sqlite:///{output_path}'
             name = basename(base)
             if exists(output_path):
                 prev = pd.read_sql_table(name, sqlite_url)
                 aggd = merge(prev, aggd)
             aggd.to_sql(name, sqlite_url, if_exists='replace')
-        elif format == 'pqt':
+        elif db_format == 'pqt':
             if exists(output_path):
                 prev = pd.read_parquet(output_path)
                 aggd = merge(prev, aggd)
             aggd.to_parquet(output_path)
         else:
-            raise ValueError(f'Unrecognized output metadata format: {format}')
+            raise ValueError(f'Unrecognized output metadata format: {db_format}')
 
     files, dirs = aggd[aggd['type'] == 'file'], aggd[aggd['type'] == 'dir']
     total_size = files.size.sum()
     print(f'{len(files)} files in {len(dirs)} dirs, total size {naturalsize(total_size)}')
 
+    out_paths = out_path
+    if out_paths:
+        plot = px.treemap(aggd, names='path', parents='parent', values='size')
+        for out_path in out_paths:
+            print(f'Writing: {out_path}')
+            makedirs(dirname(abspath(out_path)), exist_ok=True)
+            if out_path.endswith('.html'):
+                plot.write_html(out_path)
+            else:
+                plot.write_image(out_path)
+            check_call(['open', out_path])
     print(aggd)
 
 
