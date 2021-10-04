@@ -1,8 +1,8 @@
 from click import argument, command, option
 from humanize import naturalsize
 import os
-from os import makedirs, stat
-from os.path import abspath, exists, isfile, join
+from os import makedirs, stat, walk
+from os.path import abspath, exists, isfile, islink, join
 import pandas as pd
 from pandas import to_datetime as to_dt
 from pathlib import Path
@@ -34,6 +34,8 @@ def parse_s3_line(line):
     size = int(m['size'])
     key = m['key']
     parent = dirname(key)
+    if key.endswith('/'):
+        parent = dirname(parent)
     return o(mtime=mtime, size=size, key=key, parent=parent)
 
 
@@ -71,18 +73,22 @@ def flatmap(self, func, **kwargs):
 DF.flatmap = flatmap
 
 
-def expand_file_row(r, root=None):
-    path = r['path']
+def expand_file_row(r, k, root=None):
+    path = r[k]
     file_df = r.to_frame().transpose()
     ancestors = dirs(path, root=root)[:-1]
-    dirs_df = DF([ dict(mtime=r['mtime'], size=r['size'], path=dir, type='dir', parent=dirname(dir)) for dir in ancestors ])
+    def to_dict(dir):
+        rv = dict(mtime=r['mtime'], size=r['size'], type='dir', parent=dirname(dir))
+        rv[k] = dir
+        return rv
+    dirs_df = DF([ to_dict(dir) for dir in ancestors ])
     rows = concat([file_df, dirs_df]).reset_index(drop=True)
     return rows
 
 
 def agg_dirs(files, k='path', root=None,):
     files['type'] = 'file'
-    expanded = files.flatmap(expand_file_row, root=root)
+    expanded = files.flatmap(expand_file_row, k=k, root=root)
     groups = expanded.groupby([k, 'type',])
     if len(groups) == len(files):
         return files
@@ -101,7 +107,7 @@ def strip_prefix(key, prefix):
         raise ValueError(f"Key {key} doesn't start with expected prefix {prefix}")
 
 
-def main(path, profile=None):
+def load(path, profile=None, cache=cache, cache_ttl=None):
     if profile:
         env['AWS_PROFILE'] = profile
 
@@ -116,86 +122,96 @@ def main(path, profile=None):
 
         now = to_dt(dt.now())
         lines = process.lines('aws', 's3', 'ls', '--recursive', path)
-        files = DF([parse_s3_line(line) for line in lines])
-        files['path'] = files['key'].apply(strip_prefix, prefix=f'{root}/')
-        aggd = agg_dirs(files, root=root).sort_values('path')
+        files = DF([ parse_s3_line(line) for line in lines ])
+        aggd = agg_dirs(files, k='key', root=root).sort_values('key')
         aggd['bucket'] = bucket
-        aggd['root'] = root
-        aggd['key'] = aggd['root'] + '/' + aggd['path']
+        # aggd['root'] = root
         aggd['checked_dt'] = now
-        aggd = aggd.drop(columns=['path', 'root'])
         return root, bucket, aggd
     elif not url.scheme:
         # Local filesystem
         now = to_dt(dt.now())
         root = abspath(path)
-        paths = [ str(p) for p in Path(path).glob("**/*") ]
-        files = DF([ path_metadata(p) for p in paths if isfile(p) ])
+        _, dirs, files = next(walk(root))
+        dirs = [ join(root, dir) for dir in dirs ]
+        files = [ join(root, file) for file in files ]
+        files = DF([ path_metadata(p) for p in paths if not islink(p) ])
+
+        # paths = [ str(p) for p in Path(path).glob("**/*") ]
+        # files = DF([ path_metadata(p) for p in paths if isfile(p) and not islink(p) ])
         aggd = agg_dirs(files, root=root).sort_values('path')
-        aggd['root'] = root
         aggd['checked_dt'] = now
-        aggd = aggd.drop(columns=['root'])
         return root, None, aggd
     else:
         raise ValueError(f'Unsupported URL scheme: {url.scheme}')
 
 
 @command('disk-tree')
-@option('--db-dir', help=f'Location to store disk-tree metadata. Default: ${DISK_TREE_ROOT_VAR}, $HOME/.config/disk-tree, or $HOME/.disk-tree')
-@option('--db-format', default='sql', help=f'Format to write output/metadata in: `sql` or `pqt`')
-@option('-o', '--out-path', multiple=True, help='Format(s) to write output to: "jpg", "png", "svg"')
-@option('-O', '--no-db', is_flag=True, help=f'Disable writing results to {DEFAULT_ROOT}')
+@option('--cache-dir', help=f'Location to store disk-tree metadata. Default: ${DISK_TREE_ROOT_VAR}, $HOME/.config/disk-tree, or $HOME/.disk-tree')
+@option('--cache-format', default='sql', help=f'Format to write output/metadata in: `sql` or `pqt`')
+@option('-t', '--cache-ttl', help='TTL for cache entries')
+@option('-C', '--no-cache', is_flag=True, help=f'Disable writing results to {DEFAULT_ROOT}')
+@option('-m', '--max-entries', type=int, help='Only store/render the -m/--max-entries largest directories/files found')
+@option('-o', '--out-path', multiple=True, help='Paths to write output to. Supported extensions: {jpg, png, svg, html}')
 @option('-p', '--s3-profile', help='AWS profile to use')
 @argument('path')
-def cli(path, db_format, out_path, db_dir, no_db, s3_profile):
-    root, bucket, aggd = main(path, profile=s3_profile)
+def cli(path, cache_dir, cache_format, cache_ttl, no_cache, max_entries, out_path, s3_profile):
 
-    if not db_dir:
-        db_dir = DEFAULT_ROOT
+    if not cache_dir:
+        cache_dir = DEFAULT_ROOT
 
-    if db_format == 'sql':
-        output_path = join(db_dir, 'disk-tree.db')
-    elif db_format == 'pqt':
-        output_path = join(db_dir, 'disk-tree.pqt')
+    if cache_format == 'sql':
+        cache_path = join(cache_dir, 'disk-tree.db')
+    elif cache_format == 'pqt':
+        cache_path = join(cache_dir, 'disk-tree.pqt')
     else:
-        raise ValueError(f'Unrecognized output metadata format: {db_format}')
+        raise ValueError(f'Unrecognized output metadata format: {cache_format}')
 
-    if not no_db:
+    def merge(prev, cur):
+        passthrough = prev[(prev.bucket != bucket)]
+        if root:
+            passthrough = concat([ passthrough, prev[(prev.bucket == bucket) & ~(prev.key.str.startswith(root))] ])
+        merged = concat([ cur, passthrough ]).sort_values(['bucket', 'key'])
+        num_passthrough = len(passthrough)
+        num_overwritten = len(prev) - num_passthrough
+        num_new = len(cur) - num_overwritten
+        print(f"Overwriting {cache_dir}: {len(prev)} previous records, {num_passthrough} passing through, {num_overwritten} overwritten {num_new} new")
+        return merged
 
-        def merge(prev, cur):
-            passthrough = prev[(prev.bucket != bucket)]
-            if root:
-                passthrough = concat([ passthrough, prev[(prev.bucket == bucket) & ~(prev.key.str.startswith(root))] ])
-            merged = concat([ cur, passthrough ]).sort_values(['bucket', 'key'])
-            num_passthrough = len(passthrough)
-            num_overwritten = len(prev) - num_passthrough
-            num_new = len(cur) - num_overwritten
-            print(f"Overwriting {db_dir}: {len(prev)} previous records, {num_passthrough} passing through, {num_overwritten} overwritten {num_new} new")
-            return merged
-
-        base, ext = splitext(output_path)
-        if db_format == 'sql':
-            sqlite_url = f'sqlite:///{output_path}'
+    cache = None
+    if not no_cache:
+        base, ext = splitext(cache_path)
+        if cache_format == 'sql':
+            sqlite_url = f'sqlite:///{cache_path}'
             name = basename(base)
-            if exists(output_path):
-                prev = pd.read_sql_table(name, sqlite_url)
-                aggd = merge(prev, aggd)
-            aggd.to_sql(name, sqlite_url, if_exists='replace')
-        elif db_format == 'pqt':
-            if exists(output_path):
-                prev = pd.read_parquet(output_path)
-                aggd = merge(prev, aggd)
-            aggd.to_parquet(output_path)
+            if exists(cache_path):
+                cache = pd.read_sql_table(name, sqlite_url)
+                # aggd = merge(cache, aggd)
+            # aggd.to_sql(name, sqlite_url, if_exists='replace')
+        elif cache_format == 'pqt':
+            if exists(cache_path):
+                cache = pd.read_parquet(cache_path)
+                # aggd = merge(cache, aggd)
+            # aggd.to_parquet(cache_path)
         else:
-            raise ValueError(f'Unrecognized output metadata format: {db_format}')
+            raise ValueError(f'Unrecognized output metadata format: {cache_format}')
 
-    files, dirs = aggd[aggd['type'] == 'file'], aggd[aggd['type'] == 'dir']
+    root, bucket, aggd = load(path, profile=s3_profile, cache=cache, cache_ttl=cache_ttl)
+
+    aggd = aggd.sort_values('size', ascending=False)
+    if max_entries:
+        df = aggd.iloc[:max_entries]
+    else:
+        df = aggd
+
+    files, dirs = df[df['type'] == 'file'], df[df['type'] == 'dir']
     total_size = files.size.sum()
     print(f'{len(files)} files in {len(dirs)} dirs, total size {naturalsize(total_size)}')
 
     out_paths = out_path
     if out_paths:
-        plot = px.treemap(aggd, names='path', parents='parent', values='size')
+        k = 'key' if 'key' in df else 'path'
+        plot = px.treemap(df, names=k, parents='parent', values='size')
         for out_path in out_paths:
             print(f'Writing: {out_path}')
             makedirs(dirname(abspath(out_path)), exist_ok=True)
@@ -204,7 +220,7 @@ def cli(path, db_format, out_path, db_dir, no_db, s3_profile):
             else:
                 plot.write_image(out_path)
             check_call(['open', out_path])
-    print(aggd)
+    print(df)
 
 
 if __name__ == '__main__':

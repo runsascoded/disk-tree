@@ -1,4 +1,6 @@
 click
+flask
+flask-sqlalchemy
 humanize
 kaleido
 pandas
