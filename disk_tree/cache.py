@@ -1,29 +1,9 @@
-from dataclasses import dataclass
-from typing import List
-import pandas as pd
-
-
-# def parse_s3_line(line):
-#     m = re.fullmatch(LINE_RGX, line)
-#     if not m:
-#         raise ValueError(f'Unrecognized line: {line}')
-#
-#     mtime = to_dt(m['mtime'])
-#     size = int(m['size'])
-#     key = m['key']
-#     parent = dirname(key)
-#     if key.endswith('/'):
-#         parent = dirname(parent)
-#     return o(mtime=mtime, size=size, key=key, parent=parent)
-
-
-# def path_metadata(path):
-#     stat = os.stat(path)
-#     mtime = to_dt(stat.st_mtime, unit='s')
-#     size = stat.st_size
-#     path = abspath(path)
-#     parent = dirname(path)
-#     return o(mtime=mtime, size=size, path=path, parent=parent)
+from datetime import datetime as dt
+import os
+from os import environ as env, walk
+from os.path import abspath, dirname, exists, isdir, isfile, islink, join
+from sys import stderr
+from pandas import to_datetime as to_dt
 
 
 DISK_TREE_ROOT_VAR = 'DISK_TREE_ROOT'
@@ -39,7 +19,9 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{DEFAULT_ROOT}'
+cache_url = f'sqlite:///{DEFAULT_ROOT}'
+app.config['SQLALCHEMY_DATABASE_URI'] = cache_url
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 
@@ -52,51 +34,23 @@ class File(db.Model):
     num_descendants = db.Column(db.Integer, nullable=False)
     checked_at = db.Column(db.DateTime, nullable=False)
 
+    @property
+    def descendants(self):
+        return File.query.filter(File.path.startswith(self.path)).all()
+
     def __repr__(self):
         return f'File({self.path})'
 
 
 db.create_all()
 
-@dataclass
-class Entry:
-    path: str
-    mtime: pd.Timestamp
-    size: int
-    parent: 'Entry'
-    kind: str
-    num_descendants: int
-    checked_at: pd.Timestamp
-    children: List['Entry']
-
 
 class Cache:
-    def __init__(self, path, ttl=None):
-        self.path = path
-        if path.endswith('.db'):
-            self.url = f'sqlite:///{path}'
-            if exists(cache_path):
-                self.df = pd.read_sql_table('entries', self.url)
-            else:
-                self.df = None
-        # elif path.endswith('.pqt'):
-        #     if exists(cache_path):
-        #         self.df = pd.read_parquet(path)
-        #     else:
-        #         self.df = None
-        else:
-            raise RuntimeError(f'Unrecognized cache path extension: {path}')
-        self.map = {}
+    def __init__(self, ttl=None):
         self.ttl = ttl
-        self._conn = None
-
-    @property
-    def conn(self):
-        if not self._conn:
-            self._conn = sqlite3.connect(db_file)
-        return self._conn
 
     def compute(self, path, now=None):
+        path = abspath(path)
         if islink(path):
             stderr.write(f'Skipping symlink: {path}\n')
             return None
@@ -107,56 +61,70 @@ class Cache:
             mtime = to_dt(stat.st_mtime, unit='s')
             size = stat.st_size
             parent = dirname(path)
-            parent = self.get(parent)
-            entry = Entry(
-                path,
+            file = File(
+                path=path,
                 mtime=mtime,
                 size=size,
                 parent=parent,
                 kind='file',
                 num_descendants=1,
                 checked_at=now,
-                children=[],
             )
-            return entry
+            self.insert(file)
+            return file
         elif isdir(path):
-            _, dirs, files = next(walk(path))
-            files = list(filter(None, [ self[file] for file in files ]))
-            dirs = [ self[dir] for dir in dirs ]
+            try:
+                _, dirs, files = next(walk(path))
+            except StopIteration:
+                stderr.write(f'Error traversing {path}\n')
+                return None
+            files = list(filter(None, [ self[join(path, file)] for file in files ]))
+            dirs = list(filter(None, [ self[join(path, dir)] for dir in dirs ]))
             children = files + dirs
-            num_descendants = len(files) + sum( d.num_descendants for d in dirs )
-            size = sum(c.size for c in children)
+            child_paths = set([ c.path for c in children ])
+            db_children = File.query.filter(File.parent == path).all()
+            deleted_children = [ c for c in db_children if c.path not in child_paths ]
+            if deleted_children:
+                print(f'Cache: deleting {len(deleted_children)} stale children of {path}:')
+                for child in deleted_children:
+                    print(f'\t{child.path}')
+                    db.session.delete(child)
+            num_descendants = sum( c.num_descendants for c in children )
+            size = sum( c.size for c in children )
             parent = dirname(path)
-            parent = self.get(parent)
-            mtime = max(c.mtime for c in children)
+            stat = os.stat(path)
+            mtime = to_dt(stat.st_mtime, unit='s')
+            if children:
+                mtime = max(mtime, max(c.mtime for c in children))
             if not now:
                 now = to_dt(dt.now())
-            entry = Entry(
-                path,
+            d = File(
+                path=path,
                 mtime=mtime,
                 size=size,
                 parent=parent,
                 kind='dir',
                 num_descendants=num_descendants,
                 checked_at=now,
-                children = children,
             )
-            for c in children:
-                c.parent = entry
-            return entry
+            self.insert(d)
+            return d
         else:
             stderr.write(f'Unrecognized path type: {path}\n')
             return None
 
-    def insert(self, k, v):
-        sql = ''' INSERT INTO entries(name,begin_date,end_date) VALUES(?,?,?) '''
-        cur = conn.cursor()
-        cur.execute(sql, (v.path, v.mtime, v.size, v.parent.path, v.kind, v.num_descendants, v.checked_at))
-        conn.commit()
-        return cur.lastrowid
+    def insert(self, file, commit=True):
+        existing = File.query.get(file.path)
+        if existing:
+            for k in ['mtime', 'size', 'parent', 'kind', 'num_descendants', 'checked_at',]:
+                setattr(existing, k, getattr(file, k))
+        else:
+            db.session.add(file)
+        if commit:
+            db.session.commit()
 
     def get(self, path):
-        existing = self.map.get(path)
+        existing = File.query.filter_by(path=path).first()
         if existing:
             now = dt.now()
             if now - existing.checked_at <= self.ttl:
@@ -168,8 +136,4 @@ class Cache:
         if existing:
             return existing
         entry = self.compute(path)
-        if entry:
-            self.map[path] = entry
-            return entry
-        else:
-            return None
+        return entry

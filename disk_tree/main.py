@@ -1,51 +1,20 @@
 from click import argument, command, option
+from functools import partial
 from humanize import naturalsize
-import os
-from os import makedirs, stat, walk
-from os.path import abspath, exists, isfile, islink, join
+from os import makedirs
+from os.path import abspath
 import pandas as pd
 from pandas import to_datetime as to_dt
-from pathlib import Path
 import plotly.express as px
-import re
 from re import fullmatch
 from subprocess import check_call
 
-from utz import basename, concat, DF, dirname, dt, env, exists, o, process, singleton, splitext, sxs, urlparse
+from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse
+
+from disk_tree.cache import Cache
 
 
 LINE_RGX = '(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
-
-DISK_TREE_ROOT_VAR = 'DISK_TREE_ROOT'
-HOME = env['HOME']
-CONFIG_DIR = join(HOME, '.config')
-if exists(CONFIG_DIR):
-    DEFAULT_ROOT = join(CONFIG_DIR, 'disk-tree')
-else:
-    DEFAULT_ROOT = join(HOME, '.disk-tree')
-
-
-def parse_s3_line(line):
-    m = re.fullmatch(LINE_RGX, line)
-    if not m:
-        raise ValueError(f'Unrecognized line: {line}')
-
-    mtime = to_dt(m['mtime'])
-    size = int(m['size'])
-    key = m['key']
-    parent = dirname(key)
-    if key.endswith('/'):
-        parent = dirname(parent)
-    return o(mtime=mtime, size=size, key=key, parent=parent)
-
-
-def path_metadata(path):
-    stat = os.stat(path)
-    mtime = to_dt(stat.st_mtime, unit='s')
-    size = stat.st_size
-    path = abspath(path)
-    parent = dirname(path)
-    return o(mtime=mtime, size=size, path=path, parent=parent)
 
 
 def dirs(file, root=None):
@@ -107,7 +76,7 @@ def strip_prefix(key, prefix):
         raise ValueError(f"Key {key} doesn't start with expected prefix {prefix}")
 
 
-def load(path, profile=None, cache=cache, cache_ttl=None):
+def load(path, cache, profile=None):
     if profile:
         env['AWS_PROFILE'] = profile
 
@@ -125,93 +94,82 @@ def load(path, profile=None, cache=cache, cache_ttl=None):
         files = DF([ parse_s3_line(line) for line in lines ])
         aggd = agg_dirs(files, k='key', root=root).sort_values('key')
         aggd['bucket'] = bucket
-        # aggd['root'] = root
         aggd['checked_dt'] = now
         return root, bucket, aggd
     elif not url.scheme:
         # Local filesystem
         now = to_dt(dt.now())
         root = abspath(path)
-        _, dirs, files = next(walk(root))
-        dirs = [ join(root, dir) for dir in dirs ]
-        files = [ join(root, file) for file in files ]
-        files = DF([ path_metadata(p) for p in paths if not islink(p) ])
-
-        # paths = [ str(p) for p in Path(path).glob("**/*") ]
-        # files = DF([ path_metadata(p) for p in paths if isfile(p) and not islink(p) ])
-        aggd = agg_dirs(files, root=root).sort_values('path')
-        aggd['checked_dt'] = now
-        return root, None, aggd
+        root = cache[root]
+        entries = root.descendants
+        df = DF([
+            dict(
+                path=e.path,
+                kind=e.kind,
+                size=e.size,
+                mtime=e.mtime,
+                num_descendants=e.num_descendants,
+                parent=e.parent,
+                checked_at=e.checked_at,
+            )
+            for e in entries
+        ])
+        return df.set_index('path')
     else:
         raise ValueError(f'Unsupported URL scheme: {url.scheme}')
 
 
 @command('disk-tree')
-@option('--cache-dir', help=f'Location to store disk-tree metadata. Default: ${DISK_TREE_ROOT_VAR}, $HOME/.config/disk-tree, or $HOME/.disk-tree')
-@option('--cache-format', default='sql', help=f'Format to write output/metadata in: `sql` or `pqt`')
-@option('-t', '--cache-ttl', help='TTL for cache entries')
-@option('-C', '--no-cache', is_flag=True, help=f'Disable writing results to {DEFAULT_ROOT}')
-@option('-m', '--max-entries', type=int, help='Only store/render the -m/--max-entries largest directories/files found')
+@option('-h', '--human-readable', count=True, help='Pass once for SI units, twice for IEC')
+@option('-t', '--cache-ttl', default='1d', help='TTL for cache entries')
+@option('-m', '--max-entries', type=int, default=1000, help='Only store/render the -m/--max-entries largest directories/files found')
+@option('-M', '--no-max-entries', is_flag=True, help='Only store/render the -m/--max-entries largest directories/files found')
 @option('-o', '--out-path', multiple=True, help='Paths to write output to. Supported extensions: {jpg, png, svg, html}')
 @option('-p', '--s3-profile', help='AWS profile to use')
 @argument('path')
-def cli(path, cache_dir, cache_format, cache_ttl, no_cache, max_entries, out_path, s3_profile):
+def cli(path, human_readable, cache_ttl, max_entries, no_max_entries, out_path, s3_profile):
+    path = abspath(path)
+    cache = Cache(ttl=pd.to_timedelta(cache_ttl))
 
-    if not cache_dir:
-        cache_dir = DEFAULT_ROOT
+    df = load(path, cache=cache, profile=s3_profile).reset_index()
+    df['name'] = df.path.apply(basename)
+    df = df.sort_values('size')
 
-    if cache_format == 'sql':
-        cache_path = join(cache_dir, 'disk-tree.db')
-    elif cache_format == 'pqt':
-        cache_path = join(cache_dir, 'disk-tree.pqt')
+    if human_readable == 0:
+        size_col = 'size'
+    elif human_readable == 1:
+        df['hsize'] = df['size'].apply(partial(naturalsize, gnu=True))
+        size_col = 'hsize'
+    elif human_readable == 2:
+        df['hsize'] = df['size'].apply(partial(naturalsize, binary=True, gnu=True))
+        size_col = 'hsize'
     else:
-        raise ValueError(f'Unrecognized output metadata format: {cache_format}')
+        raise ValueError(f'Pass -h/--human-readable 0, 1, or 2 times (got {human_readable})')
 
-    def merge(prev, cur):
-        passthrough = prev[(prev.bucket != bucket)]
-        if root:
-            passthrough = concat([ passthrough, prev[(prev.bucket == bucket) & ~(prev.key.str.startswith(root))] ])
-        merged = concat([ cur, passthrough ]).sort_values(['bucket', 'key'])
-        num_passthrough = len(passthrough)
-        num_overwritten = len(prev) - num_passthrough
-        num_new = len(cur) - num_overwritten
-        print(f"Overwriting {cache_dir}: {len(prev)} previous records, {num_passthrough} passing through, {num_overwritten} overwritten {num_new} new")
-        return merged
+    if no_max_entries:
+        max_entries = None
 
-    cache = None
-    if not no_cache:
-        base, ext = splitext(cache_path)
-        if cache_format == 'sql':
-            sqlite_url = f'sqlite:///{cache_path}'
-            name = basename(base)
-            if exists(cache_path):
-                cache = pd.read_sql_table(name, sqlite_url)
-                # aggd = merge(cache, aggd)
-            # aggd.to_sql(name, sqlite_url, if_exists='replace')
-        elif cache_format == 'pqt':
-            if exists(cache_path):
-                cache = pd.read_parquet(cache_path)
-                # aggd = merge(cache, aggd)
-            # aggd.to_parquet(cache_path)
-        else:
-            raise ValueError(f'Unrecognized output metadata format: {cache_format}')
-
-    root, bucket, aggd = load(path, profile=s3_profile, cache=cache, cache_ttl=cache_ttl)
-
-    aggd = aggd.sort_values('size', ascending=False)
     if max_entries:
-        df = aggd.iloc[:max_entries]
-    else:
-        df = aggd
+        df = df.iloc[-max_entries:]
 
-    files, dirs = df[df['type'] == 'file'], df[df['type'] == 'dir']
-    total_size = files.size.sum()
+    files, dirs = df[df.kind == 'file'], df[df.kind == 'dir']
+    total_size = files['size'].sum()
     print(f'{len(files)} files in {len(dirs)} dirs, total size {naturalsize(total_size)}')
 
     out_paths = out_path
     if out_paths:
         k = 'key' if 'key' in df else 'path'
-        plot = px.treemap(df, names=k, parents='parent', values='size')
+        plot = px.treemap(
+            df,
+            ids=k,
+            names='name',
+            # textinfo='name',
+            parents='parent',
+            values='size',
+            #color_continuous_scale='RdBu',
+            branchvalues='total',
+            #color_continuous_midpoint=np.average(df['lifeExp'], weights=df['pop'])
+        )
         for out_path in out_paths:
             print(f'Writing: {out_path}')
             makedirs(dirname(abspath(out_path)), exist_ok=True)
@@ -220,7 +178,10 @@ def cli(path, cache_dir, cache_format, cache_ttl, no_cache, max_entries, out_pat
             else:
                 plot.write_image(out_path)
             check_call(['open', out_path])
-    print(df)
+
+    children = df[df.parent == path]
+    lines = children.apply(lambda r: '% 8s\t%s' % (r[size_col], r.path), axis=1, result_type='reduce').tolist()
+    print('\n'.join(lines))
 
 
 if __name__ == '__main__':
