@@ -1,13 +1,14 @@
 from click import argument, command, option
 from functools import partial
 from humanize import naturalsize
-from os import makedirs
-from os.path import abspath
+from os import getcwd, makedirs, remove
+from os.path import abspath, exists
 import pandas as pd
 from pandas import to_datetime as to_dt
 import plotly.express as px
-from re import fullmatch
 from subprocess import check_call
+from sys import stderr
+from tempfile import NamedTemporaryFile
 
 from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse
 
@@ -69,38 +70,19 @@ def agg_dirs(files, k='path', root=None,):
     return aggd
 
 
-def strip_prefix(key, prefix):
-    if key.startswith(prefix):
-        return key[len(prefix):]
-    else:
-        raise ValueError(f"Key {key} doesn't start with expected prefix {prefix}")
-
-
-def load(path, cache, profile=None):
+def load(path, cache, profile=None, fsck=False,):
     if profile:
         env['AWS_PROFILE'] = profile
 
     url = urlparse(path)
-    if url.scheme == 's3' or profile:
-        # S3
-        m = fullmatch('s3://(?P<bucket>[^/]+)(?:/(?P<root>.*))?', path)
-        if not m:
-            raise ValueError(f'Unrecognized S3 URL: {path}')
-        bucket = m['bucket']
-        root = m['root'] or ''
-
-        now = to_dt(dt.now())
-        lines = process.lines('aws', 's3', 'ls', '--recursive', path)
-        files = DF([ parse_s3_line(line) for line in lines ])
-        aggd = agg_dirs(files, k='key', root=root).sort_values('key')
-        aggd['bucket'] = bucket
-        aggd['checked_dt'] = now
-        return root, bucket, aggd
-    elif not url.scheme:
+    if not url.scheme:
         # Local filesystem
         now = to_dt(dt.now())
         root = abspath(path)
-        root = cache[root]
+        if fsck:
+            root = cache.compute(root, fsck=True)
+        else:
+            root = cache[root]
         entries = root.descendants
         df = DF([
             dict(
@@ -120,20 +102,28 @@ def load(path, cache, profile=None):
 
 
 @command('disk-tree')
+@option('-f', '--fsck', is_flag=True, help='Validate all cache entries that begin with the provided path(s)')
 @option('-h', '--human-readable', count=True, help='Pass once for SI units, twice for IEC')
 @option('-t', '--cache-ttl', default='1d', help='TTL for cache entries')
 @option('-m', '--max-entries', type=int, default=1000, help='Only store/render the -m/--max-entries largest directories/files found')
 @option('-M', '--no-max-entries', is_flag=True, help='Only store/render the -m/--max-entries largest directories/files found')
+@option('-n', '--sort-by-name', is_flag=True, help='Sort output entries by name (default is by size)')
 @option('-o', '--out-path', multiple=True, help='Paths to write output to. Supported extensions: {jpg, png, svg, html}')
-@option('-p', '--s3-profile', help='AWS profile to use')
-@argument('path')
-def cli(path, human_readable, cache_ttl, max_entries, no_max_entries, out_path, s3_profile):
+@option('-O', '--no-open', is_flag=True, help='Skip attempting to `open` any output files')
+@option('-t', '--tmp-html', count=True, help='Write an HTML representation to a temporary file and open in browser; pass twice to keep the temp file around after exit')
+@argument('path', required=False)
+def cli(path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort_by_name, out_path, no_open, tmp_html):
+    if path is None:
+        path = getcwd()
     path = abspath(path)
     cache = Cache(ttl=pd.to_timedelta(cache_ttl))
 
-    df = load(path, cache=cache, profile=s3_profile).reset_index()
+    df = load(path, cache=cache, fsck=fsck).reset_index()
     df['name'] = df.path.apply(basename)
-    df = df.sort_values('size')
+    if sort_by_name:
+        df = df.sort_values('name')
+    else:
+        df = df.sort_values('size')
 
     if human_readable == 0:
         size_col = 'size'
@@ -146,7 +136,7 @@ def cli(path, human_readable, cache_ttl, max_entries, no_max_entries, out_path, 
     else:
         raise ValueError(f'Pass -h/--human-readable 0, 1, or 2 times (got {human_readable})')
 
-    if no_max_entries:
+    if no_max_entries or max_entries == 0:
         max_entries = None
 
     if max_entries:
@@ -157,6 +147,9 @@ def cli(path, human_readable, cache_ttl, max_entries, no_max_entries, out_path, 
     print(f'{len(files)} files in {len(dirs)} dirs, total size {naturalsize(total_size)}')
 
     out_paths = out_path
+    if not out_paths and tmp_html:
+        tmp_html_path = NamedTemporaryFile(dir=getcwd(), prefix='.disk-tree_', suffix='.html').name
+        out_paths = [ tmp_html_path ]
     if out_paths:
         k = 'key' if 'key' in df else 'path'
         plot = px.treemap(
@@ -170,14 +163,25 @@ def cli(path, human_readable, cache_ttl, max_entries, no_max_entries, out_path, 
             branchvalues='total',
             #color_continuous_midpoint=np.average(df['lifeExp'], weights=df['pop'])
         )
+        if not no_open:
+            if not process.check('which', 'open'):
+                stderr.write("No `open` executable found; skipping opening output files")
+                no_open = True
         for out_path in out_paths:
             print(f'Writing: {out_path}')
             makedirs(dirname(abspath(out_path)), exist_ok=True)
+
             if out_path.endswith('.html'):
-                plot.write_html(out_path)
+                plot.write_html(out_path, full_html=False, include_plotlyjs='cdn')
             else:
                 plot.write_image(out_path)
-            check_call(['open', out_path])
+
+            if not no_open:
+                check_call(['open', out_path])
+
+    if tmp_html == 1 and exists(tmp_html_path):
+        print(f'Removing temp HTML file {tmp_html_path}')
+        remove(tmp_html_path)
 
     children = df[df.parent == path]
     lines = children.apply(lambda r: '% 8s\t%s' % (r[size_col], r.path), axis=1, result_type='reduce').tolist()

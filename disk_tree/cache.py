@@ -36,6 +36,8 @@ class File(db.Model):
 
     @property
     def descendants(self):
+        # TODO: this is incorrect given spaces in paths with shared prefixes, e.g. will count "a/b c/d" as a descendant
+        #  of "a/b"
         return File.query.filter(File.path.startswith(self.path)).all()
 
     def __repr__(self):
@@ -49,7 +51,7 @@ class Cache:
     def __init__(self, ttl=None):
         self.ttl = ttl
 
-    def compute(self, path, now=None):
+    def compute(self, path, now=None, fsck=False):
         path = abspath(path)
         if islink(path):
             stderr.write(f'Skipping symlink: {path}\n')
@@ -83,12 +85,12 @@ class Cache:
             children = files + dirs
             child_paths = set([ c.path for c in children ])
             db_children = File.query.filter(File.parent == path).all()
-            deleted_children = [ c for c in db_children if c.path not in child_paths ]
-            if deleted_children:
-                print(f'Cache: deleting {len(deleted_children)} stale children of {path}:')
-                for child in deleted_children:
+            expired_children = [ c for c in db_children if c.path not in child_paths ]
+            if expired_children:
+                print(f'Cache: expiring {len(expired_children)} stale children of {path}:')
+                for child in expired_children:
                     print(f'\t{child.path}')
-                    db.session.delete(child)
+                    self.expire(child)
             num_descendants = sum( c.num_descendants for c in children )
             size = sum( c.size for c in children )
             parent = dirname(path)
@@ -108,10 +110,33 @@ class Cache:
                 checked_at=now,
             )
             self.insert(d)
+            if fsck:
+                descendants = File.query.filter(File.path.startswith(path)).all()
+                for descendant in descendants:
+                    path = descendant.path
+                    if not exists(path):
+                        self.expire(descendant)
             return d
         else:
             stderr.write(f'Unrecognized path type: {path}\n')
             return None
+
+    def expire(self, file, exist_ok=False, top_level=True, commit=True):
+        path = file.path
+        if not exist_ok and exists(path):
+            raise RuntimeError(f"Refusing to expire extant path {path}")
+        db_children = File.query.filter(File.parent == path).all()
+        if top_level:
+            print(f'Expiring {path}…')
+        num_expired = 0
+        for child in db_children:
+            num_expired += self.expire(child, exist_ok=exist_ok, top_level=False, commit=False)
+        db.session.delete(file)
+        if top_level:
+            print(f'Expired {path} and {num_expired} descendants')
+        if commit:
+            db.session.commit()
+        return num_expired
 
     def insert(self, file, commit=True):
         existing = File.query.get(file.path)
