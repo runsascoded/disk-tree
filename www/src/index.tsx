@@ -33,7 +33,7 @@ type Row = {
 import { Column, useTable, usePagination, } from 'react-table'
 import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 
-// type Setter<T> = React.Dispatch<React.SetStateAction<T>>
+type Setter<T> = React.Dispatch<React.SetStateAction<T>>
 
 const Styles = styled.div`
   padding: 1rem;
@@ -73,20 +73,20 @@ function Table(
         columns,
         data,
         fetchData,
-        // loading,
-        pageCount: controlledPageCount,
+        rowCount,
+        pageCount,
         worker,
-        // pageIndex,
-        // pageSize,
+        updatePageCount,
+        initialPageSize,
     }: {
         columns: Column<Row>[],
         data: Row[],
         fetchData: ({ worker, pageSize, pageIndex }: { worker: WorkerHttpvfs, pageSize: number, pageIndex: number }) => void,
-        // loading: boolean,
         pageCount: number,
+        updatePageCount: Setter<number>,
+        rowCount: number | null,
         worker: WorkerHttpvfs | null,
-        // pageIndex: number,
-        // pageSize: number,
+        initialPageSize: number
     }
 ) {
     // Use the state and functions returned from useTable to build your UI
@@ -95,14 +95,10 @@ function Table(
         getTableBodyProps,
         headerGroups,
         prepareRow,
-        page, // Instead of using 'rows', we'll use page,
-        // which has only the rows for the active page
-
-        // The rest of these things are super handy, too ;)
+        page,
         canPreviousPage,
         canNextPage,
         pageOptions,
-        pageCount,
         gotoPage,
         nextPage,
         previousPage,
@@ -112,24 +108,40 @@ function Table(
         {
             columns,
             data,
-            initialState: { pageIndex: 0, pageSize: 20, },
+            initialState: { pageIndex: 0, pageSize: initialPageSize, },
             manualPagination: true,
-            pageCount: controlledPageCount,
+            pageCount,
         },
         usePagination
     )
 
+    // const pageCount = React.useMemo(() => (rowCount === null) ? null : Math.ceil(rowCount / pageSize), [ rowCount, pageSize, ])
+    // console.log("<Table>, pageCount:", pageCount)
+
     // Listen for changes in pagination and use the state to fetch our new data
-    React.useEffect(
+    useEffect(
         () => {
             if (worker !== null) {
                 console.log("table fetching")
-                fetchData({worker, pageIndex, pageSize})
+                fetchData({ worker, pageIndex, pageSize, })
             } else {
                 console.log("null worker")
             }
         },
-        [ fetchData, worker, pageIndex, pageSize, pageCount, ],
+        [ fetchData, worker, pageIndex, pageSize, ],
+    )
+
+    useEffect(
+        () => {
+            if (rowCount !== null) {
+                const pageCount = Math.ceil(rowCount / pageSize)
+                console.log("updatePageCount:", pageCount, `(${rowCount}/${pageSize})`)
+                updatePageCount(pageCount)
+            } else {
+                console.log("null rowCount, skipping updatePageCount")
+            }
+        },
+        [ pageSize, rowCount, ]
     )
 
     // Render the UI for your table
@@ -173,10 +185,6 @@ function Table(
                 })}
                 </tbody>
             </table>
-            {/*
-        Pagination can be built however you'd like.
-        This is just a very basic UI implementation:
-      */}
             <div className="pagination">
                 <button onClick={() => gotoPage(0)} disabled={!canPreviousPage}>
                     {'<<'}
@@ -187,7 +195,7 @@ function Table(
                 <button onClick={() => nextPage()} disabled={!canNextPage}>
                     {'>'}
                 </button>{' '}
-                <button onClick={() => gotoPage(pageCount - 1)} disabled={!canNextPage}>
+                <button onClick={() => gotoPage(pageCount === null ? 0 : (pageCount - 1))} disabled={!canNextPage}>
                     {'>>'}
                 </button>{' '}
                 <span>
@@ -235,18 +243,16 @@ async function fetchPage(worker: WorkerHttpvfs, pageIndex: number, pageSize: num
 
 function App1() {
     const url: string = "/assets/disk-tree1k.db";
-    // const { data, setData, loading, setLoading, } = useAsyncHook(url);
-    const [ pageCount, setPageCount ] = React.useState(0)
-    const [ pageSize, setPageSize ] = React.useState(20)
-    const [ pageIndex, setPageIndex ] = React.useState(20)
+    const [ rowCount, setRowCount ] = React.useState<number | null>(null)
     const [ data, setData ] = useState<Row[]>([])
     const [ loadingWorker, setLoadingWorker ] = React.useState(false);
-    const [ loadingPageCount, setLoadingPageCount ] = React.useState(false)
+    const [ loadingRowCount, setLoadingRowCount ] = React.useState(false)
+    const [ pageCount, setPageCount ] = React.useState(0)
     const [ loadingData, setLoadingData ] = React.useState(false);
 
     const [ worker, setWorker ] = React.useState<WorkerHttpvfs | null>(null)
 
-    React.useEffect(
+    useEffect(
         () => {
             console.log("effect; loadingWorker:", loadingWorker)
             async function initWorker() {
@@ -287,33 +293,45 @@ function App1() {
         [url]
     );
 
-    React.useEffect(
+    useEffect(
         () => {
-            async function initPageCount(worker: WorkerHttpvfs) {
-                if (loadingPageCount) {
+            async function initRowCount(worker: WorkerHttpvfs) {
+                if (loadingRowCount) {
                     console.log("page count: already loading")
                 } else {
                     console.log("page count, loading")
-                    setLoadingPageCount(true)
-                    console.log("setLoadingPageCount true")
-                    const [{numRows}] = (await worker.db.query(`SELECT count(*) AS numRows FROM file`)) as { numRows: number }[]
-                    const numPages = Math.ceil(numRows / pageSize)
-                    // const numRows = 100
-                    // const numPages = 5
-                    console.log(`${numRows} rows, ${numPages} pages`)
-                    setLoadingPageCount(false)
-                    console.log("setLoadingPageCount false")
-                    setPageCount(numPages)
+                    setLoadingRowCount(true)
+                    console.log("setLoadingRowCount true")
+                    const [{rowCount}] = (await worker.db.query(`SELECT count(*) AS rowCount FROM file`)) as { rowCount: number }[]
+                    console.log(`${rowCount} rows`)
+                    setLoadingRowCount(false)
+                    console.log("setLoadingRowCount false, rowCount:", rowCount)
+                    setRowCount(rowCount)
                 }
             }
 
             if (worker !== null) {
-                initPageCount(worker)
+                initRowCount(worker)
             } else {
                 console.log("page count: worker is null")
             }
         },
         [ worker ],
+    )
+
+    const initialPageSize = 20
+
+    useEffect(
+        () => {
+            if (rowCount !== null) {
+                const pageCount = Math.ceil(rowCount / initialPageSize)
+                console.log("update pageCount from rowCount:", rowCount, pageCount)
+                setPageCount(pageCount)
+            } else {
+                console.log("update pageCount from rowCount:", rowCount)
+            }
+        },
+        [ rowCount, ]
     )
 
     const columns: Column<Row>[] = React.useMemo(
@@ -350,7 +368,7 @@ function App1() {
         } else {
             console.log("worker === null")
         }
-    }, [ worker, pageSize, pageIndex, ])
+    }, [ worker, rowCount, ])
 
     return (
         <Styles>
@@ -358,10 +376,11 @@ function App1() {
             columns={columns}
             data={data}
             fetchData={fetchData}
-            // loading={loadingWorker}
             pageCount={pageCount}
+            updatePageCount={setPageCount}
+            rowCount={rowCount}
             worker={worker}
-            // pageIndex={pageIndex}
+            initialPageSize={initialPageSize}
         />
         </Styles>
     )
