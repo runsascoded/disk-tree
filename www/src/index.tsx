@@ -1,6 +1,8 @@
 import { createDbWorker } from "sql.js-httpvfs";
 import React, {useEffect, useState} from 'react';
 import ReactDOM from 'react-dom'
+import styled from 'styled-components'
+
 // import { Component, createElement } from "react";
 // import Plot from 'react-plotly.js';
 import $ from 'jquery';
@@ -32,6 +34,39 @@ import { Column, useTable, usePagination, } from 'react-table'
 import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 
 // type Setter<T> = React.Dispatch<React.SetStateAction<T>>
+
+const Styles = styled.div`
+  padding: 1rem;
+
+  table {
+    border-spacing: 0;
+    border: 1px solid black;
+
+    tr {
+      :last-child {
+        td {
+          border-bottom: 0;
+        }
+      }
+    }
+
+    th,
+    td {
+      margin: 0;
+      padding: 0.5rem;
+      border-bottom: 1px solid black;
+      border-right: 1px solid black;
+
+      :last-child {
+        border-right: 0;
+      }
+    }
+  }
+
+  .pagination {
+    padding: 0.5rem;
+  }
+`
 
 function Table(
     {
@@ -318,6 +353,7 @@ function App1() {
     }, [ worker, pageSize, pageIndex, ])
 
     return (
+        <Styles>
         <Table
             columns={columns}
             data={data}
@@ -327,6 +363,7 @@ function App1() {
             worker={worker}
             // pageIndex={pageIndex}
         />
+        </Styles>
     )
 }
 
