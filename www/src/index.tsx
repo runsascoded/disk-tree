@@ -29,51 +29,31 @@ type Row = {
 
 
 import { Column, useTable, usePagination, } from 'react-table'
+import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 
-function useAsyncHook(url: string): [ Row[], string ] {
-    const [ data, setData ] = useState<Row[]>([])
-    const [loading, setLoading] = React.useState("false");
+// type Setter<T> = React.Dispatch<React.SetStateAction<T>>
 
-    React.useEffect(
-        () => {
-            async function fetchDB() {
-                try {
-                    setLoading("true");
-                    console.log("Fetching DB…", url);
-                    const worker = await createDbWorker(
-                        [
-                            {
-                                from: "inline",
-                                config: {
-                                    serverMode: "full",
-                                    url: url,
-                                    requestChunkSize: 4096,
-                                },
-                            },
-                        ],
-                        workerUrl.toString(),
-                        wasmUrl.toString()
-                    );
-                    const rows = (await worker.db.query(`select * from file limit 100`)) as Row[];
-                    console.log("Fetched db:", url);
-                    console.log("data:", rows);
-                    setData(rows)
-                } catch (error) {
-                    setLoading("null");
-                }
-            }
-
-            if (url !== "") {
-                fetchDB();
-            }
-        },
-        [url]
-    );
-
-    return [data, loading];
-}
-
-function Table({ columns, data }: { columns: Column<Row>[], data: Row[] }) {
+function Table(
+    {
+        columns,
+        data,
+        fetchData,
+        // loading,
+        pageCount: controlledPageCount,
+        worker,
+        // pageIndex,
+        // pageSize,
+    }: {
+        columns: Column<Row>[],
+        data: Row[],
+        fetchData: ({ worker, pageSize, pageIndex }: { worker: WorkerHttpvfs, pageSize: number, pageIndex: number }) => void,
+        // loading: boolean,
+        pageCount: number,
+        worker: WorkerHttpvfs | null,
+        // pageIndex: number,
+        // pageSize: number,
+    }
+) {
     // Use the state and functions returned from useTable to build your UI
     const {
         getTableProps,
@@ -98,28 +78,43 @@ function Table({ columns, data }: { columns: Column<Row>[], data: Row[] }) {
             columns,
             data,
             initialState: { pageIndex: 0, pageSize: 20, },
+            manualPagination: true,
+            pageCount: controlledPageCount,
         },
         usePagination
+    )
+
+    // Listen for changes in pagination and use the state to fetch our new data
+    React.useEffect(
+        () => {
+            if (worker !== null) {
+                console.log("table fetching")
+                fetchData({worker, pageIndex, pageSize})
+            } else {
+                console.log("null worker")
+            }
+        },
+        [ fetchData, worker, pageIndex, pageSize, pageCount, ],
     )
 
     // Render the UI for your table
     return (
         <>
-      <pre>
-        <code>
-          {JSON.stringify(
-              {
-                  pageIndex,
-                  pageSize,
-                  pageCount,
-                  canNextPage,
-                  canPreviousPage,
-              },
-              null,
-              2
-          )}
-        </code>
-      </pre>
+            <pre>
+                <code>
+                    {JSON.stringify(
+                        {
+                            pageIndex,
+                            pageSize,
+                            pageCount,
+                            canNextPage,
+                            canPreviousPage,
+                        },
+                        null,
+                        2
+                    )}
+                </code>
+            </pre>
             <table {...getTableProps()}>
                 <thead>
                 {headerGroups.map(headerGroup => (
@@ -161,13 +156,13 @@ function Table({ columns, data }: { columns: Column<Row>[], data: Row[] }) {
                     {'>>'}
                 </button>{' '}
                 <span>
-          Page{' '}
+                    Page{' '}
                     <strong>
-            {pageIndex + 1} of {pageOptions.length}
-          </strong>{' '}
-        </span>
+                        {pageIndex + 1} of {pageOptions.length}
+                    </strong>{' '}
+                </span>
                 <span>
-          | Go to page:{' '}
+                    | Go to page:{' '}
                     <input
                         type="number"
                         defaultValue={pageIndex + 1}
@@ -177,7 +172,7 @@ function Table({ columns, data }: { columns: Column<Row>[], data: Row[] }) {
                         }}
                         style={{ width: '100px' }}
                     />
-        </span>{' '}
+                </span>{' '}
                 <select
                     value={pageSize}
                     onChange={e => {
@@ -195,9 +190,96 @@ function Table({ columns, data }: { columns: Column<Row>[], data: Row[] }) {
     )
 }
 
+async function fetchPage(worker: WorkerHttpvfs, pageIndex: number, pageSize: number): Promise<Row[]> {
+    const query = `SELECT * FROM file LIMIT ${pageSize} OFFSET ${pageIndex * pageSize}`
+    return worker.db.query(query).then((rows) => {
+        console.log(`Page ${pageIndex}x${pageSize}:`, rows);
+        return rows as Row[]
+    })
+}
+
 function App1() {
-    const url = "/assets/disk-tree.db";
-    const [data, loading] = useAsyncHook(url);
+    const url: string = "/assets/disk-tree1k.db";
+    // const { data, setData, loading, setLoading, } = useAsyncHook(url);
+    const [ pageCount, setPageCount ] = React.useState(0)
+    const [ pageSize, setPageSize ] = React.useState(20)
+    const [ pageIndex, setPageIndex ] = React.useState(20)
+    const [ data, setData ] = useState<Row[]>([])
+    const [ loadingWorker, setLoadingWorker ] = React.useState(false);
+    const [ loadingPageCount, setLoadingPageCount ] = React.useState(false)
+    const [ loadingData, setLoadingData ] = React.useState(false);
+
+    const [ worker, setWorker ] = React.useState<WorkerHttpvfs | null>(null)
+
+    React.useEffect(
+        () => {
+            console.log("effect; loadingWorker:", loadingWorker)
+            async function initWorker() {
+                console.log("initWorker; loading:", loadingWorker)
+                if (loadingWorker) {
+                    console.log("skipping init, loading already true")
+                    return
+                }
+                try {
+                    setLoadingWorker(true);
+                    console.log("Fetching DB…", url);
+                    const worker: WorkerHttpvfs = await createDbWorker(
+                        [
+                            {
+                                from: "inline",
+                                config: {
+                                    serverMode: "full",
+                                    url: url,
+                                    //requestChunkSize: 4096,
+                                    requestChunkSize: 8 * 1048576,
+                                },
+                            },
+                        ],
+                        workerUrl.toString(),
+                        wasmUrl.toString()
+                    );
+                    console.log("setting worker")
+                    setWorker(worker)
+                } catch (error) {
+                    setLoadingWorker(false);
+                }
+            }
+
+            if (url !== "") {
+                initWorker();
+            }
+        },
+        [url]
+    );
+
+    React.useEffect(
+        () => {
+            async function initPageCount(worker: WorkerHttpvfs) {
+                if (loadingPageCount) {
+                    console.log("page count: already loading")
+                } else {
+                    console.log("page count, loading")
+                    setLoadingPageCount(true)
+                    console.log("setLoadingPageCount true")
+                    const [{numRows}] = (await worker.db.query(`SELECT count(*) AS numRows FROM file`)) as { numRows: number }[]
+                    const numPages = Math.ceil(numRows / pageSize)
+                    // const numRows = 100
+                    // const numPages = 5
+                    console.log(`${numRows} rows, ${numPages} pages`)
+                    setLoadingPageCount(false)
+                    console.log("setLoadingPageCount false")
+                    setPageCount(numPages)
+                }
+            }
+
+            if (worker !== null) {
+                initPageCount(worker)
+            } else {
+                console.log("page count: worker is null")
+            }
+        },
+        [ worker ],
+    )
 
     const columns: Column<Row>[] = React.useMemo(
         () => [
@@ -212,60 +294,39 @@ function App1() {
         []
     )
 
-    // const {
-    //     getTableProps,
-    //     getTableBodyProps,
-    //     headerGroups,
-    //     rows,
-    //     prepareRow,
-    // } = useTable({ columns, data })
+    const fetchData = React.useCallback(({ worker, pageSize, pageIndex }: { worker: WorkerHttpvfs, pageSize: number, pageIndex: number }) => {
+        // Set the loading state
+        console.log(`fetching page ${pageIndex}`)
+
+        if (worker !== null) {
+            if (!loadingData) {
+                console.log("fetching")
+                setLoadingData(true)
+                console.log("setLoadingData(true)")
+                fetchPage(worker, pageIndex, pageSize).then((rows) => {
+                    console.log("fetched page:", rows)
+                    setLoadingData(false)
+                    console.log("setLoadingData(false)")
+                    setData(rows)
+                })
+            } else {
+                console.log("skipping fetch, loadingData != false:", loadingData)
+            }
+        } else {
+            console.log("worker === null")
+        }
+    }, [ worker, pageSize, pageIndex, ])
 
     return (
-        <Table columns={columns} data={data} />
-        // <table {...getTableProps()} style={{ border: 'solid 1px blue' }}>
-        //     <thead>
-        //     {headerGroups.map(headerGroup => (
-        //         <tr {...headerGroup.getHeaderGroupProps()}>
-        //             {headerGroup.headers.map(column => (
-        //                 <th
-        //                     {...column.getHeaderProps()}
-        //                     style={{
-        //                         borderBottom: 'solid 3px red',
-        //                         background: 'aliceblue',
-        //                         color: 'black',
-        //                         fontWeight: 'bold',
-        //                     }}
-        //                 >
-        //                     {column.render('Header')}
-        //                 </th>
-        //             ))}
-        //         </tr>
-        //     ))}
-        //     </thead>
-        //     <tbody {...getTableBodyProps()}>
-        //     {rows.map(row => {
-        //         prepareRow(row)
-        //         return (
-        //             <tr {...row.getRowProps()}>
-        //                 {row.cells.map(cell => {
-        //                     return (
-        //                         <td
-        //                             {...cell.getCellProps()}
-        //                             style={{
-        //                                 padding: '10px',
-        //                                 border: 'solid 1px gray',
-        //                                 background: 'papayawhip',
-        //                             }}
-        //                         >
-        //                             {cell.render('Cell')}
-        //                         </td>
-        //                     )
-        //                 })}
-        //             </tr>
-        //         )
-        //     })}
-        //     </tbody>
-        // </table>
+        <Table
+            columns={columns}
+            data={data}
+            fetchData={fetchData}
+            // loading={loadingWorker}
+            pageCount={pageCount}
+            worker={worker}
+            // pageIndex={pageIndex}
+        />
     )
 }
 
