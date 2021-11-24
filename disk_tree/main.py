@@ -4,15 +4,16 @@ from humanize import naturalsize
 from os import getcwd, makedirs, remove
 from os.path import abspath, exists
 import pandas as pd
-from pandas import to_datetime as to_dt
 import plotly.express as px
+from re import fullmatch
 from subprocess import check_call
+import sys
 from sys import stderr
 from tempfile import NamedTemporaryFile
 
 from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse
 
-from disk_tree.cache import Cache
+from disk_tree.cache import Cache, ROOT_DIR
 
 
 LINE_RGX = '(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
@@ -77,7 +78,7 @@ def load(path, cache, profile=None, fsck=False,):
     url = urlparse(path)
     if not url.scheme:
         # Local filesystem
-        now = to_dt(dt.now())
+        # now = to_dt(dt.now())
         root = abspath(path)
         if fsck:
             root = cache.compute(root, fsck=True)
@@ -102,10 +103,10 @@ def load(path, cache, profile=None, fsck=False,):
 
 
 @command('disk-tree')
-@option('-f', '--fsck', is_flag=True, help='Validate all cache entries that begin with the provided path(s)')
+@option('-f', '--fsck', count=True, help='Validate all cache entries that begin with the provided path(s); when passed twice, exit after performing fsck')
 @option('-h', '--human-readable', count=True, help='Pass once for SI units, twice for IEC')
 @option('-t', '--cache-ttl', default='1d', help='TTL for cache entries')
-@option('-m', '--max-entries', type=int, default=1000, help='Only store/render the -m/--max-entries largest directories/files found')
+@option('-m', '--max-entries', default='10k', help='Only store/render the -m/--max-entries largest directories/files found')
 @option('-M', '--no-max-entries', is_flag=True, help='Only store/render the -m/--max-entries largest directories/files found')
 @option('-n', '--sort-by-name', is_flag=True, help='Sort output entries by name (default is by size)')
 @option('-o', '--out-path', multiple=True, help='Paths to write output to. Supported extensions: {jpg, png, svg, html}')
@@ -119,11 +120,9 @@ def cli(path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort
     cache = Cache(ttl=pd.to_timedelta(cache_ttl))
 
     df = load(path, cache=cache, fsck=fsck).reset_index()
+    if fsck == 2:
+        sys.exit(0)
     df['name'] = df.path.apply(basename)
-    if sort_by_name:
-        df = df.sort_values('name')
-    else:
-        df = df.sort_values('size')
 
     if human_readable == 0:
         size_col = 'size'
@@ -136,11 +135,30 @@ def cli(path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort
     else:
         raise ValueError(f'Pass -h/--human-readable 0, 1, or 2 times (got {human_readable})')
 
+    rgx = '(?P<base>[\d\.]+)(?P<suffix>[kmb])'
+    m = fullmatch(rgx, max_entries.lower())
+    if m:
+        n = float(m['base'])
+        suffix = m['suffix']
+        order = {'k': 1e3, 'm': 1e6, 'b': 1e9 }[suffix]
+        max_entries = int(n * order)
+    else:
+        max_entries = int(float(max_entries))
+
     if no_max_entries or max_entries == 0:
         max_entries = None
 
-    if max_entries:
+    if max_entries and len(df) > max_entries:
+        print(f'Reducing to top entries ({len(df)} → {max_entries})')
+        df = df.sort_values('size')
         df = df.iloc[-max_entries:]
+        if sort_by_name:
+            df = df.sort_values('name')
+    else:
+        if sort_by_name:
+            df = df.sort_values('name')
+        else:
+            df = df.sort_values('size')
 
     files, dirs = df[df.kind == 'file'], df[df.kind == 'dir']
     total_size = files['size'].sum()
@@ -148,7 +166,8 @@ def cli(path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort
 
     out_paths = out_path
     if not out_paths and tmp_html:
-        tmp_html_path = NamedTemporaryFile(dir=getcwd(), prefix='.disk-tree_', suffix='.html').name
+        name = basename(path)
+        tmp_html_path = NamedTemporaryFile(dir=ROOT_DIR, prefix=f'.disk-tree_{name}', suffix='.html').name
         out_paths = [ tmp_html_path ]
     if out_paths:
         k = 'key' if 'key' in df else 'path'

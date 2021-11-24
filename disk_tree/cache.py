@@ -1,6 +1,6 @@
 from datetime import datetime as dt
 import os
-from os import environ as env, walk
+from os import environ as env, makedirs, walk
 from os.path import abspath, dirname, exists, isdir, isfile, islink, join
 from sys import stderr
 from pandas import to_datetime as to_dt
@@ -10,16 +10,20 @@ DISK_TREE_ROOT_VAR = 'DISK_TREE_ROOT'
 HOME = env['HOME']
 CONFIG_DIR = join(HOME, '.config')
 if exists(CONFIG_DIR):
-    DEFAULT_ROOT = join(CONFIG_DIR, 'disk-tree')
+    ROOT_DIR = join(CONFIG_DIR, 'disk-tree')
 else:
-    DEFAULT_ROOT = join(HOME, '.disk-tree')
+    ROOT_DIR = join(HOME, '.disk-tree')
 
+if not exists(ROOT_DIR):
+    makedirs(ROOT_DIR)
+
+SQLITE_PATH = join(ROOT_DIR, 'disk-tree.db')
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
 app = Flask(__name__)
-cache_url = f'sqlite:///{DEFAULT_ROOT}'
+cache_url = f'sqlite:///{SQLITE_PATH}'
 app.config['SQLALCHEMY_DATABASE_URI'] = cache_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
