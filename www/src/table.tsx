@@ -10,7 +10,7 @@ export function Table<Row extends object>(
         columns,
         data,
         fetchData,
-        sort,
+        sorts,
         handleHeaderClick,
         rowCount,
         pageCount,
@@ -21,14 +21,14 @@ export function Table<Row extends object>(
         columns: Column<Row>[],
         data: Row[],
         fetchData: (
-            { worker, pageSize, pageIndex, sort }: {
+            { worker, pageSize, pageIndex, sorts }: {
                 worker: WorkerHttpvfs,
                 pageSize: number,
                 pageIndex: number,
-                sort?: Sort,
+                sorts: Sort[],
             }
         ) => void,
-        sort?: Sort,
+        sorts: Sort[],
         handleHeaderClick: (column: string) => void,
         pageCount: number,
         updatePageCount: Setter<number>,
@@ -67,7 +67,7 @@ export function Table<Row extends object>(
         () => {
             if (worker !== null) {
                 console.log("table fetching")
-                fetchData({ worker, pageIndex, pageSize, })
+                fetchData({ worker, pageIndex, pageSize, sorts, })
             } else {
                 console.log("null worker")
             }
@@ -87,6 +87,11 @@ export function Table<Row extends object>(
         },
         [ pageSize, rowCount, ]
     )
+
+    function getColumnSortChar(column: string) {
+        const desc = sorts.find((sort) => sort.column == column)?.desc
+        return desc === true ? ' ⬇' : desc === false ? ' ⬆' : ''
+    }
 
     // Render the UI for your table
     return (
@@ -115,13 +120,7 @@ export function Table<Row extends object>(
                             // we can add them into the header props
                             <th {...column.getHeaderProps()} onClick={() => handleHeaderClick(column.id)}>
                                 {column.render('Header')}
-                                <span>
-                                    {sort && sort.column == column.id
-                                        ? sort && sort.desc
-                                            ? ' 🔽'
-                                            : ' 🔼'
-                                        : ''}
-                                </span>
+                                <span>{getColumnSortChar(column.id)}</span>
                             </th>
                         ))}
                     </tr>

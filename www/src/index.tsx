@@ -70,13 +70,17 @@ async function fetchPage(
     worker: WorkerHttpvfs,
     pageIndex: number,
     pageSize: number,
-    sort?: Sort,
+    sorts: Sort[],
 ): Promise<Row[]> {
     let query = `SELECT * FROM file`
-    if (sort) {
-        query += ` ORDER BY ${sort.column}`
-        if (sort.desc) {
-            query += ` DESC`
+    if (sorts.length) {
+        query += ` ORDER BY`
+        let first = true
+        for (const sort of sorts) {
+            if (!first) query += ','
+            first = false
+            query += ` ${sort.column}`
+            query += sort.desc ? " DESC" : " ASC"
         }
     }
     query += ` LIMIT ${pageSize} OFFSET ${pageIndex * pageSize}`
@@ -95,8 +99,8 @@ function App1() {
     const [ loadingRowCount, setLoadingRowCount ] = React.useState(false)
     const [ pageCount, setPageCount ] = React.useState(0)
     const [ loadingData, setLoadingData ] = React.useState(false);
-    const [ sort, setSort ] = React.useState<Sort | undefined>()
-    console.log("sort:", sort)
+    const [ sorts, setSorts ] = React.useState<Sort[]>([])
+    console.log("sorts:", sorts)
     const [ worker, setWorker ] = React.useState<WorkerHttpvfs | null>(null)
 
     useEffect(
@@ -149,7 +153,8 @@ function App1() {
                     console.log("page count, loading")
                     setLoadingRowCount(true)
                     console.log("setLoadingRowCount true")
-                    const [{rowCount}] = (await worker.db.query(`SELECT count(*) AS rowCount FROM file`)) as { rowCount: number }[]
+                    const query = `SELECT count(*) AS rowCount FROM file`
+                    const [{rowCount}] = await worker.db.query(query) as { rowCount: number }[]
                     console.log(`${rowCount} rows`)
                     setLoadingRowCount(false)
                     console.log("setLoadingRowCount false, rowCount:", rowCount)
@@ -195,11 +200,11 @@ function App1() {
     )
 
     const fetchData = React.useCallback(
-        ({ worker, pageSize, pageIndex }: {
+        ({ worker, pageSize, pageIndex, sorts, }: {
             worker: WorkerHttpvfs,
             pageSize: number,
             pageIndex: number,
-            sort?: Sort,
+            sorts: Sort[],
         }) => {
         // Set the loading state
         console.log(`fetching page ${pageIndex}`)
@@ -209,7 +214,7 @@ function App1() {
                 console.log("fetching")
                 setLoadingData(true)
                 console.log("setLoadingData(true)")
-                fetchPage(worker, pageIndex, pageSize, sort).then((rows) => {
+                fetchPage(worker, pageIndex, pageSize, sorts).then((rows) => {
                     console.log("fetched page:", rows)
                     setLoadingData(false)
                     console.log("setLoadingData(false)")
@@ -221,7 +226,7 @@ function App1() {
         } else {
             console.log("worker === null")
         }
-    }, [ worker, rowCount, sort, ])
+    }, [ worker, rowCount, sorts, ])
 
     return (
         <Styles>
@@ -234,15 +239,20 @@ function App1() {
             rowCount={rowCount}
             handleHeaderClick={(column) => {
                 console.log("header click:", column)
-                if (sort?.column == column) {
-                    console.log("reversing", column)
-                    setSort({ column, desc: !sort.desc })
-                } else {
-                    console.log("setting sort col:", column)
-                    setSort({ column, desc: true })
-                }
+                const sort = sorts.find(({column: col}) => col == column)
+                const desc = sort?.desc
+                let newSorts: Sort[] =
+                    (desc === true) ?
+                        [] :
+                        (desc === false) ?
+                            [{ column, desc: true }] :
+                            [{ column, desc: false }]
+                const rest = sorts.filter(({column: col}) => col != column)
+                newSorts = newSorts.concat(rest)
+                console.log("newSorts:", newSorts)
+                setSorts(newSorts)
             }}
-            sort={sort}
+            sorts={sorts}
             worker={worker}
             initialPageSize={initialPageSize}
         />
