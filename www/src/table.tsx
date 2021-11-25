@@ -1,4 +1,4 @@
-import {Column, usePagination, useTable} from "react-table";
+import {Column, useBlockLayout, usePagination, useResizeColumns, useTable} from "react-table";
 import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 import React, {useEffect} from "react";
 import { Setter } from "./utils";
@@ -43,7 +43,15 @@ export function Table<Row extends object>(
         initialPageSize: number
     }
 ) {
-    // Use the state and functions returned from useTable to build your UI
+    const defaultColumn = React.useMemo(
+        () => ({
+            minWidth: 100,
+            width: 200,
+            maxWidth: 600,
+        }),
+        []
+    )
+
     const {
         getTableProps,
         getTableBodyProps,
@@ -65,7 +73,10 @@ export function Table<Row extends object>(
             initialState: { pageIndex: 0, pageSize: initialPageSize, },
             manualPagination: true,
             pageCount,
+            defaultColumn,
         },
+        useBlockLayout,
+        useResizeColumns,
         usePagination,
     )
     // Listen for changes in pagination and use the state to fetch our new data
@@ -102,44 +113,40 @@ export function Table<Row extends object>(
     // Render the UI for your table
     return (
         <>
-            <pre>
-                <code>
-                    {JSON.stringify(
-                        {
-                            pageIndex,
-                            pageSize,
-                            pageCount,
-                            canNextPage,
-                            canPreviousPage,
-                        },
-                        null,
-                        2
-                    )}
-                </code>
-            </pre>
-            <table {...getTableProps()}>
-                <thead>
+            <div className="table" {...getTableProps()}>
+                <div>
                 {headerGroups.map(headerGroup => (
-                    <tr {...headerGroup.getHeaderGroupProps()}>
+                    <div {...headerGroup.getHeaderGroupProps()} className="tr">
                         {headerGroup.headers.map(column => (
                             // Add the sorting props to control sorting. For this example
                             // we can add them into the header props
-                            <th {...column.getHeaderProps()} onClick={() => handleHeaderClick(column.id)}>
+                            <div
+                                className="th"
+                                {...column.getHeaderProps()}
+                                onClick={() => handleHeaderClick(column.id)}
+                            >
                                 {column.render('Header')}
                                 <span>{getColumnSortChar(column.id)}</span>
-                            </th>
+                                <div
+                                    {...column.getResizerProps()}
+                                    className={`resizer ${
+                                        column.isResizing ? 'isResizing' : ''
+                                    }`}
+                                    onClick={(e) => e.stopPropagation()}
+                                />
+                            </div>
                         ))}
-                    </tr>
+                    </div>
                 ))}
-                </thead>
-                <tbody {...getTableBodyProps()}>
+                </div>
+                <div {...getTableBodyProps()}>
                 {page.map((row, i) => {
                     prepareRow(row)
                     return (
-                        <tr {...row.getRowProps()}>
+                        <div className="tr" {...row.getRowProps()}>
                             {row.cells.map(cell => {
                                 return (
-                                    <td
+                                    <div className="td"
                                         {...cell.getCellProps()}
                                         onClick={
                                             (e) => {
@@ -149,14 +156,14 @@ export function Table<Row extends object>(
                                         }
                                     >
                                         {cell.render('Cell')}
-                                    </td>
+                                    </div>
                                 )
                             })}
-                        </tr>
+                        </div>
                     )
                 })}
-                </tbody>
-            </table>
+                </div>
+            </div>
             <div className="pagination">
                 <button onClick={() => gotoPage(0)} disabled={!canPreviousPage}>
                     {'<<'}
@@ -201,6 +208,21 @@ export function Table<Row extends object>(
                     ))}
                 </select>
             </div>
+            <pre>
+                <code>
+                    {JSON.stringify(
+                        {
+                            pageIndex,
+                            pageSize,
+                            pageCount,
+                            canNextPage,
+                            canPreviousPage,
+                        },
+                        null,
+                        2
+                    )}
+                </code>
+            </pre>
         </>
     )
 }
