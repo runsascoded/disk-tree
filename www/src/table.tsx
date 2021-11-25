@@ -4,6 +4,7 @@ import React, {useEffect} from "react";
 import { Setter } from "./utils";
 
 export type Sort = { column: string, desc: boolean, }
+export type Filter = { column: string, value: string }
 
 export function Table<Row extends object>(
     {
@@ -11,7 +12,9 @@ export function Table<Row extends object>(
         data,
         fetchData,
         sorts,
+        filters,
         handleHeaderClick,
+        handleCellClick,
         rowCount,
         pageCount,
         worker,
@@ -21,15 +24,18 @@ export function Table<Row extends object>(
         columns: Column<Row>[],
         data: Row[],
         fetchData: (
-            { worker, pageSize, pageIndex, sorts }: {
+            { worker, pageSize, pageIndex, sorts, filters, }: {
                 worker: WorkerHttpvfs,
                 pageSize: number,
                 pageIndex: number,
                 sorts: Sort[],
+                filters: Filter[],
             }
         ) => void,
         sorts: Sort[],
+        filters: Filter[],
         handleHeaderClick: (column: string) => void,
+        handleCellClick: (column: string, value: string) => void,
         pageCount: number,
         updatePageCount: Setter<number>,
         rowCount: number | null,
@@ -67,12 +73,12 @@ export function Table<Row extends object>(
         () => {
             if (worker !== null) {
                 console.log("table fetching")
-                fetchData({ worker, pageIndex, pageSize, sorts, })
+                fetchData({ worker, pageIndex, pageSize, sorts, filters, })
             } else {
                 console.log("null worker")
             }
         },
-        [ fetchData, worker, pageIndex, pageSize, ],
+        [ fetchData, worker, pageIndex, pageSize, sorts, filters, ],
     )
 
     useEffect(
@@ -132,7 +138,19 @@ export function Table<Row extends object>(
                     return (
                         <tr {...row.getRowProps()}>
                             {row.cells.map(cell => {
-                                return <td {...cell.getCellProps()}>{cell.render('Cell')}</td>
+                                return (
+                                    <td
+                                        {...cell.getCellProps()}
+                                        onClick={
+                                            (e) => {
+                                                console.log("cell:", cell, "target:", e.target)
+                                                handleCellClick(cell.column.id, cell.value)
+                                            }
+                                        }
+                                    >
+                                        {cell.render('Cell')}
+                                    </td>
+                                )
                             })}
                         </tr>
                     )

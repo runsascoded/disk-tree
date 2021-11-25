@@ -31,7 +31,8 @@ type Row = {
 
 import { Column, useTable, usePagination, useSortBy, } from 'react-table'
 import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
-import {Sort, Table} from "./table";
+import {Filter, Sort, Table} from "./table";
+import {build} from "./query";
 
 const Styles = styled.div`
   padding: 1rem;
@@ -71,19 +72,18 @@ async function fetchPage(
     pageIndex: number,
     pageSize: number,
     sorts: Sort[],
+    filters: Filter[],
 ): Promise<Row[]> {
-    let query = `SELECT * FROM file`
-    if (sorts.length) {
-        query += ` ORDER BY`
-        let first = true
-        for (const sort of sorts) {
-            if (!first) query += ','
-            first = false
-            query += ` ${sort.column}`
-            query += sort.desc ? " DESC" : " ASC"
+    const query = build(
+        {
+            table: 'file',
+            limit: pageSize,
+            offset: pageSize * pageIndex,
+            count: undefined,
+            sorts,
+            filters,
         }
-    }
-    query += ` LIMIT ${pageSize} OFFSET ${pageIndex * pageSize}`
+    )
     console.log("query:", query)
     return worker.db.query(query).then((rows) => {
         console.log(`Page ${pageIndex}x${pageSize}:`, rows);
@@ -100,6 +100,7 @@ function App1() {
     const [ pageCount, setPageCount ] = React.useState(0)
     const [ loadingData, setLoadingData ] = React.useState(false);
     const [ sorts, setSorts ] = React.useState<Sort[]>([])
+    const [ filters, setFilters ] = React.useState<Filter[]>([])
     console.log("sorts:", sorts)
     const [ worker, setWorker ] = React.useState<WorkerHttpvfs | null>(null)
 
@@ -153,7 +154,12 @@ function App1() {
                     console.log("page count, loading")
                     setLoadingRowCount(true)
                     console.log("setLoadingRowCount true")
-                    const query = `SELECT count(*) AS rowCount FROM file`
+                    const query = build({
+                        table: 'file',
+                        count: 'rowCount',
+                        filters,
+                    })
+                    console.log("query:", query)
                     const [{rowCount}] = await worker.db.query(query) as { rowCount: number }[]
                     console.log(`${rowCount} rows`)
                     setLoadingRowCount(false)
@@ -168,7 +174,7 @@ function App1() {
                 console.log("page count: worker is null")
             }
         },
-        [ worker ],
+        [ worker, filters ],
     )
 
     const initialPageSize = 20
@@ -200,11 +206,12 @@ function App1() {
     )
 
     const fetchData = React.useCallback(
-        ({ worker, pageSize, pageIndex, sorts, }: {
+        ({ worker, pageSize, pageIndex, sorts, filters, }: {
             worker: WorkerHttpvfs,
             pageSize: number,
             pageIndex: number,
             sorts: Sort[],
+            filters: Filter[],
         }) => {
         // Set the loading state
         console.log(`fetching page ${pageIndex}`)
@@ -214,7 +221,7 @@ function App1() {
                 console.log("fetching")
                 setLoadingData(true)
                 console.log("setLoadingData(true)")
-                fetchPage(worker, pageIndex, pageSize, sorts).then((rows) => {
+                fetchPage(worker, pageIndex, pageSize, sorts, filters, ).then((rows) => {
                     console.log("fetched page:", rows)
                     setLoadingData(false)
                     console.log("setLoadingData(false)")
@@ -226,7 +233,7 @@ function App1() {
         } else {
             console.log("worker === null")
         }
-    }, [ worker, rowCount, sorts, ])
+    }, [ worker, rowCount, sorts, filters, ])
 
     return (
         <Styles>
@@ -252,7 +259,16 @@ function App1() {
                 console.log("newSorts:", newSorts)
                 setSorts(newSorts)
             }}
+            handleCellClick={
+                (column, value) => {
+                    console.log("filter:", column, value)
+                    if (column == 'parent') {
+                        setFilters([ { column, value  } ])
+                    }
+                }
+            }
             sorts={sorts}
+            filters={filters}
             worker={worker}
             initialPageSize={initialPageSize}
         />
