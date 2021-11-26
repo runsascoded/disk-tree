@@ -2,6 +2,7 @@ import { createDbWorker } from "sql.js-httpvfs";
 import React, { useEffect, useState, useMemo, useCallback, } from 'react';
 import ReactDOM from 'react-dom'
 import styled from 'styled-components'
+import { renderSize } from './utils'
 // import { Component, createElement } from "react";
 // import Plot from 'react-plotly.js';
 import $ from 'jquery';
@@ -10,6 +11,7 @@ import $ from 'jquery';
 
 // const { entries, values, keys, fromEntries } = Object
 // const Arr = Array.from
+const { ceil, } = Math
 
 
 const workerUrl = new URL(
@@ -242,7 +244,7 @@ function App() {
     useEffect(
         () => {
             if (rowCount !== null) {
-                const pageCount = Math.ceil(rowCount / initialPageSize)
+                const pageCount = ceil(rowCount / initialPageSize)
                 console.log("update pageCount from rowCount:", rowCount, pageCount)
                 setPageCount(pageCount)
             } else {
@@ -286,11 +288,11 @@ function App() {
     const columns: Column<Row>[] = useMemo(
         () => [
             { Header: 'Path', accessor: 'path', },
-            { Header: 'Kind', accessor: 'kind', },
-            { Header: 'Size', accessor: 'size', },
+            { Header: 'Kind', accessor: 'kind', width: 50, },
+            { Header: 'Size', accessor: row => renderSize(row.size), width: 120, },
             { Header: 'Parent', accessor: 'parent', },
             { Header: 'Modified', accessor: 'mtime', },
-            { Header: 'Descendants', accessor: 'num_descendants', },
+            { Header: 'Descendants', accessor: 'num_descendants', width: 120, },
             { Header: 'Checked At', accessor: 'checked_at', },
         ],
         []

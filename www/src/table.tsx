@@ -6,6 +6,8 @@ import { Setter } from "./utils";
 export type Sort = { column: string, desc: boolean, }
 export type Filter = { column: string, value: string }
 
+const { ceil, } = Math
+
 export function Table<Row extends object>(
     {
         columns,
@@ -45,7 +47,7 @@ export function Table<Row extends object>(
 ) {
     const defaultColumn = React.useMemo(
         () => ({
-            minWidth: 100,
+            minWidth: 50,
             width: 200,
             maxWidth: 600,
         }),
@@ -106,7 +108,7 @@ export function Table<Row extends object>(
     useEffect(
         () => {
             if (rowCount !== null) {
-                const pageCount = Math.ceil(rowCount / pageSize)
+                const pageCount = ceil(rowCount / pageSize)
                 console.log("updatePageCount:", pageCount, `(${rowCount}/${pageSize})`)
                 updatePageCount(pageCount)
             } else {
