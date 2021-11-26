@@ -5,3 +5,14 @@
 .search label {
     margin: 0.2rem 0.3rem 0 0;
 }
+
+.goto-page {
+    margin-right: 0.5rem;
+}
+.page-number {
+    margin-right: 0.5rem;
+}
+
+.pagination button {
+    margin-right: 0.2rem;
+}

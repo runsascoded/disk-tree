@@ -17,6 +17,7 @@ export function Table<Row extends object>(
         filters,
         handleHeaderClick,
         handleCellClick,
+        getColumnProps,
         rowCount,
         pageCount,
         worker,
@@ -38,6 +39,7 @@ export function Table<Row extends object>(
         filters: Filter[],
         handleHeaderClick: (column: string) => void,
         handleCellClick: (column: string, value: string) => void,
+        getColumnProps: (column: Column<Row>) => object,
         pageCount: number,
         updatePageCount: Setter<number>,
         rowCount: number | null,
@@ -123,7 +125,6 @@ export function Table<Row extends object>(
         return desc === true ? ' ⬇' : desc === false ? ' ⬆' : ''
     }
 
-    // Render the UI for your table
     return (
         <>
             <div className="table" {...getTableProps()}>
@@ -131,11 +132,9 @@ export function Table<Row extends object>(
                 {headerGroups.map(headerGroup => (
                     <div {...headerGroup.getHeaderGroupProps()} className="tr">
                         {headerGroup.headers.map(column => (
-                            // Add the sorting props to control sorting. For this example
-                            // we can add them into the header props
                             <div
                                 className="th"
-                                {...column.getHeaderProps()}
+                                {...column.getHeaderProps(getColumnProps(column))}
                                 onClick={() => handleHeaderClick(column.id)}
                             >
                                 {column.render('Header')}
@@ -160,13 +159,10 @@ export function Table<Row extends object>(
                             {row.cells.map(cell => {
                                 return (
                                     <div className="td"
-                                        {...cell.getCellProps()}
-                                        onClick={
-                                            (e) => {
-                                                console.log("cell:", cell, "target:", e.target)
-                                                handleCellClick(cell.column.id, cell.value)
-                                            }
-                                        }
+                                         {...cell.getCellProps(getColumnProps(cell.column))}
+                                         onClick={
+                                             (e) => handleCellClick(cell.column.id, cell.value)
+                                         }
                                     >
                                         {cell.render('Cell')}
                                     </div>
@@ -190,24 +186,25 @@ export function Table<Row extends object>(
                 <button onClick={() => gotoPage(pageCount === null ? 0 : (pageCount - 1))} disabled={!canNextPage}>
                     {'>>'}
                 </button>{' '}
-                <span>
+                <span className="page-number">
                     Page{' '}
-                    <strong>
+                    <span>
                         {pageIndex + 1} of {pageOptions.length}
-                    </strong>{' '}
+                    </span>{' '}
                 </span>
-                <span>
+                <span className="goto-page">
                     | Go to page:{' '}
-                    <input
-                        type="number"
-                        defaultValue={pageIndex + 1}
-                        onChange={e => {
-                            const page = e.target.value ? Number(e.target.value) - 1 : 0
-                            gotoPage(page)
-                        }}
-                        style={{ width: '100px' }}
-                    />
-                </span>{' '}
+                </span>
+                <input
+                    type="number"
+                    defaultValue={pageIndex + 1}
+                    onChange={e => {
+                        const page = e.target.value ? Number(e.target.value) - 1 : 0
+                        gotoPage(page)
+                    }}
+                    style={{ width: '100px' }}
+                />
+                {' '}
                 <select
                     value={pageSize}
                     onChange={e => {

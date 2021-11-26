@@ -24,3 +24,8 @@ export const renderSize = function(size: number): string {
     const rendered = n >= 100 ? round(n).toString() : n.toFixed(1)
     return `${rendered}${o}${suffix}`
 }
+
+export const basename = function(path: string): string {
+    const idx = path.lastIndexOf('/')
+    return idx == -1 ? path : path.substring(idx + 1)
+}

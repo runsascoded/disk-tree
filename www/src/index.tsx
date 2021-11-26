@@ -2,7 +2,8 @@ import { createDbWorker } from "sql.js-httpvfs";
 import React, { useEffect, useState, useMemo, useCallback, } from 'react';
 import ReactDOM from 'react-dom'
 import styled from 'styled-components'
-import { renderSize } from './utils'
+import { renderSize, basename } from './utils'
+import moment from 'moment'
 // import { Component, createElement } from "react";
 // import Plot from 'react-plotly.js';
 import $ from 'jquery';
@@ -30,11 +31,10 @@ type Row = {
     kind: string
 }
 
-
-import { Column, useTable, usePagination, useSortBy, } from 'react-table'
-import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
+import { Column, } from 'react-table'
+import { WorkerHttpvfs, } from "sql.js-httpvfs/dist/db";
 import {Filter, Sort, Table} from "./table";
-import {build} from "./query";
+import { build, } from "./query";
 
 const Styles = styled.div`
   padding: 1rem;
@@ -84,6 +84,7 @@ const Styles = styled.div`
 
     .th {
       cursor: pointer;
+      font-weight: bold;
     }
 
     .th,
@@ -93,7 +94,7 @@ const Styles = styled.div`
       border-bottom: 1px solid black;
       border-right: 1px solid black;
 
-      overflow-wrap: anywhere;
+      overflow-x: scroll;
 
       ${'' /* In this example we use an absolutely position resizer,
        so this is required. */}
@@ -163,7 +164,7 @@ function App() {
     const [ search, setSearch ] = useState("")
     const [ hasSearched, setHasSearched ] = useState(false)
 
-    const initialPageSize = 20
+    const initialPageSize = 10
 
     // URL -> Worker
     useEffect(
@@ -285,15 +286,17 @@ function App() {
         [ search, ],
     )
 
+    const datetimeFmt = 'YYYY-MM-DD HH:mm:ss'
+
     const columns: Column<Row>[] = useMemo(
         () => [
-            { Header: 'Path', accessor: 'path', },
-            { Header: 'Kind', accessor: 'kind', width: 50, },
-            { Header: 'Size', accessor: row => renderSize(row.size), width: 120, },
-            { Header: 'Parent', accessor: 'parent', },
-            { Header: 'Modified', accessor: 'mtime', },
-            { Header: 'Descendants', accessor: 'num_descendants', width: 120, },
-            { Header: 'Checked At', accessor: 'checked_at', },
+            { id: 'kind', Header: 'Kind', accessor: row => row.kind == 'dir' ? '📂' : '💾', width: 50, },
+            { id: 'parent', Header: 'Parent', accessor: 'parent', width: 400, },
+            { id: 'path', Header: 'Name', accessor: row => basename(row.path), width: 300, },
+            { id: 'size', Header: 'Size', accessor: row => renderSize(row.size), width: 120, },
+            { id: 'mtime', Header: 'Modified', accessor: row => moment(row.mtime).format(datetimeFmt), },
+            { id: 'num_descendants', Header: 'Descendants', accessor: 'num_descendants', width: 120, },
+            { id: 'checked_at', Header: 'Checked At', accessor: row => moment(row.checked_at).format(datetimeFmt), },
         ],
         []
     )
@@ -327,6 +330,16 @@ function App() {
             console.log("worker === null")
         }
     }, [ worker, rowCount, sorts, filters, ])
+
+    const columnProps: { [id: string]: object } = {
+        'kind': {
+            style: { textAlign: 'center', },
+        },
+    }
+    const getColumnProps = (column: Column<Row>): object =>
+        column.id &&
+        columnProps[column.id] ||
+        { style: { textAlign: 'right', }}
 
     return (
         <Styles>
@@ -369,6 +382,7 @@ function App() {
                         }
                     }
                 }
+                getColumnProps={getColumnProps}
                 sorts={sorts}
                 filters={filters}
                 worker={worker}
