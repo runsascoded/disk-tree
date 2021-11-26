@@ -79,7 +79,7 @@ export function Table<Row extends object>(
         useResizeColumns,
         usePagination,
     )
-    // Listen for changes in pagination and use the state to fetch our new data
+    // Update data page based on relevant changes
     useEffect(
         () => {
             if (worker !== null) {
@@ -92,6 +92,17 @@ export function Table<Row extends object>(
         [ fetchData, worker, pageIndex, pageSize, sorts, filters, ],
     )
 
+    // (rowCount, pageSize) -> pageIndex
+    useEffect(
+        () => {
+            if (rowCount && pageIndex * pageSize > rowCount) {
+                gotoPage(0)
+            }
+        },
+        [ rowCount, pageSize, ]
+    )
+
+    // (pageSize, rowCount) -> pageCount
     useEffect(
         () => {
             if (rowCount !== null) {

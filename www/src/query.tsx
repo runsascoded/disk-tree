@@ -29,7 +29,7 @@ export function build(
             first = false
             // TODO: escape values; normally this would be a serious vulnerability, but this is a static site reading a
             //  read-only SQLite database, so believed to be benign
-            query += ` ${column} = "${value}"`
+            query += ` ${column} LIKE "%${value}%"`
         }
     }
     if (sorts?.length) {

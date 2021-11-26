@@ -1,5 +1,5 @@
 import { createDbWorker } from "sql.js-httpvfs";
-import React, { useEffect, useState, } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, } from 'react';
 import ReactDOM from 'react-dom'
 import styled from 'styled-components'
 // import { Component, createElement } from "react";
@@ -80,6 +80,10 @@ const Styles = styled.div`
       }
     }
 
+    .th {
+      cursor: pointer;
+    }
+
     .th,
     .td {
       margin: 0;
@@ -142,19 +146,24 @@ async function fetchPage(
     })
 }
 
-function App1() {
+function App() {
     const url: string = "/assets/disk-tree1k.db";
-    const [ rowCount, setRowCount ] = React.useState<number | null>(null)
+    const [ rowCount, setRowCount ] = useState<number | null>(null)
     const [ data, setData ] = useState<Row[]>([])
-    const [ loadingWorker, setLoadingWorker ] = React.useState(false);
-    const [ loadingRowCount, setLoadingRowCount ] = React.useState(false)
-    const [ pageCount, setPageCount ] = React.useState(0)
-    const [ loadingData, setLoadingData ] = React.useState(false);
-    const [ sorts, setSorts ] = React.useState<Sort[]>([])
-    const [ filters, setFilters ] = React.useState<Filter[]>([])
+    const [ loadingWorker, setLoadingWorker ] = useState(false);
+    const [ loadingRowCount, setLoadingRowCount ] = useState(false)
+    const [ pageCount, setPageCount ] = useState(0)
+    const [ loadingData, setLoadingData ] = useState(false);
+    const [ sorts, setSorts ] = useState<Sort[]>([])
+    const [ filters, setFilters ] = useState<Filter[]>([])
     console.log("sorts:", sorts)
-    const [ worker, setWorker ] = React.useState<WorkerHttpvfs | null>(null)
+    const [ worker, setWorker ] = useState<WorkerHttpvfs | null>(null)
+    const [ search, setSearch ] = useState("")
+    const [ hasSearched, setHasSearched ] = useState(false)
 
+    const initialPageSize = 20
+
+    // URL -> Worker
     useEffect(
         () => {
             console.log("effect; loadingWorker:", loadingWorker)
@@ -196,6 +205,7 @@ function App1() {
         [url]
     );
 
+    // (Worker, Filters) -> RowCount
     useEffect(
         () => {
             async function initRowCount(worker: WorkerHttpvfs) {
@@ -228,8 +238,7 @@ function App1() {
         [ worker, filters ],
     )
 
-    const initialPageSize = 20
-
+    // RowCount -> PageCount
     useEffect(
         () => {
             if (rowCount !== null) {
@@ -243,7 +252,38 @@ function App1() {
         [ rowCount, ]
     )
 
-    const columns: Column<Row>[] = React.useMemo(
+    useEffect(
+        () => {
+            if (search) {
+                setHasSearched(true)
+            }
+        },
+        [ search ]
+    )
+
+    // search -> filters
+    useEffect(
+        () => {
+            if (!search && !hasSearched) return
+            let { filter, rest } =
+                filters.reduce<{ filter?: Filter, rest: Filter[] }>(
+                    ({ filter, rest }, {column, value}) =>
+                        column === 'path' ?
+                            { filter: { column, value: search }, rest } :
+                            { filter, rest: rest.concat([{ column, value }]) },
+                    { rest: [] },
+                )
+            if (!filter) {
+                filter = { column: 'path', value: search, }
+            }
+            const newFilters: Filter[] = [ filter ].concat(rest)
+            console.log("newFilters:", newFilters)
+            setFilters(newFilters)
+        },
+        [ search, ],
+    )
+
+    const columns: Column<Row>[] = useMemo(
         () => [
             { Header: 'Path', accessor: 'path', },
             { Header: 'Kind', accessor: 'kind', },
@@ -256,7 +296,7 @@ function App1() {
         []
     )
 
-    const fetchData = React.useCallback(
+    const fetchData = useCallback(
         ({ worker, pageSize, pageIndex, sorts, filters, }: {
             worker: WorkerHttpvfs,
             pageSize: number,
@@ -288,45 +328,54 @@ function App1() {
 
     return (
         <Styles>
-        <Table
-            columns={columns}
-            data={data}
-            fetchData={fetchData}
-            pageCount={pageCount}
-            updatePageCount={setPageCount}
-            rowCount={rowCount}
-            handleHeaderClick={(column) => {
-                console.log("header click:", column)
-                const sort = sorts.find(({column: col}) => col == column)
-                const desc = sort?.desc
-                let newSorts: Sort[] =
-                    (desc === true) ?
-                        [] :
-                        (desc === false) ?
-                            [{ column, desc: true }] :
-                            [{ column, desc: false }]
-                const rest = sorts.filter(({column: col}) => col != column)
-                newSorts = newSorts.concat(rest)
-                console.log("newSorts:", newSorts)
-                setSorts(newSorts)
-            }}
-            handleCellClick={
-                (column, value) => {
-                    console.log("filter:", column, value)
-                    if (column == 'parent') {
-                        setFilters([ { column, value  } ])
+            <div className="row no-gutters search">
+                <label>Search:</label>
+                <input
+                    type="text"
+                    placeholder=""
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                />
+            </div>
+            <Table
+                columns={columns}
+                data={data}
+                fetchData={fetchData}
+                pageCount={pageCount}
+                updatePageCount={setPageCount}
+                rowCount={rowCount}
+                handleHeaderClick={column => {
+                    console.log("header click:", column)
+                    const sort = sorts.find(({column: col}) => col == column)
+                    const desc = sort?.desc
+                    let newSorts: Sort[] =
+                        (desc === true) ?
+                            [] :
+                            (desc === false) ?
+                                [{ column, desc: true }] :
+                                [{ column, desc: false }]
+                    const rest = sorts.filter(({column: col}) => col != column)
+                    newSorts = newSorts.concat(rest)
+                    console.log("newSorts:", newSorts)
+                    setSorts(newSorts)
+                }}
+                handleCellClick={
+                    (column, value) => {
+                        console.log("search:", column, value)
+                        if (column == 'parent' || column == 'path') {
+                            setSearch(value)
+                        }
                     }
                 }
-            }
-            sorts={sorts}
-            filters={filters}
-            worker={worker}
-            initialPageSize={initialPageSize}
-        />
+                sorts={sorts}
+                filters={filters}
+                worker={worker}
+                initialPageSize={initialPageSize}
+            />
         </Styles>
     )
 }
 
 $(document).ready(function () {
-    ReactDOM.render(<App1 />, document.getElementById('root'));
+    ReactDOM.render(<App/>, document.getElementById('root'));
 });
