@@ -49,6 +49,7 @@ export const Styles = styled.div`
     .th {
       cursor: pointer;
       font-weight: bold;
+      user-select: none;
     }
 
     .th,

@@ -1,26 +1,16 @@
-from datetime import datetime as dt
 import os
-from os import environ as env, makedirs, walk
+from datetime import datetime as dt
+from os import walk
 from os.path import abspath, dirname, exists, isdir, isfile, islink, join
-from sys import stderr
+import pandas as pd
 from pandas import to_datetime as to_dt
-
-
-DISK_TREE_ROOT_VAR = 'DISK_TREE_ROOT'
-HOME = env['HOME']
-CONFIG_DIR = join(HOME, '.config')
-if exists(CONFIG_DIR):
-    ROOT_DIR = join(CONFIG_DIR, 'disk-tree')
-else:
-    ROOT_DIR = join(HOME, '.disk-tree')
-
-if not exists(ROOT_DIR):
-    makedirs(ROOT_DIR)
-
-SQLITE_PATH = join(ROOT_DIR, 'disk-tree.db')
+import sys
+from sys import stderr
 
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
+
+from .config import SQLITE_PATH
 
 app = Flask(__name__)
 cache_url = f'sqlite:///{SQLITE_PATH}'
@@ -28,6 +18,7 @@ app.config['SQLALCHEMY_DATABASE_URI'] = cache_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
+print(f'DB: {SQLITE_PATH}')
 
 class File(db.Model):
     path = db.Column(db.String, primary_key=True)
@@ -51,12 +42,27 @@ class File(db.Model):
 db.create_all()
 
 
+def is_descendant(path, ancestor):
+    path = path.rstrip('/').split('/')
+    ancestor = ancestor.rstrip('/').split('/')
+    if len(path) < len(ancestor):
+        return False
+    for (l, r) in zip(path, ancestor):
+        if l != r:
+            return False
+    return True
+
+
 class Cache:
     def __init__(self, ttl=None):
+        print(f'cache: {SQLITE_PATH}')
         self.ttl = ttl
 
-    def compute(self, path, now=None, fsck=False):
+    def compute(self, path, now=None, fsck=False, excludes=None):
         path = abspath(path)
+        if excludes and any(is_descendant(path, exclude) for exclude in excludes):
+            print(f'skipping excluded: {path}')
+            return None
         if islink(path):
             stderr.write(f'Skipping symlink: {path}\n')
             return None
@@ -84,8 +90,8 @@ class Cache:
             except StopIteration:
                 stderr.write(f'Error traversing {path}\n')
                 return None
-            files = list(filter(None, [ self[join(path, file)] for file in files ]))
-            dirs = list(filter(None, [ self[join(path, dir)] for dir in dirs ]))
+            files = list(filter(None, [ self.compute(join(path, file), excludes=excludes) for file in files ]))
+            dirs = list(filter(None, [ self.compute(join(path, dir), excludes=excludes) for dir in dirs ]))
             children = files + dirs
             child_paths = set([ c.path for c in children ])
             db_children = File.query.filter(File.parent == path).all()
@@ -160,9 +166,25 @@ class Cache:
                 return existing
         return None
 
-    def __getitem__(self, path):
-        existing = self.get(path)
-        if existing:
-            return existing
-        entry = self.compute(path)
-        return entry
+    def missing_parents(self):
+        files = pd.read_sql_table('file', con=cache_url)
+        #files['path']
+        merged = (
+            files
+                [['path', 'parent','num_descendants']]
+                .merge(
+                files.path.rename('parent2'),
+                left_on='parent',
+                right_on='parent2',
+                how='left',
+            )
+        )
+        missing_parents = merged[merged.parent2.isna()]['path']
+        return missing_parents
+
+    def fsck(self):
+        files = pd.read_sql_table('file', con=cache_url)
+        gone_paths = ~(files['path'].apply(exists))
+        gone_parents = ~(files['parent'].apply(exists))
+        invalid = files[gone_paths | gone_parents]
+        print(f'Found {gone_paths.sum()} nonexistent paths and {gone_parents.sum()} nonexistent parents ({len(invalid)} total)')

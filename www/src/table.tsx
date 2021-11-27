@@ -1,7 +1,7 @@
 import {Column, useBlockLayout, usePagination, useResizeColumns, useTable} from "react-table";
-import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 import React, {useEffect} from "react";
 import { Setter } from "./utils";
+import {Worker} from "./worker";
 
 export type Sort = { column: string, desc: boolean, }
 export type Filter = { column: string, value: string, }
@@ -12,7 +12,7 @@ export function Table<Row extends object>(
     {
         columns,
         data,
-        fetchData,
+        setData,
         sorts,
         filters,
         handleHeaderClick,
@@ -26,15 +26,7 @@ export function Table<Row extends object>(
     }: {
         columns: Column<Row>[],
         data: Row[],
-        fetchData: (
-            { worker, pageSize, pageIndex, sorts, filters, }: {
-                worker: WorkerHttpvfs,
-                pageSize: number,
-                pageIndex: number,
-                sorts: Sort[],
-                filters: Filter[],
-            }
-        ) => void,
+        setData: (rows: Row[]) => void,
         sorts: Sort[],
         filters: Filter[],
         handleHeaderClick: (column: string) => void,
@@ -43,7 +35,7 @@ export function Table<Row extends object>(
         pageCount: number,
         updatePageCount: Setter<number>,
         rowCount: number | null,
-        worker: WorkerHttpvfs | null,
+        worker: Worker,
         initialPageSize: number
     }
 ) {
@@ -86,14 +78,15 @@ export function Table<Row extends object>(
     // Update data page based on relevant changes
     useEffect(
         () => {
-            if (worker !== null) {
-                console.log("table fetching")
-                fetchData({ worker, pageIndex, pageSize, sorts, filters, })
-            } else {
-                console.log("null worker")
-            }
+            worker.fetch<Row>({
+                table: 'file',
+                limit: pageSize,
+                offset: pageIndex * pageSize,
+                sorts,
+                filters,
+            }).then(setData)
         },
-        [ fetchData, worker, pageIndex, pageSize, sorts, filters, ],
+        [ worker, pageIndex, pageSize, sorts, filters, ],
     )
 
     // (rowCount, pageSize) -> pageIndex
@@ -152,7 +145,7 @@ export function Table<Row extends object>(
                 ))}
                 </div>
                 <div {...getTableBodyProps()}>
-                {page.map((row, i) => {
+                {page.map(row => {
                     prepareRow(row)
                     return (
                         <div className="tr" {...row.getRowProps()}>
@@ -171,27 +164,15 @@ export function Table<Row extends object>(
                 </div>
             </div>
             <div className="pagination">
-                <button onClick={() => gotoPage(0)} disabled={!canPreviousPage}>
-                    {'<<'}
-                </button>{' '}
-                <button onClick={() => previousPage()} disabled={!canPreviousPage}>
-                    {'<'}
-                </button>{' '}
-                <button onClick={() => nextPage()} disabled={!canNextPage}>
-                    {'>'}
-                </button>{' '}
-                <button onClick={() => gotoPage(pageCount === null ? 0 : (pageCount - 1))} disabled={!canNextPage}>
-                    {'>>'}
-                </button>{' '}
+                <button onClick={() => gotoPage(0)} disabled={!canPreviousPage}>{'<<'}</button>{' '}
+                <button onClick={() => previousPage()} disabled={!canPreviousPage}>{'<'}</button>{' '}
+                <button onClick={() => nextPage()} disabled={!canNextPage}>{'>'}</button>{' '}
+                <button onClick={() => gotoPage(pageCount === null ? 0 : (pageCount - 1))} disabled={!canNextPage}>{'>>'}</button>{' '}
                 <span className="page-number">
                     Page{' '}
-                    <span>
-                        {pageIndex + 1} of {pageOptions.length}
-                    </span>{' '}
+                    <span>{pageIndex + 1} of {pageOptions.length}</span>{' '}
                 </span>
-                <span className="goto-page">
-                    | Go to page:{' '}
-                </span>
+                <span className="goto-page">| Go to page:{' '}</span>
                 <input
                     type="number"
                     defaultValue={pageIndex + 1}

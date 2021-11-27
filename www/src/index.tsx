@@ -6,28 +6,25 @@ import $ from 'jquery';
 import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 import {DiskTree} from "./disk-tree";
 import {List} from "./list";
-import {SQLWorker} from "./worker";
+import {SQLWorker, Worker} from "./worker";
 
 function Router() {
-    const [ url, setUrl ] = useState("/assets/disk-tree1k.db");
+    const [ url, setUrl ] = useState("/assets/www.db");
+
+    const [ worker, setWorker ] = useState<Worker>(new Worker({ url, }))
 
     return (
-        <SQLWorker url={url}>
-            {
-                (renderProps: { worker: WorkerHttpvfs, }) => {
-                    const worker: WorkerHttpvfs = renderProps.worker
-                    console.log("renderProps:", renderProps)
-                    return (
-                        <HashRouter>
-                            <Routes>
-                                <Route path="" element={<List url={url} worker={worker} />} />
-                                <Route path="disk-tree" element={<DiskTree url={url} worker={worker} />} />
-                            </Routes>
-                        </HashRouter>
-                    )
-                }
-            }
-        </SQLWorker>
+        <div>
+            <div>
+                {/*header*/}
+            </div>
+            <HashRouter>
+                <Routes>
+                    <Route path="" element={<List url={url} worker={worker} />} />
+                    <Route path="disk-tree" element={<DiskTree url={url} worker={worker} />} />
+                </Routes>
+            </HashRouter>
+        </div>
     )
 }
 

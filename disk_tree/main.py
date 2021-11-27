@@ -13,8 +13,6 @@ from tempfile import NamedTemporaryFile
 
 from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse
 
-from disk_tree.cache import Cache, ROOT_DIR
-
 
 LINE_RGX = '(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
 
@@ -71,19 +69,20 @@ def agg_dirs(files, k='path', root=None,):
     return aggd
 
 
-def load(path, cache, profile=None, fsck=False,):
+def load(path, cache, profile=None, fsck=False, excludes=None):
     if profile:
         env['AWS_PROFILE'] = profile
+
+    if excludes:
+        excludes = [ abspath(exclude) for exclude in excludes ]
+        print(f'excludes: {excludes}')
 
     url = urlparse(path)
     if not url.scheme:
         # Local filesystem
         # now = to_dt(dt.now())
         root = abspath(path)
-        if fsck:
-            root = cache.compute(root, fsck=True)
-        else:
-            root = cache[root]
+        root = cache.compute(root, fsck=True, excludes=excludes)
         entries = root.descendants
         df = DF([
             dict(
@@ -103,6 +102,7 @@ def load(path, cache, profile=None, fsck=False,):
 
 
 @command('disk-tree')
+@option('-C', '--config-path', help='Path to SQLite DB (or directory containing disk-tree.db) to use as cache')
 @option('-f', '--fsck', count=True, help='Validate all cache entries that begin with the provided path(s); when passed twice, exit after performing fsck')
 @option('-h', '--human-readable', count=True, help='Pass once for SI units, twice for IEC')
 @option('-t', '--cache-ttl', default='1d', help='TTL for cache entries')
@@ -112,16 +112,35 @@ def load(path, cache, profile=None, fsck=False,):
 @option('-o', '--out-path', multiple=True, help='Paths to write output to. Supported extensions: {jpg, png, svg, html}')
 @option('-O', '--no-open', is_flag=True, help='Skip attempting to `open` any output files')
 @option('-t', '--tmp-html', count=True, help='Write an HTML representation to a temporary file and open in browser; pass twice to keep the temp file around after exit')
+@option('-x', '--exclude', 'excludes', multiple=True, help='Exclude paths')
 @argument('path', required=False)
-def cli(path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort_by_name, out_path, no_open, tmp_html):
-    if path is None:
-        path = getcwd()
-    path = abspath(path)
+def cli(path, config_path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort_by_name, out_path, no_open, tmp_html, excludes):
+    from disk_tree import config
+    from disk_tree.config import ROOT_DIR
+    if config_path:
+        config.SQLITE_PATH = abspath(config_path)
+
+    config_path = config.SQLITE_PATH
+    print(f'overwrote SQLITE_PATH: {config_path}')
+    from disk_tree.cache import Cache
+
     cache = Cache(ttl=pd.to_timedelta(cache_ttl))
 
-    df = load(path, cache=cache, fsck=fsck).reset_index()
+    if fsck:
+        cache.fsck()
+        missing_parents = cache.missing_parents()
+        if not missing_parents.empty:
+            stderr.write(f'{len(missing_parents)} missing parents:\n{missing_parents}\n')
+            sys.exit(2)
     if fsck == 2:
         sys.exit(0)
+
+    if path is None:
+        path = getcwd()
+    else:
+        path = abspath(path)
+
+    df = load(path, cache=cache, fsck=fsck, excludes=excludes).reset_index()
     df['name'] = df.path.apply(basename)
 
     if human_readable == 0:
