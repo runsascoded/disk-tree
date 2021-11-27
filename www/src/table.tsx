@@ -4,7 +4,7 @@ import React, {useEffect} from "react";
 import { Setter } from "./utils";
 
 export type Sort = { column: string, desc: boolean, }
-export type Filter = { column: string, value: string }
+export type Filter = { column: string, value: string, }
 
 const { ceil, } = Math
 

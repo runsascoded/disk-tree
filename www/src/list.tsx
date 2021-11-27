@@ -35,7 +35,7 @@ async function fetchPage(
     })
 }
 
-export function App({ url, worker }: { url: string, worker: WorkerHttpvfs | null }) {
+export function List({ url, worker }: { url: string, worker: WorkerHttpvfs | null }) {
     const [ data, setData ] = useState<Row[]>([])
     const [ loadingData, setLoadingData ] = useState(false);
     const [ rowCount, setRowCount ] = useState<number | null>(null)
