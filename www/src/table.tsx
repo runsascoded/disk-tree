@@ -156,18 +156,15 @@ export function Table<Row extends object>(
                     prepareRow(row)
                     return (
                         <div className="tr" {...row.getRowProps()}>
-                            {row.cells.map(cell => {
-                                return (
-                                    <div className="td"
-                                         {...cell.getCellProps(getColumnProps(cell.column))}
-                                         onClick={
-                                             (e) => handleCellClick(cell.column.id, cell.value)
-                                         }
+                            {row.cells.map(cell =>
+                                    <div
+                                        className="td"
+                                        {...cell.getCellProps(getColumnProps(cell.column))}
+                                        onClick={() => handleCellClick(cell.column.id, cell.value)}
                                     >
                                         {cell.render('Cell')}
                                     </div>
-                                )
-                            })}
+                            )}
                         </div>
                     )
                 })}
@@ -198,18 +195,13 @@ export function Table<Row extends object>(
                 <input
                     type="number"
                     defaultValue={pageIndex + 1}
-                    onChange={e => {
-                        const page = e.target.value ? Number(e.target.value) - 1 : 0
-                        gotoPage(page)
-                    }}
+                    onChange={e => gotoPage(e.target.value ? Number(e.target.value) - 1 : 0)}
                     style={{ width: '100px' }}
                 />
                 {' '}
                 <select
                     value={pageSize}
-                    onChange={e => {
-                        setPageSize(Number(e.target.value))
-                    }}
+                    onChange={e => setPageSize(Number(e.target.value))}
                 >
                     {[10, 20, 30, 40, 50].map(pageSize => (
                         <option key={pageSize} value={pageSize}>
