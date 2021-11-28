@@ -20,7 +20,7 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
     const [ missingParents, setMissingParents ] = useState<string[]>([])
     const [ root, setRoot ] = useState<string | null>(null)
     const [ viewRoot, setViewRoot ] = useState<string | null>(null)
-    console.log("render:", "queryPath:", queryPath, "root:", root, "viewRoot:", viewRoot)
+    console.log("render:", "queryPath:", queryPath, "(", typeof queryPath, ")", "root:", root, "viewRoot:", viewRoot)
     useEffect(
         () => {
             worker.fetch<Row>({
@@ -86,11 +86,15 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
     }
     const pad = 20
     return <>
-        <div>
-            <span className="db-url">URL: {url}</span>
+        <div className="meta">
+            <span className="db-url">
+                <label>DB:</label>
+                {url}
+            </span>
             <span className="db-path">
-                <Link to={{ pathname: '/', search: `?search=${viewRoot}`, }}>
-                    Path: {viewRoot}
+                <label>Path:</label>
+                <Link to={{ pathname: '/', search: viewRoot ? `?search=${viewRoot}` : undefined, }}>
+                    {viewRoot || ''}
                 </Link>
             </span>
         </div>

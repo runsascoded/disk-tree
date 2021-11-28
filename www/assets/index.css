@@ -7,9 +7,20 @@ html, body {
 .js-plotly-plot {
     min-height: 450px;
 }
+
+.meta label {
+    margin-right: 0.5rem;
+}
+.db-url {
+    margin-right: 0.5rem;
+}
 /*.js-plotly-plot, .plot-container, .svg-container {*/
 /*    height: 100%*/
 /*}*/
+
+#search-input {
+    width: 20rem;
+}
 
 .search {
     margin-bottom: 0.5em;

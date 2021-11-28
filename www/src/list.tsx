@@ -54,7 +54,12 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         () => {
             if (!searchValue && !hasSearched) return
             console.log("updating query:", searchValue)
-            navigate({ pathname: "", search: `?search=${searchValue}`}, { replace: true });
+            navigate(
+                {
+                    pathname: "",
+                    search: searchValue ? `?search=${searchValue}` : undefined },
+                { replace: true },
+                );
         },
         [ searchValue, ]
     )
@@ -191,7 +196,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                             className="form-control py-2 border-right-0 border"
                             type="search"
                             placeholder="Search"
-                            id="example-search-input"
+                            id="search-input"
                             value={searchValue}
                             onChange={e => setSearchValue(e.target.value)}
                         />
@@ -222,7 +227,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                 worker={worker}
                 initialPageSize={initialPageSize}
             />
-            <Link to={{ pathname: "disk-tree", search: `?path=${querySearch}` }}>Disk Tree</Link>
+            <Link to={{ pathname: "disk-tree", search: querySearch ? `?path=${querySearch}` : undefined }}>Disk Tree</Link>
         </Styles>
     )
 }
