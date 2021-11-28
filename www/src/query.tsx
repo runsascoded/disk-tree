@@ -1,5 +1,5 @@
+import { Sort } from "./sorts";
 
-export type Sort = { column: string, desc: boolean, }
 export type Filter = { column: string, value: string, prefix?: boolean, suffix?: boolean }
 
 export function build(

@@ -1,122 +1,17 @@
 import React, {useEffect, useMemo, useState} from "react";
 import {Row} from "./data";
 import {Table} from "./table";
-import {basename, renderSize, Setter} from "./utils";
+import {basename, renderSize} from "./utils";
 import {Column} from "react-table";
 import moment from "moment";
-import {Link, NavigateFunction, useLocation, useNavigate} from "react-router-dom";
+import {Link, useLocation, useNavigate} from "react-router-dom";
 import {Styles} from "./styles";
 import {Worker} from './worker';
-import {Filter, Sort} from "./query";
-import _ from 'lodash';
+import {Filter} from "./query";
+import {queryParamToState, stateToQueryParam} from "./search-params";
+import {DefaultSorts, parseQuerySorts, renderQuerySorts, Sort} from "./sorts";
 
 const { ceil, } = Math
-
-const sortRegex = /(?<column>[^!\-]+)(?<dir>[!\-]?)/g
-const DefaultSorts = [ { column: 'size', desc: true, }]
-
-const parseQuerySorts = function(str: string): Sort[] {
-    if (!str) return []
-    return (
-        Array.from(str.matchAll(sortRegex))
-            .map(a =>
-                a.groups as { column: string, dir: string }
-            )
-            .map(
-                ( { column, dir }) => {
-                    return {
-                        column,
-                        desc: dir == '-',
-                    }
-                }
-            )
-    )
-}
-
-const renderQuerySorts = function(sorts: Sort[] | null): string {
-    return (sorts || [])
-        .map(( { column, desc, }, idx) => {
-            // return column + (desc ? '-' : (idx + 1 < sorts.length ? '!' : ''))
-            let s = column
-            if (desc) s += '-'
-            else if (idx + 1 < (sorts?.length || 0)) s += '!'
-            return s
-        })
-        .join('')
-}
-
-function queryParamToState<T>(
-    { queryKey, queryValue, state, setState, defaultValue, parse }: {
-        queryKey: string,
-        queryValue: string | null,
-        state: T | null,
-        setState: Setter <T | null>,
-        defaultValue: T,
-        parse?: (queryParam: string) => T,
-    }
-) {
-    useEffect(
-        () => {
-            if (state === null) {
-                if (queryValue) {
-                    const parsedState = parse ? parse(queryValue) : (queryValue as any as T)
-                    console.log(`queryKey ${queryKey} = ${queryValue}: parsed`, parsedState)
-                    setState(parsedState)
-                } else {
-                    console.log(`queryKey ${queryKey} = ${queryValue}: setting default value`, defaultValue)
-                    setState(defaultValue)
-                }
-            }
-        },
-        [ queryValue ]
-    )
-}
-
-function stateToQueryParam<T>(
-    { queryKey, state, searchParams, navigate, defaultValue, render, eq, replaceChars, }: {
-        queryKey: string,
-        queryValue: string | null,
-        state: T | null,
-        searchParams: URLSearchParams,
-        navigate: NavigateFunction,
-        defaultValue: T,
-        render?: (value: T | null) => string,
-        eq?: (l: T, r: T) => boolean,
-        replaceChars?: { [k: string]: string, },
-    }
-) {
-    useEffect(
-        () => {
-            if (state === null) return
-            if (
-                eq ?
-                    eq(state, defaultValue) :
-                    typeof state === 'object' ?
-                        _.isEqual(state, defaultValue) :
-                        (state == defaultValue)
-            ) {
-                searchParams.delete(queryKey)
-            } else {
-                const queryValue = render ? render(state) : (state as any).toString()
-                searchParams.set(queryKey, queryValue)
-            }
-            let queryString = searchParams.toString()
-            replaceChars = replaceChars || { '%2F': '/', '%21': '!', }
-            Object.entries(replaceChars).forEach(([ k, v ]) => {
-                queryString = queryString.replaceAll(k, v)
-            })
-            console.log(`queryKey ${queryKey} new string`, queryString)
-            navigate(
-                {
-                    pathname: "",
-                    search: queryString,
-                },
-                { replace: true, },
-            )
-        },
-        [ state ]
-    )
-}
 
 export function List({ url, worker }: { url: string, worker: Worker }) {
     const { pathname, search: query, hash } = useLocation();

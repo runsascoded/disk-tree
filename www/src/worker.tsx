@@ -2,8 +2,9 @@ import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 import {createDbWorker} from "sql.js-httpvfs";
 import {useEffect, useState} from "react";
 import {Row} from "./data";
-import {build, Filter, Sort} from "./query";
+import {build, Filter} from "./query";
 import {Setter} from "./utils";
+import {Sort} from "./sorts";
 
 export const workerUrl = new URL(
     "sql.js-httpvfs/dist/sqlite.worker.js",

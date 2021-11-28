@@ -2,7 +2,8 @@ import {Column, useBlockLayout, usePagination, useResizeColumns, useTable} from 
 import React, {useEffect} from "react";
 import { Setter } from "./utils";
 import {Worker} from "./worker";
-import {Filter, Sort} from "./query";
+import {Filter} from "./query";
+import {Sort} from "./sorts";
 
 const { ceil, } = Math
 
@@ -198,6 +199,9 @@ export function Table<Row extends object>(
                             pageCount,
                             canNextPage,
                             canPreviousPage,
+                            sorts,
+                            filters,
+                            rowCount,
                         },
                         null,
                         2
