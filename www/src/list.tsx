@@ -4,7 +4,8 @@ import {Table} from "./table";
 import {basename, renderSize} from "./utils";
 import {Column} from "react-table";
 import moment from "moment";
-import {Link, useLocation, useParams} from "react-router-dom";
+import {Link, useNavigate, useLocation, useParams} from "react-router-dom";
+import { createBrowserHistory } from "history";
 import {Styles} from "./styles";
 import {Worker} from './worker';
 import {Filter, Sort} from "./query";
@@ -16,6 +17,8 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
     const { pathname, search: query, hash } = useLocation();
     const querySearch = new URLSearchParams(query).get('search')
     console.log("location:", pathname, query, hash, querySearch)
+
+    let navigate = useNavigate()
 
     const [ data, setData ] = useState<Row[]>([])
     const [ datetimeFmt, setDatetimeFmt ] = useState('YYYY-MM-DD HH:mm:ss')
@@ -45,6 +48,15 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
             }
         },
         [ querySearch, ]
+    )
+
+    useEffect(
+        () => {
+            if (!searchValue && !hasSearched) return
+            console.log("updating query:", searchValue)
+            navigate({ pathname: "", search: `?search=${searchValue}`}, { replace: true });
+        },
+        [ searchValue, ]
     )
 
     // useEffect(
@@ -210,7 +222,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                 worker={worker}
                 initialPageSize={initialPageSize}
             />
-            <Link to="disk-tree#abc=def">Disk Tree</Link>
+            <Link to={{ pathname: "disk-tree", search: `?path=${querySearch}` }}>Disk Tree</Link>
         </Styles>
     )
 }
