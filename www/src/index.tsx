@@ -14,17 +14,12 @@ function Router() {
     const [ worker, setWorker ] = useState<Worker>(new Worker({ url, }))
 
     return (
-        <div>
-            <div>
-                {/*header*/}
-            </div>
             <HashRouter>
                 <Routes>
                     <Route path="" element={<List url={url} worker={worker} />} />
                     <Route path="disk-tree" element={<DiskTree url={url} worker={worker} />} />
                 </Routes>
             </HashRouter>
-        </div>
     )
 }
 

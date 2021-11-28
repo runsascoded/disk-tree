@@ -7,17 +7,7 @@ import Plot from "react-plotly.js";
 
 const { fromEntries } = Object
 
-import styled from "styled-components";
-
-const Styled = styled.div`
-    .js-plotly-plot {
-        width 100%;
-        height: 600px;
-    }
-    .user-svg-container {
-        height: 600px;
-    }
-`
+import {SunburstPlotDatum} from "plotly.js";
 
 export function DiskTree({ url, worker }: { url: string, worker: Worker }) {
     const [ data, setData ] = useState<Row[]>([])
@@ -51,8 +41,22 @@ export function DiskTree({ url, worker }: { url: string, worker: Worker }) {
         rendered = [{ type: "treemap", labels, values, parents, branchvalues: 'total', }]
         console.log(rendered)
     }
-    return <Styled>
-        <span>URL: {url}</span>
-        <Plot data={rendered} layout={{ autosize: true }} />
-    </Styled>
+    const pad = 20
+    return <>
+        <div>URL: {url}</div>
+        <Plot
+            data={rendered}
+            useResizeHandler
+            layout={{ autosize: true, margin: { t: pad, l: pad, b: pad, r: pad, } }}
+            style={{ width: '100%', height: '100%' }}
+            config={{ responsive: true }}
+            onClick={
+                (e) => {
+                    const point = e.points[0]
+                    const datum = point as any as SunburstPlotDatum
+                    console.log("treemap click:", e, datum.label, datum.parent)
+                }
+            }
+        />
+    </>
 }
