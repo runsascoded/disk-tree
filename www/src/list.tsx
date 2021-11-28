@@ -4,7 +4,7 @@ import {Table} from "./table";
 import {basename, renderSize, Setter} from "./utils";
 import {Column} from "react-table";
 import moment from "moment";
-import {Link, useNavigate, useLocation, useParams} from "react-router-dom";
+import {Link, useNavigate, useLocation, useParams, Navigator, NavigateFunction} from "react-router-dom";
 import { createBrowserHistory } from "history";
 import {Styles} from "./styles";
 import {Worker} from './worker';
@@ -34,13 +34,13 @@ const parseQuerySorts = function(str: string): Sort[] {
     )
 }
 
-const renderQuerySorts = function(sorts: Sort[]): string {
-    return sorts
+const renderQuerySorts = function(sorts: Sort[] | null): string {
+    return (sorts || [])
         .map(( { column, desc, }, idx) => {
             // return column + (desc ? '-' : (idx + 1 < sorts.length ? '!' : ''))
             let s = column
             if (desc) s += '-'
-            else if (idx + 1 < sorts.length) s += '!'
+            else if (idx + 1 < (sorts?.length || 0)) s += '!'
             return s
         })
         .join('')
@@ -51,7 +51,7 @@ function queryParamToState<T>(
         queryKey: string,
         queryValue: string | null,
         state: T | null,
-        setState: Setter <T>,
+        setState: Setter <T | null>,
         defaultValue: T,
         parse?: (queryParam: string) => T,
     }
@@ -61,10 +61,10 @@ function queryParamToState<T>(
             if (state === null) {
                 if (queryValue) {
                     const parsedState = parse ? parse(queryValue) : (queryValue as any as T)
-                    console.log(`Parsed from query key ${queryKey}:`, parsedState)
+                    console.log(`queryKey ${queryKey} = ${queryValue}: parsed`, parsedState)
                     setState(parsedState)
                 } else {
-                    console.log(`Setting default value for query key ${queryKey}:`, defaultValue)
+                    console.log(`queryKey ${queryKey} = ${queryValue}: setting default value`, defaultValue)
                     setState(defaultValue)
                 }
             }
@@ -73,31 +73,58 @@ function queryParamToState<T>(
     )
 }
 
-// function queryParamToState(
-//     { queryKey, queryValue, state, setState, defaultValue }: {
-//         queryKey: string,
-//         queryValue: string | null,
-//         state: string | null,
-//         setState: Setter<string>,
-//         defaultValue?: string,
-//     }
-// ) {
-//     return queryParamToState<string>({
-//         queryKey,
-//         queryValue,
-//         state,
-//         setState,
-//         defaultValue: defaultValue || '',
-//         parse: (s) => s,
-//     })
-// }
+function stateToQueryParam<T>(
+    { queryKey, state, searchParams, navigate, defaultValue, render, eq, replaceChars, }: {
+        queryKey: string,
+        queryValue: string | null,
+        state: T | null,
+        searchParams: URLSearchParams,
+        navigate: NavigateFunction,
+        defaultValue: T,
+        render?: (value: T | null) => string,
+        eq?: (l: T, r: T) => boolean,
+        replaceChars?: { [k: string]: string, },
+    }
+) {
+    useEffect(
+        () => {
+            if (state === null) return
+            if (
+                eq ?
+                    eq(state, defaultValue) :
+                    typeof state === 'object' ?
+                        _.isEqual(state, defaultValue) :
+                        (state == defaultValue)
+            ) {
+                searchParams.delete(queryKey)
+            } else {
+                const queryValue = render ? render(state) : (state as any).toString()
+                searchParams.set(queryKey, queryValue)
+            }
+            let queryString = searchParams.toString()
+            replaceChars = replaceChars || { '%2F': '/', '%21': '!', }
+            Object.entries(replaceChars).forEach(([ k, v ]) => {
+                queryString = queryString.replaceAll(k, v)
+            })
+            console.log(`queryKey ${queryKey} new string`, queryString)
+            navigate(
+                {
+                    pathname: "",
+                    search: queryString,
+                },
+                { replace: true, },
+            )
+        },
+        [ state ]
+    )
+}
 
 export function List({ url, worker }: { url: string, worker: Worker }) {
     const { pathname, search: query, hash } = useLocation();
     const searchParams = new URLSearchParams(query)
     const querySearch = searchParams.get('search')
     const querySort = searchParams.get('sort')
-    console.log("location:", pathname, query, hash, querySearch)
+    console.log("render! location:", pathname, query, hash, querySearch)
 
     let navigate = useNavigate()
 
@@ -107,19 +134,16 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
     const [ pageCount, setPageCount ] = useState(0)
     const [ sorts, setSorts ] = useState<Sort[] | null>(null)
     const [ filters, setFilters ] = useState<Filter[]>([])
-    console.log("sorts:", sorts)
-    const [ searchValue, setSearchValue ] = useState('')
+    const [ searchValue, setSearchValue ] = useState<string | null>(null)
     const [ searchPrefix, setSearchPrefix ] = useState(false)
     const [ searchSuffix, setSearchSuffix ] = useState(false)
-    const [ hasSearched, setHasSearched ] = useState(false)
+    // const [ hasSearched, setHasSearched ] = useState(false)
     // const [ b64State, setB64State ] = useState('')
 
     const search = { value: searchValue, prefix: searchPrefix, suffix: searchSuffix, }
     const searchFields = [ searchValue, searchPrefix, searchSuffix ]
 
     const initialPageSize = 10
-
-    console.log("hash:", window.location.hash)
 
     // `?search` query param -> searchValue
     queryParamToState({
@@ -129,37 +153,36 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         setState: setSearchValue,
         defaultValue: "",
     })
-    // useEffect(
-    //     () => {
-    //         if (querySearch) {
-    //             console.log("setting search path:", querySearch)
-    //             setSearchValue(querySearch)
-    //         }
-    //     },
-    //     [ querySearch, ]
-    // )
 
     // searchValue -> `?search` query param
-    useEffect(
-        () => {
-            if (!searchValue && !hasSearched) return
-            console.log("updating search query:", searchValue)
-            if (searchValue === undefined) {
-                searchParams.delete('search')
-            } else {
-                searchParams.set('search', searchValue)
-            }
-            const queryString = searchParams.toString().replaceAll('%2F', '/')
-            navigate(
-                {
-                    pathname: "",
-                    search: queryString,
-                },
-                { replace: true },
-            )
-        },
-        [ searchValue, ]
-    )
+    stateToQueryParam<string>({
+        queryKey: 'search',
+        queryValue: querySearch,
+        state: searchValue,
+        defaultValue: "",
+        searchParams,
+        navigate,
+    })
+    // useEffect(
+    //     () => {
+    //         if (!searchValue && !hasSearched) return
+    //         console.log("updating search query:", searchValue)
+    //         if (searchValue === undefined) {
+    //             searchParams.delete('search')
+    //         } else {
+    //             searchParams.set('search', searchValue)
+    //         }
+    //         const queryString = searchParams.toString().replaceAll('%2F', '/')
+    //         navigate(
+    //             {
+    //                 pathname: "",
+    //                 search: queryString,
+    //             },
+    //             { replace: true },
+    //         )
+    //     },
+    //     [ searchValue, ]
+    // )
 
     // `?sort` query param -> sorts
     queryParamToState<Sort[] | null>({
@@ -168,45 +191,40 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         state: sorts,
         setState: setSorts,
         defaultValue: DefaultSorts,
+        parse: parseQuerySorts,
+    })
+
+    // sorts -> `?sort` query param
+    stateToQueryParam<Sort[] | null>({
+        queryKey: 'sort',
+        queryValue: querySort,
+        state: sorts,
+        defaultValue: DefaultSorts,
+        render: renderQuerySorts,
+        searchParams,
+        navigate,
     })
     // useEffect(
     //     () => {
-    //         if (sorts === null) {
-    //             if (querySort) {
-    //                 const parsedSorts = parseQuerySorts(querySort)
-    //                 console.log("Parsed sorts from query string:", parsedSorts)
-    //                 setSorts(parsedSorts)
-    //             } else {
-    //                 console.log("Setting default sorts:", DefaultSorts)
-    //                 setSorts(DefaultSorts)
-    //             }
+    //         if (sorts === null) return
+    //         if (_.isEqual(sorts, DefaultSorts)) {
+    //             searchParams.delete('sort')
+    //         } else {
+    //             const sortsValue = renderQuerySorts(sorts)
+    //             searchParams.set('sort', sortsValue)
     //         }
+    //         const queryString = searchParams.toString().replaceAll('%2F', '/')
+    //         console.log("new queryString:", queryString)
+    //         navigate(
+    //             {
+    //                 pathname: "",
+    //                 search: queryString,
+    //             },
+    //             { replace: true, },
+    //         )
     //     },
-    //     [ querySort ]
+    //     [ sorts ]
     // )
-
-    // sorts -> `?sort` query param
-    useEffect(
-        () => {
-            if (sorts === null) return
-            if (_.isEqual(sorts, DefaultSorts)) {
-                searchParams.delete('sort')
-            } else {
-                const sortsValue = renderQuerySorts(sorts)
-                searchParams.set('sort', sortsValue)
-            }
-            const queryString = searchParams.toString().replaceAll('%2F', '/')
-            console.log("new queryString:", queryString)
-            navigate(
-                {
-                    pathname: "",
-                    search: queryString,
-                },
-                { replace: true, },
-            )
-        },
-        [ sorts ]
-    )
 
     // useEffect(
     //     () => {
@@ -239,28 +257,28 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         () => {
             if (rowCount !== null) {
                 const pageCount = ceil(rowCount / initialPageSize)
-                console.log("update pageCount from rowCount:", rowCount, pageCount)
+                // console.log("update pageCount from rowCount:", rowCount, pageCount)
                 setPageCount(pageCount)
             } else {
-                console.log("update pageCount from rowCount:", rowCount)
+                // console.log("update pageCount from rowCount:", rowCount)
             }
         },
         [ rowCount, ]
     )
 
-    useEffect(
-        () => {
-            if (searchValue) {
-                setHasSearched(true)
-            }
-        },
-        searchFields
-    )
+    // useEffect(
+    //     () => {
+    //         if (searchValue) {
+    //             setHasSearched(true)
+    //         }
+    //     },
+    //     searchFields
+    // )
 
     // search -> filters
     useEffect(
         () => {
-            if (!search?.value && !hasSearched) return
+            if (search === null) return
             const newFilter = {
                 column: 'path',
                 value: search?.value || '',
@@ -279,7 +297,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                 filter = newFilter
             }
             const newFilters: Filter[] = [ filter ].concat(rest)
-            console.log("newFilters:", newFilters)
+            // console.log("newFilters:", newFilters)
             setFilters(newFilters)
         },
         searchFields,
@@ -309,7 +327,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         { style: { textAlign: 'right', }}
 
     const handleHeaderClick = (column: string) => {
-        console.log("header click:", column)
+        // console.log("header click:", column)
         const sort = sorts?.find(({column: col}) => col == column)
         const desc = sort?.desc
         let newSorts: Sort[] =
@@ -320,12 +338,12 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                     [{ column, desc: false }]
         const rest = sorts?.filter(({column: col}) => col != column) || []
         newSorts = newSorts.concat(rest)
-        console.log("newSorts:", newSorts)
+        // console.log("newSorts:", newSorts)
         setSorts(newSorts)
     }
 
     const handleCellClick = (column: string, value: string) => {
-        console.log("search:", column, value)
+        // console.log("search:", column, value)
         if (column == 'parent' || column == 'path') {
             setSearchValue(value)
         }
@@ -341,7 +359,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                             type="search"
                             placeholder="Search"
                             id="search-input"
-                            value={searchValue}
+                            value={searchValue || ''}
                             onChange={e => setSearchValue(e.target.value)}
                         />
                         <span className="input-group-append">
