@@ -29,7 +29,7 @@ export function Table<Row extends object>(
         sorts: Sort[],
         filters: Filter[],
         handleHeaderClick: (column: string) => void,
-        handleCellClick: (column: string, value: string) => void,
+        handleCellClick: (column: string, row: Row) => void,
         getColumnProps: (column: Column<Row>) => object,
         pageCount: number,
         updatePageCount: Setter<number>,
@@ -127,7 +127,7 @@ export function Table<Row extends object>(
                             <div
                                 className="th"
                                 {...column.getHeaderProps(getColumnProps(column))}
-                                onClick={() => handleHeaderClick(column.id)}
+                                onClick={(e) => handleHeaderClick(column.id)}
                             >
                                 {column.render('Header')}
                                 <span>{getColumnSortChar(column.id)}</span>
@@ -152,7 +152,10 @@ export function Table<Row extends object>(
                                     <div
                                         className="td"
                                         {...cell.getCellProps(getColumnProps(cell.column))}
-                                        onClick={() => handleCellClick(cell.column.id, cell.value)}
+                                        onClick={() => {
+                                            console.log("clicked cell:", cell)
+                                            handleCellClick(cell.column.id, cell.row.original)
+                                        }}
                                     >
                                         {cell.render('Cell')}
                                     </div>

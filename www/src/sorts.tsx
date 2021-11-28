@@ -1,3 +1,5 @@
+import {QueryState} from "./search-params";
+import _ from "lodash";
 
 export type Sort = { column: string, desc: boolean, }
 
@@ -33,3 +35,12 @@ export const renderQuerySorts = function(sorts: Sort[] | null): string {
         })
         .join('')
 }
+
+export class SortsQueryState extends QueryState<Sort[]> {
+    defaultValue: Sort[] = DefaultSorts
+    parse = parseQuerySorts
+    render = renderQuerySorts
+    eq = _.isEqual
+}
+
+export const sortsQueryState = new SortsQueryState()

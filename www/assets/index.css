@@ -18,6 +18,19 @@ html, body {
 /*    height: 100%*/
 /*}*/
 
+.disk-tree-icon {
+    font-size: 1.5em;
+    margin-left: 0.5em;
+}
+
+.td .parent-span .disk-icon {
+    visibility: hidden;
+}
+
+.td:hover .parent-span .disk-icon {
+    visibility: visible;
+}
+
 #search-input {
     width: 20rem;
 }

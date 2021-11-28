@@ -4,80 +4,34 @@ import {Table} from "./table";
 import {basename, renderSize} from "./utils";
 import {Column} from "react-table";
 import moment from "moment";
-import {Link, useLocation, useNavigate} from "react-router-dom";
+import {Link} from "react-router-dom";
 import {Styles} from "./styles";
 import {Worker} from './worker';
 import {Filter} from "./query";
-import {queryParamToState, stateToQueryParam} from "./search-params";
-import {DefaultSorts, parseQuerySorts, renderQuerySorts, Sort} from "./sorts";
+import {getQueryString, queryParamState, stringQueryState, toQueryString} from "./search-params";
+import {Sort, sortsQueryState} from "./sorts";
 
 const { ceil, } = Math
 
 export function List({ url, worker }: { url: string, worker: Worker }) {
-    const { pathname, search: query, hash } = useLocation();
-    const searchParams = new URLSearchParams(query)
-    const querySearch = searchParams.get('search')
-    const querySort = searchParams.get('sort')
-    console.log("render! location:", pathname, query, hash, querySearch)
-
-    let navigate = useNavigate()
-
     const [ data, setData ] = useState<Row[]>([])
     const [ datetimeFmt, setDatetimeFmt ] = useState('YYYY-MM-DD HH:mm:ss')
     const [ rowCount, setRowCount ] = useState<number | null>(null)
     const [ pageCount, setPageCount ] = useState(0)
-    const [ sorts, setSorts ] = useState<Sort[] | null>(null)
     const [ filters, setFilters ] = useState<Filter[]>([])
-    const [ searchValue, setSearchValue ] = useState<string | null>(null)
+    const [ searchValue, setSearchValue, querySearch, ] = queryParamState('search', stringQueryState)
+
     const [ searchPrefix, setSearchPrefix ] = useState(false)
     const [ searchSuffix, setSearchSuffix ] = useState(false)
-    // const [ hasSearched, setHasSearched ] = useState(false)
-    // const [ b64State, setB64State ] = useState('')
 
     const search = { value: searchValue, prefix: searchPrefix, suffix: searchSuffix, }
     const searchFields = [ searchValue, searchPrefix, searchSuffix ]
 
     const initialPageSize = 10
 
-    // `?search` query param -> searchValue
-    queryParamToState({
-        queryKey: 'search',
-        queryValue: querySearch,
-        state: searchValue,
-        setState: setSearchValue,
-        defaultValue: "",
-    })
+    const [ sorts, setSorts, querySorts, ] = queryParamState<Sort[]>('sort', sortsQueryState)
 
-    // searchValue -> `?search` query param
-    stateToQueryParam<string>({
-        queryKey: 'search',
-        queryValue: querySearch,
-        state: searchValue,
-        defaultValue: "",
-        searchParams,
-        navigate,
-    })
-
-    // `?sort` query param -> sorts
-    queryParamToState<Sort[] | null>({
-        queryKey: 'sort',
-        queryValue: querySort,
-        state: sorts,
-        setState: setSorts,
-        defaultValue: DefaultSorts,
-        parse: parseQuerySorts,
-    })
-
-    // sorts -> `?sort` query param
-    stateToQueryParam<Sort[] | null>({
-        queryKey: 'sort',
-        queryValue: querySort,
-        state: sorts,
-        defaultValue: DefaultSorts,
-        render: renderQuerySorts,
-        searchParams,
-        navigate,
-    })
+    console.log("sorts:", sorts, "filters:", filters)
 
     // (Worker, Filters) -> RowCount
     useEffect(
@@ -128,7 +82,24 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
     const columns: Column<Row>[] = useMemo(
         () => [
             { id: 'kind', Header: 'Kind', accessor: row => row.kind == 'dir' ? '📂' : '💾', width: 50, },
-            { id: 'parent', Header: 'Parent', accessor: 'parent', width: 400, },
+            {
+                id: 'parent',
+                Header: 'Parent',
+                accessor: r => {
+                    const searchParams = new URLSearchParams()
+                    searchParams.set('path', r.parent)
+                    const queryString = getQueryString({ searchParams, })
+                    return (
+                        <span className="parent-span">
+                            <Link to={{ pathname: 'disk-tree', search: queryString }} >
+                                <span className="disk-icon">💾</span>
+                            </Link>
+                            {r.parent}
+                        </span>
+                    )
+                },
+                width: 400,
+            },
             { id: 'path', Header: 'Name', accessor: row => basename(row.path), width: 300, },
             { id: 'size', Header: 'Size', accessor: row => renderSize(row.size), width: 120, },
             { id: 'mtime', Header: 'Modified', accessor: row => moment(row.mtime).format(datetimeFmt), },
@@ -138,17 +109,21 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         []
     )
 
+    const defaultColumnProps = { style: { textAlign: 'right', }}
     const columnProps: { [id: string]: object } = {
         'kind': {
             style: { textAlign: 'center', },
         },
     }
     const getColumnProps = (column: Column<Row>): object =>
-        column.id &&
-        columnProps[column.id] ||
-        { style: { textAlign: 'right', }}
+        Object.assign(
+            {},
+            defaultColumnProps,
+            column.id && columnProps[column.id] ? columnProps[column.id] : {}
+        )
 
     const handleHeaderClick = (column: string) => {
+        console.log("header clicked:", column)
         const sort = sorts?.find(({column: col}) => col == column)
         const desc = sort?.desc
         let newSorts: Sort[] =
@@ -162,9 +137,9 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         setSorts(newSorts)
     }
 
-    const handleCellClick = (column: string, value: string) => {
+    const handleCellClick = (column: string, row: Row) => {
         if (column == 'parent' || column == 'path') {
-            setSearchValue(value)
+            setSearchValue(row[column])
         }
     }
 
@@ -190,6 +165,17 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                                 <i className="fa fa-times"/>
                             </button>
                         </span>
+                        <span className="disk-tree-icon">
+                            <Link to={{
+                                pathname: "disk-tree",
+                                search:
+                                    searchValue &&
+                                    toQueryString({ path: searchValue }) ||
+                                    undefined
+                            }}>
+                                💾
+                            </Link>
+                        </span>
                     </div>
                 </div>
             </div>
@@ -208,7 +194,6 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                 worker={worker}
                 initialPageSize={initialPageSize}
             />
-            <Link to={{ pathname: "disk-tree", search: querySearch ? `?path=${querySearch}` : undefined }}>Disk Tree</Link>
         </Styles>
     )
 }
