@@ -1,25 +1,19 @@
-import {Link, useLocation, useNavigate} from "react-router-dom";
-import React, {DOMElement, useEffect, useState} from "react";
+import {Link} from "react-router-dom";
+import React, {useEffect, useState} from "react";
 import {Row} from "./data";
 import {Worker} from "./worker";
 import Plot from "react-plotly.js";
 import {SunburstPlotDatum} from "plotly.js";
 import {basename, renderSize} from "./utils";
+import {queryParamState, stringQueryState} from "./search-params";
 
 const { fromEntries } = Object
 
 export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Worker, dataRoot?: string }) {
-    const { pathname, search: query, hash } = useLocation();
-    const queryPath = new URLSearchParams(query).get('path')
-
-    let navigate = useNavigate()
-
     const [ data, setData ] = useState<Row[]>([])
     const [ limit, setLimit ] = useState(1000)
     const [ missingParents, setMissingParents ] = useState<string[]>([])
     const [ root, setRoot ] = useState<string | null>(null)
-    const [ viewRoot, setViewRoot ] = useState<string | null>(null)
-    console.log("render:", "queryPath:", queryPath, "(", typeof queryPath, ")", "root:", root, "viewRoot:", viewRoot)
     useEffect(
         () => {
             worker.fetch<Row>({
@@ -31,25 +25,7 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
         [ url, worker,],
     )
 
-    useEffect(
-        () => {
-            if (queryPath && viewRoot === null) {
-                console.log("setting viewRoot from queryPath:", queryPath)
-                setViewRoot(queryPath)
-            }
-        },
-        [ queryPath ]
-    )
-
-    useEffect(
-        () => {
-            if (viewRoot !== null) {
-                console.log("updating query path:", viewRoot)
-                navigate({pathname: "", search: `?path=${viewRoot}`}, {replace: true});
-            }
-        },
-        [ viewRoot ]
-    )
+    const [ viewRoot, setViewRoot, queryPath ] = queryParamState('path', stringQueryState)
 
     useEffect(
         () => {
@@ -69,8 +45,6 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
     let rendered: Plotly.Data[] = []
     if (data.length) {
         const ids = data.map(r => r.path)
-        //const text = data.map(({ path, size, }) => `${root == path ? root : basename(path)}: ${renderSize(size)}`)
-        //const labels = data.map(({path}) => root == path ? root : basename(path))
         const labels = data.map(({ path, size, }) => `${root == path ? root : basename(path)}: ${renderSize(size)}`)
         const values = data.map(r => r.size)
         const parents = data.map(r => r.parent)
