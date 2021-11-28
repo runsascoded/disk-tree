@@ -4,19 +4,18 @@ import {Row} from "./data";
 import {Worker} from "./worker";
 import Plot from "react-plotly.js";
 import {SunburstPlotDatum} from "plotly.js";
-import {basename} from "./utils";
+import {basename, renderSize} from "./utils";
 
 const { fromEntries } = Object
 
 export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Worker, dataRoot?: string }) {
     const { pathname, search: query, hash } = useLocation();
     const queryPath = new URLSearchParams(query).get('path')
-    // console.log("location:", pathname, query, hash, queryPath)
 
     let navigate = useNavigate()
 
     const [ data, setData ] = useState<Row[]>([])
-    const [ limit, setLimit ] = useState(100)
+    const [ limit, setLimit ] = useState(1000)
     const [ missingParents, setMissingParents ] = useState<string[]>([])
     const [ root, setRoot ] = useState<string | null>(null)
     const [ viewRoot, setViewRoot ] = useState<string | null>(null)
@@ -70,12 +69,17 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
     let rendered: Plotly.Data[] = []
     if (data.length) {
         const ids = data.map(r => r.path)
-        const labels = data.map(({path}) => root == path ? root : basename(path))
+        //const text = data.map(({ path, size, }) => `${root == path ? root : basename(path)}: ${renderSize(size)}`)
+        //const labels = data.map(({path}) => root == path ? root : basename(path))
+        const labels = data.map(({ path, size, }) => `${root == path ? root : basename(path)}: ${renderSize(size)}`)
         const values = data.map(r => r.size)
         const parents = data.map(r => r.parent)
         rendered = [{
             type: "treemap",
             ids,
+            textinfo: 'label',
+            text: labels,
+            hoverinfo: 'text',
             labels,
             values,
             parents,
