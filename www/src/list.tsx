@@ -4,8 +4,7 @@ import {Table} from "./table";
 import {basename, renderSize, Setter} from "./utils";
 import {Column} from "react-table";
 import moment from "moment";
-import {Link, useNavigate, useLocation, useParams, Navigator, NavigateFunction} from "react-router-dom";
-import { createBrowserHistory } from "history";
+import {Link, NavigateFunction, useLocation, useNavigate} from "react-router-dom";
 import {Styles} from "./styles";
 import {Worker} from './worker';
 import {Filter, Sort} from "./query";
@@ -163,26 +162,6 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         searchParams,
         navigate,
     })
-    // useEffect(
-    //     () => {
-    //         if (!searchValue && !hasSearched) return
-    //         console.log("updating search query:", searchValue)
-    //         if (searchValue === undefined) {
-    //             searchParams.delete('search')
-    //         } else {
-    //             searchParams.set('search', searchValue)
-    //         }
-    //         const queryString = searchParams.toString().replaceAll('%2F', '/')
-    //         navigate(
-    //             {
-    //                 pathname: "",
-    //                 search: queryString,
-    //             },
-    //             { replace: true },
-    //         )
-    //     },
-    //     [ searchValue, ]
-    // )
 
     // `?sort` query param -> sorts
     queryParamToState<Sort[] | null>({
@@ -204,45 +183,6 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         searchParams,
         navigate,
     })
-    // useEffect(
-    //     () => {
-    //         if (sorts === null) return
-    //         if (_.isEqual(sorts, DefaultSorts)) {
-    //             searchParams.delete('sort')
-    //         } else {
-    //             const sortsValue = renderQuerySorts(sorts)
-    //             searchParams.set('sort', sortsValue)
-    //         }
-    //         const queryString = searchParams.toString().replaceAll('%2F', '/')
-    //         console.log("new queryString:", queryString)
-    //         navigate(
-    //             {
-    //                 pathname: "",
-    //                 search: queryString,
-    //             },
-    //             { replace: true, },
-    //         )
-    //     },
-    //     [ sorts ]
-    // )
-
-    // useEffect(
-    //     () => {
-    //         const json = JSON.stringify({ sorts, filters })
-    //         const encoded = encode(json)
-    //         console.log("encoded:", json, encoded, encoded.length)
-    //         setB64State(encoded)
-    //     },
-    //     [ sorts, filters, ]
-    // )
-
-    // useEffect(
-    //     () => {
-    //         console.log("update hash:", b64State)
-    //         window.location.hash = b64State
-    //     },
-    //     [ b64State ]
-    // )
 
     // (Worker, Filters) -> RowCount
     useEffect(
@@ -257,23 +197,11 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         () => {
             if (rowCount !== null) {
                 const pageCount = ceil(rowCount / initialPageSize)
-                // console.log("update pageCount from rowCount:", rowCount, pageCount)
                 setPageCount(pageCount)
-            } else {
-                // console.log("update pageCount from rowCount:", rowCount)
             }
         },
         [ rowCount, ]
     )
-
-    // useEffect(
-    //     () => {
-    //         if (searchValue) {
-    //             setHasSearched(true)
-    //         }
-    //     },
-    //     searchFields
-    // )
 
     // search -> filters
     useEffect(
@@ -297,7 +225,6 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                 filter = newFilter
             }
             const newFilters: Filter[] = [ filter ].concat(rest)
-            // console.log("newFilters:", newFilters)
             setFilters(newFilters)
         },
         searchFields,
@@ -327,7 +254,6 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         { style: { textAlign: 'right', }}
 
     const handleHeaderClick = (column: string) => {
-        // console.log("header click:", column)
         const sort = sorts?.find(({column: col}) => col == column)
         const desc = sort?.desc
         let newSorts: Sort[] =
@@ -338,12 +264,10 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                     [{ column, desc: false }]
         const rest = sorts?.filter(({column: col}) => col != column) || []
         newSorts = newSorts.concat(rest)
-        // console.log("newSorts:", newSorts)
         setSorts(newSorts)
     }
 
     const handleCellClick = (column: string, value: string) => {
-        // console.log("search:", column, value)
         if (column == 'parent' || column == 'path') {
             setSearchValue(value)
         }
