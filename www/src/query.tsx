@@ -1,4 +1,6 @@
-import {Filter, Sort} from "./table";
+
+export type Sort = { column: string, desc: boolean, }
+export type Filter = { column: string, value: string, prefix?: boolean, suffix?: boolean }
 
 export function build(
     {
@@ -24,12 +26,13 @@ export function build(
     if (filters?.length) {
         query += ' WHERE'
         let first = true
-        for (const { column, value } of filters) {
+        for (const { column, value, prefix, suffix, } of filters) {
             if (!first) query += ' AND'
             first = false
+            const like = (prefix ? '' : '%') + value + (suffix ? '' : '%')
             // TODO: escape values; normally this would be a serious vulnerability, but this is a static site reading a
             //  read-only SQLite database, so believed to be benign
-            query += ` ${column} LIKE "%${value}%"`
+            query += ` ${column} LIKE "${like}"`
         }
     }
     if (sorts?.length) {

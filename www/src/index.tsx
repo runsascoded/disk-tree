@@ -3,14 +3,12 @@ import React, {useState,} from 'react';
 import ReactDOM from 'react-dom'
 
 import $ from 'jquery';
-import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 import {DiskTree} from "./disk-tree";
 import {List} from "./list";
-import {SQLWorker, Worker} from "./worker";
+import {Worker} from "./worker";
 
 function Router() {
     const [ url, setUrl ] = useState("/assets/www.db");
-
     const [ worker, setWorker ] = useState<Worker>(new Worker({ url, }))
 
     return (

@@ -1,16 +1,22 @@
 import React, {useEffect, useMemo, useState} from "react";
 import {Row} from "./data";
-import {Filter, Sort, Table} from "./table";
+import {Table} from "./table";
 import {basename, renderSize} from "./utils";
 import {Column} from "react-table";
 import moment from "moment";
-import {Link} from "react-router-dom";
+import {Link, useLocation, useParams} from "react-router-dom";
 import {Styles} from "./styles";
 import {Worker} from './worker';
+import {Filter, Sort} from "./query";
 
 const { ceil, } = Math
 
 export function List({ url, worker }: { url: string, worker: Worker }) {
+    const { testvalue } = useParams();
+    const { pathname, search: query, hash } = useLocation();
+    const querySearch = new URLSearchParams(query).get('search')
+    console.log("location:", pathname, query, hash, querySearch)
+
     const [ data, setData ] = useState<Row[]>([])
     const [ datetimeFmt, setDatetimeFmt ] = useState('YYYY-MM-DD HH:mm:ss')
     const [ rowCount, setRowCount ] = useState<number | null>(null)
@@ -18,13 +24,28 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
     const [ sorts, setSorts ] = useState<Sort[]>([])
     const [ filters, setFilters ] = useState<Filter[]>([])
     console.log("sorts:", sorts)
-    const [ search, setSearch ] = useState("")
+    const [ searchValue, setSearchValue ] = useState('')
+    const [ searchPrefix, setSearchPrefix ] = useState(false)
+    const [ searchSuffix, setSearchSuffix ] = useState(false)
     const [ hasSearched, setHasSearched ] = useState(false)
     // const [ b64State, setB64State ] = useState('')
+
+    const search = { value: searchValue, prefix: searchPrefix, suffix: searchSuffix, }
+    const searchFields = [ searchValue, searchPrefix, searchSuffix ]
 
     const initialPageSize = 10
 
     console.log("hash:", window.location.hash)
+
+    useEffect(
+        () => {
+            if (querySearch) {
+                console.log("setting search path:", querySearch)
+                setSearchValue(querySearch)
+            }
+        },
+        [ querySearch, ]
+    )
 
     // useEffect(
     //     () => {
@@ -68,33 +89,39 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
 
     useEffect(
         () => {
-            if (search) {
+            if (searchValue) {
                 setHasSearched(true)
             }
         },
-        [ search ]
+        searchFields
     )
 
     // search -> filters
     useEffect(
         () => {
-            if (!search && !hasSearched) return
+            if (!search?.value && !hasSearched) return
+            const newFilter = {
+                column: 'path',
+                value: search?.value || '',
+                prefix: search?.prefix || false,
+                suffix: search?.suffix || false,
+            }
             let { filter, rest } =
                 filters.reduce<{ filter?: Filter, rest: Filter[] }>(
-                    ({ filter, rest }, {column, value}) =>
-                        column === 'path' ?
-                            { filter: { column, value: search }, rest } :
-                            { filter, rest: rest.concat([{ column, value }]) },
+                    ({ filter, rest }, cur) =>
+                        cur.column === 'path' ?
+                            { filter: newFilter, rest } :
+                            { filter, rest: rest.concat([cur]) },
                     { rest: [] },
                 )
             if (!filter) {
-                filter = { column: 'path', value: search, }
+                filter = newFilter
             }
             const newFilters: Filter[] = [ filter ].concat(rest)
             console.log("newFilters:", newFilters)
             setFilters(newFilters)
         },
-        [ search, ],
+        searchFields,
     )
 
     const columns: Column<Row>[] = useMemo(
@@ -139,7 +166,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
     const handleCellClick = (column: string, value: string) => {
         console.log("search:", column, value)
         if (column == 'parent' || column == 'path') {
-            setSearch(value)
+            setSearchValue(value)
         }
     }
 
@@ -153,14 +180,14 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                             type="search"
                             placeholder="Search"
                             id="example-search-input"
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
+                            value={searchValue}
+                            onChange={e => setSearchValue(e.target.value)}
                         />
                         <span className="input-group-append">
                             <button
                                 className="btn btn-outline-secondary border-left-0 border"
                                 type="button"
-                                onClick={() => setSearch('')}
+                                onClick={() => setSearchValue('')}
                             >
                                 <i className="fa fa-times"/>
                             </button>

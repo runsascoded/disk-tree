@@ -2,9 +2,7 @@ import {Column, useBlockLayout, usePagination, useResizeColumns, useTable} from 
 import React, {useEffect} from "react";
 import { Setter } from "./utils";
 import {Worker} from "./worker";
-
-export type Sort = { column: string, desc: boolean, }
-export type Filter = { column: string, value: string, }
+import {Filter, Sort} from "./query";
 
 const { ceil, } = Math
 

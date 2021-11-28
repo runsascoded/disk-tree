@@ -1,9 +1,8 @@
 import {WorkerHttpvfs} from "sql.js-httpvfs/dist/db";
 import {createDbWorker} from "sql.js-httpvfs";
 import {useEffect, useState} from "react";
-import {Filter, Sort} from "./table";
 import {Row} from "./data";
-import {build} from "./query";
+import {build, Filter, Sort} from "./query";
 import {Setter} from "./utils";
 
 export const workerUrl = new URL(
@@ -196,73 +195,4 @@ export class Worker {
         this.requests[query].promise = rows
         return rows
     }
-}
-
-export async function fetchPage(
-    worker: WorkerHttpvfs,
-    pageIndex: number,
-    pageSize: number,
-    sorts: Sort[],
-    filters: Filter[],
-): Promise<Row[]> {
-    const query = build(
-        {
-            table: 'file',
-            limit: pageSize,
-            offset: pageSize * pageIndex,
-            count: undefined,
-            sorts,
-            filters,
-        }
-    )
-    console.log("query:", query)
-    return worker.db.query(query).then((rows) => {
-        console.log(`Page ${pageIndex}x${pageSize}:`, rows);
-        return rows as Row[]
-    })
-}
-
-export type FetchData = {
-    worker: WorkerHttpvfs,
-    pageSize: number,
-    pageIndex: number,
-    sorts: Sort[],
-    filters: Filter[],
-    loadingData: boolean,
-    setLoadingData: Setter<boolean>,
-    setData: Setter<Row[]>,
-}
-export function fetchData(
-    {
-        worker,
-        pageSize, pageIndex,
-        sorts, filters,
-        loadingData, setLoadingData,
-        setData,
-    }: FetchData
-) {
-    // Set the loading state
-    console.log(`fetching page ${pageIndex}`)
-
-    if (worker !== null) {
-        if (!loadingData) {
-            console.log("fetching")
-            setLoadingData(true)
-            console.log("setLoadingData(true)")
-            fetchPage(worker, pageIndex, pageSize, sorts, filters, ).then((rows) => {
-                console.log("fetched page:", rows)
-                setLoadingData(false)
-                console.log("setLoadingData(false)")
-                setData(rows)
-            })
-        } else {
-            console.log("skipping fetch, loadingData != false:", loadingData)
-        }
-    } else {
-        console.log("worker === null")
-    }
-}
-
-export default {
-    fetchData,
 }
