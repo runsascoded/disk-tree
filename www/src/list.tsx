@@ -13,6 +13,23 @@ import {Sort, sortsQueryState} from "./sorts";
 
 const { ceil, } = Math
 
+function TreeLinkCell(path: string, ...classes: string[]): JSX.Element
+function TreeLinkCell([path, display]: [string, string], ...classes: string[]): JSX.Element
+function TreeLinkCell(arg: string | [string, string], ...classes: string[]) {
+    const searchParams = new URLSearchParams()
+    const [ path, display ] = typeof arg === 'string' ? [ arg, arg ] : arg
+    searchParams.set('path', path)
+    const queryString = getQueryString({ searchParams, })
+    return (
+        <span className={["cell-span"].concat(classes).join(' ')}>
+            <Link to={{ pathname: 'disk-tree', search: queryString }} >
+                <span className="disk-tree-icon">🌲</span>
+            </Link>
+            {display}
+        </span>
+    )
+}
+
 export function List({ url, worker }: { url: string, worker: Worker }) {
     const [ data, setData ] = useState<Row[]>([])
     const [ datetimeFmt, setDatetimeFmt ] = useState('YYYY-MM-DD HH:mm:ss')
@@ -79,26 +96,11 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         searchFields,
     )
 
-    function TreeLinkCell(path: string, display?: string) {
-        const searchParams = new URLSearchParams()
-        searchParams.set('path', path)
-        display = display || path
-        const queryString = getQueryString({ searchParams, })
-        return (
-            <span className="cell-span">
-                <Link to={{ pathname: 'disk-tree', search: queryString }} >
-                    <span className="disk-tree-icon">🌲</span>
-                </Link>
-                {display}
-            </span>
-        )
-    }
-
     const columns: Column<Row>[] = useMemo(
         () => [
             { id: 'kind', Header: 'Kind', accessor: r => r.kind == 'dir' ? '📂' : '💾', width: 50, },
-            { id: 'parent', Header: 'Parent', accessor: r => TreeLinkCell(r.parent), width: 400,},
-            { id: 'path', Header: 'Name', accessor: r => TreeLinkCell(r.path, basename(r.path)), width: 300, },
+            { id: 'parent', Header: 'Parent', accessor: r => TreeLinkCell(r.parent, 'cell-parent'), width: 400,},
+            { id: 'path', Header: 'Name', accessor: r => TreeLinkCell([r.path, basename(r.path)], 'cell-path'), width: 300, },
             { id: 'size', Header: 'Size', accessor: r => renderSize(r.size), width: 120, },
             { id: 'mtime', Header: 'Modified', accessor: r => moment(r.mtime).format(datetimeFmt), },
             { id: 'num_descendants', Header: 'Descendants', accessor: 'num_descendants', width: 120, },
@@ -143,7 +145,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
 
     return (
         <Styles>
-            <div className="header-controls row no-gutters search">
+            <div className="list-page header-controls row no-gutters search">
                 <div className="row">
                     <div className="input-group col-md-12">
                         <input

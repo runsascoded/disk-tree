@@ -8,15 +8,34 @@ html, body {
     min-height: 450px;
 }
 
-.meta label {
-    margin-right: 0.5rem;
+.disk-tree .control {
+    margin-right: 0.6rem;
 }
-.db-url {
-    margin-right: 0.5rem;
+.disk-tree label {
+    margin-right: 0.4rem;
 }
 /*.js-plotly-plot, .plot-container, .svg-container {*/
 /*    height: 100%*/
 /*}*/
+
+.max-nodes-input {
+    width: 5rem;
+    padding: 0 0.2rem;
+    text-align: right;
+}
+
+.row.disk-tree.meta {
+    margin-left: 1rem;
+    margin-top: 0.5rem;
+}
+
+.disk-tree.meta label {
+    font-weight: bold;
+}
+
+.cell-parent, .cell-path {
+    font-family: monospace;
+}
 
 .header-controls .disk-tree-icon.large {
     font-size: 1.5em;

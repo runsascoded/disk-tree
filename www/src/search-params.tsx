@@ -25,6 +25,17 @@ export class StringQueryState extends QueryState<string> {
 
 export const stringQueryState = new StringQueryState()
 
+export class NumericQueryState extends QueryState<number> {
+    constructor(readonly defaultValue: number) {
+        super();
+    }
+    parse(queryParams: string): number {
+        const value = parseInt(queryParams);
+        return isNaN(value) ? this.defaultValue : value
+    }
+}
+export const numericQueryState = (defaultValue: number) => new NumericQueryState(defaultValue)
+
 export function queryParamToState<T>(
     { queryKey, queryValue, state, setState, defaultValue, parse }: {
         queryKey: string,
