@@ -149,7 +149,7 @@ export function assignQueryString(
 export function useQueryState<T>(
     queryKey: string,
     queryState: QueryState<T>,
-): [ T | null, Setter<T | null>, string | null, ] {
+): [ T | null, Setter<T | null>, ] {
     const { defaultValue, parse, render, eq, } = queryState
     const { search: query } = useLocation();
     const searchParams = new URLSearchParams(query)
@@ -176,5 +176,5 @@ export function useQueryState<T>(
         navigate,
         eq,
     })
-    return [ state, setState, queryValue ]
+    return [ state, setState, ]
 }

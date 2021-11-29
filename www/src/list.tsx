@@ -19,7 +19,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
     const [ rowCount, setRowCount ] = useState<number | null>(null)
     const [ pageCount, setPageCount ] = useState(0)
     const [ filters, setFilters ] = useState<Filter[]>([])
-    const [ searchValue, setSearchValue, querySearch, ] = useQueryState('search', stringQueryState)
+    const [ searchValue, setSearchValue, ] = useQueryState('search', stringQueryState)
 
     const [ searchPrefix, setSearchPrefix ] = useState(false)
     const [ searchSuffix, setSearchSuffix ] = useState(false)
@@ -29,7 +29,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
 
     const initialPageSize = 10
 
-    const [ sorts, setSorts, querySorts, ] = useQueryState<Sort[]>('sort', sortsQueryState)
+    const [ sorts, setSorts, ] = useQueryState<Sort[]>('sort', sortsQueryState)
 
     console.log("sorts:", sorts, "filters:", filters)
 
@@ -79,32 +79,30 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         searchFields,
     )
 
+    function TreeLinkCell(path: string, display?: string) {
+        const searchParams = new URLSearchParams()
+        searchParams.set('path', path)
+        display = display || path
+        const queryString = getQueryString({ searchParams, })
+        return (
+            <span className="cell-span">
+                <Link to={{ pathname: 'disk-tree', search: queryString }} >
+                    <span className="disk-tree-icon">🌲</span>
+                </Link>
+                {display}
+            </span>
+        )
+    }
+
     const columns: Column<Row>[] = useMemo(
         () => [
-            { id: 'kind', Header: 'Kind', accessor: row => row.kind == 'dir' ? '📂' : '💾', width: 50, },
-            {
-                id: 'parent',
-                Header: 'Parent',
-                accessor: r => {
-                    const searchParams = new URLSearchParams()
-                    searchParams.set('path', r.parent)
-                    const queryString = getQueryString({ searchParams, })
-                    return (
-                        <span className="parent-span">
-                            <Link to={{ pathname: 'disk-tree', search: queryString }} >
-                                <span className="disk-icon">💾</span>
-                            </Link>
-                            {r.parent}
-                        </span>
-                    )
-                },
-                width: 400,
-            },
-            { id: 'path', Header: 'Name', accessor: row => basename(row.path), width: 300, },
-            { id: 'size', Header: 'Size', accessor: row => renderSize(row.size), width: 120, },
-            { id: 'mtime', Header: 'Modified', accessor: row => moment(row.mtime).format(datetimeFmt), },
+            { id: 'kind', Header: 'Kind', accessor: r => r.kind == 'dir' ? '📂' : '💾', width: 50, },
+            { id: 'parent', Header: 'Parent', accessor: r => TreeLinkCell(r.parent), width: 400,},
+            { id: 'path', Header: 'Name', accessor: r => TreeLinkCell(r.path, basename(r.path)), width: 300, },
+            { id: 'size', Header: 'Size', accessor: r => renderSize(r.size), width: 120, },
+            { id: 'mtime', Header: 'Modified', accessor: r => moment(r.mtime).format(datetimeFmt), },
             { id: 'num_descendants', Header: 'Descendants', accessor: 'num_descendants', width: 120, },
-            { id: 'checked_at', Header: 'Checked At', accessor: row => moment(row.checked_at).format(datetimeFmt), },
+            { id: 'checked_at', Header: 'Checked At', accessor: r => moment(r.checked_at).format(datetimeFmt), },
         ],
         []
     )
@@ -145,7 +143,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
 
     return (
         <Styles>
-            <div className="row no-gutters search">
+            <div className="header-controls row no-gutters search">
                 <div className="row">
                     <div className="input-group col-md-12">
                         <input
@@ -165,7 +163,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                                 <i className="fa fa-times"/>
                             </button>
                         </span>
-                        <span className="disk-tree-icon">
+                        <span className="disk-tree-icon large">
                             <Link to={{
                                 pathname: "disk-tree",
                                 search:
@@ -173,7 +171,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                                     toQueryString({ path: searchValue }) ||
                                     undefined
                             }}>
-                                💾
+                                🌲
                             </Link>
                         </span>
                     </div>

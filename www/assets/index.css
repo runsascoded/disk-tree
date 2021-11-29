@@ -18,16 +18,17 @@ html, body {
 /*    height: 100%*/
 /*}*/
 
-.disk-tree-icon {
+.header-controls .disk-tree-icon.large {
     font-size: 1.5em;
     margin-left: 0.5em;
 }
 
-.td .parent-span .disk-icon {
+.td .cell-span .disk-tree-icon {
     visibility: hidden;
+    margin-right: 0.5rem;
 }
 
-.td:hover .parent-span .disk-icon {
+.td:hover .cell-span .disk-tree-icon {
     visibility: visible;
 }
 
