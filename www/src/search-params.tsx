@@ -120,7 +120,6 @@ export function fromQueryString({ query }: { query?: string, }): { [k: string]: 
     }
     const searchParams = new URLSearchParams(query)
     return Object.fromEntries(searchParams.entries())
-    //const queryString = getQueryString({ searchParams, })
 }
 
 export function toQueryString(o: { [k: string]: string }): string {
@@ -147,7 +146,7 @@ export function assignQueryString(
     )
 }
 
-export function queryParamState<T>(
+export function useQueryState<T>(
     queryKey: string,
     queryState: QueryState<T>,
 ): [ T | null, Setter<T | null>, string | null, ] {

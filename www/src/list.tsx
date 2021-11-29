@@ -8,7 +8,7 @@ import {Link} from "react-router-dom";
 import {Styles} from "./styles";
 import {Worker} from './worker';
 import {Filter} from "./query";
-import {getQueryString, queryParamState, stringQueryState, toQueryString} from "./search-params";
+import {getQueryString, useQueryState, stringQueryState, toQueryString} from "./search-params";
 import {Sort, sortsQueryState} from "./sorts";
 
 const { ceil, } = Math
@@ -19,7 +19,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
     const [ rowCount, setRowCount ] = useState<number | null>(null)
     const [ pageCount, setPageCount ] = useState(0)
     const [ filters, setFilters ] = useState<Filter[]>([])
-    const [ searchValue, setSearchValue, querySearch, ] = queryParamState('search', stringQueryState)
+    const [ searchValue, setSearchValue, querySearch, ] = useQueryState('search', stringQueryState)
 
     const [ searchPrefix, setSearchPrefix ] = useState(false)
     const [ searchSuffix, setSearchSuffix ] = useState(false)
@@ -29,7 +29,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
 
     const initialPageSize = 10
 
-    const [ sorts, setSorts, querySorts, ] = queryParamState<Sort[]>('sort', sortsQueryState)
+    const [ sorts, setSorts, querySorts, ] = useQueryState<Sort[]>('sort', sortsQueryState)
 
     console.log("sorts:", sorts, "filters:", filters)
 

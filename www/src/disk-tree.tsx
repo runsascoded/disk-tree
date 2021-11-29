@@ -5,7 +5,7 @@ import {Worker} from "./worker";
 import Plot from "react-plotly.js";
 import {SunburstPlotDatum} from "plotly.js";
 import {basename, renderSize} from "./utils";
-import {queryParamState, stringQueryState} from "./search-params";
+import {useQueryState, stringQueryState} from "./search-params";
 
 const { fromEntries } = Object
 
@@ -25,7 +25,7 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
         [ url, worker,],
     )
 
-    const [ viewRoot, setViewRoot, queryPath ] = queryParamState('path', stringQueryState)
+    const [ viewRoot, setViewRoot, queryPath ] = useQueryState('path', stringQueryState)
 
     useEffect(
         () => {
