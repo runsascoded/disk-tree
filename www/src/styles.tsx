@@ -52,14 +52,17 @@ export const Styles = styled.div`
       user-select: none;
     }
 
+    .td {
+      white-space: nowrap;
+      overflow-x: auto;
+    }
+
     .th,
     .td {
       margin: 0;
-      padding: 0.5rem;
+      padding: 0.2rem 0.4rem;
       border-bottom: 1px solid black;
       border-right: 1px solid black;
-
-      overflow-x: scroll;
 
       ${'' /* In this example we use an absolutely position resizer,
        so this is required. */}

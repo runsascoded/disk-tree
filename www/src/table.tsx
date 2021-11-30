@@ -126,7 +126,7 @@ export function Table<Row extends object>(
                         {headerGroup.headers.map(column => (
                             <div
                                 className="th"
-                                {...column.getHeaderProps(getColumnProps(column))}
+                                {...column.getHeaderProps()}
                                 onClick={(e) => handleHeaderClick(column.id)}
                             >
                                 {column.render('Header')}

@@ -37,14 +37,40 @@ html, body {
     font-family: monospace;
 }
 
+.cell-size-suffix {
+    margin-left: 0.2rem;
+}
+
 .header-controls .disk-tree-icon.large {
     font-size: 1.5em;
     margin-left: 0.5em;
 }
 
+.th {
+    text-align: right;
+}
+
+.th .header-span .settings-icon {
+    /*visibility: hidden;*/
+    display: none;
+    margin-right: 0.4rem;
+    /*font-size: 1.2rem;*/
+}
+
+.th:hover .header-span .settings-icon {
+    /*visibility: visible;*/
+    display: inline;
+    /*float: right;*/
+}
+
+.MuiTooltip-tooltip {
+    background-color: #616161
+}
+
 .td .cell-span .disk-tree-icon {
     visibility: hidden;
     margin-right: 0.5rem;
+    /*font-size: 1.2rem;*/
 }
 
 .td:hover .cell-span .disk-tree-icon {

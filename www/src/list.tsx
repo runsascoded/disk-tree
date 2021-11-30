@@ -1,17 +1,21 @@
-import React, {useEffect, useMemo, useState} from "react";
+import React, {MouseEvent, useEffect, useMemo, useState} from "react";
 import {Row} from "./data";
 import {Table} from "./table";
-import {basename, renderSize} from "./utils";
+import {basename, Setter, stopPropagation} from "./utils";
 import {Column} from "react-table";
 import moment from "moment";
 import {Link} from "react-router-dom";
 import {Styles} from "./styles";
 import {Worker} from './worker';
 import {Filter} from "./query";
-import {getQueryString, useQueryState, stringQueryState, toQueryString} from "./search-params";
+import {getQueryString, stringQueryState, toQueryString, useQueryState} from "./search-params";
 import {Sort, sortsQueryState} from "./sorts";
+import {styled, ThemeProvider, Tooltip, tooltipClasses, TooltipProps} from "@mui/material"
+import {computeSize, SizeFmt} from "./size";
+import {Radios} from "./radios";
+import theme from "./theme";
 
-const { ceil, } = Math
+const { ceil, round, } = Math
 
 function TreeLinkCell(path: string, ...classes: string[]): JSX.Element
 function TreeLinkCell([path, display]: [string, string], ...classes: string[]): JSX.Element
@@ -30,6 +34,59 @@ function TreeLinkCell(arg: string | [string, string], ...classes: string[]) {
     )
 }
 
+function SizeCell(size: number, sizeFmt: SizeFmt) {
+    const { num: n, suffix } = computeSize(size, sizeFmt)
+    const rendered = n >= 100 ? round(n).toString() : n.toFixed(1)
+    return <span className="cell-size">
+        <span className="cell-size-num">{rendered}</span>
+        { suffix && <span className="cell-size-suffix">{suffix}</span> }
+    </span>
+}
+
+type HeaderSettings<T extends string> = {
+    choices: { label: string, name: T }[]
+    choice: T | null
+    setChoice: Setter<T>
+}
+
+function ColumnHeader<T extends string>(
+    label: string,
+    headerSettings?: HeaderSettings<T>,
+) {
+    return function(r: { column: Column<Row> }) {
+        const body: JSX.Element =
+            headerSettings ?
+                <Radios {...headerSettings} /> :
+                <div>no choices available</div>
+
+        return (
+            <Tooltip arrow placement="bottom-start" title={
+                <div className="settings-tooltip" onClick={stopPropagation}>
+                    {body}
+                </div>
+            }>
+                <span className="header-span">
+                    <span className="settings-icon">⚙️</span>
+                    {label}
+                </span>
+            </Tooltip>
+        )
+    }
+}
+
+const LightTooltip = styled(
+    ({ className, ...props }: TooltipProps) => <Tooltip {...props} classes={{ popper: className }} />
+)(({ theme }) => ({
+    [`& .${tooltipClasses.tooltip}`]: {
+        backgroundColor: theme.palette.common.black, //'#313131',
+        color: theme.palette.common.white,
+        // backgroundColor: theme.palette.common.white,
+        // color: 'rgba(0, 0, 0, 0.87)',
+        // boxShadow: theme.shadows[1],
+        // fontSize: 11,
+    },
+}));
+
 export function List({ url, worker }: { url: string, worker: Worker }) {
     const [ data, setData ] = useState<Row[]>([])
     const [ datetimeFmt, setDatetimeFmt ] = useState('YYYY-MM-DD HH:mm:ss')
@@ -37,6 +94,8 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
     const [ pageCount, setPageCount ] = useState(0)
     const [ filters, setFilters ] = useState<Filter[]>([])
     const [ searchValue, setSearchValue, ] = useQueryState('search', stringQueryState)
+
+    const [ sizeFmt, setSizeFmt ] = useState<SizeFmt>('iec')
 
     const [ searchPrefix, setSearchPrefix ] = useState(false)
     const [ searchSuffix, setSearchSuffix ] = useState(false)
@@ -48,7 +107,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
 
     const [ sorts, setSorts, ] = useQueryState<Sort[]>('sort', sortsQueryState)
 
-    console.log("sorts:", sorts, "filters:", filters)
+    // console.log("sorts:", sorts, "filters:", filters)
 
     // (Worker, Filters) -> RowCount
     useEffect(
@@ -96,17 +155,27 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         searchFields,
     )
 
+    const sizeHeaderSettings: HeaderSettings<SizeFmt> = {
+        choices: [
+            { name: 'iec', label: 'Human Readable (IEC)', },
+            { name: 'iso', label: 'Human Readable (ISO)', },
+            { name: 'bytes', label: 'Bytes', },
+        ],
+        choice: sizeFmt,
+        setChoice: setSizeFmt,
+    }
+
     const columns: Column<Row>[] = useMemo(
         () => [
-            { id: 'kind', Header: 'Kind', accessor: r => r.kind == 'dir' ? '📂' : '💾', width: 50, },
-            { id: 'parent', Header: 'Parent', accessor: r => TreeLinkCell(r.parent, 'cell-parent'), width: 400,},
-            { id: 'path', Header: 'Name', accessor: r => TreeLinkCell([r.path, basename(r.path)], 'cell-path'), width: 300, },
-            { id: 'size', Header: 'Size', accessor: r => renderSize(r.size), width: 120, },
-            { id: 'mtime', Header: 'Modified', accessor: r => moment(r.mtime).format(datetimeFmt), },
+            { id: 'kind', Header: ColumnHeader('Kind'), accessor: r => r.kind == 'dir' ? '📂' : '💾', width: 50, },
+            { id: 'parent', Header: ColumnHeader('Parent'), accessor: r => TreeLinkCell(r.parent, 'cell-parent'), width: 400,},
+            { id: 'path', Header: ColumnHeader('Name'), accessor: r => TreeLinkCell([r.path, basename(r.path)], 'cell-path'), width: 300, },
+            { id: 'size', Header: ColumnHeader('Size', sizeHeaderSettings), accessor: r => SizeCell(r.size, sizeFmt), width: 120, },
+            { id: 'mtime', Header: ColumnHeader('Modified'), accessor: r => moment(r.mtime).format(datetimeFmt), },
             { id: 'num_descendants', Header: 'Descendants', accessor: 'num_descendants', width: 120, },
-            { id: 'checked_at', Header: 'Checked At', accessor: r => moment(r.checked_at).format(datetimeFmt), },
+            { id: 'checked_at', Header: ColumnHeader('Checked At'), accessor: r => moment(r.checked_at).format(datetimeFmt), },
         ],
-        []
+        [ sizeFmt, datetimeFmt, sizeHeaderSettings, ]
     )
 
     const defaultColumnProps = { style: { textAlign: 'right', }}
@@ -145,6 +214,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
 
     return (
         <Styles>
+            <ThemeProvider theme={theme}>
             <div className="list-page header-controls row no-gutters search">
                 <div className="row">
                     <div className="input-group col-md-12">
@@ -194,6 +264,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                 worker={worker}
                 initialPageSize={initialPageSize}
             />
+            </ThemeProvider>
         </Styles>
     )
 }

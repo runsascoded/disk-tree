@@ -4,8 +4,9 @@ import {Row} from "./data";
 import {Worker} from "./worker";
 import Plot from "react-plotly.js";
 import {SunburstPlotDatum} from "plotly.js";
-import {basename, renderSize} from "./utils";
+import {basename} from "./utils";
 import {numericQueryState, stringQueryState, useQueryState} from "./search-params";
+import {renderSize, SizeFmt} from "./size";
 
 const { fromEntries } = Object
 
@@ -14,6 +15,8 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
     const [ maxNodes, setMaxNodes ] = useQueryState('limit', numericQueryState(1000))
     const [ missingParents, setMissingParents ] = useState<string[]>([])
     const [ root, setRoot ] = useState<string | null>(null)
+    const [ sizeFmt, setSizeFmt ] = useState<SizeFmt>('iec')
+
     useEffect(
         () => {
             if (maxNodes === null) return
@@ -47,7 +50,7 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
     let rendered: Plotly.Data[] = []
     if (data.length) {
         const ids = data.map(r => r.path)
-        const labels = data.map(({ path, size, }) => `${root == path ? root : basename(path)}: ${renderSize(size)}`)
+        const labels = data.map(({ path, size, }) => `${root == path ? root : basename(path)}: ${renderSize(size, sizeFmt)}`)
         const values = data.map(r => r.size)
         const parents = data.map(r => r.parent)
         rendered = [{
@@ -76,7 +79,7 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
                 <span className="control db-path">
                     <label>Path:</label>
                     <Link to={{ pathname: '/', search: viewRoot ? `?search=${viewRoot}` : undefined, }}>
-                        {viewRoot || ''}
+                        {viewRoot || root || ''}
                     </Link>
                 </span>
                 <span className="control max-nodes">
