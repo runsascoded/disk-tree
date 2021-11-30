@@ -22,6 +22,7 @@ export function Table<Row extends object>(
         worker,
         updatePageCount,
         initialPageSize,
+        onColumnResize,
     }: {
         columns: Column<Row>[],
         data: Row[],
@@ -35,7 +36,8 @@ export function Table<Row extends object>(
         updatePageCount: Setter<number>,
         rowCount: number | null,
         worker: Worker,
-        initialPageSize: number
+        initialPageSize: number,
+        onColumnResize: (columnWidths: { [k: string]: number }) => void,
     }
 ) {
     const defaultColumn = React.useMemo(
@@ -60,7 +62,7 @@ export function Table<Row extends object>(
         nextPage,
         previousPage,
         setPageSize,
-        state: { pageIndex, pageSize },
+        state: { pageIndex, pageSize, columnResizing },
     } = useTable<Row>(
         {
             columns,
@@ -74,6 +76,15 @@ export function Table<Row extends object>(
         useResizeColumns,
         usePagination,
     )
+
+    // Listen for column resizing
+    useEffect(() => {
+        if (columnResizing.isResizingColumn === null) {
+            // console.log('columnResizing', columnResizing);
+            onColumnResize(columnResizing.columnWidths)
+        }
+    }, [columnResizing]);
+
     // Update data page based on relevant changes
     useEffect(
         () => {

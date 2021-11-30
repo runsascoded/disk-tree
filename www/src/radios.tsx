@@ -3,13 +3,13 @@ import {FormControlLabel, Radio, RadioGroup, styled} from "@mui/material";
 import React from "react";
 import {green} from "@mui/material/colors";
 
-// const StyledRadio = styled(Radio)`
-//   color: ${green[400]};
-//   &.Mui-checked {
-//     color: ${green[600]};
-//   }
-// `;
-const StyledRadio = styled(Radio)``;
+const StyledRadio = styled(Radio)`
+  color: ${green[400]};
+  &.Mui-checked {
+    color: ${green[600]};
+  }
+`;
+// const StyledRadio = styled(Radio)``;
 
 export const Radios = function<T extends string>({ choices, choice, setChoice }: {
     choices: { label: string, name: T }[],

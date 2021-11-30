@@ -99,11 +99,11 @@ export function DiskTree({ url, worker, dataRoot, }: { url: string, worker: Work
                     {data.length ? ` (actual: ${data.length})` : ""}
                 </span>
                 {
-                    missingParents ?
-                        <span className="control missing-parents">
-                            Missing parents: {missingParents.join(',')}
-                        </span> :
-                        ""
+                    missingParents?.length &&
+                    <span className="control missing-parents">
+                        Missing parents: {missingParents.join(',')}
+                    </span> ||
+                    null
                 }
             </div>
         </div>

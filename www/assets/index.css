@@ -48,6 +48,7 @@ html, body {
 
 .th {
     text-align: right;
+    overflow-x: hidden;
 }
 
 .th .header-span .settings-icon {

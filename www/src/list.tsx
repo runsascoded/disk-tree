@@ -2,7 +2,7 @@ import React, {MouseEvent, useEffect, useMemo, useState} from "react";
 import {Row} from "./data";
 import {Table} from "./table";
 import {basename, Setter, stopPropagation} from "./utils";
-import {Column} from "react-table";
+import {Column, IdType} from "react-table";
 import moment from "moment";
 import {Link} from "react-router-dom";
 import {Styles} from "./styles";
@@ -14,8 +14,10 @@ import {styled, ThemeProvider, Tooltip, tooltipClasses, TooltipProps} from "@mui
 import {computeSize, SizeFmt} from "./size";
 import {Radios} from "./radios";
 import theme from "./theme";
+import createPersistedState from 'use-persisted-state';
 
 const { ceil, round, } = Math
+const { assign, entries } = Object
 
 function TreeLinkCell(path: string, ...classes: string[]): JSX.Element
 function TreeLinkCell([path, display]: [string, string], ...classes: string[]): JSX.Element
@@ -60,7 +62,7 @@ function ColumnHeader<T extends string>(
                 <div>no choices available</div>
 
         return (
-            <Tooltip arrow placement="bottom-start" title={
+            <ColumnHeaderTooltip arrow placement="bottom-start" title={
                 <div className="settings-tooltip" onClick={stopPropagation}>
                     {body}
                 </div>
@@ -69,12 +71,12 @@ function ColumnHeader<T extends string>(
                     <span className="settings-icon">⚙️</span>
                     {label}
                 </span>
-            </Tooltip>
+            </ColumnHeaderTooltip>
         )
     }
 }
 
-const LightTooltip = styled(
+const ColumnHeaderTooltip = styled(
     ({ className, ...props }: TooltipProps) => <Tooltip {...props} classes={{ popper: className }} />
 )(({ theme }) => ({
     [`& .${tooltipClasses.tooltip}`]: {
@@ -87,15 +89,51 @@ const LightTooltip = styled(
     },
 }));
 
+type DatetimeFmt = 'YYYY-MM-DD HH:mm:ss' | 'relative'
+
+moment.locale('en', {
+    relativeTime: {
+        future: 'in %s',
+        past: '%s ago',
+        s:  'seconds',
+        ss: '%ss',
+        m:  'a minute',
+        mm: '%dm',
+        h:  'an hour',
+        hh: '%dh',
+        d:  'a day',
+        dd: '%dd',
+        M:  'a month',
+        MM: '%dM',
+        y:  'a year',
+        yy: '%dY'
+    }
+});
+
+const useSizeFmt = createPersistedState('sizeFmt')
+const useDatetimeFmt = createPersistedState('datetimeFmt')
+
+const defaultWidths = {
+    kind: 50,
+    parent: 400,
+    path: 300,
+    size: 120,
+    mtime: 200,
+    num_descendants: 120,
+    checked_at: 200.
+}
+const useColumnWidths = createPersistedState('column-widths')
+
 export function List({ url, worker }: { url: string, worker: Worker }) {
     const [ data, setData ] = useState<Row[]>([])
-    const [ datetimeFmt, setDatetimeFmt ] = useState('YYYY-MM-DD HH:mm:ss')
+    const [ datetimeFmt, setDatetimeFmt ] = useDatetimeFmt<DatetimeFmt>('YYYY-MM-DD HH:mm:ss')
     const [ rowCount, setRowCount ] = useState<number | null>(null)
     const [ pageCount, setPageCount ] = useState(0)
     const [ filters, setFilters ] = useState<Filter[]>([])
     const [ searchValue, setSearchValue, ] = useQueryState('search', stringQueryState)
+    const [ columnWidths, setColumnWidths ] = useColumnWidths<{ [k: string]: number }>(defaultWidths)
 
-    const [ sizeFmt, setSizeFmt ] = useState<SizeFmt>('iec')
+    const [ sizeFmt, setSizeFmt ] = useSizeFmt<SizeFmt>('iec')
 
     const [ searchPrefix, setSearchPrefix ] = useState(false)
     const [ searchSuffix, setSearchSuffix ] = useState(false)
@@ -165,18 +203,55 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         setChoice: setSizeFmt,
     }
 
-    const columns: Column<Row>[] = useMemo(
-        () => [
-            { id: 'kind', Header: ColumnHeader('Kind'), accessor: r => r.kind == 'dir' ? '📂' : '💾', width: 50, },
-            { id: 'parent', Header: ColumnHeader('Parent'), accessor: r => TreeLinkCell(r.parent, 'cell-parent'), width: 400,},
-            { id: 'path', Header: ColumnHeader('Name'), accessor: r => TreeLinkCell([r.path, basename(r.path)], 'cell-path'), width: 300, },
-            { id: 'size', Header: ColumnHeader('Size', sizeHeaderSettings), accessor: r => SizeCell(r.size, sizeFmt), width: 120, },
-            { id: 'mtime', Header: ColumnHeader('Modified'), accessor: r => moment(r.mtime).format(datetimeFmt), },
-            { id: 'num_descendants', Header: 'Descendants', accessor: 'num_descendants', width: 120, },
-            { id: 'checked_at', Header: ColumnHeader('Checked At'), accessor: r => moment(r.checked_at).format(datetimeFmt), },
+    const datetimeHeaderSettings: HeaderSettings<DatetimeFmt> = {
+        choices: [
+            { name: 'relative', label: 'Relative', },
+            { name: 'YYYY-MM-DD HH:mm:ss', label: 'YYYY-MM-DD HH:mm:ss', },
         ],
-        [ sizeFmt, datetimeFmt, sizeHeaderSettings, ]
+        choice: datetimeFmt,
+        setChoice: setDatetimeFmt,
+    }
+
+    function renderDatetime(date: Date, fmt: DatetimeFmt): string {
+        const m = moment(date)
+        if (fmt == 'relative') {
+            return m.fromNow(true)
+        } else {
+            return m.format(fmt)
+        }
+    }
+
+    const columns: Column<Row>[] = useMemo(
+        () => {
+            const columns: Column<Row>[] = [
+                { id: 'kind', Header: ColumnHeader('Kind'), accessor: r => r.kind == 'dir' ? '📂' : '💾' },
+                { id: 'parent', Header: ColumnHeader('Parent'), accessor: r => TreeLinkCell(r.parent, 'cell-parent'), },
+                { id: 'path', Header: ColumnHeader('Name'), accessor: r => TreeLinkCell([r.path, basename(r.path)], 'cell-path'), },
+                { id: 'size', Header: ColumnHeader('Size', sizeHeaderSettings), accessor: r => SizeCell(r.size, sizeFmt), },
+                { id: 'mtime', Header: ColumnHeader('Modified', datetimeHeaderSettings), accessor: r => renderDatetime(r.mtime, datetimeFmt), },
+                { id: 'num_descendants', Header: 'Descendants', accessor: 'num_descendants', },
+                { id: 'checked_at', Header: ColumnHeader('Checked At', datetimeHeaderSettings), accessor: r => renderDatetime(r.checked_at, datetimeFmt), },
+            ]
+            return columns.map(
+                c => {
+                    if (c.id && c.id in columnWidths) {
+                        c.width = columnWidths[c.id]
+                    }
+                    return c
+                }
+            )
+        },
+        [ sizeFmt, datetimeFmt, sizeHeaderSettings, , datetimeHeaderSettings, ]
     )
+
+    function onColumnResize(newColumnWidths: { [k: string]: number }) {
+        const nxtColumnWidths = assign({}, columnWidths)
+        entries(newColumnWidths).map(([ column, width ]: [ string, number ]) => {
+            nxtColumnWidths[column] = width
+        })
+        console.log("column widths:", columnWidths, nxtColumnWidths)
+        setColumnWidths(nxtColumnWidths)
+    }
 
     const defaultColumnProps = { style: { textAlign: 'right', }}
     const columnProps: { [id: string]: object } = {
@@ -185,7 +260,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
         },
     }
     const getColumnProps = (column: Column<Row>): object =>
-        Object.assign(
+        assign(
             {},
             defaultColumnProps,
             column.id && columnProps[column.id] ? columnProps[column.id] : {}
@@ -263,6 +338,7 @@ export function List({ url, worker }: { url: string, worker: Worker }) {
                 filters={filters}
                 worker={worker}
                 initialPageSize={initialPageSize}
+                onColumnResize={onColumnResize}
             />
             </ThemeProvider>
         </Styles>
