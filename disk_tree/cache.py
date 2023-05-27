@@ -20,6 +20,7 @@ db = SQLAlchemy(app)
 
 print(f'DB: {SQLITE_PATH}')
 
+
 class File(db.Model):
     path = db.Column(db.String, primary_key=True)
     mtime = db.Column(db.DateTime, nullable=False)
@@ -39,6 +40,7 @@ class File(db.Model):
         return f'File({self.path})'
 
 
+app.app_context().push()
 db.create_all()
 
 

@@ -5,4 +5,5 @@ humanize
 kaleido
 pandas
 plotly
-utz==0.3.18
+sqlalchemy<2
+utz

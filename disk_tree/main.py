@@ -14,7 +14,7 @@ from tempfile import NamedTemporaryFile
 from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse
 
 
-LINE_RGX = '(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
+LINE_RGX = r'(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
 
 
 def dirs(file, root=None):
@@ -58,7 +58,7 @@ def expand_file_row(r, k, root=None):
 def agg_dirs(files, k='path', root=None,):
     files['type'] = 'file'
     expanded = files.flatmap(expand_file_row, k=k, root=root)
-    groups = expanded.groupby([k, 'type',])
+    groups = expanded.groupby([ k, 'type' ])
     if len(groups) == len(files):
         return files
     sizes = groups['size'].sum()
@@ -102,26 +102,26 @@ def load(path, cache, profile=None, fsck=False, excludes=None):
 
 
 @command('disk-tree')
-@option('-C', '--config-path', help='Path to SQLite DB (or directory containing disk-tree.db) to use as cache')
+@option('-C', '--cache-path', help='Path to SQLite DB (or directory containing disk-tree.db) to use as cache')
 @option('-f', '--fsck', count=True, help='Validate all cache entries that begin with the provided path(s); when passed twice, exit after performing fsck')
 @option('-h', '--human-readable', count=True, help='Pass once for SI units, twice for IEC')
 @option('-t', '--cache-ttl', default='1d', help='TTL for cache entries')
 @option('-m', '--max-entries', default='10k', help='Only store/render the -m/--max-entries largest directories/files found')
-@option('-M', '--no-max-entries', is_flag=True, help='Only store/render the -m/--max-entries largest directories/files found')
+@option('-M', '--no-max-entries', is_flag=True, help='Show all directories/files, ignore -m/--max-entries')
 @option('-n', '--sort-by-name', is_flag=True, help='Sort output entries by name (default is by size)')
 @option('-o', '--out-path', multiple=True, help='Paths to write output to. Supported extensions: {jpg, png, svg, html}')
 @option('-O', '--no-open', is_flag=True, help='Skip attempting to `open` any output files')
 @option('-t', '--tmp-html', count=True, help='Write an HTML representation to a temporary file and open in browser; pass twice to keep the temp file around after exit')
 @option('-x', '--exclude', 'excludes', multiple=True, help='Exclude paths')
 @argument('path', required=False)
-def cli(path, config_path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort_by_name, out_path, no_open, tmp_html, excludes):
+def cli(path, cache_path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort_by_name, out_path, no_open, tmp_html, excludes):
     from disk_tree import config
     from disk_tree.config import ROOT_DIR
-    if config_path:
-        config.SQLITE_PATH = abspath(config_path)
+    if cache_path:
+        config.SQLITE_PATH = abspath(cache_path)
 
-    config_path = config.SQLITE_PATH
-    print(f'overwrote SQLITE_PATH: {config_path}')
+    cache_path = config.SQLITE_PATH
+    print(f'overwrote SQLITE_PATH: {cache_path}')
     from disk_tree.cache import Cache
 
     cache = Cache(ttl=pd.to_timedelta(cache_ttl))
@@ -154,7 +154,7 @@ def cli(path, config_path, fsck, human_readable, cache_ttl, max_entries, no_max_
     else:
         raise ValueError(f'Pass -h/--human-readable 0, 1, or 2 times (got {human_readable})')
 
-    rgx = '(?P<base>[\d\.]+)(?P<suffix>[kmb])'
+    rgx = r'(?P<base>[\d\.]+)(?P<suffix>[kmb])'
     m = fullmatch(rgx, max_entries.lower())
     if m:
         n = float(m['base'])
