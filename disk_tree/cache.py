@@ -1,47 +1,18 @@
 import os
+import shlex
 from datetime import datetime as dt
 from os import walk
 from os.path import abspath, dirname, exists, isdir, isfile, islink, join
+from subprocess import check_call, CalledProcessError
+
 import pandas as pd
 from pandas import to_datetime as to_dt
-import sys
-from sys import stderr
+from utz import err
 
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
-
-from .config import SQLITE_PATH
-
-app = Flask(__name__)
-cache_url = f'sqlite:///{SQLITE_PATH}'
-app.config['SQLALCHEMY_DATABASE_URI'] = cache_url
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-db = SQLAlchemy(app)
-
-print(f'DB: {SQLITE_PATH}')
-
-
-class File(db.Model):
-    path = db.Column(db.String, primary_key=True)
-    mtime = db.Column(db.DateTime, nullable=False)
-    size = db.Column(db.Integer, nullable=False)
-    parent = db.Column(db.String, nullable=True)
-    kind = db.Column(db.String, nullable=False)
-    num_descendants = db.Column(db.Integer, nullable=False)
-    checked_at = db.Column(db.DateTime, nullable=False)
-
-    @property
-    def descendants(self):
-        # TODO: this is incorrect given spaces in paths with shared prefixes, e.g. will count "a/b c/d" as a descendant
-        #  of "a/b"
-        return File.query.filter(File.path.startswith(self.path)).all()
-
-    def __repr__(self):
-        return f'File({self.path})'
-
-
-app.app_context().push()
-db.create_all()
+from . import s3
+from .config import SQLITE_PATH, ROOT_DIR
+from .db import db, cache_url
+from .model import File, S3
 
 
 def is_descendant(path, ancestor):
@@ -55,10 +26,73 @@ def is_descendant(path, ancestor):
     return True
 
 
+def strip_prefix(key, prefix):
+    if key.startswith(prefix):
+        return key[len(prefix):]
+    else:
+        raise ValueError(f"Key {key} doesn't start with expected prefix {prefix}")
+
+
 class Cache:
     def __init__(self, ttl=None):
-        print(f'cache: {SQLITE_PATH}')
+        print(f'cache: {cache_url}')
         self.ttl = ttl
+
+    def compute_s3(self, url, bucket, root_key):
+        now = to_dt(dt.now())
+        e = S3.query.get((bucket, root_key))
+        if e:
+            elem_age = now - e.checked_at
+            if elem_age <= self.ttl:
+                return e
+
+        S3_LINE_CACHE = join(ROOT_DIR, '.s3/ls')
+        s3_cache_path = join(S3_LINE_CACHE, bucket, root_key) + '.txt'
+        cached = False
+        if exists(s3_cache_path):
+            stat = os.stat(s3_cache_path)
+            mtime = to_dt(stat.st_mtime, unit='s')
+            cache_age = now - mtime
+            if cache_age <= self.ttl:
+                err(f'Found {s3_cache_path} ({cache_age} old)')
+                cached = True
+
+        if not cached:
+            parent = dirname(s3_cache_path)
+            os.makedirs(parent, exist_ok=True)
+            try:
+                with open(s3_cache_path, 'w') as f:
+                    cmd = ['aws', 's3', 'ls', '--recursive', url]
+                    err(f'Running: {shlex.join(cmd)} > {s3_cache_path}')
+                    check_call(cmd, stdout=f)
+            except CalledProcessError as e:
+                os.remove(s3_cache_path)
+                raise
+
+        with open(s3_cache_path, 'r') as f:
+            lines = [ line.rstrip('\n') for line in f.readlines() ]
+
+        files = pd.DataFrame([ s3.parse_line(line) for line in lines ])
+        files = files[~files.key.str.endswith('/')]
+        files['relpath'] = files['key'].apply(strip_prefix, prefix=f'{root_key}/')
+        files['root_key'] = root_key
+        aggd = s3.agg_dirs(files).sort_values('key')
+        # aggd['url'] = f's3://{bucket}/' + aggd['key']
+        aggd['bucket'] = bucket
+        # aggd['root_key'] = root_key
+        #aggd['key'] = aggd['root_key'] + '/' + aggd['relpath']
+        aggd['parent'] = aggd['key'].apply(dirname)
+        aggd['checked_at'] = now
+        keys = [ 'bucket', 'key', 'mtime', 'size', 'parent', 'kind', 'num_descendants', 'checked_at', ]
+        for idx, r in aggd.iterrows():
+            e = S3(**{
+                k: r[k]
+                for k in keys
+            })
+            self.insert(e)
+        #aggd = aggd.drop(columns=['root_key'])
+        #return aggd
+        return S3.query.get((bucket, root_key))
 
     def compute(self, path, now=None, fsck=False, excludes=None):
         path = abspath(path)
@@ -66,7 +100,7 @@ class Cache:
             print(f'skipping excluded: {path}')
             return None
         if islink(path):
-            stderr.write(f'Skipping symlink: {path}\n')
+            err(f'Skipping symlink: {path}')
             return None
         elif isfile(path):
             if not now:
@@ -90,7 +124,7 @@ class Cache:
             try:
                 _, dirs, files = next(walk(path))
             except StopIteration:
-                stderr.write(f'Error traversing {path}\n')
+                err(f'Error traversing {path}')
                 return None
             files = list(filter(None, [ self.compute(join(path, file), excludes=excludes) for file in files ]))
             dirs = list(filter(None, [ self.compute(join(path, dir), excludes=excludes) for dir in dirs ]))
@@ -130,7 +164,7 @@ class Cache:
                         self.expire(descendant)
             return d
         else:
-            stderr.write(f'Unrecognized path type: {path}\n')
+            err(f'Unrecognized path type: {path}')
             return None
 
     def expire(self, file, exist_ok=False, top_level=True, commit=True):
@@ -153,7 +187,7 @@ class Cache:
     def insert(self, file, commit=True):
         existing = File.query.get(file.path)
         if existing:
-            for k in ['mtime', 'size', 'parent', 'kind', 'num_descendants', 'checked_at',]:
+            for k in ['mtime', 'size', 'parent', 'kind', 'num_descendants', 'checked_at']:
                 setattr(existing, k, getattr(file, k))
         else:
             db.session.add(file)
@@ -170,11 +204,10 @@ class Cache:
 
     def missing_parents(self):
         files = pd.read_sql_table('file', con=cache_url)
-        #files['path']
         merged = (
             files
-                [['path', 'parent','num_descendants']]
-                .merge(
+            [['path', 'parent', 'num_descendants']]
+            .merge(
                 files.path.rename('parent2'),
                 left_on='parent',
                 right_on='parent2',

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from click import argument, command, option
 from functools import partial
 from humanize import naturalsize
@@ -11,8 +13,9 @@ import sys
 from sys import stderr
 from tempfile import NamedTemporaryFile
 
-from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse
+from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse, err
 
+from disk_tree.db import init
 
 LINE_RGX = r'(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
 
@@ -39,6 +42,7 @@ def flatmap(self, func, **kwargs):
         dfs.append(df)
     return concat(dfs)
 
+
 DF.flatmap = flatmap
 
 
@@ -46,6 +50,7 @@ def expand_file_row(r, k, root=None):
     path = r[k]
     file_df = r.to_frame().transpose()
     ancestors = dirs(path, root=root)[:-1]
+
     def to_dict(dir):
         rv = dict(mtime=r['mtime'], size=r['size'], type='dir', parent=dirname(dir))
         rv[k] = dir
@@ -64,64 +69,65 @@ def agg_dirs(files, k='path', root=None,):
     sizes = groups['size'].sum()
     mtimes = groups['mtime'].max()
     parents = groups.apply(lambda df: singleton(df['parent'])).rename('parent')
-    num_descendents = groups.size().rename('num_descendents')
-    aggd = sxs(mtimes, sizes, num_descendents, parents).reset_index()
+    num_descendants = groups.size().rename('num_descendants')
+    aggd = sxs(mtimes, sizes, num_descendants, parents).reset_index()
     return aggd
 
 
-def load(path, cache, profile=None, fsck=False, excludes=None):
-    if profile:
-        env['AWS_PROFILE'] = profile
-
-    if excludes:
-        excludes = [ abspath(exclude) for exclude in excludes ]
-        print(f'excludes: {excludes}')
-
-    url = urlparse(path)
-    if not url.scheme:
+def load(url: str, cache: 'Cache', profile: str = None, fsck: bool = False, excludes: Optional[list[str]] = None):
+    parsed = urlparse(url)
+    if not parsed.scheme or parsed.scheme == 'file':
         # Local filesystem
         # now = to_dt(dt.now())
-        root = abspath(path)
+        root = abspath(url)
+        if excludes:
+            excludes = [ abspath(exclude) for exclude in excludes ]
+            print(f'excludes: {excludes}')
         root = cache.compute(root, fsck=True, excludes=excludes)
         entries = root.descendants
+        keys = [ 'path', 'kind', 'size', 'mtime', 'num_descendants', 'parent', 'checked_at', ]
         df = DF([
-            dict(
-                path=e.path,
-                kind=e.kind,
-                size=e.size,
-                mtime=e.mtime,
-                num_descendants=e.num_descendants,
-                parent=e.parent,
-                checked_at=e.checked_at,
-            )
+            { k: getattr(e, k) for k in keys }
             for e in entries
         ])
         return df.set_index('path')
+    elif parsed.scheme == 's3':
+        if profile:
+            env['AWS_PROFILE'] = profile
+        bucket = parsed.netloc
+        root_key = parsed.path
+        if root_key[0] == '/':
+            root_key = root_key[1:]
+        root = cache.compute_s3(url=url, bucket=bucket, root_key=root_key)
+        entries = root.descendants
+        keys = [ 'bucket', 'key', 'kind', 'size', 'mtime', 'num_descendants', 'parent', 'checked_at', ]
+        df = DF([
+            { k: getattr(e, k) for k in keys }
+            for e in entries
+        ])
+        return df.set_index(['bucket', 'key'])
     else:
-        raise ValueError(f'Unsupported URL scheme: {url.scheme}')
+        raise ValueError(f'Unsupported URL scheme: {parsed.scheme}')
 
 
 @command('disk-tree')
 @option('-C', '--cache-path', help='Path to SQLite DB (or directory containing disk-tree.db) to use as cache')
 @option('-f', '--fsck', count=True, help='Validate all cache entries that begin with the provided path(s); when passed twice, exit after performing fsck')
 @option('-h', '--human-readable', count=True, help='Pass once for SI units, twice for IEC')
-@option('-t', '--cache-ttl', default='1d', help='TTL for cache entries')
+@option('-H', '--tmp-html', count=True, help='Write an HTML representation to a temporary file and open in browser; pass twice to keep the temp file around after exit')
 @option('-m', '--max-entries', default='10k', help='Only store/render the -m/--max-entries largest directories/files found')
 @option('-M', '--no-max-entries', is_flag=True, help='Show all directories/files, ignore -m/--max-entries')
 @option('-n', '--sort-by-name', is_flag=True, help='Sort output entries by name (default is by size)')
 @option('-o', '--out-path', multiple=True, help='Paths to write output to. Supported extensions: {jpg, png, svg, html}')
 @option('-O', '--no-open', is_flag=True, help='Skip attempting to `open` any output files')
-@option('-t', '--tmp-html', count=True, help='Write an HTML representation to a temporary file and open in browser; pass twice to keep the temp file around after exit')
+@option('-p', '--profile', help='AWS_PROFILE to use')
+@option('-t', '--cache-ttl', default='1d', help='TTL for cache entries')
 @option('-x', '--exclude', 'excludes', multiple=True, help='Exclude paths')
-@argument('path', required=False)
-def cli(path, cache_path, fsck, human_readable, cache_ttl, max_entries, no_max_entries, sort_by_name, out_path, no_open, tmp_html, excludes):
-    from disk_tree import config
+@argument('url', required=False)
+def cli(url, cache_path, fsck, human_readable, tmp_html, max_entries, no_max_entries, sort_by_name, out_path, no_open, profile, cache_ttl, excludes):
     from disk_tree.config import ROOT_DIR
-    if cache_path:
-        config.SQLITE_PATH = abspath(cache_path)
+    init(cache_path)
 
-    cache_path = config.SQLITE_PATH
-    print(f'overwrote SQLITE_PATH: {cache_path}')
     from disk_tree.cache import Cache
 
     cache = Cache(ttl=pd.to_timedelta(cache_ttl))
@@ -135,13 +141,14 @@ def cli(path, cache_path, fsck, human_readable, cache_ttl, max_entries, no_max_e
     if fsck == 2:
         sys.exit(0)
 
-    if path is None:
-        path = getcwd()
-    else:
-        path = abspath(path)
+    if url is None:
+        url = getcwd()
+    if url.endswith('/'):
+        url = url[:-1]
 
-    df = load(path, cache=cache, fsck=fsck, excludes=excludes).reset_index()
-    df['name'] = df.path.apply(basename)
+    df = load(url, cache=cache, fsck=fsck, profile=profile, excludes=excludes).reset_index()
+    k = 'path' if 'path' in df else 'key'
+    df['name'] = df[k].apply(basename)
 
     if human_readable == 0:
         size_col = 'size'
@@ -167,8 +174,12 @@ def cli(path, cache_path, fsck, human_readable, cache_ttl, max_entries, no_max_e
     if no_max_entries or max_entries == 0:
         max_entries = None
 
+    files, dirs = df[df.kind == 'file'], df[df.kind == 'dir']
+    total_size = files['size'].sum()
+    err(f'{len(files)} files in {len(dirs)} dirs, total size {naturalsize(total_size)}')
+
     if max_entries and len(df) > max_entries:
-        print(f'Reducing to top entries ({len(df)} → {max_entries})')
+        err(f'Reducing to top entries ({len(df)} → {max_entries})')
         df = df.sort_values('size')
         df = df.iloc[-max_entries:]
         if sort_by_name:
@@ -179,17 +190,12 @@ def cli(path, cache_path, fsck, human_readable, cache_ttl, max_entries, no_max_e
         else:
             df = df.sort_values('size')
 
-    files, dirs = df[df.kind == 'file'], df[df.kind == 'dir']
-    total_size = files['size'].sum()
-    print(f'{len(files)} files in {len(dirs)} dirs, total size {naturalsize(total_size)}')
-
     out_paths = out_path
     if not out_paths and tmp_html:
-        name = basename(path)
+        name = basename(url)
         tmp_html_path = NamedTemporaryFile(dir=ROOT_DIR, prefix=f'.disk-tree_{name}', suffix='.html').name
         out_paths = [ tmp_html_path ]
     if out_paths:
-        k = 'key' if 'key' in df else 'path'
         plot = px.treemap(
             df,
             ids=k,
@@ -221,8 +227,8 @@ def cli(path, cache_path, fsck, human_readable, cache_ttl, max_entries, no_max_e
         print(f'Removing temp HTML file {tmp_html_path}')
         remove(tmp_html_path)
 
-    children = df[df.parent == path]
-    lines = children.apply(lambda r: '% 8s\t%s' % (r[size_col], r.path), axis=1, result_type='reduce').tolist()
+    children = df[df.parent == url]
+    lines = children.apply(lambda r: '% 8s\t%s' % (r[size_col], r[k]), axis=1, result_type='reduce').tolist()
     print('\n'.join(lines))
 
 
