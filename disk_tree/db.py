@@ -21,5 +21,4 @@ def init(sqlite_path=None):
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db = SQLAlchemy(app)
     app.app_context().push()
-    db.create_all()
     return db

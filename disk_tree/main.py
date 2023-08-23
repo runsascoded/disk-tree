@@ -126,7 +126,9 @@ def load(url: str, cache: 'Cache', profile: str = None, fsck: bool = False, excl
 @argument('url', required=False)
 def cli(url, cache_path, fsck, human_readable, tmp_html, max_entries, no_max_entries, sort_by_name, out_path, no_open, profile, cache_ttl, excludes):
     from disk_tree.config import ROOT_DIR
-    init(cache_path)
+    db = init(cache_path)
+    from .model import File, S3
+    db.create_all()
 
     from disk_tree.cache import Cache
 
