@@ -15,6 +15,7 @@ from tempfile import NamedTemporaryFile
 
 from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse, err
 
+from disk_tree.config import SQLITE_PATH
 from disk_tree.db import init
 
 LINE_RGX = r'(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
@@ -111,17 +112,17 @@ def load(url: str, cache: 'Cache', profile: str = None, fsck: bool = False, excl
 
 
 @command('disk-tree')
-@option('-C', '--cache-path', help='Path to SQLite DB (or directory containing disk-tree.db) to use as cache')
+@option('-C', '--cache-path', help=f'Path to SQLite DB (or directory containing disk-tree.db) to use as cache; default: {SQLITE_PATH}')
 @option('-f', '--fsck', count=True, help='Validate all cache entries that begin with the provided path(s); when passed twice, exit after performing fsck')
 @option('-h', '--human-readable', count=True, help='Pass once for SI units, twice for IEC')
 @option('-H', '--tmp-html', count=True, help='Write an HTML representation to a temporary file and open in browser; pass twice to keep the temp file around after exit')
-@option('-m', '--max-entries', default='10k', help='Only store/render the -m/--max-entries largest directories/files found')
+@option('-m', '--max-entries', default='10k', help='Only store/render the -m/--max-entries largest directories/files found; default: "10k"')
 @option('-M', '--no-max-entries', is_flag=True, help='Show all directories/files, ignore -m/--max-entries')
 @option('-n', '--sort-by-name', is_flag=True, help='Sort output entries by name (default is by size)')
 @option('-o', '--out-path', multiple=True, help='Paths to write output to. Supported extensions: {jpg, png, svg, html}')
 @option('-O', '--no-open', is_flag=True, help='Skip attempting to `open` any output files')
 @option('-p', '--profile', help='AWS_PROFILE to use')
-@option('-t', '--cache-ttl', default='1d', help='TTL for cache entries')
+@option('-t', '--cache-ttl', default='1d', help='TTL for cache entries; default: "1d"')
 @option('-x', '--exclude', 'excludes', multiple=True, help='Exclude paths')
 @argument('url', required=False)
 def cli(url, cache_path, fsck, human_readable, tmp_html, max_entries, no_max_entries, sort_by_name, out_path, no_open, profile, cache_ttl, excludes):
