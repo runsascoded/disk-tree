@@ -1,7 +1,16 @@
 # disk-tree
 Disk-space tree-maps and statistics
 
+<!-- toc -->
+- [Install](#install)
+- [Examples](#examples)
+    - [S3 bucket](#s3)
+    - [Local directory](#local)
+<!-- /toc -->
+
+## Install <a id="install"></a>
 ```bash
+pip install disk-tree
 disk-tree --help
 # Usage: disk-tree [OPTIONS] [URL]
 #
@@ -33,9 +42,9 @@ disk-tree --help
 #   --help                  Show this message and exit.
 ```
 
-## Examples
+## Examples <a id="examples"></a>
 
-### S3 bucket
+### S3 bucket <a id="s3"></a>
 Visualizing [`s3://ctbk`](https://ctbk.s3.amazonaws.com/index.html):
 ```bash
 disk-tree -os3/ctbk.html s3://ctbk
@@ -55,8 +64,24 @@ disk-tree -os3/ctbk.html s3://ctbk
 
 ![](screenshots/disk-tree%20ctbk%20screenshot.png)
 
-### Local directory
-Visualize a clone of this repo:
+### Local directory <a id="local"></a>
+Visualize a clone of this repo, color by size:
 ```bash
-disk-tree -odisk-tree.html
+disk-tree -odisk-tree.htmldisk-tree -odisk-tree.html -csize disk-tree
+# 97 files in 47 dirs, total size 1.5M
+# Writing: disk-tree.html
+#       0B	/Users/ryan/c/disk-tree/disk-tree/__init__.py
+#      77B	/Users/ryan/c/disk-tree/disk-tree/requirements.txt
+#     867B	/Users/ryan/c/disk-tree/disk-tree/setup.py
+#     2.3K	/Users/ryan/c/disk-tree/disk-tree/README.md
+#    23.8K	/Users/ryan/c/disk-tree/disk-tree/disk_tree
+#   291.8K	/Users/ryan/c/disk-tree/disk-tree/screenshots
+#   580.4K	/Users/ryan/c/disk-tree/disk-tree/.git
+#   628.6K	/Users/ryan/c/disk-tree/disk-tree/www
 ```
+
+![](screenshots/disk-tree%20repo%20screenshot.png)
+(default color scale is "RdBu"; see Plotly options [here][plotly color scales], `-csize=<scale>` to configure)
+
+
+[plotly color scales]: https://plotly.com/python/builtin-colorscales/#builtin-sequential-color-scales
