@@ -99,8 +99,15 @@ class Cache:
         #return aggd
         return S3.query.get((bucket, root_key))
 
-    def compute(self, path, now=None, fsck=False, excludes=None):
+    def compute_file(self, path, now=None, fsck=False, excludes=None):
         path = abspath(path)
+        record = self.get(path)
+        if record:
+            return record
+        else:
+            return self.compute(path, now=now, fsck=fsck, excludes=excludes)
+
+    def compute(self, path, now=None, fsck=False, excludes=None):
         if excludes and any(is_descendant(path, exclude) for exclude in excludes):
             err(f'skipping excluded: {path}')
             return None
@@ -201,7 +208,7 @@ class Cache:
             db.session.commit()
 
     def get(self, path):
-        existing = File.query.filter_by(path=path).first()
+        existing = File.query.get(path)
         if existing:
             now = dt.now()
             if now - existing.checked_at <= self.ttl:

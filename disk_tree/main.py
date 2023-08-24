@@ -1,21 +1,19 @@
-from urllib.parse import ParseResult
+from os import getcwd, makedirs, remove
+from os.path import abspath, exists
 
-from typing import Optional
-
+import pandas as pd
+import plotly.express as px
+import sys
 from click import argument, command, option
 from functools import partial
 from humanize import naturalsize
-from os import getcwd, makedirs, remove
-from os.path import abspath, exists
-import pandas as pd
-import plotly.express as px
 from re import fullmatch
 from subprocess import check_call
-import sys
 from sys import stderr
 from tempfile import NamedTemporaryFile
-
-from utz import basename, concat, DF, dirname, dt, env, process, singleton, sxs, urlparse, err
+from typing import Optional
+from urllib.parse import ParseResult
+from utz import basename, concat, DF, dirname, env, process, singleton, sxs, urlparse, err
 
 from disk_tree.config import SQLITE_PATH
 from disk_tree.db import init
@@ -83,7 +81,7 @@ def load_file(url: str, cache: 'Cache', fsck: bool = False, excludes: Optional[l
     if excludes:
         excludes = [ abspath(exclude) for exclude in excludes ]
         print(f'excludes: {excludes}')
-    root = cache.compute(root, fsck=fsck, excludes=excludes)
+    root = cache.compute_file(root, fsck=fsck, excludes=excludes)
     entries = root.descendants(excludes=excludes)
     keys = [ 'path', 'kind', 'size', 'mtime', 'num_descendants', 'parent', 'checked_at', ]
     df = DF([
@@ -133,7 +131,6 @@ def load_s3(url: str, parsed: ParseResult, cache: 'Cache', profile: str = None, 
 def cli(url, color, cache_path, fsck, max_entries, no_max_entries, sort_by_name, out_path, no_open, profile, size_mode, cache_ttl, tmp_html, excludes):
     from disk_tree.config import ROOT_DIR
     db = init(cache_path)
-    from .model import File, S3
     db.create_all()
 
     from disk_tree.cache import Cache
