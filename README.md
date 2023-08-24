@@ -3,11 +3,17 @@ Disk-space tree-maps and statistics
 
 https://github.com/runsascoded/disk-tree/assets/465045/3d03e817-b72d-4ac3-993e-191c41927d0c
 
+## Index
 <!-- toc -->
 - [Install](#install)
 - [Examples](#examples)
     - [S3 bucket](#s3)
     - [Local directory](#local)
+- [Notes](#notes)
+    - [Caching](#caching)
+    - [Performance](#performance)
+    - [Max. entries](#max-entries)
+    - [TUI-only mode](#tui-only)
 <!-- /toc -->
 
 ## Install <a id="install"></a>
@@ -85,5 +91,18 @@ disk-tree -odisk-tree.htmldisk-tree -odisk-tree.html -csize disk-tree
 ![](screenshots/disk-tree%20repo%20screenshot.png)
 (default color scale is "RdBu"; see Plotly options [here][plotly color scales], `-csize=<scale>` to configure)
 
+## Notes <a id="notes"></a>
+
+### Caching <a id="caching"></a>
+`disk-tree` caches file stats in a SQLite database, defaulting to `~/.config/disk-tree/disk-tree.db` and a `1d` TTL (see `-C`/`--cache-path` and `-t`/`--ttl`, resp.).
+
+### Performance <a id="performance"></a>
+`disk-tree` is reasonably performant on S3 buckets (it caches the result of `aws s3 ls --recursive s3://…`, and hydrates its cache from there), but ["local mode"](#local) is slow, as it stats every file and directory in a given tree, in a single-threaded tree-traversal.
+
+### Max. entries <a id="max-entries"></a>
+Plotly treemaps fall over with too many elements; `-m`/`--max-entries` (default `10k`) determines the maximum number of nodes (files and directories) to attempt to render.
+
+### TUI-only mode <a id="tui-only"></a>
+If you omit the `-o<path>.html` in [the examples above](#examples), `disk-tree` will simply print the sizes of all children of the specified URL, and exit.
 
 [plotly color scales]: https://plotly.com/python/builtin-colorscales/#builtin-sequential-color-scales
