@@ -1,7 +1,7 @@
 # disk-tree
 Disk-space tree-maps and statistics
 
-https://github.com/runsascoded/disk-tree/assets/465045/3d03e817-b72d-4ac3-993e-191c41927d0c
+https://github.com/runsascoded/disk-tree/assets/465045/6d5051a0-fc67-42b0-ae12-f4db6b19a78d
 
 ## Index
 <!-- toc -->
