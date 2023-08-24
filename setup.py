@@ -12,6 +12,8 @@ setup(
     name='disk-tree',
     version=version,
     description='Disk/Cloud space usage analyzer',
+    long_description=open('README.md', 'r').read(),
+    long_description_content_type='text/markdown',
     author='Ryan Williams',
     author_email='ryan@runsascoded.com',
     license='Apache License 2.0',
