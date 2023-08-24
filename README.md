@@ -29,7 +29,7 @@ disk-tree --help
 #                           colorscales/#builtin-sequential-color-scales)
 #   -C, --cache-path TEXT   Path to SQLite DB (or directory containing disk-
 #                           tree.db) to use as cache; default:
-#                           /Users/ryan/.config/disk-tree/disk-tree.db
+#                           $HOME/.config/disk-tree/disk-tree.db
 #   -f, --fsck              `file` scheme only: validate all cache entries that
 #                           begin with the provided path(s); when passed twice,
 #                           exit after performing fsck  [x>=0]
@@ -75,17 +75,17 @@ disk-tree -os3/ctbk.html s3://ctbk
 ### Local directory <a id="local"></a>
 Visualize a clone of this repo, color by size:
 ```bash
-disk-tree -odisk-tree.htmldisk-tree -odisk-tree.html -csize disk-tree
+disk-tree -odisk-tree.html -csize
 # 97 files in 47 dirs, total size 1.5M
 # Writing: disk-tree.html
-#       0B	/Users/ryan/c/disk-tree/disk-tree/__init__.py
-#      77B	/Users/ryan/c/disk-tree/disk-tree/requirements.txt
-#     867B	/Users/ryan/c/disk-tree/disk-tree/setup.py
-#     2.3K	/Users/ryan/c/disk-tree/disk-tree/README.md
-#    23.8K	/Users/ryan/c/disk-tree/disk-tree/disk_tree
-#   291.8K	/Users/ryan/c/disk-tree/disk-tree/screenshots
-#   580.4K	/Users/ryan/c/disk-tree/disk-tree/.git
-#   628.6K	/Users/ryan/c/disk-tree/disk-tree/www
+#       0B	disk-tree/__init__.py
+#      77B	disk-tree/requirements.txt
+#     867B	disk-tree/setup.py
+#     2.3K	disk-tree/README.md
+#    23.8K	disk-tree/disk_tree
+#   291.8K	disk-tree/screenshots
+#   580.4K	disk-tree/.git
+#   628.6K	disk-tree/www
 ```
 
 ![](screenshots/disk-tree%20repo%20screenshot.png)
