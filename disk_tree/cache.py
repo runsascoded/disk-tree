@@ -27,6 +27,8 @@ def is_descendant(path, ancestor):
 
 
 def strip_prefix(key, prefix):
+    if not prefix:
+        return key
     if key.startswith(prefix):
         return key[len(prefix):]
     else:
@@ -47,7 +49,10 @@ class Cache:
                 return e
 
         S3_LINE_CACHE = join(ROOT_DIR, '.s3/ls')
-        s3_cache_path = join(S3_LINE_CACHE, bucket, root_key) + '.txt'
+        s3_cache_path = join(*(
+                [S3_LINE_CACHE, bucket] +
+                ([root_key] if root_key else [])
+        )) + '.txt'
         cached = False
         if exists(s3_cache_path):
             stat = os.stat(s3_cache_path)
@@ -74,7 +79,7 @@ class Cache:
 
         files = pd.DataFrame([ s3.parse_line(line) for line in lines ])
         files = files[~files.key.str.endswith('/')]
-        files['relpath'] = files['key'].apply(strip_prefix, prefix=f'{root_key}/')
+        files['relpath'] = files['key'].apply(strip_prefix, prefix=f'{root_key}/' if root_key else None)
         files['root_key'] = root_key
         aggd = s3.agg_dirs(files).sort_values('key')
         # aggd['url'] = f's3://{bucket}/' + aggd['key']

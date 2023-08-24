@@ -97,7 +97,7 @@ def load(url: str, cache: 'Cache', profile: str = None, fsck: bool = False, excl
             env['AWS_PROFILE'] = profile
         bucket = parsed.netloc
         root_key = parsed.path
-        if root_key[0] == '/':
+        if root_key and root_key[0] == '/':
             root_key = root_key[1:]
         root = cache.compute_s3(url=url, bucket=bucket, root_key=root_key)
         entries = root.descendants
