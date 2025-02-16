@@ -6,6 +6,8 @@ import plotly.express as px
 import sys
 from click import argument, command, option
 from functools import partial
+
+from disk_tree.cache import Cache
 from humanize import naturalsize
 from re import fullmatch
 from subprocess import check_call
@@ -13,6 +15,8 @@ from sys import stderr
 from tempfile import NamedTemporaryFile
 from typing import Optional
 from urllib.parse import ParseResult
+
+from pandas import Series, DataFrame
 from utz import basename, concat, DF, dirname, env, process, singleton, sxs, urlparse, err
 
 from disk_tree.config import SQLITE_PATH
@@ -21,7 +25,7 @@ from disk_tree.db import init
 LINE_RGX = r'(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
 
 
-def dirs(file, root=None):
+def dirs(file: str, root: str | None = None):
     rv = [file]
     cur = file
     while True:
@@ -47,7 +51,11 @@ def flatmap(self, func, **kwargs):
 DF.flatmap = flatmap
 
 
-def expand_file_row(r, k, root=None):
+def expand_file_row(
+    r: Series,
+    k: str,
+    root: str | None = None,
+):
     path = r[k]
     file_df = r.to_frame().transpose()
     ancestors = dirs(path, root=root)[:-1]
@@ -61,7 +69,11 @@ def expand_file_row(r, k, root=None):
     return rows
 
 
-def agg_dirs(files, k='path', root=None,):
+def agg_dirs(
+    files: DataFrame,
+    k: str = 'path',
+    root: str | None = None,
+):
     files['type'] = 'file'
     expanded = files.flatmap(expand_file_row, k=k, root=root)
     groups = expanded.groupby([ k, 'type' ])
@@ -75,7 +87,12 @@ def agg_dirs(files, k='path', root=None,):
     return aggd
 
 
-def load_file(url: str, cache: 'Cache', fsck: bool = False, excludes: Optional[list[str]] = None):
+def load_file(
+    url: str,
+    cache: Cache,
+    fsck: bool = False,
+    excludes: list[str] | None = None,
+):
     # Local filesystem
     root = url
     if excludes:
@@ -91,11 +108,17 @@ def load_file(url: str, cache: 'Cache', fsck: bool = False, excludes: Optional[l
     return df.set_index('path')
 
 
-def make_s3_url(r):
+def make_s3_url(r: Series):
     return f's3://{r.bucket}/{r.key}' if r.key else f's3://{r.bucket}'
 
 
-def load_s3(url: str, parsed: ParseResult, cache: 'Cache', profile: str = None, excludes: Optional[list[str]] = None):
+def load_s3(
+    url: str,
+    parsed: ParseResult,
+    cache: Cache,
+    profile: str = None,
+    excludes: Optional[list[str]] = None,
+):
     if profile:
         env['AWS_PROFILE'] = profile
     bucket = parsed.netloc

@@ -1,0 +1,35 @@
+[project]
+name = "disk-tree"
+version = "0.1.0"
+description = "Disk/Cloud space usage analyzer"
+readme = "README.md"
+authors = [{name = "Ryan Williams", email = "ryan@runsascoded.com"}]
+license = {text = "Apache License 2.0"}
+
+dependencies = [
+    "click",
+    "flask",
+    "flask-sqlalchemy",
+    "humanize",
+    "kaleido",
+    "pandas",
+    "plotly",
+    "sqlalchemy<2",
+    "utz",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest"
+]
+
+[project.scripts]
+disk-tree = "disk_tree.main:cli"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+packages = ["disk_tree"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
