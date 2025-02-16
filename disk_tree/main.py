@@ -131,9 +131,8 @@ def load_s3(url: str, parsed: ParseResult, cache: 'Cache', profile: str = None, 
 def cli(url, color, cache_path, fsck, max_entries, no_max_entries, sort_by_name, out_path, no_open, profile, size_mode, cache_ttl, tmp_html, excludes):
     from disk_tree.config import ROOT_DIR
     db = init(cache_path)
-    db.create_all()
-
     from disk_tree.cache import Cache
+    db.create_all()
 
     cache = Cache(ttl=pd.to_timedelta(cache_ttl))
 

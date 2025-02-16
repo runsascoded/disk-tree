@@ -6,6 +6,7 @@ import pandas as pd
 import shlex
 from datetime import datetime as dt
 from pandas import to_datetime as to_dt
+from sqlite3 import IntegrityError
 from subprocess import check_call, CalledProcessError
 from utz import err
 
@@ -94,7 +95,8 @@ class Cache:
                 k: r[k]
                 for k in keys
             })
-            self.insert(e)
+            self.insert_s3(e)
+        db.session.commit()
         #aggd = aggd.drop(columns=['root_key'])
         #return aggd
         return S3.query.get((bucket, root_key))
@@ -199,6 +201,20 @@ class Cache:
 
     def insert(self, file, commit=True):
         existing = File.query.get(file.path)
+        if existing:
+            for k in ['mtime', 'size', 'parent', 'kind', 'num_descendants', 'checked_at']:
+                setattr(existing, k, getattr(file, k))
+        else:
+            db.session.add(file)
+        if commit:
+            try:
+                db.session.commit()
+            except IntegrityError as e:
+                #db.session.rollback()
+                raise RuntimeError(f'Error inserting {file.path}: {e}')
+
+    def insert_s3(self, file, commit=False):
+        existing = S3.query.get((file.bucket, file.key))
         if existing:
             for k in ['mtime', 'size', 'parent', 'kind', 'num_descendants', 'checked_at']:
                 setattr(existing, k, getattr(file, k))
