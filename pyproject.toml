@@ -7,6 +7,7 @@ authors = [{name = "Ryan Williams", email = "ryan@runsascoded.com"}]
 license = {text = "Apache License 2.0"}
 
 dependencies = [
+    "aiopath",
     "click",
     "flask",
     "flask-sqlalchemy",
