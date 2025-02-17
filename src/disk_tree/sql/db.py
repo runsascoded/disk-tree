@@ -3,7 +3,7 @@ from typing import Optional
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 
-from .config import SQLITE_PATH
+from ..config import SQLITE_PATH
 
 app = None
 db: Optional[SQLAlchemy] = None

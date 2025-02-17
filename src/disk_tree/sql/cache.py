@@ -10,8 +10,8 @@ from sqlite3 import IntegrityError
 from subprocess import check_call, CalledProcessError
 from utz import err
 
-from . import s3
-from .config import ROOT_DIR
+from .. import s3
+from ..config import ROOT_DIR
 from .db import db, cache_url
 from .model import File, S3
 

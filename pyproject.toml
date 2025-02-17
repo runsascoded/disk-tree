@@ -25,7 +25,7 @@ dev = [
 ]
 
 [project.scripts]
-disk-tree = "disk_tree.main:cli"
+disk-tree = "disk_tree.cli.main:cli"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

@@ -1,7 +1,10 @@
 import re
 from os.path import join
 
+from pandas import Series, DataFrame
 from utz import concat, DF, dirname, o, sxs, to_dt
+
+from disk_tree.df import flatmap
 
 LINE_RGX = '(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
 
@@ -31,18 +34,7 @@ def dirs(file):
     return list(reversed(rv))
 
 
-def flatmap(self, func):
-    dfs = []
-    for idx, row in self.iterrows():
-        df = func(row)
-        dfs.append(df)
-    return concat(dfs)
-
-
-DF.flatmap = flatmap
-
-
-def expand_file_row(r):
+def expand_file_row(r: Series) -> DataFrame:
     file_df = r.to_frame().transpose()
     if r.key.endswith('/'):
         return DF()
@@ -63,7 +55,7 @@ def expand_file_row(r):
 
 def agg_dirs(files, k='key'):
     files['kind'] = 'file'
-    expanded = files.flatmap(expand_file_row)
+    expanded = flatmap(files, expand_file_row)
     groups = expanded.groupby([k, 'kind'])
     if len(groups) == len(files):
         return files
