@@ -1,4 +1,3 @@
-from asyncio import gather
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal
@@ -30,12 +29,11 @@ async def expand(path: str | AsyncPath, children: bool = False) -> Entry | None:
     stat = await path.stat()
     mtime = fromtimestamp(stat.st_mtime, tz=utc)
     if await path.is_dir():
-        paths = [ child async for child in path.iterdir() ]
-        entries = await gather(*[ expand(child) for child in paths ], return_exceptions=True)
         num_descendants = 1
         size = 0
         _children = [] if children else None
-        for entry in entries:
+        async for child in path.iterdir():
+            entry = await expand(child)
             if isinstance(entry, BaseException):
                 err(f"{entry}")
                 continue
