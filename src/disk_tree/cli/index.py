@@ -4,12 +4,11 @@ from os import getcwd
 
 from click import argument, option
 from humanize import naturalsize
-from utz import err
+from utz import err, Time
+from utz.mem import Tracker
 
 from disk_tree.cli.base import cli
 from disk_tree.index import expand
-from disk_tree.memray import MemTracker
-from disk_tree.time import Time
 
 
 @cli.command('index')
@@ -22,10 +21,10 @@ def index(
     """Index a directory, in memory."""
     url = url or getcwd()
     if measure_memory:
-        memray = MemTracker()
-        ctx = memray
+        mem = Tracker()
+        ctx = mem
     else:
-        memray = None
+        mem = None
         ctx = nullcontext()
 
     time = Time()
@@ -36,8 +35,8 @@ def index(
     num_desc = res.num_descendants
     speed = num_desc / elapsed
 
-    if memray:
-        peak_mem = memray.peak_mem
+    if mem:
+        peak_mem = mem.peak_mem
         err(f"Peak memory use: {peak_mem:,} ({naturalsize(peak_mem, binary=True, format='%.3g')})")
 
     print(f"{num_desc:,} descendents ({elapsed:.3g}s, {round(speed):,d}/s), {naturalsize(res.size, binary=True, format='%.3g')}")
