@@ -1,5 +1,6 @@
+import asyncio
 import sys
-from os import makedirs, remove
+from os import makedirs, remove, getcwd
 from os.path import abspath, exists
 from subprocess import check_call
 from sys import stderr
@@ -8,16 +9,26 @@ from tempfile import NamedTemporaryFile
 import pandas as pd
 import plotly.express as px
 from click import argument, command, option, group
+from humanize import naturalsize
 from utz import basename, dirname, process
 from utz.cli import number
 
 from disk_tree.config import SQLITE_PATH
+from disk_tree.index import expand
 from disk_tree.sql.db import init
 
 
 @group('disk-tree')
 def cli():
     pass
+
+
+@cli.command('index')
+@argument('url', required=False)
+def index(url: str | None):
+    url = url or getcwd()
+    res = asyncio.run(expand(url))
+    print(f"{res.num_descendants} descendents, {naturalsize(res.size, binary=True, format='%.3g')}")
 
 
 @cli.command('load')
