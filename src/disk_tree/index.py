@@ -1,5 +1,8 @@
+from asyncio import gather
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from os import stat_result
+from stat import S_ISLNK, S_ISREG, S_ISDIR
 from typing import Literal
 
 from utz import err
@@ -26,9 +29,10 @@ class Entry:
 async def expand(path: str | AsyncPath, children: bool = False) -> Entry | None:
     if isinstance(path, str):
         path = AsyncPath(path)
-    stat = await path.stat()
+    stat = await path._accessor.stat(path, follow_symlinks=False)
+    mode = stat.st_mode
     mtime = fromtimestamp(stat.st_mtime, tz=utc)
-    if await path.is_dir():
+    if S_ISDIR(mode):
         num_descendants = 1
         size = 0
         _children = [] if children else None
@@ -36,6 +40,8 @@ async def expand(path: str | AsyncPath, children: bool = False) -> Entry | None:
             entry = await expand(child)
             if isinstance(entry, BaseException):
                 err(f"{entry}")
+                continue
+            elif not entry:
                 continue
             if children:
                 _children.append(entry)
@@ -51,7 +57,7 @@ async def expand(path: str | AsyncPath, children: bool = False) -> Entry | None:
             **(dict(children=_children) if children else {}),
         )
         return entry
-    elif await path.is_file():
+    elif S_ISREG(mode):
         entry = Entry(
             path=str(path),
             mtime=mtime,
@@ -61,6 +67,9 @@ async def expand(path: str | AsyncPath, children: bool = False) -> Entry | None:
             num_descendants=1,
         )
         return entry
+    elif S_ISLNK(mode):
+        # err("Skipping symlink: %s" % path)
+        return None
     else:
-        err("Skipping non-{file,dir}: %s" % path)
+        # err("Skipping: %s" % path)
         return None
