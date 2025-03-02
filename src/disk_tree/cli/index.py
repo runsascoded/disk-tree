@@ -8,14 +8,16 @@ from utz import err, Time
 from utz.mem import Tracker
 
 from disk_tree.cli.base import cli
-from disk_tree.index import expand
+from disk_tree.index import expand, TaskPool
 
 
 @cli.command('index')
 @option('-m', '--measure-memory', is_flag=True)
+@option('-n', '--n-workers', type=int, default=20)
 @argument('url', required=False)
 def index(
     measure_memory: bool,
+    n_workers: int,
     url: str | None,
 ):
     """Index a directory, in memory."""
@@ -28,8 +30,9 @@ def index(
         ctx = nullcontext()
 
     time = Time()
+    pool = TaskPool(n_workers)
     with ctx, time("expand"):
-        res = asyncio.run(expand(url))
+        res = asyncio.run(expand(url, pool))
 
     elapsed = time['expand']
     num_desc = res.num_descendants
