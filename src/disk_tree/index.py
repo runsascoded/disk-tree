@@ -1,10 +1,11 @@
-from asyncio import Semaphore, create_task, Task
+from asyncio import Semaphore, create_task, Task, gather
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from itertools import batched
 from stat import S_ISLNK, S_ISREG, S_ISDIR
 from typing import Literal, Coroutine, TypeVar, Any
 
+from disk_tree.model import FileEntry
 from utz import err
 
 utc = timezone.utc
@@ -34,18 +35,13 @@ class TaskPool:
         return task
 
 
-@dataclass
-class Entry:
-    path: str
-    mtime: datetime
-    size: int
-    parent: str
-    kind: Kind
-    num_descendants: int
-    children: list["Entry"] | None = None
-
-
-async def expand(path: str | AsyncPath, pool: TaskPool, children: bool = False, level: int = 0) -> Entry | None:
+async def expand(
+    path: str | AsyncPath,
+    pool: TaskPool,
+    children: bool = False,
+    parent: FileEntry | None = None,
+    level: int = 0,
+) -> FileEntry | None:
     # err(f"{'+' * (level + 1)} {path}")
     if isinstance(path, str):
         path = AsyncPath(path)
@@ -59,10 +55,19 @@ async def expand(path: str | AsyncPath, pool: TaskPool, children: bool = False, 
 
         batch_size = max(1, pool.semaphore._value // 2)
         child_paths = [ child async for child in path.iterdir() ]
+        cur = FileEntry(
+            path=str(path),
+            mtime=mtime,
+            size=size,
+            parent=parent,
+            kind='dir',
+            num_descendants=num_descendants
+        )
+        await cur.save()
         for batch in batched(child_paths, batch_size):
             pending_tasks = []
             for child in batch:
-                task = await pool.submit_task(expand(child, pool, children=children, level=level + 1))
+                task = await pool.submit_task(expand(child, pool, children=children, parent=cur, level=level + 1))
                 pending_tasks.append(task)
 
             for task in pending_tasks:
@@ -76,26 +81,22 @@ async def expand(path: str | AsyncPath, pool: TaskPool, children: bool = False, 
                     _children.append(entry)
                 num_descendants += entry.num_descendants
                 size += entry.size
-        entry = Entry(
-            path=str(path),
-            mtime=mtime,
-            size=size,
-            parent=str(path.parent),
-            kind='dir',
-            num_descendants=num_descendants,
-            **(dict(children=_children) if children else {}),
-        )
+
+        cur.num_descendants = num_descendants
+        cur.size = size
+        await cur.save()
         # err(f"{'-' * (level + 1)} {path}")
-        return entry
+        return cur
     elif S_ISREG(mode):
-        entry = Entry(
+        entry = FileEntry(
             path=str(path),
             mtime=mtime,
             size=stat.st_size,
-            parent=str(path.parent),
+            parent=parent,
             kind='file',
             num_descendants=1,
         )
+        await entry.save()
         # err(f"{'-' * (level + 1)} {path}")
         return entry
     elif S_ISLNK(mode):
