@@ -3,14 +3,14 @@ from functools import wraps
 from os import getcwd
 
 from click import argument, option
-from disk_tree.model import init_db
+from disk_tree.tortoise.model import init_db
 from humanize import naturalsize
 from tortoise import run_async
 from utz import err, Time
 from utz.mem import Tracker
 
 from disk_tree.cli.base import cli
-from disk_tree.index import expand, TaskPool
+from disk_tree.tortoise.index import expand, TaskPool
 
 
 def tortoise_main(fn):

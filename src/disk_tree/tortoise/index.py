@@ -1,14 +1,12 @@
-from asyncio import Semaphore, create_task, Task, gather
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import timezone
 from itertools import batched
 from stat import S_ISLNK, S_ISREG, S_ISDIR
-from typing import Literal, Coroutine, TypeVar, Any
+from typing import Literal
 
-from tortoise.exceptions import MultipleObjectsReturned, IntegrityError
-
-from disk_tree.model import FileEntry
 from utz import err
+
+from .model import FileEntry
+from .task_pool import TaskPool
 
 utc = timezone.utc
 
@@ -16,25 +14,6 @@ from aiopath import AsyncPath
 from stdlb import fromtimestamp
 
 Kind = Literal['file', 'dir']
-T = TypeVar("T")
-
-
-class TaskPool:
-    def __init__(self, max_workers: int):
-        self.semaphore = Semaphore(max_workers)
-        self.tasks = set()
-
-    async def submit_task(self, coro: Coroutine[Any, Any, T]) -> Task[T]:
-        await self.semaphore.acquire()
-        task = create_task(coro)
-
-        def done_callback(_):
-            self.semaphore.release()
-            self.tasks.remove(task)
-
-        task.add_done_callback(done_callback)
-        self.tasks.add(task)
-        return task
 
 
 async def expand(
@@ -65,14 +44,11 @@ async def expand(
             kind='dir',
             num_descendants=num_descendants
         )
-        try:
-            await cur.save()
-        except IntegrityError:
-            # Update
+        cur0 = await FileEntry.get_or_none(path=str(path))
+        if cur0:
             err(f"Updating {cur.path}")
-            cur = await FileEntry.get(path=str(path))
-            
-
+            await cur0.delete()
+        await cur.save()
 
         for batch in batched(child_paths, batch_size):
             pending_tasks = []

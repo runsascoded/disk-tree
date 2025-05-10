@@ -13,7 +13,7 @@ from utz.cli import number
 
 from disk_tree.cli.base import cli
 from disk_tree.config import SQLITE_PATH
-from disk_tree.sql.db import init
+from disk_tree.sqla.db import init
 
 
 @cli.command('load')
@@ -48,7 +48,7 @@ def load(
     """Index a directory, persisting data to a SQLite DB."""
     from disk_tree.config import ROOT_DIR
     db = init(cache_path)
-    from disk_tree.sql.cache import Cache
+    from disk_tree.sqla.cache import Cache
     db.create_all()
 
     cache = Cache(ttl=pd.to_timedelta(cache_ttl))
