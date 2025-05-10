@@ -5,6 +5,8 @@ from itertools import batched
 from stat import S_ISLNK, S_ISREG, S_ISDIR
 from typing import Literal, Coroutine, TypeVar, Any
 
+from tortoise.exceptions import MultipleObjectsReturned, IntegrityError
+
 from disk_tree.model import FileEntry
 from utz import err
 
@@ -63,7 +65,15 @@ async def expand(
             kind='dir',
             num_descendants=num_descendants
         )
-        await cur.save()
+        try:
+            await cur.save()
+        except IntegrityError:
+            # Update
+            err(f"Updating {cur.path}")
+            cur = await FileEntry.get(path=str(path))
+            
+
+
         for batch in batched(child_paths, batch_size):
             pending_tasks = []
             for child in batch:
