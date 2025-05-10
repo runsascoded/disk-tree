@@ -9,7 +9,7 @@ from pandas import Series, DataFrame
 from utz import basename, concat, DF, dirname, env, singleton, sxs, urlparse, err
 
 from disk_tree.df import flatmap
-from disk_tree.sql.cache import Cache
+from disk_tree.sqla.cache import Cache
 
 LINE_RGX = r'(?P<mtime>\d{4}-\d{2}-\d{2} \d\d:\d\d:\d\d) +(?P<size>\d+) (?P<key>.*)'
 
