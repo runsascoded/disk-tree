@@ -5,19 +5,17 @@ from typing import Iterator
 
 import pandas as pd
 from tqdm import tqdm
-from utz import proc, o
+from utz import o, err
 
 from disk_tree import time
 
 
 def files_iter(path: str) -> Iterator[dict]:
     abspath = os.path.abspath(path)
-    fd = Popen(['gfind', abspath, '-printf', r'%y %s %T@ %p\n'], stdout=PIPE)
-    # with time("files_iter find"):
-    #     lines = proc.lines('gfind', abspath, '-printf', r'%y %s %T@ %p\n')
+    proc = Popen(['gfind', abspath, '-printf', r'%y %s %T@ %p\n'], stdout=PIPE, stderr=PIPE, text=True)
     with time("files_iter lines"):
-        for line in fd:
-            strs = line.split(' ', 3)
+        for line in tqdm(proc.stdout):
+            strs = line.rstrip('\n').split(' ', 3)
             kind = 'file' if strs[0] == 'f' else 'dir' if strs[0] == 'd' else strs[0]
             size = int(strs[1])
             mtime = int(float(strs[2]))
@@ -27,14 +25,24 @@ def files_iter(path: str) -> Iterator[dict]:
                 size=size,
                 mtime=mtime,
                 kind=kind,
+                parent=None if path == abspath else dirname(path),
             )
 
+    # Check for any errors from gfind after the loop
+    stderr_output = proc.stderr.read()
+    if stderr_output:
+        err(stderr_output)
+
+    # Wait for the proc to finish and check the return code
+    code = proc.wait()
+    if code != 0:
+        err(f"gfind process exited with return code {code}")
 
 def index(path: str) -> pd.DataFrame:
     path0 = path.rstrip('/')
     with time("files_iter"):
         paths = [
-            dict(**e, parent=dirname(e.path), n_desc=1, n_children=0)
+            dict(**e, n_desc=1, n_children=0)
             for e in files_iter(path0)
         ]
     df = pd.DataFrame(paths)
