@@ -18,7 +18,7 @@ def init(sqlite_path: str = None):
     app = Flask(__name__)
     if not sqlite_path:
         sqlite_path = SQLITE_PATH
-        err("Initializing DB at default location")
+        err(f"Initializing DB at default location: {SQLITE_PATH}")
     cache_path = abspath(sqlite_path)
     cache_url = f'sqlite:///{cache_path}'
     app.config['SQLALCHEMY_DATABASE_URI'] = cache_url
