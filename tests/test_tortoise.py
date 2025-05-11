@@ -1,7 +1,7 @@
 import asyncio
 from os.path import dirname, join
 
-from disk_tree.index import expand
+from disk_tree.tortoise.index import expand
 
 
 TESTS = dirname(__file__)

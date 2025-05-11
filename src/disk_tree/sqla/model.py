@@ -1,11 +1,12 @@
 import os
 from datetime import datetime
-from os import makedirs
+from os import makedirs, remove
 from os.path import join, exists
 from typing import Optional
+from uuid import uuid4
 
 import pandas as pd
-from utz import err
+from utz import err, iec
 
 from disk_tree import find
 from .db import db
@@ -16,66 +17,91 @@ if not db:
     db = init()
 
 
+Column = db.Column
+
+
 class Scan(db.Model):
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    path = db.Column(db.String, nullable=False)
-    time = db.Column(db.DateTime, nullable=False)
+    id = Column(db.Integer, primary_key=True, autoincrement=True)
+    path = Column(db.String, nullable=False)
+    time = Column(db.DateTime, nullable=False)
+    blob = Column(db.String, nullable=False)
 
     @classmethod
     def create(
         cls,
         path: str,
         scans_dir: str | None = None,
+        gc: bool = False,
     ) -> pd.DataFrame:
-        abspath = os.path.abspath(path).rstrip('/')
+        path = os.path.abspath(path).rstrip('/')
         now = datetime.now()
-        scan = Scan(path=abspath, time=now)
-        df = find.index(abspath)
+        df = find.index(path)
+
+        uuid = uuid4()
         if not scans_dir:
             scans_dir = SCANS_DIR
         makedirs(scans_dir, exist_ok=True)
-        ms = int(now.timestamp() * 1000)
-        out_path = join(scans_dir, f'{ms}.parquet')
+        out_path = join(scans_dir, f'{uuid}.parquet')
         if exists(out_path):
             raise RuntimeError(f"{out_path} exists")
         df.to_parquet(out_path)
-        # Save scan
+
+        # Save "scan" record
+        scan = Scan(path=path, time=now, blob=out_path)
         db.session.add(scan)
         db.session.commit()
         err(f"{path}: saved {len(df)} rows to {out_path}")
+        if gc:
+            cls.gc(path, now)
+
         return df
+
+    @classmethod
+    def gc(
+        cls,
+        path: str,
+        cutoff: datetime,
+    ):
+        scans = Scan.query.filter_by(path=path).filter(Scan.time < cutoff).all()
+        err(f"{path}: deleting {len(scans)} old scans:")
+        for scan in scans:
+            blob = scan.blob
+            size = os.stat(blob).st_size
+            err(f"\t{scan.time}: {blob} ({iec(size)})")
+            db.session.delete(scan)
+            db.session.commit()
+            remove(blob)
 
     @classmethod
     def load(
         cls,
         path: str,
-        scans_dir: str | None = None,
-    ) -> pd.DataFrame | None:
+    ) -> 'Scan | None':
         abspath = os.path.abspath(path).rstrip('/')
-        scan_entry = cls.query.filter_by(path=abspath).order_by(cls.time.desc()).first()
-        if scan_entry:
-            ms = int(scan_entry.time.timestamp() * 1000)
-            if not scans_dir:
-                scans_dir = SCANS_DIR
+        return cls.query.filter_by(path=abspath).order_by(cls.time.desc()).first()
 
-            pqt_path = join(scans_dir, f'{ms}.parquet')
-            if exists(pqt_path):
-                df = pd.read_parquet(pqt_path)
-                err(f"{path}: loaded {len(df)} rows from {pqt_path}")
-                return df
-            else:
-                raise FileNotFoundError(f"Parquet file not found for scan: {pqt_path}")
-        else:
-            return None
-            # raise FileNotFoundError(f"No scan found for path: {path}")
+    def df(self) -> pd.DataFrame:
+        pqt_path = self.blob
+        if not exists(pqt_path):
+            raise FileNotFoundError(f"Parquet file not found for scan: {pqt_path}")
+        df = pd.read_parquet(pqt_path)
+        err(f"{self.path}: loaded {len(df)} rows from {pqt_path}")
+        return df
 
     @classmethod
     def load_or_create(
         cls,
         path: str,
         scans_dir: str | None = None,
+        gc: bool = False,
     ) -> pd.DataFrame:
-        return cls.load(path, scans_dir) or cls.create(path, scans_dir)
+        scan = cls.load(path)
+        if not scan:
+            return cls.create(path, scans_dir, gc=gc)
+        else:
+            df = scan.df()
+            cls.gc(path=path, cutoff=scan.time)
+            return df
 
 
 class File(db.Model):
