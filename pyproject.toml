@@ -16,6 +16,7 @@ dependencies = [
     "pandas",
     "plotly",
     "sqlalchemy<2",
+    "tqdm",
     "utz",
 ]
 
