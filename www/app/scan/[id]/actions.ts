@@ -21,11 +21,7 @@ export type ScanDetails = {
   rows: Row[]
 }
 
-export async function getScan(id: number): Promise<ScanDetails | undefined> {
-  const stmt = db.prepare<[number], Scan>('SELECT * FROM scan WHERE id = ?')
-  const scan = stmt.get(id)
-  if (!scan) return undefined
-
+export async function scanDetails(scan: Scan): Promise<ScanDetails> {
   let prefix = scan.path
   if (!prefix.endsWith('/')) {
     prefix += '/'
@@ -70,4 +66,11 @@ export async function getScan(id: number): Promise<ScanDetails | undefined> {
     return depth <= levels
   })
   return { scan, root, children, rows }
+}
+
+export async function getScan(id: number): Promise<ScanDetails | undefined> {
+  const stmt = db.prepare<[number], Scan>('SELECT * FROM scan WHERE id = ?')
+  const scan = stmt.get(id)
+  if (!scan) return undefined
+  return scanDetails(scan)
 }
