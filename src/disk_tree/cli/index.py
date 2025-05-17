@@ -24,7 +24,7 @@ def index(
     sudo: bool,
     url: str | None,
 ):
-    """Index a directory, in memory."""
+    """Index a directory, persisting data to a SQLite DB."""
     db = init()
     from disk_tree.sqla.model import Scan
     db.create_all()
