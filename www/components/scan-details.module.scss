@@ -2,6 +2,12 @@
   margin: 0 0.5rem;
 }
 
+@mixin elide {
+  text-wrap: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .table {
   th {
     text-align: left;
@@ -14,11 +20,19 @@
     a:hover {
       text-decoration: underline;
     }
+    &.path {
+      @include elide;
+      max-width: 25rem;
+    }
   }
-  td.path {
-    max-width: 25rem;
-    text-wrap: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  td, th {
+    &.n_children {
+      text-wrap: nowrap;
+      overflow: hidden;
+      max-width: 5rem;
+    }
+  }
+  .size, .n_children, .n_desc {
+    text-align: right;
   }
 }

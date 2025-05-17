@@ -8,7 +8,7 @@ import Link from "next/link"
 import { Fragment } from "react";
 import css from "./scan-details.module.scss"
 
-export function BreadcrumbsPath({ path }: { path: string }) {
+export function BreadcrumbsPath({ path, }: { path: string }) {
   const segments = (
     path
       .split('/')
@@ -26,7 +26,6 @@ export function BreadcrumbsPath({ path }: { path: string }) {
   console.log("segments", segments)
   return <div className="breadcrumbs">
     {segments.map((segment, idx) => {
-      // const href = '/' + segments.slice(0, idx + 1).join('/')
       return <Fragment key={idx}>
         <span className={`${css.separator}`}>/</span>
         {
@@ -41,7 +40,7 @@ export function BreadcrumbsPath({ path }: { path: string }) {
   </div>
 }
 
-export function ScanDetails({ root, children, rows }: ScanDetails) {
+export function ScanDetails({ root, children, rows, time }: ScanDetails) {
   const now = new Date()
   const data = [ root, ...rows ]
   return <div>
@@ -52,10 +51,11 @@ export function ScanDetails({ root, children, rows }: ScanDetails) {
         <tr>
           <th></th>
           <th>Path</th>
-          <th>Size</th>
-          <th>Modified</th>
-          <th># Desc.</th>
-          <th># Children</th>
+          <th className={css.size}>Size</th>
+          <th className={css.mtime}>Modified</th>
+          <th className={css.n_children}>Children</th>
+          <th className={css.n_desc}>Desc.</th>
+          <th>Scanned</th>
         </tr>
         </thead>
         <tbody>
@@ -69,10 +69,11 @@ export function ScanDetails({ root, children, rows }: ScanDetails) {
                   <code>{path}</code>
                 </Link>
             }</td>
-            <td><Size size={size} /></td>
-            <td><Time time={mtime * 1000} now={now} /></td>
-            <td>{n_desc.toLocaleString()}</td>
-            <td>{n_children.toLocaleString()}</td>
+            <td className={css.size}><Size size={size} /></td>
+            <td className={css.mtime}><Time time={mtime * 1000} now={now} /></td>
+            <td className={css.n_children}>{n_children.toLocaleString()}</td>
+            <td className={css.n_desc}>{n_desc.toLocaleString()}</td>
+            <td><Time time={time} now={now} /></td>
           </tr>
         ))}
         </tbody>

@@ -11,7 +11,7 @@ export function relativeDateStr(date: Date, now: Date): string {
   if (seconds < 60) {
     return `${seconds}s`
   } else if (minutes < 60) {
-    return `${minutes}min`
+    return `${minutes}m`
   } else if (hours < 24) {
     return `${hours}hr`
   } else if (days < 7) {
@@ -30,7 +30,7 @@ export function relativeDateStr(date: Date, now: Date): string {
     } else if (fullMonthsAgo >= 12) {
       const fullYearsAgo = floor(fullMonthsAgo / 12)
       const monthsRemainder = fullMonthsAgo % 12
-      return `${fullYearsAgo}y` + (monthsRemainder ? `${monthsRemainder}m` : '')
+      return `${fullYearsAgo}y` + (monthsRemainder ? ` ${monthsRemainder}m` : '')
     } else {
       return `${fullMonthsAgo}mo`
     }
@@ -40,10 +40,11 @@ export function relativeDateStr(date: Date, now: Date): string {
 export function Time(
   { time, now }: {
     time: string | number
-    now: Date
+    now?: Date
   }
 ) {
   const date = new Date(time)
+  now = now ?? new Date()
   const options: Intl.DateTimeFormatOptions = {
     year: "2-digit",
     month: "numeric",
