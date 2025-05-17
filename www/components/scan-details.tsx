@@ -1,5 +1,4 @@
-import { getScan } from "@/app/scan/[id]/actions"
-import type { ScanDetails } from "@/app/scan/[id]/actions"
+import type { ScanDetails } from "@/src/scan-details"
 import { Time } from "@/app/time"
 import { Size, sizeStr } from "@/app/size"
 import { FaFileAlt, FaFolder } from "react-icons/fa"
@@ -70,15 +69,4 @@ export function ScanDetails({ root, children, rows }: ScanDetails) {
       />
     </div>
   </div>
-}
-
-export default async function Home({ params }: any) {
-  let { id } = await params
-  id = parseInt(id)
-  const res = await getScan(id)
-  console.log("scan:", res)
-  if (!res) {
-    return <div>Scan not found</div>
-  }
-  return <ScanDetails {...res} />
 }

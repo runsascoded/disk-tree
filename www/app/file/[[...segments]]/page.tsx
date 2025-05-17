@@ -1,5 +1,5 @@
 import { getScan } from "./actions"
-import { ScanDetails } from "@/app/scan/[id]/page"
+import { ScanDetails } from "@/components/scan-details"
 
 export default async function Page({ params }: {
   params: Promise<{ segments: string[] | undefined }>
