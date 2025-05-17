@@ -37,24 +37,13 @@ export function relativeDateStr(date: Date, now: Date): string {
   }
 }
 
-export function Time(
-  { time, now }: {
-    time: string | number
-    now?: Date
-  }
-) {
-  const date = new Date(time)
-  now = now ?? new Date()
-  const options: Intl.DateTimeFormatOptions = {
-    year: "2-digit",
-    month: "numeric",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }
-  const tooltip = date.toLocaleString("en-US", options)
-  return <span title={tooltip}>
-    {relativeDateStr(date, now)}
-  </span>
+export const options: Intl.DateTimeFormatOptions = {
+  year: "2-digit",
+  month: "numeric",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  // second: "2-digit",
 }
+
+export const fmtDate = (d: Date) => d.toLocaleString("en-US", options)
