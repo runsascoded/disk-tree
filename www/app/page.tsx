@@ -18,7 +18,7 @@ export function Scans({ scans }: { scans: Scan[] }) {
           <tbody>
           {scans.map((scan) => (
             <tr key={scan.id}>
-              <td><Link href={`/file/${scan.path}`}>{scan.path}</Link></td>
+              <td><Link prefetch href={`/file/${scan.path}`}>{scan.path}</Link></td>
               <td><Time time={scan.time} now={now}/></td>
             </tr>
           ))}
