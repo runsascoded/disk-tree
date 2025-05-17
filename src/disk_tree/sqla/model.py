@@ -32,10 +32,11 @@ class Scan(db.Model):
         path: str,
         scans_dir: str | None = None,
         gc: bool = False,
+        sudo: bool = False,
     ) -> pd.DataFrame:
         path = os.path.abspath(path).rstrip('/')
         now = datetime.now()
-        df = find.index(path)
+        df = find.index(path, sudo=sudo)
 
         uuid = uuid4()
         if not scans_dir:
@@ -94,10 +95,11 @@ class Scan(db.Model):
         path: str,
         scans_dir: str | None = None,
         gc: bool = False,
+        sudo: bool = False,
     ) -> pd.DataFrame:
         scan = cls.load(path)
         if not scan:
-            return cls.create(path, scans_dir, gc=gc)
+            return cls.create(path, scans_dir, gc=gc, sudo=sudo)
         else:
             df = scan.df()
             cls.gc(path=path, cutoff=scan.time)

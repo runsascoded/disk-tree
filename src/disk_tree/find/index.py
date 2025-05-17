@@ -10,9 +10,15 @@ from utz import o, err
 from disk_tree import time
 
 
-def files_iter(path: str) -> Iterator[dict]:
+def files_iter(
+    path: str,
+    sudo: bool = False,
+) -> Iterator[dict]:
     abspath = os.path.abspath(path)
-    proc = Popen(['gfind', abspath, '-printf', r'%y %s %T@ %p\n'], stdout=PIPE, stderr=PIPE, text=True)
+    cmd = ['gfind', abspath, '-printf', r'%y %s %T@ %p\n']
+    if sudo:
+        cmd = [ 'sudo', *cmd ]
+    proc = Popen(cmd, stdout=PIPE, stderr=PIPE, text=True)
     with time("files_iter lines"):
         for line in tqdm(proc.stdout):
             strs = line.rstrip('\n').split(' ', 3)
@@ -38,12 +44,15 @@ def files_iter(path: str) -> Iterator[dict]:
     if code != 0:
         err(f"gfind process exited with return code {code}")
 
-def index(path: str) -> pd.DataFrame:
+def index(
+    path: str,
+    sudo: bool = False,
+) -> pd.DataFrame:
     path0 = path.rstrip('/')
     with time("files_iter"):
         paths = [
             dict(**e, n_desc=1, n_children=0)
-            for e in files_iter(path0)
+            for e in files_iter(path0, sudo=sudo)
         ]
     df = pd.DataFrame(paths)
     files = df[df.kind == 'file']

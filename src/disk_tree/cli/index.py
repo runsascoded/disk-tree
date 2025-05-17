@@ -15,11 +15,13 @@ from utz.mem import Tracker
 @option('-C', '--no-cache-read', is_flag=True)
 @option('-m', '--measure-memory', is_flag=True)
 @option('-g', '--gc', is_flag=True)
+@option('-s', '--sudo', is_flag=True, help='Run `find` as sudo')
 @argument('url', required=False)
 def index(
     no_cache_read: bool,
     measure_memory: bool,
     gc: bool,
+    sudo: bool,
     url: str | None,
 ):
     """Index a directory, in memory."""
@@ -37,9 +39,9 @@ def index(
 
     with ctx, time("scan"):
         if no_cache_read:
-            df = Scan.create(url, gc=gc)
+            df = Scan.create(url, gc=gc, sudo=sudo)
         else:
-            df = Scan.load_or_create(url, gc=gc)
+            df = Scan.load_or_create(url, gc=gc, sudo=sudo)
 
     elapsed = time['scan']
     res = df.set_index('path').loc[url]
