@@ -1,4 +1,4 @@
-import { db, Scan } from "@/app/db"
+import { Scan } from "@/app/db"
 import { asyncBufferFromFile, parquetReadObjects } from "hyparquet"
 import { mapValues } from "@rdub/base"
 
@@ -30,12 +30,6 @@ export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails
 
   const { blob } = scan
   const file = await asyncBufferFromFile(blob)
-  // console.log(
-  //   `path: ${path}${scan.path !== path ? ` (${scan.path})` : ``}, prefix ${prefix}, blob ${blob}, ${rows.length} rows,\n`,
-  //   rows.map(({ path }) => path).filter(p => p.startsWith(prefix) || p === path).join('\n')
-  // )
-  // rows =
-  //   rows
   let rows = (
     (await parquetReadObjects({ file }))
       .filter(
@@ -44,7 +38,7 @@ export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails
       .map(
         row => mapValues(
           row,
-          (_, v) => typeof v === 'bigint' ? parseInt(v) : v
+          (_, v) => typeof v === 'bigint' ? parseInt(v as any) : v
         )
       ) as Row[]
   )
@@ -77,11 +71,4 @@ export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails
     return depth <= levels
   })
   return { root, children, rows }
-}
-
-export async function getScan(id: number): Promise<ScanDetails | undefined> {
-  const stmt = db.prepare<[number], Scan>('SELECT * FROM scan WHERE id = ?')
-  const scan = stmt.get(id)
-  if (!scan) return undefined
-  return scanDetails(scan.path, scan)
 }
