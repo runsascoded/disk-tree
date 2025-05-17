@@ -1,6 +1,6 @@
 
 export function sizeStr(size: number, iec = false) {
-  const units = iec ? ['B', 'KiB', 'MiB', 'GiB', 'TiB'] : ['B', 'KB', 'MB', 'GB', 'TB']
+  const units = iec ? ['B', 'KiB', 'MiB', 'GiB', 'TiB'] : ['B', 'K', 'M', 'G', 'T']
   const base = iec ? 1024 : 1000
   let i = 0
   while (size > base && i < units.length - 1) {

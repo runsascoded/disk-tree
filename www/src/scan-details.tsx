@@ -18,6 +18,7 @@ export type ScanDetails = {
   root: Row
   children: Row[]
   rows: Row[]
+  time: string
 }
 
 export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails> {
@@ -28,7 +29,7 @@ export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails
     prefix += "/"
   }
 
-  const { blob } = scan
+  const { blob, time } = scan
   const file = await asyncBufferFromFile(blob)
   let rows = (
     (await parquetReadObjects({ file }))
@@ -70,5 +71,5 @@ export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails
     }
     return depth <= levels
   })
-  return { root, children, rows }
+  return { root, children, rows, time }
 }
