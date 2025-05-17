@@ -15,7 +15,6 @@ export type Row = {
 }
 
 export type ScanDetails = {
-  scan: Scan
   root: Row
   children: Row[]
   rows: Row[]
@@ -77,7 +76,7 @@ export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails
     }
     return depth <= levels
   })
-  return { scan, root, children, rows }
+  return { root, children, rows }
 }
 
 export async function getScan(id: number): Promise<ScanDetails | undefined> {

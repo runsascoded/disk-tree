@@ -3,10 +3,11 @@ import type { ScanDetails } from "@/app/scan/[id]/actions"
 import { Time } from "@/app/time"
 import { Size, sizeStr } from "@/app/size"
 import { FaFileAlt, FaFolder } from "react-icons/fa"
-import { Plot } from "@/components/plot";
-import { basename } from "path";
+import { Plot } from "@/components/plot"
+import { basename } from "path"
+import Link from "next/link"
 
-export function ScanDetails({ scan, root, children, rows }: ScanDetails) {
+export function ScanDetails({ root, children, rows }: ScanDetails) {
   const now = new Date()
   const data = [ root, ...rows ]
   return <div>
@@ -24,10 +25,16 @@ export function ScanDetails({ scan, root, children, rows }: ScanDetails) {
         </tr>
         </thead>
         <tbody>
-        {[ root, ...children ].map(({  path, size, mtime, n_desc, n_children, kind, }, idx) => (
+        {[ root, ...children ].map(({ path, size, mtime, n_desc, n_children, kind, }, idx) => (
           <tr key={path} className={idx === 0 ? "root" : ""}>
             <td>{kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
-            <td><code>{path}</code></td>
+            <td>{
+              idx === 0
+                ? <code>{path}</code>
+                : <Link href={`/file${root.path}/${path}`}>
+                  <code>{path}</code>
+                </Link>
+            }</td>
             <td><Size size={size} /></td>
             <td><Time time={mtime * 1000} now={now} /></td>
             <td>{n_desc}</td>
