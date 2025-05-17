@@ -5,12 +5,47 @@ import { FaFileAlt, FaFolder } from "react-icons/fa"
 import { Plot } from "@/components/plot"
 import { basename } from "path"
 import Link from "next/link"
+import { Fragment } from "react";
+import css from "./scan-details.module.scss"
+
+export function BreadcrumbsPath({ path }: { path: string }) {
+  const segments = (
+    path
+      .split('/')
+      .filter(Boolean)
+      .reduce(
+        (acc, segment) => {
+          const prev = acc[acc.length - 1]
+          const next = prev ? `${prev}/${segment}` : segment
+          acc.push(next)
+          return acc
+        },
+        [] as string[]
+      )
+  )
+  console.log("segments", segments)
+  return <div className="breadcrumbs">
+    {segments.map((segment, idx) => {
+      // const href = '/' + segments.slice(0, idx + 1).join('/')
+      return <Fragment key={idx}>
+        <span className={`${css.separator}`}>/</span>
+        {
+          idx + 1 === segments.length
+            ? <span className={`${css.current}`}>{basename(segment)}</span>
+            : <Link href={`/file/${segment}`}>
+              {basename(segment)}
+            </Link>
+        }
+      </Fragment>
+    })}
+  </div>
+}
 
 export function ScanDetails({ root, children, rows }: ScanDetails) {
   const now = new Date()
   const data = [ root, ...rows ]
   return <div>
-    <h1>{root.path}</h1>
+    <h1><BreadcrumbsPath path={root.path} /></h1>
     <div>
       <table>
         <thead>
