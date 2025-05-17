@@ -15,7 +15,7 @@ export async function getScan(path: string): Promise<ScanDetails | undefined> {
       .reduce(
         (ancestors, segment) => {
           const prv = ancestors[ancestors.length - 1]
-          const nxt = `${prv}${segment}/`
+          const nxt = `${prv}${prv === "/" ? "" : "/"}${segment}`
           ancestors.push(nxt)
           return ancestors
         },
@@ -23,7 +23,7 @@ export async function getScan(path: string): Promise<ScanDetails | undefined> {
       )
   console.log("ancestors", ancestors)
   // Get most recent scan that matches the path or is for a path that begins with one of the ancestor dir paths
-  const ancestorConditions = ancestors.map(() => "path LIKE ? || '%'").join(" OR ");
+  const ancestorConditions = ancestors.map(() => "path = ?").join(" OR ");
   const query = `
     SELECT *
     FROM scan

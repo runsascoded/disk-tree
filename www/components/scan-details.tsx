@@ -47,7 +47,7 @@ export function ScanDetails({ root, children, rows }: ScanDetails) {
   return <div>
     <h1><BreadcrumbsPath path={root.path} /></h1>
     <div>
-      <table>
+      <table className={css.table}>
         <thead>
         <tr>
           <th></th>
