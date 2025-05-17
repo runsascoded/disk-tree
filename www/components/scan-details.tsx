@@ -62,17 +62,17 @@ export function ScanDetails({ root, children, rows }: ScanDetails) {
         {[ root, ...children ].map(({ path, size, mtime, n_desc, n_children, kind, }, idx) => (
           <tr key={path} className={idx === 0 ? "root" : ""}>
             <td>{kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
-            <td>{
+            <td className={css.path}>{
               idx === 0
-                ? <code>{path}</code>
+                ? <code>.</code>
                 : <Link prefetch href={`/file${root.path}/${path}`} title={path}>
                   <code>{path}</code>
                 </Link>
             }</td>
             <td><Size size={size} /></td>
             <td><Time time={mtime * 1000} now={now} /></td>
-            <td>{n_desc}</td>
-            <td>{n_children}</td>
+            <td>{n_desc.toLocaleString()}</td>
+            <td>{n_children.toLocaleString()}</td>
           </tr>
         ))}
         </tbody>

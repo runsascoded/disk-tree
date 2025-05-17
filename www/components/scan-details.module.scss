@@ -6,4 +6,19 @@
   th {
     text-align: left;
   }
+  td {
+    a {
+      text-decoration: none;
+      border-bottom: none;
+    }
+    a:hover {
+      text-decoration: underline;
+    }
+  }
+  td.path {
+    max-width: 25rem;
+    text-wrap: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
