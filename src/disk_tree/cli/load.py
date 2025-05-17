@@ -45,7 +45,9 @@ def load(
     excludes: tuple[str, ...],
     url: str | None,
 ):
-    """Index a directory, persisting data to a SQLite DB."""
+    """Load or compute an index for a directory, persisting data to a SQLite DB.
+
+    Old / outdated."""
     from disk_tree.config import ROOT_DIR
     db = init(cache_path)
     from disk_tree.sqla.cache import Cache
