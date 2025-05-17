@@ -21,25 +21,37 @@ export type ScanDetails = {
   rows: Row[]
 }
 
-export async function scanDetails(scan: Scan): Promise<ScanDetails> {
-  let prefix = scan.path
-  if (!prefix.endsWith('/')) {
-    prefix += '/'
+export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails> {
+  let prefix = path
+  if (path.endsWith("/")) {
+    path = path.slice(0, -1)
+  } else {
+    prefix += "/"
   }
 
   const { blob } = scan
   const file = await asyncBufferFromFile(blob)
-  let rows =
+  // console.log(
+  //   `path: ${path}${scan.path !== path ? ` (${scan.path})` : ``}, prefix ${prefix}, blob ${blob}, ${rows.length} rows,\n`,
+  //   rows.map(({ path }) => path).filter(p => p.startsWith(prefix) || p === path).join('\n')
+  // )
+  // rows =
+  //   rows
+  let rows = (
     (await parquetReadObjects({ file }))
+      .filter(
+        ({ path: p }) => p.startsWith(prefix) || p === path
+      )
       .map(
         row => mapValues(
           row,
           (_, v) => typeof v === 'bigint' ? parseInt(v) : v
         )
       ) as Row[]
+  )
   const levels = 2
   const [ root, ...rest ] = rows
-  if (root.path != scan.path) {
+  if (root.path != path) {
     throw new Error(`Root path ${root.path} doesn't match scan path ${scan.path}`)
   }
   root.parent = null
@@ -72,5 +84,5 @@ export async function getScan(id: number): Promise<ScanDetails | undefined> {
   const stmt = db.prepare<[number], Scan>('SELECT * FROM scan WHERE id = ?')
   const scan = stmt.get(id)
   if (!scan) return undefined
-  return scanDetails(scan)
+  return scanDetails(scan.path, scan)
 }

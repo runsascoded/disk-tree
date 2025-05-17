@@ -10,7 +10,7 @@ export function ScanDetails({ scan, root, children, rows }: ScanDetails) {
   const now = new Date()
   const data = [ root, ...rows ]
   return <div>
-    <h1>{scan.path}</h1>
+    <h1>{root.path}</h1>
     <div>
       <table>
         <thead>
