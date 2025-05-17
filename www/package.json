@@ -9,6 +9,9 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/material": "^7.1.0",
     "@rdub/base": "^0.8.0",
     "@tanstack/react-query": "^5.75.7",
     "better-sqlite3": "^11.10.0",

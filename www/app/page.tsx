@@ -1,6 +1,6 @@
 import { getScans } from "@/app/actions"
 import Link from "next/link"
-import { Time } from "@/app/time"
+import { Time } from "@/components/time"
 import { Scan } from "@/app/db"
 
 export function Scans({ scans }: { scans: Scan[] }) {

@@ -1,6 +1,6 @@
 import type { ScanDetails } from "@/src/scan-details"
-import { Time } from "@/app/time"
-import { Size, sizeStr } from "@/app/size"
+import { Scanned, Time } from "@/components/time"
+import { Size, sizeStr } from "@/components/size"
 import { FaFileAlt, FaFolder } from "react-icons/fa"
 import { Plot } from "@/components/plot"
 import { basename } from "path"
@@ -73,7 +73,7 @@ export function ScanDetails({ root, children, rows, time }: ScanDetails) {
             <td className={css.mtime}><Time time={mtime * 1000} now={now} /></td>
             <td className={css.n_children}>{n_children.toLocaleString()}</td>
             <td className={css.n_desc}>{n_desc.toLocaleString()}</td>
-            <td><Time time={time} now={now} /></td>
+            <td><Scanned time={time} now={now} /></td>
           </tr>
         ))}
         </tbody>
