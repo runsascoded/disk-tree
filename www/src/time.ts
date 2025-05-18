@@ -43,7 +43,6 @@ export const options: Intl.DateTimeFormatOptions = {
   day: "numeric",
   hour: "numeric",
   minute: "2-digit",
-  // second: "2-digit",
 }
 
 export const fmtDate = (d: Date) => d.toLocaleString("en-US", options)
