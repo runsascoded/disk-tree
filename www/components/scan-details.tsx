@@ -1,3 +1,5 @@
+'use client'
+
 import type { ScanDetails } from "@/src/scan-details"
 import { Scanned, Time } from "@/components/time"
 import { Size, sizeStr } from "@/components/size"
@@ -71,9 +73,17 @@ export function ScanDetails({ root, children, rows, time }: ScanDetails) {
             }</td>
             <td className={css.size}><Size size={size} /></td>
             <td className={css.mtime}><Time time={mtime * 1000} now={now} /></td>
-            <td className={css.n_children}>{n_children.toLocaleString()}</td>
-            <td className={css.n_desc}>{n_desc.toLocaleString()}</td>
-            <td><Scanned time={time} now={now} /></td>
+            <td className={css.n_children}>{n_children ? n_children.toLocaleString() : null}</td>
+            <td className={css.n_desc}>{n_desc > 1 ? n_desc.toLocaleString() : null}</td>
+            <td className={css.scanned}>
+              <Scanned
+                time={time}
+                now={now}
+                onRefresh={() => {
+                  console.log("Refresh:", path)
+                }}
+              />
+            </td>
           </tr>
         ))}
         </tbody>
