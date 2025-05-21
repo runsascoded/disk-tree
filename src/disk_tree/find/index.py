@@ -76,8 +76,8 @@ def files_iter(
     if path.startswith('s3://'):
         yield from s3_files_iter(path)
         return
-    abspath = os.path.abspath(path)
-    cmd = ['gfind', abspath, '-printf', r'%y %s %T@ %p\n']
+    path0 = os.path.abspath(path)
+    cmd = ['gfind', path0, '-printf', r'%y %s %T@ %p\n']
     if sudo:
         cmd = [ 'sudo', *cmd ]
     proc = subprocess.Popen(cmd, stdout=PIPE, stderr=PIPE, text=True)
@@ -88,12 +88,17 @@ def files_iter(
             size = int(strs[1])
             mtime = int(float(strs[2]))
             path = strs[3]
+            if not path.startswith(f'{path0}/') and path != path0:
+                raise ValueError(f"{path0}: unexpected {path=}")
+            uri = path
+            path = path[len(path0)+1:] if path != path0 else ''
             yield o(
                 path=path,
                 size=size,
                 mtime=mtime,
                 kind=kind,
-                parent=None if path == abspath else dirname(path),
+                parent=None if path == path0 else dirname(path),
+                uri=uri,
             )
 
     # Check for any errors from gfind after the loop
