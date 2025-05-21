@@ -165,6 +165,8 @@ def index(
             'kind': 'dir',
         }).reset_index(drop=True)
         dirs['parent'] = dirs.path.apply(dirname)
+        dirs.loc[dirs.parent == '', 'parent'] = '.'
+        dirs.loc[dirs.path == '', ['path', 'parent']] = [ '.', '' ]
         dirs['uri'] = dirs.path.apply(lambda p: f'{path0}/{p}' if p else path0)
         return (
             pd.concat(
