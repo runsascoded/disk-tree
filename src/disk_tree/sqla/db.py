@@ -4,6 +4,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from utz import err
 
+from .base import Base
 from ..config import SQLITE_PATH
 
 app = None
@@ -11,10 +12,12 @@ db: Optional[SQLAlchemy] = None
 cache_url = None
 
 
-def init(sqlite_path: str = None):
+def init(sqlite_path: str = None) -> SQLAlchemy:
+    global db
+    if db:
+        return db
     global app
     global cache_url
-    global db
     app = Flask(__name__)
     if not sqlite_path:
         sqlite_path = SQLITE_PATH
@@ -25,4 +28,5 @@ def init(sqlite_path: str = None):
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     db = SQLAlchemy(app)
     app.app_context().push()
+    Base.metadata.create_all(db.engine)
     return db

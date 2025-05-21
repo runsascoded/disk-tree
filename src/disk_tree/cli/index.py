@@ -11,7 +11,7 @@ from utz import err
 from utz.mem import Tracker
 
 
-@cli.command('index')
+@cli.command
 @option('-C', '--no-cache-read', is_flag=True)
 @option('-m', '--measure-memory', is_flag=True)
 @option('-g', '--gc', is_flag=True)
@@ -44,7 +44,7 @@ def index(
             df = Scan.load_or_create(url, gc=gc, sudo=sudo)
 
     elapsed = time['scan']
-    res = df.set_index('path').loc[url]
+    res = df.set_index('path').loc['.']
     n_desc = res.n_desc
     size = res['size']
     speed = n_desc / elapsed
