@@ -1,2 +1,2 @@
 from .base import cli
-from . import index, load
+from . import index
