@@ -2,9 +2,11 @@ import { getScan } from "./actions"
 import { BreadcrumbsPath, ScanDetails } from "@/components/scan-details"
 import Home from "@/app/page"
 
-export default async function Page({ params }: {
-  params: Promise<{ segments: string[] | undefined }>
-}) {
+export default async function Page(
+  { params }: {
+    params: Promise<{ segments: string[] | undefined }>
+  }
+) {
   const { segments } = await params
   console.log("segments", segments)
   const path = segments ? [ '', ...segments ].join('/') : '/'

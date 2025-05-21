@@ -45,8 +45,10 @@ export function BreadcrumbsPath({ path, }: { path: string }) {
 export function ScanDetails({ root, children, rows, time }: ScanDetails) {
   const now = new Date()
   const data = [ root, ...rows ]
+  const { uri } = root
+  const childUrlPrefix = uri.startsWith('/s3://') ? `s3/${uri.slice('s3://'.length)}` : `/file${uri}`
   return <div>
-    <h1><BreadcrumbsPath path={root.path} /></h1>
+    <h1><BreadcrumbsPath path={root.uri} /></h1>
     <div>
       <table className={css.table}>
         <thead>
@@ -67,7 +69,7 @@ export function ScanDetails({ root, children, rows, time }: ScanDetails) {
             <td className={css.path}>{
               idx === 0
                 ? <code>.</code>
-                : <Link prefetch href={`/file${root.path}/${path}`} title={path}>
+                : <Link prefetch href={`${childUrlPrefix}/${path}`} title={path}>
                   <code>{path}</code>
                 </Link>
             }</td>
