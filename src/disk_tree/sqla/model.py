@@ -5,25 +5,22 @@ from os.path import join, exists
 from uuid import uuid4
 
 import pandas as pd
+from sqlalchemy import Integer, String, DateTime
+from sqlalchemy.orm import Mapped, mapped_column
 from utz import err, iec
 
 from disk_tree import find
-from .db import db
+from .base import Base
 from ..config import SCANS_DIR
 
-if not db:
-    from .db import init
-    db = init()
 
+class Scan(Base):
+    __tablename__ = "scan"
 
-Column = db.Column
-
-
-class Scan(db.Model):
-    id = Column(db.Integer, primary_key=True, autoincrement=True)
-    path = Column(db.String, nullable=False)
-    time = Column(db.DateTime, nullable=False)
-    blob = Column(db.String, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, init=False)
+    path: Mapped[str] = mapped_column(String, nullable=False)
+    time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    blob: Mapped[str] = mapped_column(String, nullable=False)
 
     @classmethod
     def create(
@@ -33,8 +30,10 @@ class Scan(db.Model):
         gc: bool = False,
         sudo: bool = False,
     ) -> pd.DataFrame:
+        from .db import db
+
         path = os.path.abspath(path).rstrip('/')
-        now = datetime.now()
+        now = datetime.now().astimezone()
         df = find.index(path, sudo=sudo)
 
         uuid = uuid4()
@@ -62,7 +61,9 @@ class Scan(db.Model):
         path: str,
         cutoff: datetime,
     ):
-        scans = Scan.query.filter_by(path=path).filter(Scan.time < cutoff).all()
+        from .db import db
+
+        scans = db.session.query(Scan).filter_by(path=path).filter(Scan.time < cutoff).all()
         err(f"{path}: deleting {len(scans)} old scans:")
         for scan in scans:
             blob = scan.blob
@@ -77,8 +78,10 @@ class Scan(db.Model):
         cls,
         path: str,
     ) -> 'Scan | None':
+        from .db import db
+
         abspath = os.path.abspath(path).rstrip('/')
-        return cls.query.filter_by(path=abspath).order_by(cls.time.desc()).first()
+        return db.session.query(cls).filter_by(path=abspath).order_by(cls.time.desc()).first()
 
     def df(self) -> pd.DataFrame:
         pqt_path = self.blob

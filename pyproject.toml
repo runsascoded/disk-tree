@@ -14,7 +14,7 @@ dependencies = [
     "kaleido",
     "pandas",
     "plotly",
-    "sqlalchemy<2",
+    "sqlalchemy",
     "tqdm",
     "utz",
 ]
