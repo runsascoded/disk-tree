@@ -1,6 +1,7 @@
 import { Scan } from "@/app/db"
 import { asyncBufferFromFile, parquetReadObjects } from "hyparquet"
 import { mapValues } from "@rdub/base"
+import { dirname } from "path"
 
 export type Kind = 'file' | 'dir'
 
@@ -12,6 +13,7 @@ export type Row = {
   n_children: number
   kind: Kind
   parent: string | null
+  uri: string
 }
 
 export type ScanDetails = {
@@ -21,21 +23,39 @@ export type ScanDetails = {
   time: string
 }
 
-export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails> {
-  let prefix = path
-  if (path.endsWith("/")) {
-    path = path.slice(0, -1)
+export async function scanDetails(uri: string, scan: Scan): Promise<ScanDetails> {
+  let prefix = uri
+  if (uri.endsWith("/")) {
+    uri = uri.slice(0, -1)
   } else {
     prefix += "/"
   }
 
-  const { blob, time } = scan
+  const { id, blob, time } = scan
+  console.log(`${uri}: scan ${id}, ${blob}`)
   const file = await asyncBufferFromFile(blob)
   let rows = (
     (await parquetReadObjects({ file }))
       .filter(
-        ({ path: p }) => p.startsWith(prefix) || p === path
+        ({ uri: u }) => u.startsWith(prefix) || u === uri
       )
+      .map(row => {
+        if (scan.path === uri) {
+          return row
+        }
+        let { path, parent, ...obj } = row
+        const uriPrefix = `${uri}/`
+        if (row.uri === uri) {
+          path = '.'
+          parent = null
+        } else if (!row.uri.startsWith(uriPrefix)) {
+          throw new Error(`${uri}: ${row.uri} doesn't start with scan URI prefix ${uriPrefix}`)
+        } else {
+          path = row.uri.slice(uriPrefix.length)
+          parent = (parent === uri) ? '.' : dirname(path)
+        }
+        return { path, parent, ...obj }
+      })
       .map(
         row => mapValues(
           row,
@@ -45,28 +65,15 @@ export async function scanDetails(path: string, scan: Scan): Promise<ScanDetails
   )
   const levels = 2
   const [ root, ...rest ] = rows
-  if (root.path != path) {
-    throw new Error(`Root path ${root.path} doesn't match scan path ${scan.path}`)
+  if (root.path != '.') {
+    throw new Error(`${uri}: unexpected root path`)
   }
   root.parent = null
   console.log("root:", root)
   const children: Row[] = []
-  rows = rest.map(({ path, parent, ...obj }) => {
-    if (!path.startsWith(prefix)) {
-      throw new Error(`Path ${path} doesn't start with ${prefix}`)
-    }
-    path = path.slice(prefix.length)
-    if (parent === root.path) {
-      parent = null
-    } else if (parent?.startsWith(prefix)) {
-      parent = parent.slice(prefix.length)
-    } else {
-      throw new Error(`Path ${path}'s parent ${parent} doesn't start with ${prefix}`)
-    }
-    return { path, parent, ...obj }
-  }).filter(({ path, ...obj }) =>{
+  rows = rest.filter(({ path, ...obj }) => {
     const depth = path.split('/').length
-    if (depth === 1) {
+    if (depth === 1 && path !== '.') {
       children.push({ path, ...obj })
     }
     return depth <= levels
