@@ -167,7 +167,7 @@ def index(
         dirs['parent'] = dirs.path.apply(dirname)
         dirs.loc[dirs.parent == '', 'parent'] = '.'
         dirs.loc[dirs.path == '', ['path', 'parent']] = [ '.', '' ]
-        dirs['uri'] = dirs.path.apply(lambda p: f'{path0}/{p}' if p else path0)
+        dirs['uri'] = dirs.path.apply(lambda p: path0 if p == '.' else f'{path0}/{p}')
         return (
             pd.concat(
                 [dirs, files],
