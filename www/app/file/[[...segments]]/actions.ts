@@ -1,5 +1,6 @@
 import { db, Scan } from "@/app/db"
-import { scanDetails, ScanDetails } from "@/src/scan-details"
+import { ScanDetails } from "@/src/scan-details"
+import { scanDetails } from "@/src/scan-details-action"
 
 export async function getScan(uri: string): Promise<ScanDetails | undefined> {
   if (uri.endsWith("/")) {

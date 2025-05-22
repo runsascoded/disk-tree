@@ -44,7 +44,7 @@ export function BreadcrumbsPath({ uri, }: { uri: string }) {
         {
           idx + 1 === segments.length
             ? <span className={`${css.current}`}>{basename(segment)}</span>
-            : <Link prefetch href={`${ancestorUrlPrefix}/${segment}`}>
+            : <Link href={`${ancestorUrlPrefix}/${segment}`}>
               {basename(segment)}
             </Link>
         }
@@ -81,7 +81,7 @@ export function ScanDetails({ root, children, rows, time }: ScanDetails) {
               <td className={css.path}>{
                 idx === 0
                   ? <code>.</code>
-                  : <Link prefetch href={`${childUrlPrefix}/${path}`} title={path}>
+                  : <Link href={`${childUrlPrefix}/${path}`} title={path}>
                     <code>{path}</code>
                   </Link>
               }</td>
