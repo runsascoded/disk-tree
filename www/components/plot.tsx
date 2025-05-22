@@ -15,9 +15,8 @@ export function Plot(
   return <Plot0
     {...props}
     onInitialized={(fig, div) => {
-      console.log("initialized", fig, div)
-      // div.on(event, clickHandler)
-      div.on(event, handler)
+      console.log("initialized", fig, div);
+      (div as any).on(event, handler)
     }}
   />
 }
