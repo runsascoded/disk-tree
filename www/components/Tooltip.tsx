@@ -10,4 +10,4 @@ export const Tooltip = styled(({ className, ...props }: TooltipProps) => (
     boxShadow: theme.shadows[1],
     fontSize: '1rem',
   },
-}));
+}))

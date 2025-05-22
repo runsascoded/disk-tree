@@ -1,13 +1,13 @@
 'use client'
 
-import type { ScanDetails } from "@/src/scan-details"
-import { Scanned, Time } from "@/components/time"
-import { Size, sizeStr } from "@/components/size"
-import { FaFileAlt, FaFolder } from "react-icons/fa"
-import { Plot } from "@/components/plot"
 import { basename } from "path"
 import Link from "next/link"
-import { Fragment } from "react";
+import { Fragment } from "react"
+import { FaFileAlt, FaFolder } from "react-icons/fa"
+import { Plot } from "@/components/plot"
+import { Size, sizeStr } from "@/components/size"
+import { Scanned, Time } from "@/components/time"
+import type { ScanDetails } from "@/src/scan-details"
 import css from "./scan-details.module.scss"
 
 export function BreadcrumbsPath({ uri, }: { uri: string }) {
@@ -64,42 +64,42 @@ export function ScanDetails({ root, children, rows, time }: ScanDetails) {
     <div>
       <table className={css.table}>
         <thead>
-        <tr>
-          <th></th>
-          <th>Path</th>
-          <th className={css.size}>Size</th>
-          <th className={css.mtime}>Modified</th>
-          <th className={css.n_children}>Children</th>
-          <th className={css.n_desc}>Desc.</th>
-          <th>Scanned</th>
-        </tr>
+          <tr>
+            <th></th>
+            <th>Path</th>
+            <th className={css.size}>Size</th>
+            <th className={css.mtime}>Modified</th>
+            <th className={css.n_children}>Children</th>
+            <th className={css.n_desc}>Desc.</th>
+            <th>Scanned</th>
+          </tr>
         </thead>
         <tbody>
-        {[ root, ...children ].map(({ path, size, mtime, n_desc, n_children, kind, }, idx) => (
-          <tr key={path} className={idx === 0 ? "root" : ""}>
-            <td>{kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
-            <td className={css.path}>{
-              idx === 0
-                ? <code>.</code>
-                : <Link prefetch href={`${childUrlPrefix}/${path}`} title={path}>
-                  <code>{path}</code>
-                </Link>
-            }</td>
-            <td className={css.size}><Size size={size} /></td>
-            <td className={css.mtime}><Time time={mtime * 1000} now={now} /></td>
-            <td className={css.n_children}>{n_children ? n_children.toLocaleString() : null}</td>
-            <td className={css.n_desc}>{n_desc > 1 ? n_desc.toLocaleString() : null}</td>
-            <td className={css.scanned}>
-              <Scanned
-                time={time}
-                now={now}
-                onRefresh={() => {
-                  console.log("Refresh:", path)
-                }}
-              />
-            </td>
-          </tr>
-        ))}
+          {[ root, ...children ].map(({ path, size, mtime, n_desc, n_children, kind, }, idx) => (
+            <tr key={path} className={idx === 0 ? "root" : ""}>
+              <td>{kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
+              <td className={css.path}>{
+                idx === 0
+                  ? <code>.</code>
+                  : <Link prefetch href={`${childUrlPrefix}/${path}`} title={path}>
+                    <code>{path}</code>
+                  </Link>
+              }</td>
+              <td className={css.size}><Size size={size} /></td>
+              <td className={css.mtime}><Time time={mtime * 1000} now={now} /></td>
+              <td className={css.n_children}>{n_children ? n_children.toLocaleString() : null}</td>
+              <td className={css.n_desc}>{n_desc > 1 ? n_desc.toLocaleString() : null}</td>
+              <td className={css.scanned}>
+                <Scanned
+                  time={time}
+                  now={now}
+                  onRefresh={() => {
+                    console.log("Refresh:", path)
+                  }}
+                />
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
       <Plot

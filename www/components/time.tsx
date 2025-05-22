@@ -1,7 +1,7 @@
-import { Tooltip } from "@/components/Tooltip"
-import { fmtDate, relativeDateStr } from "@/src/time"
 import { useState } from "react"
 import { IoMdRefresh } from "react-icons/io"
+import { Tooltip } from "@/components/Tooltip"
+import { fmtDate, relativeDateStr } from "@/src/time"
 import css from "./time.module.scss"
 
 export function Time(
@@ -34,11 +34,11 @@ export function Scanned({ time, now, onRefresh, }: { time: string, now: Date, on
       {
         showRefresh &&
           <IoMdRefresh
-              className={css.icon}
-              onClick={(e) => {
-                e.stopPropagation()
-                onRefresh()
-              }}
+            className={css.icon}
+            onClick={(e) => {
+              e.stopPropagation()
+              onRefresh()
+            }}
           />
       }
     </div>

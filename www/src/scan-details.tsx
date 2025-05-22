@@ -1,7 +1,7 @@
-import { Scan } from "@/app/db"
-import { asyncBufferFromFile, parquetReadObjects } from "hyparquet"
-import { mapValues } from "@rdub/base"
 import { dirname } from "path"
+import { mapValues } from "@rdub/base"
+import { asyncBufferFromFile, parquetReadObjects } from "hyparquet"
+import { Scan } from "@/app/db"
 
 export type Kind = 'file' | 'dir'
 
