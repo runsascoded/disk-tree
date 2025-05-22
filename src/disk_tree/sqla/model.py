@@ -32,7 +32,9 @@ class Scan(Base):
     ) -> tuple['Scan', pd.DataFrame]:
         from .db import db
 
-        path = os.path.abspath(path).rstrip('/')
+        if not path.startswith('s3://'):
+            path = os.path.abspath(path)
+        path = path.rstrip('/')
         now = datetime.now().astimezone()
         df = find.index(path, sudo=sudo)
 

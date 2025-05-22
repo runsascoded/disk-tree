@@ -34,8 +34,10 @@ def s3_files_iter(path: str) -> Iterator[dict]:
             key = strs[3]
             if not key.startswith(f'{key0}/') and key != key0:
                 raise ValueError(f"{path}: unexpected {key=}")
-            key = key[len(key0)+1:] if key != key0 else ''
-            cur = key
+            relpath = key[len(key0)+1:] if key != key0 else ''
+            cur = relpath
+            if not cur and not relpath:
+                continue
             new_dirs = []
             while True:
                 try:
@@ -57,14 +59,14 @@ def s3_files_iter(path: str) -> Iterator[dict]:
                     mtime=0,
                     kind='dir',
                     parent=None if d == key0 else dirname(d),
-                    uri=f's3://{bkt}/{d}',
+                    uri=f's3://{bkt}/{key0}/{d}',
                 )
             yield o(
-                path=key,
+                path=relpath,
                 size=size,
                 mtime=mtime,
                 kind='file',
-                parent=None if key == key0 else dirname(key),
+                parent=dirname(relpath),
                 uri=f's3://{bkt}/{key}',
             )
 
