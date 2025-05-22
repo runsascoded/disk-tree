@@ -1,16 +1,25 @@
 import { db, Scan } from "@/app/db"
 import { scanDetails, ScanDetails } from "@/src/scan-details"
 
-export async function getScan(path: string): Promise<ScanDetails | undefined> {
-  if (path.endsWith("/")) {
-    path = path.slice(0, -1)
+export async function getScan(uri: string): Promise<ScanDetails | undefined> {
+  if (uri.endsWith("/")) {
+    uri = uri.slice(0, -1)
   }
-  const path0 = path
-  if (path.startsWith('/')) {
-    path = path.slice(1)
+  const uri0 = uri
+  let prefix = ``
+  if (uri.startsWith('/')) {
+    uri = uri.slice(1)
+  } else if (uri.startsWith('s3://')) {
+    uri = uri.substring('s3://'.length)
+    const m = uri.match(/^([^/]+)\/(.+)$/)!
+    let [ _, bkt, key ] = m ?? [ '', uri, '' ]
+    uri = key
+    prefix = `s3://${bkt}`
+    // console.log("key", key, "uri", uri, "prefix", prefix)
   }
-  const ancestors =
-    path.split('/')
+  let ancestors =
+    uri
+      .split('/')
       .slice(0, -1)
       .reduce(
         (ancestors, segment) => {
@@ -20,8 +29,11 @@ export async function getScan(path: string): Promise<ScanDetails | undefined> {
           return ancestors
         },
         ["/"]
-      )
-  console.log("ancestors", ancestors)
+      ).map(
+        ancestor =>
+          `${prefix}${ancestor}`.replace(/\/$/, "")
+    )
+  // console.log("ancestors", ancestors)
   // Get most recent scan that matches the path or is for a path that begins with one of the ancestor dir paths
   const ancestorConditions = ancestors.map(() => "path = ?").join(" OR ");
   const query = `
@@ -31,9 +43,9 @@ export async function getScan(path: string): Promise<ScanDetails | undefined> {
     ORDER BY time DESC
     limit 1
   `;
-  const params: (string)[] = [path0, ...ancestors]
+  const params: (string)[] = [uri0, ...ancestors]
   const stmt = db.prepare<string[], Scan>(query)
   const scan = stmt.get(...params)
   if (!scan) return undefined
-  return scanDetails(path0, scan)
+  return scanDetails(uri0, scan)
 }

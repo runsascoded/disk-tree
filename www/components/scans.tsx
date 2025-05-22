@@ -17,12 +17,15 @@ export function Scans({ scans }: { scans: Scan[] }) {
           </tr>
           </thead>
           <tbody>
-          {scans.map((scan) => (
-            <tr key={scan.id}>
-              <td><Link prefetch href={`/file/${scan.path}`}>{scan.path}</Link></td>
-              <td><Time time={scan.time} now={now}/></td>
-            </tr>
-          ))}
+          {scans.map((scan) => {
+            const href = scan.path.startsWith('s3://') ? `/s3/${scan.path.slice('s3://'.length)}` : `/file/${scan.path}`
+            return (
+              <tr key={scan.id}>
+                <td><Link prefetch href={href}>{scan.path}</Link></td>
+                <td><Time time={scan.time} now={now}/></td>
+              </tr>
+            )
+          })}
           </tbody>
         </table>
       </main>

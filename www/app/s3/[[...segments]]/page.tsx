@@ -1,4 +1,4 @@
-import { getScan } from "./actions"
+import { getScan } from "@/app/file/[[...segments]]/actions"
 import { BreadcrumbsPath, ScanDetails } from "@/components/scan-details"
 import Home from "@/app/page"
 
@@ -9,8 +9,8 @@ export default async function Page(
 ) {
   let { segments } = await params
   segments = (segments ?? []).map(s => decodeURIComponent(s))
-  console.log("file/[[...segments]]:", segments)
-  const uri = segments ? [ '', ...segments ].join('/') : '/'
+  console.log("s3/[[...segments]]:", segments)
+  const uri = `s3://${segments.join('/')}`
   const res = await getScan(uri)
   if (!res) {
     return <div>

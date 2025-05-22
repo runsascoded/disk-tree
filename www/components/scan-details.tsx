@@ -10,9 +10,16 @@ import Link from "next/link"
 import { Fragment } from "react";
 import css from "./scan-details.module.scss"
 
-export function BreadcrumbsPath({ path, }: { path: string }) {
+export function BreadcrumbsPath({ uri, }: { uri: string }) {
+  let ancestorUrlPrefix = `/file`
+  let isS3 = false
+  if (uri.startsWith('s3://')) {
+    ancestorUrlPrefix = '/s3'
+    uri = uri.slice('s3://'.length)
+    isS3 = true
+  }
   const segments = (
-    path
+    uri
       .split('/')
       .filter(Boolean)
       .reduce(
@@ -29,11 +36,15 @@ export function BreadcrumbsPath({ path, }: { path: string }) {
   return <div className="breadcrumbs">
     {segments.map((segment, idx) => {
       return <Fragment key={idx}>
-        <span className={`${css.separator}`}>/</span>
+        {
+          idx === 0 && isS3
+            ? <span className={`${css.separator}`}>s3://</span>
+            : <span className={`${css.separator}`}>/</span>
+        }
         {
           idx + 1 === segments.length
             ? <span className={`${css.current}`}>{basename(segment)}</span>
-            : <Link prefetch href={`/file/${segment}`}>
+            : <Link prefetch href={`${ancestorUrlPrefix}/${segment}`}>
               {basename(segment)}
             </Link>
         }
@@ -46,9 +57,10 @@ export function ScanDetails({ root, children, rows, time }: ScanDetails) {
   const now = new Date()
   const data = [ root, ...rows ]
   const { uri } = root
-  const childUrlPrefix = uri.startsWith('/s3://') ? `s3/${uri.slice('s3://'.length)}` : `/file${uri}`
+  console.log({ root, children, rows, time })
+  const childUrlPrefix = uri.startsWith('s3://') ? `/s3/${uri.slice('s3://'.length)}` : `/file${uri}`
   return <div>
-    <h1><BreadcrumbsPath path={root.uri} /></h1>
+    <h1><BreadcrumbsPath uri={uri} /></h1>
     <div>
       <table className={css.table}>
         <thead>
