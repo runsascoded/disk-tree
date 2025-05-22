@@ -1,7 +1,7 @@
 'use server'
 
-import { Scan } from "./db"
 import { db } from "@/app/db"
+import { Scan } from "./db"
 
 export async function getScans(): Promise<Scan[]> {
   const stmt = db.prepare<[], Scan>(`

@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { PlotParams } from "react-plotly.js";
+import { PlotParams } from "react-plotly.js"
 
 const Plot0 = dynamic(() => import('react-plotly.js'), { ssr: false })
 
@@ -10,7 +10,7 @@ export function Plot(
 ) {
   const event = 'plotly_treemapclick'
   const handler = function(data: any) {
-    console.log('Treemap click event data:', data);
+    console.log('Treemap click event data:', data)
   }
   return <Plot0
     {...props}

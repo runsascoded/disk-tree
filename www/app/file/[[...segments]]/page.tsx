@@ -1,6 +1,6 @@
-import { getScan } from "./actions"
-import { BreadcrumbsPath, ScanDetails } from "@/components/scan-details"
 import Home from "@/app/page"
+import { BreadcrumbsPath, ScanDetails } from "@/components/scan-details"
+import { getScan } from "./actions"
 
 export default async function Page(
   { params }: {

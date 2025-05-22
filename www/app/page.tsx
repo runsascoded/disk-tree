@@ -1,5 +1,5 @@
 import { getScans } from "@/app/actions"
-import { Scans } from "@/components/scans";
+import { Scans } from "@/components/scans"
 
 export default async function Home() {
   const scans = await getScans()
