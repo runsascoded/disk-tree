@@ -1,3 +1,4 @@
+import os
 from contextlib import nullcontext
 from os import getcwd
 
@@ -7,7 +8,7 @@ from disk_tree import time
 from disk_tree.cli.base import cli
 from disk_tree.sqla.db import init
 from humanize import naturalsize
-from utz import err
+from utz import err, iec
 from utz.mem import Tracker
 
 
@@ -39,9 +40,9 @@ def index(
 
     with ctx, time("scan"):
         if no_cache_read:
-            df = Scan.create(url, gc=gc, sudo=sudo)
+            scan, df = Scan.create(url, gc=gc, sudo=sudo)
         else:
-            df = Scan.load_or_create(url, gc=gc, sudo=sudo)
+            scan, df = Scan.load_or_create(url, gc=gc, sudo=sudo)
 
     elapsed = time['scan']
     res = df.set_index('path').loc['.']
@@ -57,3 +58,5 @@ def index(
     for k, v in time.fmt().items():
         print(f"  {k}: {v}s")
     print(f"{n_desc:,} descendents ({elapsed:.3g}s, {round(speed):,d}/s), {naturalsize(size, binary=True, format='%.3g')}")
+    stat = os.stat(scan.blob)
+    print(f"Scan cached path: {scan.blob} ({iec(stat.st_size)})")

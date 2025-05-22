@@ -29,7 +29,7 @@ class Scan(Base):
         scans_dir: str | None = None,
         gc: bool = False,
         sudo: bool = False,
-    ) -> pd.DataFrame:
+    ) -> tuple['Scan', pd.DataFrame]:
         from .db import db
 
         path = os.path.abspath(path).rstrip('/')
@@ -53,7 +53,7 @@ class Scan(Base):
         if gc:
             cls.gc(path, now)
 
-        return df
+        return scan, df
 
     @classmethod
     def gc(
@@ -98,11 +98,11 @@ class Scan(Base):
         scans_dir: str | None = None,
         gc: bool = False,
         sudo: bool = False,
-    ) -> pd.DataFrame:
+    ) -> tuple['Scan', pd.DataFrame]:
         scan = cls.load(path)
         if not scan:
             return cls.create(path, scans_dir, gc=gc, sudo=sudo)
         else:
             df = scan.df()
             cls.gc(path=path, cutoff=scan.time)
-            return df
+            return scan, df
