@@ -34,6 +34,10 @@ export async function scanDetails(uri: string, scan: Scan): Promise<ScanDetails>
   const { id, blob, time } = scan
   console.log(`${uri}: scan ${id}, ${blob}`)
   const file = await asyncBufferFromFile(blob)
+  // let rows = await parquetReadObjects({ file }) as Row[]
+  // console.log(`${uri}: ${rows.length} rows from parquet, prefix ${prefix}`)
+  // rows = (
+  //   rows
   let rows = (
     (await parquetReadObjects({ file }))
       .filter(
