@@ -1,5 +1,9 @@
 from os.path import abspath, dirname
 import sqlite3
+import subprocess
+import threading
+import uuid
+from datetime import datetime
 
 import pandas as pd
 from flask import Flask, jsonify, request, g
@@ -11,6 +15,9 @@ app = Flask(__name__)
 CORS(app)
 
 DB_PATH = abspath(SQLITE_PATH)
+
+# Track in-progress scans: {job_id: {path, status, started, output, error}}
+running_scans: dict[str, dict] = {}
 
 
 def get_db():
@@ -174,6 +181,73 @@ def get_scan():
         'time': scan['time'],
         'scan_path': scan['path'],
     })
+
+
+def run_scan_job(job_id: str, path: str):
+    """Run disk-tree index in background and update job status."""
+    try:
+        running_scans[job_id]['status'] = 'running'
+        result = subprocess.run(
+            ['disk-tree', 'index', path],
+            capture_output=True,
+            text=True,
+        )
+        running_scans[job_id]['output'] = result.stdout
+        running_scans[job_id]['error'] = result.stderr
+        running_scans[job_id]['status'] = 'completed' if result.returncode == 0 else 'failed'
+        running_scans[job_id]['finished'] = datetime.now().isoformat()
+    except Exception as e:
+        running_scans[job_id]['status'] = 'failed'
+        running_scans[job_id]['error'] = str(e)
+        running_scans[job_id]['finished'] = datetime.now().isoformat()
+
+
+@app.route('/api/scan/start', methods=['POST'])
+def start_scan():
+    """Start a new scan for a path.
+
+    JSON body:
+        path: The path or s3:// URI to scan
+    """
+    data = request.get_json() or {}
+    path = data.get('path', '/')
+
+    # Check if already scanning this path
+    for job_id, job in running_scans.items():
+        if job['path'] == path and job['status'] == 'running':
+            return jsonify({'error': 'Scan already in progress', 'job_id': job_id}), 409
+
+    job_id = str(uuid.uuid4())[:8]
+    running_scans[job_id] = {
+        'path': path,
+        'status': 'pending',
+        'started': datetime.now().isoformat(),
+        'output': '',
+        'error': '',
+    }
+
+    thread = threading.Thread(target=run_scan_job, args=(job_id, path))
+    thread.daemon = True
+    thread.start()
+
+    return jsonify({'job_id': job_id, 'path': path, 'status': 'pending'})
+
+
+@app.route('/api/scan/status/<job_id>')
+def scan_status(job_id: str):
+    """Get status of a scan job."""
+    if job_id not in running_scans:
+        return jsonify({'error': 'Job not found'}), 404
+    return jsonify({'job_id': job_id, **running_scans[job_id]})
+
+
+@app.route('/api/scans/running')
+def running_scans_list():
+    """Get list of all running/recent scans."""
+    return jsonify([
+        {'job_id': job_id, **job}
+        for job_id, job in running_scans.items()
+    ])
 
 
 def main():

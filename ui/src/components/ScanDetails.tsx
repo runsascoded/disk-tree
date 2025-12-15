@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { FaFileAlt, FaFolder } from 'react-icons/fa'
+import { Button, CircularProgress, Tooltip } from '@mui/material'
+import { FaFileAlt, FaFolder, FaSync } from 'react-icons/fa'
 import Plot from 'react-plotly.js'
-import { fetchScanDetails } from '../api'
-import type { Row, ScanDetails as ScanDetailsType } from '../api'
+import { fetchScanDetails, startScan, fetchScanStatus } from '../api'
+import type { Row, ScanDetails as ScanDetailsType, ScanJob } from '../api'
 
 function sizeStr(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -74,10 +75,18 @@ function DetailsTable({ root, children, uri, routeType }: {
         <tr>
           <th></th>
           <th>Path</th>
-          <th>Size</th>
-          <th>Modified</th>
-          <th>Children</th>
-          <th>Desc.</th>
+          <Tooltip title="Total size including all nested files and directories">
+            <th>Size</th>
+          </Tooltip>
+          <Tooltip title="Most recent modification time of any file in this directory tree">
+            <th>Modified</th>
+          </Tooltip>
+          <Tooltip title="Number of direct children (files and subdirectories)">
+            <th>Children</th>
+          </Tooltip>
+          <Tooltip title="Total number of descendants (all nested files and directories)">
+            <th>Desc.</th>
+          </Tooltip>
         </tr>
       </thead>
       <tbody>
@@ -150,25 +159,90 @@ export function ScanDetails() {
   const [details, setDetails] = useState<ScanDetailsType | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [scanning, setScanning] = useState(false)
+  const [scanJob, setScanJob] = useState<ScanJob | null>(null)
 
-  useEffect(() => {
+  const loadDetails = () => {
     setLoading(true)
     setError(null)
     fetchScanDetails(uri)
       .then(setDetails)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
+  }
+
+  useEffect(() => {
+    loadDetails()
   }, [uri])
 
+  // Poll scan job status
+  useEffect(() => {
+    if (!scanJob || (scanJob.status !== 'pending' && scanJob.status !== 'running')) return
+
+    const interval = setInterval(async () => {
+      const status = await fetchScanStatus(scanJob.job_id)
+      setScanJob(status)
+      if (status.status === 'completed') {
+        setScanning(false)
+        loadDetails() // Refresh data
+      } else if (status.status === 'failed') {
+        setScanning(false)
+        setError(status.error || 'Scan failed')
+      }
+    }, 2000)
+
+    return () => clearInterval(interval)
+  }, [scanJob])
+
+  const handleRescan = async () => {
+    setScanning(true)
+    try {
+      const job = await startScan(uri)
+      setScanJob(job)
+    } catch (e) {
+      setScanning(false)
+      setError(e instanceof Error ? e.message : 'Failed to start scan')
+    }
+  }
+
   if (loading) return <div>Loading...</div>
-  if (error) return <div>Error: {error}</div>
+  if (error && !details) {
+    return (
+      <div>
+        <p>Error: {error}</p>
+        {error.includes('No scan found') && (
+          <Button
+            variant="contained"
+            onClick={handleRescan}
+            disabled={scanning}
+            startIcon={scanning ? <CircularProgress size={16} /> : <FaSync />}
+          >
+            {scanning ? 'Scanning...' : 'Scan This Path'}
+          </Button>
+        )}
+      </div>
+    )
+  }
   if (!details) return <div>No data</div>
 
   const { root, children, rows } = details
 
   return (
     <div>
-      <h1><Breadcrumbs uri={uri} routeType={routeType} /></h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+        <h1 style={{ margin: 0 }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
+        <Tooltip title="Re-scan this directory to update the cached data">
+          <Button
+            size="small"
+            onClick={handleRescan}
+            disabled={scanning}
+            startIcon={scanning ? <CircularProgress size={14} /> : <FaSync />}
+          >
+            {scanning ? 'Scanning...' : 'Rescan'}
+          </Button>
+        </Tooltip>
+      </div>
+      {error && <p style={{ color: 'red' }}>{error}</p>}
       <DetailsTable root={root} children={children} uri={uri} routeType={routeType} />
       <Treemap root={root} rows={rows} />
     </div>
