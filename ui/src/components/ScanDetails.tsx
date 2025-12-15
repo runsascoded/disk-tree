@@ -278,7 +278,8 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
         branchvalues: 'total',
         ids: data.map(r => r.path),
         labels: data.map(r => r.path.split('/').pop() || r.path),
-        parents: data.map(r => r.path === '.' ? '' : (r.parent ?? '.')),
+        // Root has no parent (''), all children should reference '.' as parent
+        parents: data.map(r => r.path === '.' ? '' : (r.parent || '.')),
         values: data.map(r => r.size),
         text: data.map(r => sizeStr(r.size)),
         texttemplate: '%{label}<br>%{text}',
@@ -315,6 +316,8 @@ export function ScanDetails() {
   const [childJobs, setChildJobs] = useState<Map<string, ScanJob>>(new Map())
   const [sorts, setSorts] = useState<SortSpec[]>([{ key: 'size', dir: 'desc' }])
   const [deletingPaths, setDeletingPaths] = useState<Set<string>>(new Set())
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(50)
 
   const handleSort = (key: SortKey) => {
     setSorts(prev => {
@@ -377,6 +380,17 @@ export function ScanDetails() {
       return 0
     })
   }, [details, sorts])
+
+  const totalPages = Math.ceil(sortedChildren.length / pageSize)
+  const paginatedChildren = useMemo(() => {
+    const start = page * pageSize
+    return sortedChildren.slice(start, start + pageSize)
+  }, [sortedChildren, page, pageSize])
+
+  // Reset page when sort changes or data reloads
+  useEffect(() => {
+    setPage(0)
+  }, [sorts, details])
 
   const loadDetails = () => {
     setLoading(true)
@@ -514,7 +528,7 @@ export function ScanDetails() {
       {error && <p style={{ color: 'red' }}>{error}</p>}
       <DetailsTable
         root={root}
-        children={sortedChildren}
+        children={paginatedChildren}
         uri={uri}
         routeType={routeType}
         onScanChild={handleScanChild}
@@ -528,6 +542,37 @@ export function ScanDetails() {
         onDelete={handleDelete}
         deletingPaths={deletingPaths}
       />
+      {sortedChildren.length > pageSize && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem', fontSize: '0.85rem' }}>
+          <span style={{ opacity: 0.7 }}>
+            {page * pageSize + 1}-{Math.min((page + 1) * pageSize, sortedChildren.length)} of {sortedChildren.length}
+          </span>
+          <div style={{ display: 'flex', gap: '0.25rem' }}>
+            <Button size="small" disabled={page === 0} onClick={() => setPage(0)} sx={{ minWidth: 0, padding: '2px 6px' }}>
+              &laquo;
+            </Button>
+            <Button size="small" disabled={page === 0} onClick={() => setPage(p => p - 1)} sx={{ minWidth: 0, padding: '2px 6px' }}>
+              &lsaquo;
+            </Button>
+            <Button size="small" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)} sx={{ minWidth: 0, padding: '2px 6px' }}>
+              &rsaquo;
+            </Button>
+            <Button size="small" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)} sx={{ minWidth: 0, padding: '2px 6px' }}>
+              &raquo;
+            </Button>
+          </div>
+          <select
+            value={pageSize}
+            onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
+            style={{ padding: '2px 4px', fontSize: '0.85rem' }}
+          >
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={250}>250</option>
+          </select>
+        </div>
+      )}
       {rows.length > 0 && <Treemap root={root} rows={rows} />}
     </div>
   )
