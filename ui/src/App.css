@@ -12,13 +12,14 @@ h1 {
 table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 th, td {
-  padding: 0.5rem;
+  padding: 0.25rem 0.5rem;
   text-align: left;
   border-bottom: 1px solid var(--border-color, #eee);
+  white-space: nowrap;
 }
 
 th {
