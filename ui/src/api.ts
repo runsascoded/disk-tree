@@ -76,3 +76,23 @@ export async function fetchRunningScans(): Promise<ScanJob[]> {
   if (!res.ok) throw new Error('Failed to fetch running scans')
   return res.json()
 }
+
+export type DeleteResult = {
+  success: boolean
+  path: string
+  deleted_size: number
+  deleted_n_desc: number
+}
+
+export async function deletePath(path: string): Promise<DeleteResult> {
+  const res = await fetch('/api/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.error || 'Failed to delete')
+  }
+  return res.json()
+}
