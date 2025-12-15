@@ -108,13 +108,31 @@ function scanTimeAgo(scanTime: string | undefined): string {
   return `${days}d ago`
 }
 
-function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths }: {
+function ChildScanStatus({ row, scanStatus }: { row: Row; scanStatus: 'full' | 'partial' | 'none' }) {
+  // If parent was fully scanned, children inherit that scan
+  if (scanStatus === 'full' && !row.scan_time) {
+    return <span style={{ opacity: 0.6 }}>via parent</span>
+  }
+  if (row.scanned === 'partial') {
+    return <span style={{ color: '#ff9800' }}>partial</span>
+  }
+  if (row.scan_time) {
+    return <span>{scanTimeAgo(row.scan_time)}</span>
+  }
+  return <span style={{ opacity: 0.4 }}>-</span>
+}
+
+function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning }: {
   root: Row
   children: Row[]
   uri: string
   routeType: RouteType
   onScanChild: (path: string) => void
   scanningPaths: Set<string>
+  scanStatus: 'full' | 'partial' | 'none'
+  scanTime: string | null
+  onRescan: () => void
+  isScanning: boolean
 }) {
   const prefix = routeType === 's3' ? `/s3/${uri.replace('s3://', '')}` : `/file${uri}`
   return (
@@ -149,14 +167,32 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           <td>{timeAgo(root.mtime)}</td>
           <td>{root.n_children?.toLocaleString()}</td>
           <td>{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
-          <td></td>
-          <td></td>
+          <td>
+            <ScanStatusChip status={scanStatus} />
+            {scanStatus === 'full' && scanTime && (
+              <span style={{ marginLeft: 8, opacity: 0.7 }}>{scanTimeAgo(scanTime)}</span>
+            )}
+          </td>
+          <td>
+            <Tooltip title={scanStatus === 'full' ? 'Rescan this directory' : 'Scan this directory'}>
+              <span>
+                <Button
+                  size="small"
+                  onClick={onRescan}
+                  disabled={isScanning}
+                  sx={{ minWidth: 0, padding: '2px 8px' }}
+                >
+                  {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
+                </Button>
+              </span>
+            </Tooltip>
+          </td>
         </tr>
         {children.map(row => {
           const childUri = row.uri
-          const isScanning = scanningPaths.has(childUri)
+          const isChildScanning = scanningPaths.has(childUri)
           return (
-            <tr key={row.path} style={{ opacity: row.scanned ? 1 : 0.6 }}>
+            <tr key={row.path} style={{ opacity: row.scanned || scanStatus === 'full' ? 1 : 0.6 }}>
               <td><RowIcon row={row} /></td>
               <td>
                 <Link to={`${prefix}/${row.path}`}>
@@ -167,8 +203,8 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               <td>{timeAgo(row.mtime)}</td>
               <td>{row.n_children ? row.n_children.toLocaleString() : null}</td>
               <td>{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
-              <td style={{ color: row.scanned === 'partial' ? '#ff9800' : undefined }}>
-                {row.scanned === 'partial' ? 'partial' : scanTimeAgo(row.scan_time)}
+              <td>
+                <ChildScanStatus row={row} scanStatus={scanStatus} />
               </td>
               <td>
                 {row.kind === 'dir' && (
@@ -177,10 +213,10 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                       <Button
                         size="small"
                         onClick={() => onScanChild(childUri)}
-                        disabled={isScanning}
+                        disabled={isChildScanning}
                         sx={{ minWidth: 0, padding: '2px 8px' }}
                       >
-                        {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
+                        {isChildScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
                       </Button>
                     </span>
                   </Tooltip>
@@ -347,24 +383,11 @@ export function ScanDetails() {
   }
   if (!details) return <div>No data</div>
 
-  const { root, children, rows, scan_status } = details
+  const { root, children, rows, scan_status, time } = details
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0 }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
-        <ScanStatusChip status={scan_status} />
-        <Tooltip title="Scan this directory to get accurate size and file counts">
-          <Button
-            size="small"
-            onClick={handleRescan}
-            disabled={scanning}
-            startIcon={scanning ? <CircularProgress size={14} /> : <FaSync />}
-          >
-            {scanning ? 'Scanning...' : (scan_status === 'full' ? 'Rescan' : 'Scan')}
-          </Button>
-        </Tooltip>
-      </div>
+      <h1 style={{ marginBottom: '1rem' }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
       {error && <p style={{ color: 'red' }}>{error}</p>}
       <DetailsTable
         root={root}
@@ -373,6 +396,10 @@ export function ScanDetails() {
         routeType={routeType}
         onScanChild={handleScanChild}
         scanningPaths={scanningPaths}
+        scanStatus={scan_status}
+        scanTime={time}
+        onRescan={handleRescan}
+        isScanning={scanning}
       />
       {rows.length > 0 && <Treemap root={root} rows={rows} />}
     </div>
