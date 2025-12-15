@@ -1,5 +1,6 @@
-from os import listdir, stat
+from os import listdir, remove, stat
 from os.path import abspath, dirname, isdir, isfile, join
+import shutil
 import sqlite3
 import subprocess
 import threading
@@ -389,6 +390,138 @@ def running_scans_list():
         {'job_id': job_id, **job}
         for job_id, job in running_scans.items()
     ])
+
+
+def update_parent_scans_after_delete(deleted_path: str, deleted_size: int, deleted_n_desc: int):
+    """Update all ancestor scans to subtract the deleted item's size and descendants."""
+    db = get_db()
+
+    # Find all scans that are ancestors of the deleted path
+    cursor = db.execute('SELECT id, path, blob FROM scan')
+    for row in cursor:
+        scan_path = row['path']
+        # Check if this scan is an ancestor of the deleted path
+        if deleted_path.startswith(scan_path + '/') or deleted_path == scan_path:
+            blob_path = row['blob']
+            try:
+                df = pd.read_parquet(blob_path)
+
+                # Calculate the relative path within this scan
+                if scan_path == deleted_path:
+                    rel_path = '.'
+                else:
+                    rel_path = deleted_path[len(scan_path) + 1:]
+
+                # Find the row for the deleted item and all its ancestors
+                # First, mark the deleted item's row (and descendants) for removal
+                deleted_mask = (df['path'] == rel_path) | df['path'].str.startswith(rel_path + '/')
+
+                if not deleted_mask.any():
+                    continue
+
+                # Get the deleted rows to calculate totals
+                deleted_rows = df[deleted_mask]
+                total_deleted_size = deleted_rows[deleted_rows['path'] == rel_path]['size'].sum()
+                total_deleted_n_desc = len(deleted_rows)
+
+                # Remove the deleted rows
+                df = df[~deleted_mask].copy()
+
+                # Update all ancestor directories
+                path_parts = rel_path.split('/')
+                for i in range(len(path_parts)):
+                    if i == 0:
+                        ancestor_path = '.'
+                    else:
+                        ancestor_path = '/'.join(path_parts[:i])
+                        if not ancestor_path:
+                            ancestor_path = '.'
+
+                    ancestor_mask = df['path'] == ancestor_path
+                    if ancestor_mask.any():
+                        df.loc[ancestor_mask, 'size'] -= total_deleted_size
+                        df.loc[ancestor_mask, 'n_desc'] -= total_deleted_n_desc
+                        # Decrement n_children only for direct parent
+                        if i == len(path_parts) - 1 or (i == 0 and '/' not in rel_path):
+                            df.loc[ancestor_mask, 'n_children'] -= 1
+
+                # Also update the root '.' entry
+                root_mask = df['path'] == '.'
+                if root_mask.any() and rel_path != '.':
+                    # Size and n_desc already updated if '.' was in ancestors
+                    pass
+
+                # Save updated parquet
+                df.to_parquet(blob_path, index=False)
+
+            except Exception as e:
+                print(f"Error updating scan {scan_path}: {e}")
+                continue
+
+
+@app.route('/api/delete', methods=['POST'])
+def delete_path():
+    """Delete a file or directory.
+
+    JSON body:
+        path: The absolute path to delete
+    """
+    data = request.get_json() or {}
+    path = data.get('path')
+
+    if not path:
+        return jsonify({'error': 'Path is required'}), 400
+
+    # Security: only allow deleting within user's home directory or specific paths
+    # For now, require absolute paths and check they exist
+    if not path.startswith('/'):
+        return jsonify({'error': 'Path must be absolute'}), 400
+
+    if not isfile(path) and not isdir(path):
+        return jsonify({'error': 'Path does not exist'}), 404
+
+    # Get size before deletion for updating scans
+    try:
+        if isfile(path):
+            deleted_size = stat(path).st_size
+            deleted_n_desc = 1
+        else:
+            # For directories, we need to calculate total size
+            deleted_size = 0
+            deleted_n_desc = 0
+            for root, dirs, files in __import__('os').walk(path):
+                deleted_n_desc += len(files) + len(dirs)
+                for f in files:
+                    try:
+                        deleted_size += stat(join(root, f)).st_size
+                    except (OSError, PermissionError):
+                        pass
+            deleted_n_desc += 1  # Include the directory itself
+    except (OSError, PermissionError) as e:
+        return jsonify({'error': f'Cannot access path: {e}'}), 403
+
+    # Perform the deletion
+    try:
+        if isfile(path):
+            remove(path)
+        else:
+            shutil.rmtree(path)
+    except (OSError, PermissionError) as e:
+        return jsonify({'error': f'Failed to delete: {e}'}), 500
+
+    # Update parent scans
+    try:
+        update_parent_scans_after_delete(path, deleted_size, deleted_n_desc)
+    except Exception as e:
+        # Deletion succeeded but scan update failed - log but don't fail the request
+        print(f"Warning: Failed to update scans after deletion: {e}")
+
+    return jsonify({
+        'success': True,
+        'path': path,
+        'deleted_size': deleted_size,
+        'deleted_n_desc': deleted_n_desc,
+    })
 
 
 def main():

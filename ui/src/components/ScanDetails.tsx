@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Button, CircularProgress, Tooltip } from '@mui/material'
-import { FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown } from 'react-icons/fa'
+import { FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash } from 'react-icons/fa'
 import Plot from 'react-plotly.js'
-import { fetchScanDetails, startScan, fetchScanStatus } from '../api'
+import { fetchScanDetails, startScan, fetchScanStatus, deletePath } from '../api'
 import type { Row, ScanDetails as ScanDetailsType, ScanJob } from '../api'
 
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
@@ -143,7 +143,7 @@ function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanSt
   return <span style={{ opacity: 0.4 }}>-</span>
 }
 
-function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort }: {
+function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths }: {
   root: Row
   children: Row[]
   uri: string
@@ -156,6 +156,8 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   isScanning: boolean
   sorts: SortSpec[]
   onSort: (key: SortKey) => void
+  onDelete: (path: string) => void
+  deletingPaths: Set<string>
 }) {
   const prefix = routeType === 's3' ? `/s3/${uri.replace('s3://', '')}` : `/file${uri}`
   return (
@@ -169,6 +171,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           <SortableHeader label="Children" sortKey="n_children" sorts={sorts} onSort={onSort} tooltip="Number of direct children (files and subdirectories)" />
           <SortableHeader label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
           <SortableHeader label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
+          <th></th>
           <th></th>
         </tr>
       </thead>
@@ -200,13 +203,14 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   size="small"
                   onClick={onRescan}
                   disabled={isScanning}
-                  sx={{ minWidth: 0, padding: '2px 8px' }}
+                  sx={{ minWidth: 0, padding: '2px 4px' }}
                 >
                   {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
                 </Button>
               </span>
             </Tooltip>
           </td>
+          <td></td>
         </tr>
         {children.map(row => {
           const childUri = row.uri
@@ -234,13 +238,27 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                         size="small"
                         onClick={() => onScanChild(childUri)}
                         disabled={isChildScanning}
-                        sx={{ minWidth: 0, padding: '2px 8px' }}
+                        sx={{ minWidth: 0, padding: '2px 4px' }}
                       >
                         {isChildScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
                       </Button>
                     </span>
                   </Tooltip>
                 )}
+              </td>
+              <td>
+                <Tooltip title={`Delete ${row.kind === 'dir' ? 'directory' : 'file'}`}>
+                  <span>
+                    <Button
+                      size="small"
+                      onClick={() => onDelete(childUri)}
+                      disabled={deletingPaths.has(childUri)}
+                      sx={{ minWidth: 0, padding: '2px 4px', color: '#d32f2f' }}
+                    >
+                      {deletingPaths.has(childUri) ? <CircularProgress size={14} /> : <FaTrash size={12} />}
+                    </Button>
+                  </span>
+                </Tooltip>
               </td>
             </tr>
           )
@@ -296,6 +314,7 @@ export function ScanDetails() {
   const [scanJob, setScanJob] = useState<ScanJob | null>(null)
   const [childJobs, setChildJobs] = useState<Map<string, ScanJob>>(new Map())
   const [sorts, setSorts] = useState<SortSpec[]>([{ key: 'size', dir: 'desc' }])
+  const [deletingPaths, setDeletingPaths] = useState<Set<string>>(new Set())
 
   const handleSort = (key: SortKey) => {
     setSorts(prev => {
@@ -440,6 +459,27 @@ export function ScanDetails() {
     }
   }
 
+  const handleDelete = async (path: string) => {
+    const name = path.split('/').pop() || path
+    if (!confirm(`Delete "${name}"? This cannot be undone.`)) {
+      return
+    }
+
+    setDeletingPaths(prev => new Set(prev).add(path))
+    try {
+      await deletePath(path)
+      loadDetails() // Refresh to show updated data
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete')
+    } finally {
+      setDeletingPaths(prev => {
+        const next = new Set(prev)
+        next.delete(path)
+        return next
+      })
+    }
+  }
+
   const scanningPaths = new Set(
     Array.from(childJobs.entries())
       .filter(([, job]) => job.status === 'pending' || job.status === 'running')
@@ -485,6 +525,8 @@ export function ScanDetails() {
         isScanning={scanning}
         sorts={sorts}
         onSort={handleSort}
+        onDelete={handleDelete}
+        deletingPaths={deletingPaths}
       />
       {rows.length > 0 && <Treemap root={root} rows={rows} />}
     </div>
