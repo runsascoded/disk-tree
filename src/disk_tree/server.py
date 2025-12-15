@@ -250,7 +250,8 @@ def get_scan():
     if scan['path'] == uri:
         # Exact match - use '.' as root
         root_mask = df['path'] == '.'
-        children_mask = df['parent'] == '.'
+        # Direct children have parent='.' (dirs) or parent='' (files)
+        children_mask = (df['parent'] == '.') | ((df['parent'] == '') & (df['path'] != '.'))
     else:
         # Scan is an ancestor - filter by URI
         root_mask = df['uri'] == uri
@@ -284,7 +285,8 @@ def get_scan():
 
         df['depth'] = df['path'].apply(get_depth)
         children_df = df[(df['depth'] > 0) & (df['depth'] <= depth)]
-        direct_children_df = df[df['parent'] == '.']
+        # Direct children have parent='.' (dirs) or parent='' (files)
+        direct_children_df = df[(df['parent'] == '.') | ((df['parent'] == '') & (df['path'] != '.'))]
     else:
         # Filter by relative path depth
         def get_rel_depth(rel_path):
