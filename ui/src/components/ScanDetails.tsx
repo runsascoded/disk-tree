@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Button, Chip, CircularProgress, Tooltip } from '@mui/material'
+import { Button, CircularProgress, Tooltip } from '@mui/material'
 import { FaFileAlt, FaFolder, FaFolderOpen, FaSync } from 'react-icons/fa'
 import Plot from 'react-plotly.js'
 import { fetchScanDetails, startScan, fetchScanStatus } from '../api'
@@ -31,28 +31,6 @@ function timeAgo(timestamp: number | null): string {
   if (months < 12) return `${months}mo ago`
   const years = Math.floor(months / 12)
   return `${years}y ago`
-}
-
-function ScanStatusChip({ status }: { status: 'full' | 'partial' | 'none' }) {
-  if (status === 'full') {
-    return (
-      <Tooltip title="This directory has been fully scanned">
-        <Chip label="Scanned" color="success" size="small" />
-      </Tooltip>
-    )
-  }
-  if (status === 'partial') {
-    return (
-      <Tooltip title="Some subdirectories have been scanned, but not this directory itself">
-        <Chip label="Partial" color="warning" size="small" />
-      </Tooltip>
-    )
-  }
-  return (
-    <Tooltip title="This directory has not been scanned yet">
-      <Chip label="Not scanned" color="default" size="small" />
-    </Tooltip>
-  )
 }
 
 type RouteType = 'file' | 's3'
@@ -108,10 +86,10 @@ function scanTimeAgo(scanTime: string | undefined): string {
   return `${days}d ago`
 }
 
-function ChildScanStatus({ row, scanStatus }: { row: Row; scanStatus: 'full' | 'partial' | 'none' }) {
-  // If parent was fully scanned, children inherit that scan
-  if (scanStatus === 'full' && !row.scan_time) {
-    return <span style={{ opacity: 0.6 }}>via parent</span>
+function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanStatus: 'full' | 'partial' | 'none'; parentScanTime: string | null }) {
+  // If parent was fully scanned, children inherit that scan time (shown grayed)
+  if (scanStatus === 'full' && !row.scan_time && parentScanTime) {
+    return <span style={{ opacity: 0.5 }}>{scanTimeAgo(parentScanTime)}</span>
   }
   if (row.scanned === 'partial') {
     return <span style={{ color: '#ff9800' }}>partial</span>
@@ -168,9 +146,16 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           <td>{root.n_children?.toLocaleString()}</td>
           <td>{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
           <td>
-            <ScanStatusChip status={scanStatus} />
-            {scanStatus === 'full' && scanTime && (
-              <span style={{ marginLeft: 8, opacity: 0.7 }}>{scanTimeAgo(scanTime)}</span>
+            {scanStatus === 'full' && scanTime ? (
+              <span>{scanTimeAgo(scanTime)}</span>
+            ) : scanStatus === 'partial' ? (
+              <Tooltip title="Some subdirectories have been scanned, but not this directory itself">
+                <span style={{ color: '#ff9800' }}>partial</span>
+              </Tooltip>
+            ) : (
+              <Tooltip title="This directory has not been scanned yet">
+                <span style={{ opacity: 0.4 }}>-</span>
+              </Tooltip>
             )}
           </td>
           <td>
@@ -204,7 +189,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               <td>{row.n_children ? row.n_children.toLocaleString() : null}</td>
               <td>{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
               <td>
-                <ChildScanStatus row={row} scanStatus={scanStatus} />
+                <ChildScanStatus row={row} scanStatus={scanStatus} parentScanTime={scanTime} />
               </td>
               <td>
                 {row.kind === 'dir' && (
