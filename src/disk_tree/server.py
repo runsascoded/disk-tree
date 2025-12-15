@@ -106,6 +106,68 @@ def get_scan():
                 test_path = dirname(test_path) if test_path != '/' else None
 
     if not scan:
+        # No ancestor scan - look for child scans that could form a virtual directory
+        prefix = search_path.rstrip('/') + '/'
+        cursor = db.execute('''
+            SELECT path, time, blob FROM scan
+            WHERE path LIKE ?
+            GROUP BY path
+            HAVING time = MAX(time)
+            ORDER BY path
+        ''', (prefix + '%',))
+        child_scans = cursor.fetchall()
+
+        if child_scans:
+            # Build a virtual directory from child scans
+            children = []
+            for child in child_scans:
+                child_path = child['path']
+                # Get the immediate child name (first path segment after prefix)
+                rel = child_path[len(prefix):]
+                immediate = rel.split('/')[0]
+                # Load the parquet to get the root row's stats
+                df = pd.read_parquet(child['blob'])
+                root_row = df[df['path'] == '.'].iloc[0]
+                children.append({
+                    'path': immediate,
+                    'uri': prefix + immediate,
+                    'size': int(root_row['size']),
+                    'mtime': int(root_row['mtime']),
+                    'kind': 'dir',
+                    'n_children': int(root_row.get('n_children', 0)),
+                    'n_desc': int(root_row.get('n_desc', 0)),
+                })
+
+            # Dedupe by immediate child name (keep largest)
+            seen = {}
+            for c in children:
+                if c['path'] not in seen or c['size'] > seen[c['path']]['size']:
+                    seen[c['path']] = c
+            children = sorted(seen.values(), key=lambda x: -x['size'])
+
+            # Create a virtual root
+            total_size = sum(c['size'] for c in children)
+            max_mtime = max(c['mtime'] for c in children)
+            total_desc = sum(c['n_desc'] for c in children)
+
+            return jsonify({
+                'root': {
+                    'path': '.',
+                    'uri': search_path,
+                    'size': total_size,
+                    'mtime': max_mtime,
+                    'kind': 'dir',
+                    'n_children': len(children),
+                    'n_desc': total_desc,
+                    'parent': None,
+                },
+                'children': children,
+                'rows': children,
+                'time': None,
+                'scan_path': None,
+                'virtual': True,
+            })
+
         return jsonify({'error': 'No scan found for path', 'uri': uri}), 404
 
     # Load parquet
