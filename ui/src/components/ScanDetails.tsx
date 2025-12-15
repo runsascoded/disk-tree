@@ -165,6 +165,7 @@ export function ScanDetails() {
   const loadDetails = () => {
     setLoading(true)
     setError(null)
+    setDetails(null) // Clear previous data when loading new URI
     fetchScanDetails(uri)
       .then(setDetails)
       .catch(e => setError(e.message))
