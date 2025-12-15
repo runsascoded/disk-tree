@@ -93,11 +93,28 @@ function RowIcon({ row }: { row: Row }) {
   return <FaFolder style={{ opacity: 0.5 }} />
 }
 
-function DetailsTable({ root, children, uri, routeType }: {
+function scanTimeAgo(scanTime: string | undefined): string {
+  if (!scanTime) return '-'
+  const date = new Date(scanTime)
+  const now = new Date()
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
+
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
+function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths }: {
   root: Row
   children: Row[]
   uri: string
   routeType: RouteType
+  onScanChild: (path: string) => void
+  scanningPaths: Set<string>
 }) {
   const prefix = routeType === 's3' ? `/s3/${uri.replace('s3://', '')}` : `/file${uri}`
   return (
@@ -118,6 +135,10 @@ function DetailsTable({ root, children, uri, routeType }: {
           <Tooltip title="Total number of descendants (all nested files and directories)">
             <th>Desc.</th>
           </Tooltip>
+          <Tooltip title="When this directory was last scanned">
+            <th>Scanned</th>
+          </Tooltip>
+          <th></th>
         </tr>
       </thead>
       <tbody>
@@ -128,21 +149,46 @@ function DetailsTable({ root, children, uri, routeType }: {
           <td>{timeAgo(root.mtime)}</td>
           <td>{root.n_children?.toLocaleString()}</td>
           <td>{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
+          <td></td>
+          <td></td>
         </tr>
-        {children.map(row => (
-          <tr key={row.path} style={{ opacity: row.scanned ? 1 : 0.6 }}>
-            <td><RowIcon row={row} /></td>
-            <td>
-              <Link to={`${prefix}/${row.path}`}>
-                <code>{row.path}</code>
-              </Link>
-            </td>
-            <td>{sizeStr(row.size)}</td>
-            <td>{timeAgo(row.mtime)}</td>
-            <td>{row.n_children ? row.n_children.toLocaleString() : null}</td>
-            <td>{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
-          </tr>
-        ))}
+        {children.map(row => {
+          const childUri = row.uri
+          const isScanning = scanningPaths.has(childUri)
+          return (
+            <tr key={row.path} style={{ opacity: row.scanned ? 1 : 0.6 }}>
+              <td><RowIcon row={row} /></td>
+              <td>
+                <Link to={`${prefix}/${row.path}`}>
+                  <code>{row.path}</code>
+                </Link>
+              </td>
+              <td>{sizeStr(row.size)}</td>
+              <td>{timeAgo(row.mtime)}</td>
+              <td>{row.n_children ? row.n_children.toLocaleString() : null}</td>
+              <td>{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
+              <td style={{ color: row.scanned === 'partial' ? '#ff9800' : undefined }}>
+                {row.scanned === 'partial' ? 'partial' : scanTimeAgo(row.scan_time)}
+              </td>
+              <td>
+                {row.kind === 'dir' && (
+                  <Tooltip title={row.scanned ? 'Rescan this directory' : 'Scan this directory'}>
+                    <span>
+                      <Button
+                        size="small"
+                        onClick={() => onScanChild(childUri)}
+                        disabled={isScanning}
+                        sx={{ minWidth: 0, padding: '2px 8px' }}
+                      >
+                        {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                )}
+              </td>
+            </tr>
+          )
+        })}
       </tbody>
     </table>
   )
@@ -192,6 +238,7 @@ export function ScanDetails() {
   const [error, setError] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [scanJob, setScanJob] = useState<ScanJob | null>(null)
+  const [childJobs, setChildJobs] = useState<Map<string, ScanJob>>(new Map())
 
   const loadDetails = () => {
     setLoading(true)
@@ -207,7 +254,7 @@ export function ScanDetails() {
     loadDetails()
   }, [uri])
 
-  // Poll scan job status
+  // Poll scan job status (main scan)
   useEffect(() => {
     if (!scanJob || (scanJob.status !== 'pending' && scanJob.status !== 'running')) return
 
@@ -226,6 +273,34 @@ export function ScanDetails() {
     return () => clearInterval(interval)
   }, [scanJob])
 
+  // Poll child scan jobs
+  useEffect(() => {
+    const activeJobs = Array.from(childJobs.entries()).filter(
+      ([, job]) => job.status === 'pending' || job.status === 'running'
+    )
+    if (activeJobs.length === 0) return
+
+    const interval = setInterval(async () => {
+      const updates = new Map(childJobs)
+      let anyCompleted = false
+
+      for (const [path, job] of activeJobs) {
+        const status = await fetchScanStatus(job.job_id)
+        updates.set(path, status)
+        if (status.status === 'completed') {
+          anyCompleted = true
+        }
+      }
+
+      setChildJobs(updates)
+      if (anyCompleted) {
+        loadDetails() // Refresh to show updated scan data
+      }
+    }, 2000)
+
+    return () => clearInterval(interval)
+  }, [childJobs])
+
   const handleRescan = async () => {
     setScanning(true)
     try {
@@ -236,6 +311,21 @@ export function ScanDetails() {
       setError(e instanceof Error ? e.message : 'Failed to start scan')
     }
   }
+
+  const handleScanChild = async (childPath: string) => {
+    try {
+      const job = await startScan(childPath)
+      setChildJobs(prev => new Map(prev).set(childPath, job))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start scan')
+    }
+  }
+
+  const scanningPaths = new Set(
+    Array.from(childJobs.entries())
+      .filter(([, job]) => job.status === 'pending' || job.status === 'running')
+      .map(([path]) => path)
+  )
 
   if (loading) return <div>Loading...</div>
   if (error && !details) {
@@ -276,7 +366,14 @@ export function ScanDetails() {
         </Tooltip>
       </div>
       {error && <p style={{ color: 'red' }}>{error}</p>}
-      <DetailsTable root={root} children={children} uri={uri} routeType={routeType} />
+      <DetailsTable
+        root={root}
+        children={children}
+        uri={uri}
+        routeType={routeType}
+        onScanChild={handleScanChild}
+        scanningPaths={scanningPaths}
+      />
       {rows.length > 0 && <Treemap root={root} rows={rows} />}
     </div>
   )
