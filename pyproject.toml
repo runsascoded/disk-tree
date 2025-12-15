@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "click",
     "flask",
+    "flask-cors",
     "flask-sqlalchemy",
     "humanize",
     "kaleido",
@@ -32,6 +33,7 @@ mem = [
 
 [project.scripts]
 disk-tree = "disk_tree.cli.main:cli"
+disk-tree-server = "disk_tree.server:main"
 
 [dependency-groups]
 dev = [

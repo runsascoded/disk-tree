@@ -1,0 +1,184 @@
+from os.path import abspath, dirname
+import sqlite3
+
+import pandas as pd
+from flask import Flask, jsonify, request, g
+from flask_cors import CORS
+
+from disk_tree.config import SQLITE_PATH
+
+app = Flask(__name__)
+CORS(app)
+
+DB_PATH = abspath(SQLITE_PATH)
+
+
+def get_db():
+    """Get database connection for current request."""
+    if 'db' not in g:
+        g.db = sqlite3.connect(DB_PATH)
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+
+@app.teardown_appcontext
+def close_db(error):
+    """Close database connection at end of request."""
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
+
+
+@app.route('/api/scans')
+def get_scans():
+    """Return list of most recent scan per path."""
+    db = get_db()
+    # Get most recent scan for each path
+    cursor = db.execute('''
+        SELECT s.*
+        FROM scan s
+        INNER JOIN (
+            SELECT path, MAX(time) as max_time
+            FROM scan
+            GROUP BY path
+        ) latest ON s.path = latest.path AND s.time = latest.max_time
+        ORDER BY s.time DESC
+    ''')
+    result = []
+    for row in cursor:
+        result.append({
+            'id': row['id'],
+            'path': row['path'],
+            'time': row['time'],
+            'blob': row['blob'],
+        })
+    return jsonify(result)
+
+
+@app.route('/api/scan')
+def get_scan():
+    """Return scan details for a given URI.
+
+    Query params:
+        uri: The path or s3:// URI to look up
+        depth: Max depth of children to return (default 2)
+    """
+    uri = request.args.get('uri', '/')
+    depth = int(request.args.get('depth', 2))
+
+    # Normalize URI
+    uri = uri.rstrip('/')
+    if not uri:
+        uri = '/'
+
+    # Find the best matching scan (exact match or ancestor)
+    if uri.startswith('s3://'):
+        search_path = uri
+    else:
+        search_path = uri if uri.startswith('/') else f'/{uri}'
+
+    # Try exact match first, then ancestors
+    db = get_db()
+    scan = None
+    test_path = search_path
+    while test_path:
+        cursor = db.execute(
+            'SELECT * FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1',
+            (test_path,)
+        )
+        row = cursor.fetchone()
+        if row:
+            scan = dict(row)
+            break
+        # Go up one directory
+        if test_path == '/' or test_path == 's3://':
+            break
+        test_path = dirname(test_path)
+        if not test_path or test_path == test_path.rstrip('/'):
+            if not test_path.startswith('s3://'):
+                test_path = dirname(test_path) if test_path != '/' else None
+
+    if not scan:
+        return jsonify({'error': 'No scan found for path', 'uri': uri}), 404
+
+    # Load parquet
+    df = pd.read_parquet(scan['blob'])
+
+    # Filter to requested URI prefix
+    prefix = uri.rstrip('/') + '/'
+    if scan['path'] == uri:
+        # Exact match - use '.' as root
+        root_mask = df['path'] == '.'
+        children_mask = df['parent'] == '.'
+    else:
+        # Scan is an ancestor - filter by URI
+        root_mask = df['uri'] == uri
+        children_mask = df['uri'].str.startswith(prefix)
+
+        # Recompute relative paths
+        def make_relative(row):
+            if row['uri'] == uri:
+                return '.'
+            elif row['uri'].startswith(prefix):
+                return row['uri'][len(prefix):]
+            return row['path']
+
+        df = df.copy()
+        df['rel_path'] = df.apply(make_relative, axis=1)
+    root_row = df[root_mask]
+    if root_row.empty:
+        return jsonify({'error': 'URI not found in scan', 'uri': uri, 'scan_path': scan['path']}), 404
+
+    root = root_row.iloc[0].to_dict()
+    root['path'] = '.'
+    root['parent'] = None
+
+    # Get children up to requested depth
+    if scan['path'] == uri:
+        # Filter by path depth
+        def get_depth(path):
+            if path == '.':
+                return 0
+            return path.count('/') + 1
+
+        df['depth'] = df['path'].apply(get_depth)
+        children_df = df[(df['depth'] > 0) & (df['depth'] <= depth)]
+        direct_children_df = df[df['parent'] == '.']
+    else:
+        # Filter by relative path depth
+        def get_rel_depth(rel_path):
+            if rel_path == '.':
+                return 0
+            return rel_path.count('/') + 1
+
+        df['depth'] = df['rel_path'].apply(get_rel_depth)
+        children_df = df[(df['depth'] > 0) & (df['depth'] <= depth)]
+        direct_children_df = df[df['depth'] == 1]
+
+    # Convert to list of dicts, handling numpy types
+    def row_to_dict(row):
+        d = row.to_dict()
+        # Convert numpy types to Python types
+        for k, v in d.items():
+            if hasattr(v, 'item'):
+                d[k] = v.item()
+        return d
+
+    children = [row_to_dict(row) for _, row in direct_children_df.iterrows()]
+    rows = [row_to_dict(row) for _, row in children_df.iterrows()]
+
+    return jsonify({
+        'root': root,
+        'children': sorted(children, key=lambda x: -x.get('size', 0)),
+        'rows': rows,
+        'time': scan['time'],
+        'scan_path': scan['path'],
+    })
+
+
+def main():
+    app.run(debug=True, port=5001)
+
+
+if __name__ == '__main__':
+    main()
