@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Button, CircularProgress, Tooltip } from '@mui/material'
-import { FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash } from 'react-icons/fa'
+import { Button, CircularProgress, TextField, Tooltip } from '@mui/material'
+import { FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import Plot from 'react-plotly.js'
 import { fetchScanDetails, startScan, fetchScanStatus, deletePath } from '../api'
 import type { Row, ScanDetails as ScanDetailsType, ScanJob } from '../api'
@@ -318,6 +318,7 @@ export function ScanDetails() {
   const [deletingPaths, setDeletingPaths] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
+  const [filter, setFilter] = useState('')
 
   const handleSort = (key: SortKey) => {
     setSorts(prev => {
@@ -336,11 +337,16 @@ export function ScanDetails() {
     })
   }
 
-  const sortedChildren = useMemo(() => {
+  const filteredChildren = useMemo(() => {
     if (!details) return []
     const { children } = details
+    if (!filter.trim()) return children
+    const lowerFilter = filter.toLowerCase()
+    return children.filter(r => r.path.toLowerCase().includes(lowerFilter))
+  }, [details, filter])
 
-    return [...children].sort((a, b) => {
+  const sortedChildren = useMemo(() => {
+    return [...filteredChildren].sort((a, b) => {
       for (const { key, dir } of sorts) {
         let cmp = 0
         switch (key) {
@@ -379,7 +385,7 @@ export function ScanDetails() {
       }
       return 0
     })
-  }, [details, sorts])
+  }, [filteredChildren, sorts])
 
   const totalPages = Math.ceil(sortedChildren.length / pageSize)
   const paginatedChildren = useMemo(() => {
@@ -387,10 +393,10 @@ export function ScanDetails() {
     return sortedChildren.slice(start, start + pageSize)
   }, [sortedChildren, page, pageSize])
 
-  // Reset page when sort changes or data reloads
+  // Reset page when sort/filter changes or data reloads
   useEffect(() => {
     setPage(0)
-  }, [sorts, details])
+  }, [sorts, filter, details])
 
   const loadDetails = () => {
     setLoading(true)
@@ -526,6 +532,16 @@ export function ScanDetails() {
     <div>
       <h1 style={{ marginBottom: '1rem' }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
       {error && <p style={{ color: 'red' }}>{error}</p>}
+      <div style={{ marginBottom: '0.5rem' }}>
+        <TextField
+          size="small"
+          placeholder="Filter by name..."
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          slotProps={{ input: { startAdornment: <FaSearch style={{ marginRight: 8, opacity: 0.5 }} /> } }}
+          sx={{ width: 250 }}
+        />
+      </div>
       <DetailsTable
         root={root}
         children={paginatedChildren}
