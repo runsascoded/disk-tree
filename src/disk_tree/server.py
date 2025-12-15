@@ -1,4 +1,5 @@
-from os.path import abspath, dirname
+from os import listdir, stat
+from os.path import abspath, dirname, isdir, isfile, join
 import sqlite3
 import subprocess
 import threading
@@ -62,6 +63,49 @@ def get_scans():
     return jsonify(result)
 
 
+def list_fs_children(path: str) -> list[dict]:
+    """List filesystem children of a directory with basic stats."""
+    if not isdir(path):
+        return []
+
+    children = []
+    try:
+        for name in listdir(path):
+            child_path = join(path, name)
+            try:
+                st = stat(child_path)
+                children.append({
+                    'path': name,
+                    'uri': child_path,
+                    'size': st.st_size if isfile(child_path) else None,
+                    'mtime': int(st.st_mtime),
+                    'kind': 'file' if isfile(child_path) else 'dir',
+                    'n_children': None,
+                    'n_desc': None,
+                    'scanned': False,
+                })
+            except (OSError, PermissionError):
+                continue
+    except (OSError, PermissionError):
+        pass
+
+    return children
+
+
+def get_scanned_paths(db) -> dict[str, dict]:
+    """Get a mapping of scanned paths to their most recent scan info."""
+    cursor = db.execute('''
+        SELECT s.path, s.time, s.blob
+        FROM scan s
+        INNER JOIN (
+            SELECT path, MAX(time) as max_time
+            FROM scan
+            GROUP BY path
+        ) latest ON s.path = latest.path AND s.time = latest.max_time
+    ''')
+    return {row['path']: dict(row) for row in cursor}
+
+
 @app.route('/api/scan')
 def get_scan():
     """Return scan details for a given URI.
@@ -106,66 +150,94 @@ def get_scan():
                 test_path = dirname(test_path) if test_path != '/' else None
 
     if not scan:
-        # No ancestor scan - look for child scans that could form a virtual directory
-        prefix = search_path.rstrip('/') + '/'
-        cursor = db.execute('''
-            SELECT path, time, blob FROM scan
-            WHERE path LIKE ?
-            GROUP BY path
-            HAVING time = MAX(time)
-            ORDER BY path
-        ''', (prefix + '%',))
-        child_scans = cursor.fetchall()
+        # No ancestor scan - build from filesystem + any child scans
+        if not search_path.startswith('s3://'):
+            # Local path - list filesystem and merge with scan data
+            fs_children = list_fs_children(search_path)
 
-        if child_scans:
-            # Build a virtual directory from child scans
-            children = []
-            for child in child_scans:
-                child_path = child['path']
-                # Get the immediate child name (first path segment after prefix)
-                rel = child_path[len(prefix):]
-                immediate = rel.split('/')[0]
-                # Load the parquet to get the root row's stats
-                df = pd.read_parquet(child['blob'])
-                root_row = df[df['path'] == '.'].iloc[0]
-                children.append({
-                    'path': immediate,
-                    'uri': prefix + immediate,
-                    'size': int(root_row['size']),
-                    'mtime': int(root_row['mtime']),
-                    'kind': 'dir',
-                    'n_children': int(root_row.get('n_children', 0)),
-                    'n_desc': int(root_row.get('n_desc', 0)),
-                })
+            # Get all scanned paths to check which children have scans
+            scanned_paths = get_scanned_paths(db)
 
-            # Dedupe by immediate child name (keep largest)
-            seen = {}
-            for c in children:
-                if c['path'] not in seen or c['size'] > seen[c['path']]['size']:
-                    seen[c['path']] = c
-            children = sorted(seen.values(), key=lambda x: -x['size'])
+            # Find child scans under this path
+            prefix = search_path.rstrip('/') + '/'
+            scan_data_by_name = {}  # immediate child name -> scan stats
 
-            # Create a virtual root
-            total_size = sum(c['size'] for c in children)
-            max_mtime = max(c['mtime'] for c in children)
-            total_desc = sum(c['n_desc'] for c in children)
+            for scanned_path, scan_info in scanned_paths.items():
+                if scanned_path.startswith(prefix):
+                    rel = scanned_path[len(prefix):]
+                    immediate = rel.split('/')[0]
+                    if immediate not in scan_data_by_name:
+                        # Load parquet to get stats
+                        df = pd.read_parquet(scan_info['blob'])
+                        root_row = df[df['path'] == '.'].iloc[0]
+                        scan_data_by_name[immediate] = {
+                            'size': int(root_row['size']),
+                            'mtime': int(root_row['mtime']),
+                            'n_children': int(root_row.get('n_children', 0)),
+                            'n_desc': int(root_row.get('n_desc', 0)),
+                            'scan_time': scan_info['time'],
+                        }
+
+            # Merge filesystem with scan data
+            children_by_name = {}
+            for child in fs_children:
+                name = child['path']
+                child_uri = child['uri']
+
+                # Check if this child has a direct scan
+                if child_uri in scanned_paths:
+                    scan_info = scanned_paths[child_uri]
+                    df = pd.read_parquet(scan_info['blob'])
+                    root_row = df[df['path'] == '.'].iloc[0]
+                    child['size'] = int(root_row['size'])
+                    child['mtime'] = int(root_row['mtime'])
+                    child['n_children'] = int(root_row.get('n_children', 0))
+                    child['n_desc'] = int(root_row.get('n_desc', 0))
+                    child['scanned'] = True
+                    child['scan_time'] = scan_info['time']
+                elif name in scan_data_by_name:
+                    # Has a descendant scan - use that data
+                    data = scan_data_by_name[name]
+                    child['size'] = data['size']
+                    child['mtime'] = data['mtime']
+                    child['n_children'] = data['n_children']
+                    child['n_desc'] = data['n_desc']
+                    child['scanned'] = 'partial'  # Has child scans but not itself
+                    child['scan_time'] = data['scan_time']
+
+                children_by_name[name] = child
+
+            children = list(children_by_name.values())
+            # Sort: scanned first (by size desc), then unscanned (by name)
+            children.sort(key=lambda x: (
+                0 if x.get('scanned') else 1,
+                -(x.get('size') or 0),
+                x['path'],
+            ))
+
+            # Compute virtual root stats from scanned children only
+            scanned_children = [c for c in children if c.get('scanned')]
+            total_size = sum(c.get('size') or 0 for c in scanned_children)
+            max_mtime = max((c.get('mtime') or 0 for c in scanned_children), default=0)
+            total_desc = sum(c.get('n_desc') or 0 for c in scanned_children)
 
             return jsonify({
                 'root': {
                     'path': '.',
                     'uri': search_path,
-                    'size': total_size,
-                    'mtime': max_mtime,
+                    'size': total_size if scanned_children else None,
+                    'mtime': max_mtime if scanned_children else None,
                     'kind': 'dir',
                     'n_children': len(children),
-                    'n_desc': total_desc,
+                    'n_desc': total_desc if scanned_children else None,
                     'parent': None,
+                    'scanned': False,
                 },
                 'children': children,
-                'rows': children,
+                'rows': [c for c in children if c.get('scanned')],
                 'time': None,
                 'scan_path': None,
-                'virtual': True,
+                'scan_status': 'partial' if scanned_children else 'none',
             })
 
         return jsonify({'error': 'No scan found for path', 'uri': uri}), 404
@@ -236,12 +308,17 @@ def get_scan():
     children = [row_to_dict(row) for _, row in direct_children_df.iterrows()]
     rows = [row_to_dict(row) for _, row in children_df.iterrows()]
 
+    # Mark all children as scanned
+    for c in children:
+        c['scanned'] = True
+
     return jsonify({
         'root': root,
         'children': sorted(children, key=lambda x: -x.get('size', 0)),
         'rows': rows,
         'time': scan['time'],
         'scan_path': scan['path'],
+        'scan_status': 'full',
     })
 
 

@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Button, CircularProgress, Tooltip } from '@mui/material'
-import { FaFileAlt, FaFolder, FaSync } from 'react-icons/fa'
+import { Button, Chip, CircularProgress, Tooltip } from '@mui/material'
+import { FaFileAlt, FaFolder, FaFolderOpen, FaSync } from 'react-icons/fa'
 import Plot from 'react-plotly.js'
 import { fetchScanDetails, startScan, fetchScanStatus } from '../api'
 import type { Row, ScanDetails as ScanDetailsType, ScanJob } from '../api'
 
-function sizeStr(bytes: number): string {
+function sizeStr(bytes: number | null): string {
+  if (bytes === null) return '-'
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
 }
 
-function timeAgo(timestamp: number): string {
+function timeAgo(timestamp: number | null): string {
+  if (timestamp === null) return '-'
   const date = new Date(timestamp * 1000)
   const now = new Date()
   const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
@@ -29,6 +31,28 @@ function timeAgo(timestamp: number): string {
   if (months < 12) return `${months}mo ago`
   const years = Math.floor(months / 12)
   return `${years}y ago`
+}
+
+function ScanStatusChip({ status }: { status: 'full' | 'partial' | 'none' }) {
+  if (status === 'full') {
+    return (
+      <Tooltip title="This directory has been fully scanned">
+        <Chip label="Scanned" color="success" size="small" />
+      </Tooltip>
+    )
+  }
+  if (status === 'partial') {
+    return (
+      <Tooltip title="Some subdirectories have been scanned, but not this directory itself">
+        <Chip label="Partial" color="warning" size="small" />
+      </Tooltip>
+    )
+  }
+  return (
+    <Tooltip title="This directory has not been scanned yet">
+      <Chip label="Not scanned" color="default" size="small" />
+    </Tooltip>
+  )
 }
 
 type RouteType = 'file' | 's3'
@@ -60,6 +84,13 @@ function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) 
       ))}
     </div>
   )
+}
+
+function RowIcon({ row }: { row: Row }) {
+  if (row.kind === 'file') return <FaFileAlt />
+  if (row.scanned === true) return <FaFolder style={{ color: '#4caf50' }} />
+  if (row.scanned === 'partial') return <FaFolderOpen style={{ color: '#ff9800' }} />
+  return <FaFolder style={{ opacity: 0.5 }} />
 }
 
 function DetailsTable({ root, children, uri, routeType }: {
@@ -96,11 +127,11 @@ function DetailsTable({ root, children, uri, routeType }: {
           <td>{sizeStr(root.size)}</td>
           <td>{timeAgo(root.mtime)}</td>
           <td>{root.n_children?.toLocaleString()}</td>
-          <td>{root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
+          <td>{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
         </tr>
         {children.map(row => (
-          <tr key={row.path}>
-            <td>{row.kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
+          <tr key={row.path} style={{ opacity: row.scanned ? 1 : 0.6 }}>
+            <td><RowIcon row={row} /></td>
             <td>
               <Link to={`${prefix}/${row.path}`}>
                 <code>{row.path}</code>
@@ -109,7 +140,7 @@ function DetailsTable({ root, children, uri, routeType }: {
             <td>{sizeStr(row.size)}</td>
             <td>{timeAgo(row.mtime)}</td>
             <td>{row.n_children ? row.n_children.toLocaleString() : null}</td>
-            <td>{row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
+            <td>{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
           </tr>
         ))}
       </tbody>
@@ -226,26 +257,27 @@ export function ScanDetails() {
   }
   if (!details) return <div>No data</div>
 
-  const { root, children, rows } = details
+  const { root, children, rows, scan_status } = details
 
   return (
     <div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
-        <Tooltip title="Re-scan this directory to update the cached data">
+        <ScanStatusChip status={scan_status} />
+        <Tooltip title="Scan this directory to get accurate size and file counts">
           <Button
             size="small"
             onClick={handleRescan}
             disabled={scanning}
             startIcon={scanning ? <CircularProgress size={14} /> : <FaSync />}
           >
-            {scanning ? 'Scanning...' : 'Rescan'}
+            {scanning ? 'Scanning...' : (scan_status === 'full' ? 'Rescan' : 'Scan')}
           </Button>
         </Tooltip>
       </div>
       {error && <p style={{ color: 'red' }}>{error}</p>}
       <DetailsTable root={root} children={children} uri={uri} routeType={routeType} />
-      <Treemap root={root} rows={rows} />
+      {rows.length > 0 && <Treemap root={root} rows={rows} />}
     </div>
   )
 }

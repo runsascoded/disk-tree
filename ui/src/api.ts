@@ -7,21 +7,24 @@ export type Scan = {
 
 export type Row = {
   path: string
-  size: number
-  mtime: number
+  size: number | null
+  mtime: number | null
   kind: 'file' | 'dir'
   parent: string | null
   uri: string
-  n_desc: number
-  n_children: number
+  n_desc: number | null
+  n_children: number | null
+  scanned?: boolean | 'partial'
+  scan_time?: string
 }
 
 export type ScanDetails = {
   root: Row
   children: Row[]
   rows: Row[]
-  time: string
-  scan_path: string
+  time: string | null
+  scan_path: string | null
+  scan_status: 'full' | 'partial' | 'none'
 }
 
 export async function fetchScans(): Promise<Scan[]> {
