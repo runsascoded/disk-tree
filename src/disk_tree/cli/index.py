@@ -9,7 +9,6 @@ from disk_tree.cli.base import cli
 from disk_tree.sqla.db import init
 from humanize import naturalsize
 from utz import err, iec
-from utz.mem import Tracker
 
 
 @cli.command
@@ -32,6 +31,7 @@ def index(
     url = url or getcwd()
     url = url.rstrip('/')
     if measure_memory:
+        from utz.mem import Tracker
         mem = Tracker()
         ctx = mem
     else:
