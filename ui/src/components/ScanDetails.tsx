@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Button, CircularProgress, Tooltip } from '@mui/material'
-import { FaFileAlt, FaFolder, FaFolderOpen, FaSync } from 'react-icons/fa'
+import { FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown } from 'react-icons/fa'
 import Plot from 'react-plotly.js'
 import { fetchScanDetails, startScan, fetchScanStatus } from '../api'
 import type { Row, ScanDetails as ScanDetailsType, ScanJob } from '../api'
+
+type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
+type SortDir = 'asc' | 'desc'
+type SortSpec = { key: SortKey; dir: SortDir }
 
 function sizeStr(bytes: number | null): string {
   if (bytes === null) return '-'
@@ -86,6 +90,45 @@ function scanTimeAgo(scanTime: string | undefined): string {
   return `${days}d ago`
 }
 
+function SortableHeader({
+  label,
+  sortKey,
+  sorts,
+  onSort,
+  tooltip,
+}: {
+  label: string
+  sortKey: SortKey
+  sorts: SortSpec[]
+  onSort: (key: SortKey) => void
+  tooltip?: string
+}) {
+  const primarySort = sorts[0]
+  const isPrimary = primarySort?.key === sortKey
+  const isSecondary = sorts.length > 1 && sorts[1]?.key === sortKey
+
+  const header = (
+    <th
+      onClick={() => onSort(sortKey)}
+      style={{ cursor: 'pointer', userSelect: 'none' }}
+    >
+      {label}
+      {isPrimary && (
+        primarySort.dir === 'asc'
+          ? <FaSortUp style={{ marginLeft: 4, verticalAlign: 'middle' }} />
+          : <FaSortDown style={{ marginLeft: 4, verticalAlign: 'middle' }} />
+      )}
+      {isSecondary && (
+        <span style={{ opacity: 0.4, marginLeft: 2 }}>
+          {sorts[1].dir === 'asc' ? <FaSortUp style={{ verticalAlign: 'middle', fontSize: '0.7em' }} /> : <FaSortDown style={{ verticalAlign: 'middle', fontSize: '0.7em' }} />}
+        </span>
+      )}
+    </th>
+  )
+
+  return tooltip ? <Tooltip title={tooltip}>{header}</Tooltip> : header
+}
+
 function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanStatus: 'full' | 'partial' | 'none'; parentScanTime: string | null }) {
   // If parent was fully scanned, children inherit that scan time (shown grayed)
   if (scanStatus === 'full' && !row.scan_time && parentScanTime) {
@@ -100,7 +143,7 @@ function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanSt
   return <span style={{ opacity: 0.4 }}>-</span>
 }
 
-function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning }: {
+function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort }: {
   root: Row
   children: Row[]
   uri: string
@@ -111,29 +154,21 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   scanTime: string | null
   onRescan: () => void
   isScanning: boolean
+  sorts: SortSpec[]
+  onSort: (key: SortKey) => void
 }) {
   const prefix = routeType === 's3' ? `/s3/${uri.replace('s3://', '')}` : `/file${uri}`
   return (
     <table>
       <thead>
         <tr>
-          <th></th>
-          <th>Path</th>
-          <Tooltip title="Total size including all nested files and directories">
-            <th>Size</th>
-          </Tooltip>
-          <Tooltip title="Most recent modification time of any file in this directory tree">
-            <th>Modified</th>
-          </Tooltip>
-          <Tooltip title="Number of direct children (files and subdirectories)">
-            <th>Children</th>
-          </Tooltip>
-          <Tooltip title="Total number of descendants (all nested files and directories)">
-            <th>Desc.</th>
-          </Tooltip>
-          <Tooltip title="When this directory was last scanned">
-            <th>Scanned</th>
-          </Tooltip>
+          <SortableHeader label="" sortKey="kind" sorts={sorts} onSort={onSort} tooltip="Sort by type (file/folder)" />
+          <SortableHeader label="Path" sortKey="path" sorts={sorts} onSort={onSort} />
+          <SortableHeader label="Size" sortKey="size" sorts={sorts} onSort={onSort} tooltip="Total size including all nested files and directories" />
+          <SortableHeader label="Modified" sortKey="mtime" sorts={sorts} onSort={onSort} tooltip="Most recent modification time of any file in this directory tree" />
+          <SortableHeader label="Children" sortKey="n_children" sorts={sorts} onSort={onSort} tooltip="Number of direct children (files and subdirectories)" />
+          <SortableHeader label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
+          <SortableHeader label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
           <th></th>
         </tr>
       </thead>
@@ -260,6 +295,69 @@ export function ScanDetails() {
   const [scanning, setScanning] = useState(false)
   const [scanJob, setScanJob] = useState<ScanJob | null>(null)
   const [childJobs, setChildJobs] = useState<Map<string, ScanJob>>(new Map())
+  const [sorts, setSorts] = useState<SortSpec[]>([{ key: 'size', dir: 'desc' }])
+
+  const handleSort = (key: SortKey) => {
+    setSorts(prev => {
+      const existingIdx = prev.findIndex(s => s.key === key)
+      if (existingIdx === 0) {
+        // Toggle direction if clicking current primary sort
+        return [{ key, dir: prev[0].dir === 'asc' ? 'desc' : 'asc' }, ...prev.slice(1)]
+      }
+      // Make this the new primary sort, keep previous as secondary
+      const newSorts: SortSpec[] = [{ key, dir: 'desc' }]
+      // Add previous primary as secondary (if different)
+      if (prev.length > 0 && prev[0].key !== key) {
+        newSorts.push(prev[0])
+      }
+      return newSorts
+    })
+  }
+
+  const sortedChildren = useMemo(() => {
+    if (!details) return []
+    const { children } = details
+
+    return [...children].sort((a, b) => {
+      for (const { key, dir } of sorts) {
+        let cmp = 0
+        switch (key) {
+          case 'kind':
+            cmp = (a.kind === 'dir' ? 0 : 1) - (b.kind === 'dir' ? 0 : 1)
+            break
+          case 'path':
+            cmp = a.path.localeCompare(b.path)
+            break
+          case 'size':
+            cmp = (a.size ?? 0) - (b.size ?? 0)
+            break
+          case 'mtime':
+            cmp = (a.mtime ?? 0) - (b.mtime ?? 0)
+            break
+          case 'n_children':
+            cmp = (a.n_children ?? 0) - (b.n_children ?? 0)
+            break
+          case 'n_desc':
+            cmp = (a.n_desc ?? 0) - (b.n_desc ?? 0)
+            break
+          case 'scanned':
+            // Sort by: has own scan_time > scanned true > scanned partial > not scanned
+            const scanOrder = (r: Row) => {
+              if (r.scan_time) return 3
+              if (r.scanned === true) return 2
+              if (r.scanned === 'partial') return 1
+              return 0
+            }
+            cmp = scanOrder(a) - scanOrder(b)
+            break
+        }
+        if (cmp !== 0) {
+          return dir === 'asc' ? cmp : -cmp
+        }
+      }
+      return 0
+    })
+  }, [details, sorts])
 
   const loadDetails = () => {
     setLoading(true)
@@ -368,7 +466,7 @@ export function ScanDetails() {
   }
   if (!details) return <div>No data</div>
 
-  const { root, children, rows, scan_status, time } = details
+  const { root, rows, scan_status, time } = details
 
   return (
     <div>
@@ -376,7 +474,7 @@ export function ScanDetails() {
       {error && <p style={{ color: 'red' }}>{error}</p>}
       <DetailsTable
         root={root}
-        children={children}
+        children={sortedChildren}
         uri={uri}
         routeType={routeType}
         onScanChild={handleScanChild}
@@ -385,6 +483,8 @@ export function ScanDetails() {
         scanTime={time}
         onRescan={handleRescan}
         isScanning={scanning}
+        sorts={sorts}
+        onSort={handleSort}
       />
       {rows.length > 0 && <Treemap root={root} rows={rows} />}
     </div>
