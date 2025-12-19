@@ -12,23 +12,38 @@ Key goals:
 - **Always-ready index**: Run overnight scans so you don't wait when running out of space
 - **External media snapshots**: Keep cached views of SSDs even when unplugged
 - **Fast indexing**: Shell out to `gfind`/`aws s3 ls` instead of slow Python stat calls
-- **TTL-aware caching**: Smart cache invalidation (child inherits parent freshness, etc.)
-- **Web UI**: Treemap visualizations for browsing disk usage
+- **Fresher child patching**: When viewing a parent, newer child scans automatically patch in updated stats
+- **Web UI**: Treemap visualizations and directory browsing
 
 ## Architecture
 
 ### Python Backend (`src/disk_tree/`)
 
 **Indexing** (`find/index.py`):
-- Local: `gfind -printf '%y %s %T@ %p\n'` → streams file metadata
+- Local: `gfind -printf '%y %b %T@ %p\0'` → null-terminated, 512-byte block sizes (handles sparse files)
 - S3: `aws s3 ls --recursive` → parses listing format
+- Excludes CloudStorage paths (`~/Library/CloudStorage`) to avoid blocking on cloud I/O
 - Builds DataFrame with columns: `path`, `size`, `mtime`, `kind`, `parent`, `uri`, `n_desc`, `n_children`
 - Aggregates sizes upward through directory tree
+- Returns `IndexResult(df, error_count, error_paths)`
 
 **Data Model** (`sqla/model.py`):
-- `Scan` table: `id`, `path`, `time`, `blob` (path to parquet file)
+- `Scan` table: `id`, `path`, `time`, `blob`, `error_count`, `error_paths`
+- `ScanProgress` table: real-time tracking of active scans
 - Results stored as Parquet in `~/.config/disk-tree/scans/<uuid>.parquet`
 - SQLite metadata DB at `~/.config/disk-tree/disk-tree.db`
+- Index on `(path, time)` for efficient fresher child queries
+
+**Server API** (`server.py`):
+- Flask server on port 5001
+- `GET /api/scans` — List all scans (most recent per path)
+- `GET /api/scan?uri=<path>` — Get scan details for a path
+  - Patches in fresher child scans automatically
+  - Falls back to filesystem listing if no scan exists
+- `POST /api/scan/start` — Start a new scan (background thread)
+- `GET /api/scans/progress` — Current progress of active scans
+- `GET /api/scans/progress/stream` — SSE stream for real-time progress
+- `POST /api/delete` — Delete a file/directory and update scan parquets
 
 **CLI** (`cli/`):
 ```bash
@@ -39,22 +54,27 @@ disk-tree index [URL]     # Scan directory or s3:// bucket
   -m, --measure-memory    # Track peak memory
 
 disk-tree scans           # List cached scans (JSON)
+
+disk-tree-server          # Start Flask API server
 ```
 
-### Web UI (`www/`)
+### Web UI (`ui/`)
 
-Next.js 15 with App Router, Material-UI, Plotly treemaps.
+Vite + React + TypeScript with Material-UI, Plotly treemaps.
 
-**Routes**:
-- `/` — List all scans
-- `/file/[[...segments]]` — Browse local filesystem paths
-- `/s3/[[...segments]]` — Browse S3 buckets/prefixes
+**Key features**:
+- Directory listing with size, mtime, n_children, n_desc columns
+- Breadcrumb navigation
+- Rescan button with real-time progress (SSE)
+- Multi-select with keyboard navigation (Shift+arrows)
+- Bulk delete for selected items
+- Treemap visualization (Plotly)
+- Pagination and search/filter
 
 **Key files**:
-- `app/db.ts` — SQLite connection (better-sqlite3)
-- `src/scan-details-action.ts` — Load parquet data for a path (uses hyparquet)
-- `components/scan-details.tsx` — Directory listing with breadcrumbs, size table
-- `components/plot.tsx` — Plotly treemap wrapper
+- `src/App.tsx` — Main layout with scan list and detail view
+- `src/ScanDetails.tsx` — Directory listing component
+- `src/hooks/useScanProgress.ts` — SSE-based progress tracking
 
 ## Development
 
@@ -63,10 +83,13 @@ Next.js 15 with App Router, Material-UI, Plotly treemaps.
 uv sync
 disk-tree index .
 
+# Start API server
+disk-tree-server  # http://localhost:5001
+
 # Web UI
-cd www
+cd ui
 pnpm install
-pnpm dev        # http://localhost:3000
+pnpm dev        # http://localhost:5180
 ```
 
 ## Data Flow
@@ -74,8 +97,9 @@ pnpm dev        # http://localhost:3000
 1. `disk-tree index /path` runs `gfind` or `aws s3 ls`
 2. Output parsed into DataFrame, aggregated by directory
 3. Saved as Parquet, metadata recorded in SQLite
-4. Web UI queries SQLite for scan list
-5. Route loads Parquet via hyparquet, filters to requested path depth
+4. API server queries SQLite for scan list
+5. `/api/scan?uri=...` loads Parquet, patches fresher child stats
+6. UI renders directory listing with real-time updates
 
 ## Config
 
@@ -95,14 +119,13 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet).
 
 - CLI indexing works for local + S3
 - Parquet caching functional
-- Web UI shows scan list and directory details
-- Plotly treemap component scaffolded but not fully wired
-- Refresh button placeholder (doesn't trigger re-scan yet)
+- Flask API with real-time progress (SSE)
+- Fresher child scan patching (non-transitive, one level)
+- Web UI with directory listing, treemap, multi-select, bulk actions
+- Delete functionality with scan parquet updates
 
 ## TODOs / Known Issues
 
-- Web UI DB path hardcoded in `www/app/db.ts`
-- TTL logic not implemented (always uses cache if exists)
+- Fresher child patching is not transitive (grandchild patches don't propagate)
 - No scheduled/overnight indexing yet
-- Treemap visualization incomplete
 - S3 pagination not explicitly handled (relies on aws cli)
