@@ -7,7 +7,7 @@ from typing import Optional
 from uuid import uuid4
 
 import pandas as pd
-from sqlalchemy import Integer, String, DateTime
+from sqlalchemy import Integer, String, DateTime, Index
 from sqlalchemy.orm import Mapped, mapped_column
 from utz import err, iec
 
@@ -80,6 +80,10 @@ class ScanProgress(Base):
 
 class Scan(Base):
     __tablename__ = "scan"
+    __table_args__ = (
+        # Index for finding fresher child scans: path LIKE 'prefix%' AND time > parent_time
+        Index('ix_scan_path_time', 'path', 'time'),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, init=False)
     path: Mapped[str] = mapped_column(String, nullable=False)
