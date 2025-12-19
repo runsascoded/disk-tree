@@ -4,6 +4,7 @@ import {
   Box,
   Button,
   CircularProgress,
+  LinearProgress,
   Paper,
   TextField,
   Tooltip,
@@ -11,7 +12,8 @@ import {
 } from '@mui/material'
 import { FaPlay, FaSync } from 'react-icons/fa'
 import { fetchScans, fetchRunningScans, startScan } from '../api'
-import type { Scan, ScanJob } from '../api'
+import type { Scan, ScanJob, ScanProgress } from '../api'
+import { useScanProgress } from '../hooks/useScanProgress'
 
 function timeAgo(dateStr: string): string {
   const date = new Date(dateStr)
@@ -34,6 +36,51 @@ function pathToRoute(path: string): string {
   return `/file${path}`
 }
 
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return n.toString()
+}
+
+function LiveScanProgress({ progress }: { progress: ScanProgress[] }) {
+  const activeScans = progress.filter(p => p.status === 'running')
+  if (activeScans.length === 0) return null
+
+  return (
+    <Paper sx={{ p: 2, mb: 2 }}>
+      <Typography variant="subtitle2" sx={{ mb: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <CircularProgress size={16} />
+        Scans in Progress (Live)
+      </Typography>
+      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+        {activeScans.map(scan => (
+          <Box key={scan.id} sx={{ borderLeft: '3px solid', borderColor: 'primary.main', pl: 2 }}>
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', mb: 0.5 }}>
+              {scan.path}
+            </Typography>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 0.5 }}>
+              <LinearProgress
+                variant="indeterminate"
+                sx={{ flexGrow: 1, height: 6, borderRadius: 1 }}
+              />
+            </Box>
+            <Box sx={{ display: 'flex', gap: 3, color: 'text.secondary', fontSize: '0.85rem' }}>
+              <span><strong>{formatNumber(scan.items_found)}</strong> items</span>
+              {scan.items_per_sec && (
+                <span>{formatNumber(Math.round(scan.items_per_sec))} items/sec</span>
+              )}
+              {scan.error_count > 0 && (
+                <span style={{ color: '#ed6c02' }}>{scan.error_count} errors</span>
+              )}
+              <span>{timeAgo(scan.started)}</span>
+            </Box>
+          </Box>
+        ))}
+      </Box>
+    </Paper>
+  )
+}
+
 function RunningScans({ jobs, onRefresh }: { jobs: ScanJob[]; onRefresh: () => void }) {
   const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'pending')
   if (activeJobs.length === 0) return null
@@ -42,7 +89,7 @@ function RunningScans({ jobs, onRefresh }: { jobs: ScanJob[]; onRefresh: () => v
     <Paper sx={{ p: 2, mb: 2 }}>
       <Typography variant="subtitle2" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
         <CircularProgress size={16} />
-        Scans in Progress
+        Scans in Progress (Web-initiated)
       </Typography>
       <table style={{ width: '100%' }}>
         <tbody>
@@ -120,6 +167,9 @@ export function ScanList() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Live progress from SSE
+  const scanProgress = useScanProgress()
+
   const loadData = async () => {
     try {
       const [scansData, jobsData] = await Promise.all([
@@ -139,7 +189,7 @@ export function ScanList() {
     loadData()
   }, [])
 
-  // Poll for running scans
+  // Poll for running scans (web-initiated only)
   useEffect(() => {
     const hasActive = runningJobs.some(j => j.status === 'running' || j.status === 'pending')
     if (!hasActive) return
@@ -159,6 +209,16 @@ export function ScanList() {
     return () => clearInterval(interval)
   }, [runningJobs])
 
+  // Refresh scans list when a live scan completes (SSE shows empty but we had scans)
+  const [prevProgressCount, setPrevProgressCount] = useState(0)
+  useEffect(() => {
+    if (prevProgressCount > 0 && scanProgress.length === 0) {
+      // A scan just finished - refresh the list
+      fetchScans().then(setScans)
+    }
+    setPrevProgressCount(scanProgress.length)
+  }, [scanProgress.length, prevProgressCount])
+
   const handleNewScan = (job: ScanJob) => {
     setRunningJobs(prev => [...prev, job])
   }
@@ -170,6 +230,7 @@ export function ScanList() {
     <div>
       <h1>Scans</h1>
       <NewScanForm onStarted={handleNewScan} />
+      <LiveScanProgress progress={scanProgress} />
       <RunningScans jobs={runningJobs} onRefresh={loadData} />
       <Tooltip title="Previously completed scans. Click a path to browse its contents.">
         <Typography variant="subtitle2" sx={{ mb: 1 }}>Completed Scans</Typography>

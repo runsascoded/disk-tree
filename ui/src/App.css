@@ -72,6 +72,10 @@ tr.root {
   color: var(--muted, #666);
 }
 
+.breadcrumb-sep {
+  padding: 0 0.25em;
+}
+
 :root {
   --border-color: #eee;
   --header-bg: #f8f8f8;

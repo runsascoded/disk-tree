@@ -1,14 +1,16 @@
+import json
 from os import listdir, remove, stat
 from os.path import abspath, dirname, isdir, isfile, join
 import shutil
 import sqlite3
 import subprocess
 import threading
+import time
 import uuid
 from datetime import datetime
 
 import pandas as pd
-from flask import Flask, jsonify, request, g
+from flask import Flask, jsonify, request, g, Response
 from flask_cors import CORS
 
 from disk_tree.config import SQLITE_PATH
@@ -60,6 +62,8 @@ def get_scans():
             'path': row['path'],
             'time': row['time'],
             'blob': row['blob'],
+            'error_count': row['error_count'],
+            'error_paths': row['error_paths'],
         })
     return jsonify(result)
 
@@ -314,6 +318,7 @@ def get_scan():
     # Mark all children as scanned
     for c in children:
         c['scanned'] = True
+        c['scan_time'] = scan['time']
 
     return jsonify({
         'root': root,
@@ -322,15 +327,21 @@ def get_scan():
         'time': scan['time'],
         'scan_path': scan['path'],
         'scan_status': 'full',
+        'error_count': scan.get('error_count'),
+        'error_paths': scan.get('error_paths'),
     })
 
 
-def run_scan_job(job_id: str, path: str):
+def run_scan_job(job_id: str, path: str, force: bool = True):
     """Run disk-tree index in background and update job status."""
     try:
         running_scans[job_id]['status'] = 'running'
+        cmd = ['disk-tree', 'index']
+        if force:
+            cmd.append('-C')  # Force fresh scan, don't use cache
+        cmd.append(path)
         result = subprocess.run(
-            ['disk-tree', 'index', path],
+            cmd,
             capture_output=True,
             text=True,
         )
@@ -390,6 +401,77 @@ def running_scans_list():
         {'job_id': job_id, **job}
         for job_id, job in running_scans.items()
     ])
+
+
+@app.route('/api/scans/progress')
+def get_scans_progress():
+    """Get current progress of all active scans (one-shot, no SSE)."""
+    db = get_db()
+    try:
+        cursor = db.execute('SELECT * FROM scan_progress')
+        result = []
+        for row in cursor:
+            result.append({
+                'id': row['id'],
+                'path': row['path'],
+                'pid': row['pid'],
+                'started': row['started'],
+                'items_found': row['items_found'],
+                'items_per_sec': row['items_per_sec'],
+                'error_count': row['error_count'],
+                'status': row['status'],
+            })
+        return jsonify(result)
+    except sqlite3.OperationalError:
+        # Table might not exist yet
+        return jsonify([])
+
+
+@app.route('/api/scans/progress/stream')
+def stream_scans_progress():
+    """Stream scan progress updates via Server-Sent Events."""
+    def generate():
+        last_data = None
+        while True:
+            # Create a new connection for each poll (can't share across threads)
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            try:
+                cursor = conn.execute('SELECT * FROM scan_progress')
+                rows = []
+                for row in cursor:
+                    rows.append({
+                        'id': row['id'],
+                        'path': row['path'],
+                        'pid': row['pid'],
+                        'started': row['started'],
+                        'items_found': row['items_found'],
+                        'items_per_sec': row['items_per_sec'],
+                        'error_count': row['error_count'],
+                        'status': row['status'],
+                    })
+                data = json.dumps(rows)
+                # Only send if data changed
+                if data != last_data:
+                    yield f"data: {data}\n\n"
+                    last_data = data
+            except sqlite3.OperationalError:
+                # Table might not exist yet
+                yield f"data: []\n\n"
+            finally:
+                conn.close()
+
+            time.sleep(1)  # Poll every second
+
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',  # Disable nginx buffering
+        },
+    )
 
 
 def update_parent_scans_after_delete(deleted_path: str, deleted_size: int, deleted_n_desc: int):
