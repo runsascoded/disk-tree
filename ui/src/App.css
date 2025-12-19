@@ -22,8 +22,22 @@ th, td {
   white-space: nowrap;
 }
 
+/* Checkbox column - minimal width */
+th:nth-child(1), td:nth-child(1) {
+  width: 1.5rem;
+  padding: 0.25rem 0.1rem;
+  text-align: center;
+}
+
+/* Kind/icon column - minimal width */
+th:nth-child(2), td:nth-child(2) {
+  width: 1.5rem;
+  padding: 0.25rem 0.1rem;
+  text-align: center;
+}
+
 /* Path column - can shrink with ellipsis */
-td:nth-child(2) {
+td:nth-child(3) {
   max-width: 0;
   width: 100%;
   overflow: hidden;

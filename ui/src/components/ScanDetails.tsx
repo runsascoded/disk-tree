@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Button, CircularProgress, TextField, Tooltip } from '@mui/material'
+import { Box, Button, Checkbox, CircularProgress, TextField, Tooltip } from '@mui/material'
 import { FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import Plot from 'react-plotly.js'
 import { fetchScanDetails, startScan, fetchScanStatus, deletePath } from '../api'
@@ -143,7 +143,7 @@ function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanSt
   return <span style={{ opacity: 0.4 }}>-</span>
 }
 
-function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths }: {
+function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, selectedPaths, hoveredIndex, onRowClick, onRowHover }: {
   root: Row
   children: Row[]
   uri: string
@@ -158,12 +158,48 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   onSort: (key: SortKey) => void
   onDelete: (path: string) => void
   deletingPaths: Set<string>
+  selectedPaths: Set<string>
+  hoveredIndex: number | null
+  onRowClick: (uri: string, index: number, event: React.MouseEvent | React.KeyboardEvent) => void
+  onRowHover: (index: number | null) => void
 }) {
   const prefix = routeType === 's3' ? `/s3/${uri.replace('s3://', '')}` : `/file${uri}`
+  const allSelected = children.length > 0 && children.every(r => selectedPaths.has(r.uri))
+  const someSelected = children.some(r => selectedPaths.has(r.uri))
+
+  const handleSelectAll = () => {
+    // Toggle all - if all selected, deselect all; otherwise select all
+    const syntheticEvent = { shiftKey: false, metaKey: false, ctrlKey: false } as React.MouseEvent
+    if (allSelected) {
+      // Deselect all by clicking each selected one with meta key (toggle off)
+      children.forEach((r, idx) => {
+        if (selectedPaths.has(r.uri)) {
+          onRowClick(r.uri, idx, { ...syntheticEvent, metaKey: true } as React.MouseEvent)
+        }
+      })
+    } else {
+      // Select all not yet selected
+      children.forEach((r, idx) => {
+        if (!selectedPaths.has(r.uri)) {
+          onRowClick(r.uri, idx, { ...syntheticEvent, metaKey: true } as React.MouseEvent)
+        }
+      })
+    }
+  }
+
   return (
     <table>
       <thead>
         <tr>
+          <th style={{ width: '1.5rem', padding: '0.25rem 0.1rem' }}>
+            <Checkbox
+              size="small"
+              checked={allSelected}
+              indeterminate={someSelected && !allSelected}
+              onChange={handleSelectAll}
+              sx={{ padding: 0 }}
+            />
+          </th>
           <SortableHeader label="" sortKey="kind" sorts={sorts} onSort={onSort} tooltip="Sort by type (file/folder)" />
           <SortableHeader label="Path" sortKey="path" sorts={sorts} onSort={onSort} />
           <SortableHeader label="Size" sortKey="size" sorts={sorts} onSort={onSort} tooltip="Total size including all nested files and directories" />
@@ -177,6 +213,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
       </thead>
       <tbody>
         <tr className="root">
+          <td></td>
           <td>{root.kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
           <td><code>.</code></td>
           <td>{sizeStr(root.size)}</td>
@@ -212,14 +249,37 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           </td>
           <td></td>
         </tr>
-        {children.map(row => {
+        {children.map((row, idx) => {
           const childUri = row.uri
           const isChildScanning = scanningPaths.has(childUri)
+          const isSelected = selectedPaths.has(childUri)
+          const isHovered = hoveredIndex === idx
           return (
-            <tr key={row.path} style={{ opacity: row.scanned || scanStatus === 'full' ? 1 : 0.6 }}>
+            <tr
+              key={row.path}
+              style={{
+                opacity: row.scanned || scanStatus === 'full' ? 1 : 0.6,
+                background: isSelected
+                  ? 'var(--selected-bg, rgba(25, 118, 210, 0.12))'
+                  : isHovered
+                    ? 'var(--hover-bg, #f5f5f5)'
+                    : undefined,
+              }}
+              onClick={e => onRowClick(childUri, idx, e)}
+              onMouseEnter={() => onRowHover(idx)}
+              onMouseLeave={() => onRowHover(null)}
+            >
+              <td onClick={e => e.stopPropagation()}>
+                <Checkbox
+                  size="small"
+                  checked={isSelected}
+                  onChange={e => onRowClick(childUri, idx, e as unknown as React.MouseEvent)}
+                  sx={{ padding: 0 }}
+                />
+              </td>
               <td><RowIcon row={row} /></td>
               <td>
-                <Link to={`${prefix}/${row.path}`}>
+                <Link to={`${prefix}/${row.path}`} onClick={e => e.stopPropagation()}>
                   <code>{row.path}</code>
                 </Link>
               </td>
@@ -230,7 +290,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               <td>
                 <ChildScanStatus row={row} scanStatus={scanStatus} parentScanTime={scanTime} />
               </td>
-              <td>
+              <td onClick={e => e.stopPropagation()}>
                 {row.kind === 'dir' && (
                   <Tooltip title={row.scanned ? 'Rescan this directory' : 'Scan this directory'}>
                     <span>
@@ -246,7 +306,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   </Tooltip>
                 )}
               </td>
-              <td>
+              <td onClick={e => e.stopPropagation()}>
                 <Tooltip title={`Delete ${row.kind === 'dir' ? 'directory' : 'file'}`}>
                   <span>
                     <Button
@@ -319,6 +379,11 @@ export function ScanDetails() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
   const [filter, setFilter] = useState('')
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  const [anchorIndex, setAnchorIndex] = useState<number | null>(null) // The fixed point of selection
+  const [expandDirection, setExpandDirection] = useState<'up' | 'down' | null>(null) // Which direction we're expanding
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
+  const tableRef = useRef<HTMLDivElement>(null)
 
   const handleSort = (key: SortKey) => {
     setSorts(prev => {
@@ -398,15 +463,242 @@ export function ScanDetails() {
     setPage(0)
   }, [sorts, filter, details])
 
-  const loadDetails = () => {
-    setLoading(true)
+  // Clear selection when data changes
+  useEffect(() => {
+    setSelectedPaths(new Set())
+    setAnchorIndex(null)
+    setExpandDirection(null)
+  }, [details])
+
+  // Handle row click with shift/meta modifiers
+  const handleRowClick = useCallback((uri: string, index: number, event: React.MouseEvent | React.KeyboardEvent) => {
+    const shiftKey = event.shiftKey
+    const metaKey = 'metaKey' in event ? event.metaKey || event.ctrlKey : false
+
+    if (metaKey) {
+      // Meta-click: set new anchor, start fresh selection at this point
+      setSelectedPaths(new Set([uri]))
+      setAnchorIndex(index)
+      setExpandDirection(null) // Reset direction
+    } else if (shiftKey && anchorIndex !== null) {
+      // Shift-click: select range from anchor to clicked
+      const start = Math.min(anchorIndex, index)
+      const end = Math.max(anchorIndex, index)
+      const newSelection = new Set<string>()
+      for (let i = start; i <= end; i++) {
+        if (paginatedChildren[i]) {
+          newSelection.add(paginatedChildren[i].uri)
+        }
+      }
+      setSelectedPaths(newSelection)
+    } else {
+      // Regular click: single select, set as new anchor
+      setSelectedPaths(new Set([uri]))
+      setAnchorIndex(index)
+      setExpandDirection(null)
+    }
+  }, [anchorIndex, paginatedChildren])
+
+  // Click outside table to deselect
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (tableRef.current && !tableRef.current.contains(e.target as Node)) {
+        setSelectedPaths(new Set())
+        setAnchorIndex(null)
+        setExpandDirection(null)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Keyboard navigation for up/down and shift+up/down (Superhuman-style)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only handle if we're focused on the table area or body
+      if (!tableRef.current?.contains(document.activeElement) && document.activeElement !== document.body) {
+        return
+      }
+
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        const keyDirection = e.key === 'ArrowUp' ? 'up' : 'down'
+
+        // Without shift: just move hover
+        if (!e.shiftKey) {
+          if (hoveredIndex === null) {
+            // Start at first or last depending on direction
+            setHoveredIndex(keyDirection === 'up' ? paginatedChildren.length - 1 : 0)
+          } else {
+            const newIndex = keyDirection === 'up'
+              ? Math.max(0, hoveredIndex - 1)
+              : Math.min(paginatedChildren.length - 1, hoveredIndex + 1)
+            setHoveredIndex(newIndex)
+          }
+          return
+        }
+
+        // With shift: selection logic
+        // If no anchor, start from hovered row (or first/last row)
+        if (anchorIndex === null) {
+          const startIndex = hoveredIndex ?? (keyDirection === 'up' ? paginatedChildren.length - 1 : 0)
+          if (startIndex >= 0 && startIndex < paginatedChildren.length) {
+            // First shift+arrow: select hovered + one in that direction (2 rows)
+            const nextIndex = keyDirection === 'up'
+              ? Math.max(0, startIndex - 1)
+              : Math.min(paginatedChildren.length - 1, startIndex + 1)
+
+            setAnchorIndex(startIndex)
+            if (nextIndex !== startIndex) {
+              setSelectedPaths(new Set([
+                paginatedChildren[startIndex].uri,
+                paginatedChildren[nextIndex].uri,
+              ]))
+            } else {
+              setSelectedPaths(new Set([paginatedChildren[startIndex].uri]))
+            }
+            setExpandDirection(keyDirection)
+          }
+          return
+        }
+
+        // Find current selection bounds
+        const selectedIndices = paginatedChildren
+          .map((r, i) => selectedPaths.has(r.uri) ? i : -1)
+          .filter(i => i >= 0)
+
+        if (selectedIndices.length === 0) return
+
+        const minSelected = Math.min(...selectedIndices)
+        const maxSelected = Math.max(...selectedIndices)
+
+        // If only one selected and no direction set, this press sets the expand direction
+        if (selectedIndices.length === 1 && expandDirection === null) {
+          setExpandDirection(keyDirection)
+        }
+
+        const currentDirection = expandDirection ?? keyDirection
+
+        if (keyDirection === currentDirection) {
+          // Expanding in the current direction
+          const newIndex = currentDirection === 'up'
+            ? Math.max(0, minSelected - 1)
+            : Math.min(paginatedChildren.length - 1, maxSelected + 1)
+
+          if (newIndex >= 0 && newIndex < paginatedChildren.length) {
+            setSelectedPaths(prev => {
+              const next = new Set(prev)
+              next.add(paginatedChildren[newIndex].uri)
+              return next
+            })
+          }
+        } else {
+          // Contracting (opposite direction)
+          if (selectedIndices.length > 1) {
+            // Remove from the expanding edge
+            const indexToRemove = currentDirection === 'up' ? minSelected : maxSelected
+            setSelectedPaths(prev => {
+              const next = new Set(prev)
+              next.delete(paginatedChildren[indexToRemove].uri)
+
+              // If we're down to one item, reset direction
+              if (next.size === 1) {
+                setExpandDirection(null)
+              }
+              return next
+            })
+          }
+          // If only one selected, opposite arrow does nothing (or could reset direction)
+        }
+      } else if (e.key === 'Escape') {
+        setSelectedPaths(new Set())
+        setAnchorIndex(null)
+        setExpandDirection(null)
+      } else if (e.key === 'a' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault()
+        setSelectedPaths(new Set(paginatedChildren.map(r => r.uri)))
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [anchorIndex, expandDirection, hoveredIndex, paginatedChildren, selectedPaths])
+
+  // Compute selection summary
+  const selectedRows = useMemo(() => {
+    return paginatedChildren.filter(r => selectedPaths.has(r.uri))
+  }, [paginatedChildren, selectedPaths])
+
+  const selectedSize = useMemo(() => {
+    return selectedRows.reduce((sum, r) => sum + (r.size ?? 0), 0)
+  }, [selectedRows])
+
+  const selectedDirs = useMemo(() => {
+    return selectedRows.filter(r => r.kind === 'dir')
+  }, [selectedRows])
+
+  // Bulk actions
+  const handleBulkScan = async () => {
+    for (const row of selectedDirs) {
+      try {
+        const job = await startScan(row.uri)
+        setChildJobs(prev => new Map(prev).set(row.uri, job))
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to start scan')
+      }
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedRows.length === 0) return
+
+    const msg = selectedRows.length === 1
+      ? `Delete "${selectedRows[0].path}"?`
+      : `Delete ${selectedRows.length} items (${sizeStr(selectedSize)})?`
+
+    if (!confirm(`${msg} This cannot be undone.`)) {
+      return
+    }
+
+    const pathsToDelete = selectedRows.map(r => r.uri)
+    setDeletingPaths(prev => {
+      const next = new Set(prev)
+      pathsToDelete.forEach(p => next.add(p))
+      return next
+    })
+
+    for (const path of pathsToDelete) {
+      try {
+        await deletePath(path)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Failed to delete')
+      }
+    }
+
+    setDeletingPaths(prev => {
+      const next = new Set(prev)
+      pathsToDelete.forEach(p => next.delete(p))
+      return next
+    })
+
+    setSelectedPaths(new Set())
+    refreshDetails()
+  }
+
+  const loadDetails = (refresh = false) => {
+    if (!refresh) {
+      setLoading(true)
+      setDetails(null) // Clear previous data when loading new URI
+    }
     setError(null)
-    setDetails(null) // Clear previous data when loading new URI
     fetchScanDetails(uri)
       .then(setDetails)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
   }
+
+  const refreshDetails = () => loadDetails(true)
 
   useEffect(() => {
     loadDetails()
@@ -421,7 +713,7 @@ export function ScanDetails() {
       setScanJob(status)
       if (status.status === 'completed') {
         setScanning(false)
-        loadDetails() // Refresh data
+        refreshDetails()
       } else if (status.status === 'failed') {
         setScanning(false)
         setError(status.error || 'Scan failed')
@@ -452,7 +744,7 @@ export function ScanDetails() {
 
       setChildJobs(updates)
       if (anyCompleted) {
-        loadDetails() // Refresh to show updated scan data
+        refreshDetails()
       }
     }, 2000)
 
@@ -488,7 +780,7 @@ export function ScanDetails() {
     setDeletingPaths(prev => new Set(prev).add(path))
     try {
       await deletePath(path)
-      loadDetails() // Refresh to show updated data
+      refreshDetails()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to delete')
     } finally {
@@ -529,10 +821,10 @@ export function ScanDetails() {
   const { root, rows, scan_status, time } = details
 
   return (
-    <div>
+    <div ref={tableRef} tabIndex={0} style={{ outline: 'none' }}>
       <h1 style={{ marginBottom: '1rem' }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
       {error && <p style={{ color: 'red' }}>{error}</p>}
-      <div style={{ marginBottom: '0.5rem' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
         <TextField
           size="small"
           placeholder="Filter by name..."
@@ -541,7 +833,43 @@ export function ScanDetails() {
           slotProps={{ input: { startAdornment: <FaSearch style={{ marginRight: 8, opacity: 0.5 }} /> } }}
           sx={{ width: 250 }}
         />
-      </div>
+        {selectedRows.length > 0 && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.85rem' }}>
+            <span style={{ opacity: 0.8 }}>
+              {selectedRows.length} selected ({sizeStr(selectedSize)})
+            </span>
+            {selectedDirs.length > 0 && (
+              <Tooltip title={`Scan ${selectedDirs.length} director${selectedDirs.length === 1 ? 'y' : 'ies'}`}>
+                <Button
+                  size="small"
+                  onClick={handleBulkScan}
+                  startIcon={<FaSync size={12} />}
+                  sx={{ minWidth: 0 }}
+                >
+                  Scan
+                </Button>
+              </Tooltip>
+            )}
+            <Tooltip title={`Delete ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}`}>
+              <Button
+                size="small"
+                onClick={handleBulkDelete}
+                startIcon={<FaTrash size={12} />}
+                sx={{ minWidth: 0, color: '#d32f2f' }}
+              >
+                Delete
+              </Button>
+            </Tooltip>
+            <Button
+              size="small"
+              onClick={() => setSelectedPaths(new Set())}
+              sx={{ minWidth: 0, opacity: 0.7 }}
+            >
+              Clear
+            </Button>
+          </Box>
+        )}
+      </Box>
       <DetailsTable
         root={root}
         children={paginatedChildren}
@@ -557,6 +885,10 @@ export function ScanDetails() {
         onSort={handleSort}
         onDelete={handleDelete}
         deletingPaths={deletingPaths}
+        selectedPaths={selectedPaths}
+        hoveredIndex={hoveredIndex}
+        onRowClick={handleRowClick}
+        onRowHover={setHoveredIndex}
       />
       {sortedChildren.length > pageSize && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem', fontSize: '0.85rem' }}>
