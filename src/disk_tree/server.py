@@ -320,6 +320,60 @@ def get_scan():
         c['scanned'] = True
         c['scan_time'] = scan['time']
 
+    # Patch in fresher child scans: find direct child paths with newer scans
+    scan_time = scan['time']
+    child_uri_prefix = uri.rstrip('/') + '/'
+    db = get_db()
+    # Query for scans of direct children that are newer than parent scan
+    # Direct children: path starts with parent prefix, no additional slashes
+    fresher_scans = db.execute('''
+        SELECT s1.*
+        FROM scan s1
+        INNER JOIN (
+            SELECT path, MAX(time) as max_time
+            FROM scan
+            WHERE path LIKE ? ESCAPE '\\'
+              AND path NOT LIKE ? ESCAPE '\\'
+              AND time > ?
+            GROUP BY path
+        ) s2 ON s1.path = s2.path AND s1.time = s2.max_time
+    ''', (
+        child_uri_prefix.replace('%', '\\%').replace('_', '\\_') + '%',  # children
+        child_uri_prefix.replace('%', '\\%').replace('_', '\\_') + '%/%',  # exclude grandchildren+
+        scan_time,
+    )).fetchall()
+
+    # Build a map of child path -> fresher scan stats
+    fresher_stats = {}
+    for child_scan in fresher_scans:
+        try:
+            child_df = pd.read_parquet(child_scan['blob'])
+            # Get the root row (path='.')
+            root_rows = child_df[child_df['path'] == '.']
+            if not root_rows.empty:
+                root = root_rows.iloc[0]
+                fresher_stats[child_scan['path']] = {
+                    'size': int(root['size']) if hasattr(root['size'], 'item') else root['size'],
+                    'mtime': int(root['mtime']) if hasattr(root['mtime'], 'item') else root['mtime'],
+                    'n_desc': int(root['n_desc']) if hasattr(root['n_desc'], 'item') else root['n_desc'],
+                    'n_children': int(root['n_children']) if hasattr(root['n_children'], 'item') else root['n_children'],
+                    'scan_time': child_scan['time'],
+                }
+        except Exception:
+            pass  # Skip if parquet can't be loaded
+
+    # Patch fresher stats into children
+    for c in children:
+        child_path = c.get('uri', '')
+        if child_path in fresher_stats:
+            stats = fresher_stats[child_path]
+            c['size'] = stats['size']
+            c['mtime'] = stats['mtime']
+            c['n_desc'] = stats['n_desc']
+            c['n_children'] = stats['n_children']
+            c['scan_time'] = stats['scan_time']
+            c['patched'] = True  # Mark that this was patched from a fresher scan
+
     return jsonify({
         'root': root,
         'children': sorted(children, key=lambda x: -x.get('size', 0)),
