@@ -57,6 +57,19 @@ def index(
     print("Timings:")
     for k, v in time.fmt().items():
         print(f"  {k}: {v}s")
-    print(f"{n_desc:,} descendents ({elapsed:.3g}s, {round(speed):,d}/s), {naturalsize(size, binary=True, format='%.3g')}")
+    summary = f"{n_desc:,} descendents ({elapsed:.3g}s, {round(speed):,d}/s), {naturalsize(size, binary=True, format='%.3g')}"
+    if scan.error_count:
+        summary += f", {scan.error_count} permission errors"
+    print(summary)
     stat = os.stat(scan.blob)
     print(f"Scan cached path: {scan.blob} ({iec(stat.st_size)})")
+    if scan.error_count:
+        import json
+        error_paths = json.loads(scan.error_paths) if scan.error_paths else []
+        if error_paths:
+            print(f"\nPermission errors (showing first {len(error_paths)}):")
+            for p in error_paths[:10]:
+                print(f"  {p}")
+            if len(error_paths) > 10:
+                print(f"  ... and {len(error_paths) - 10} more")
+        print(f"\nTip: Run with --sudo for full access: disk-tree index --sudo {url}")

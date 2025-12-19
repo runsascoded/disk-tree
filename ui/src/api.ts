@@ -3,6 +3,8 @@ export type Scan = {
   path: string
   time: string
   blob: string
+  error_count?: number | null
+  error_paths?: string | null  // JSON array
 }
 
 export type Row = {
@@ -25,6 +27,8 @@ export type ScanDetails = {
   time: string | null
   scan_path: string | null
   scan_status: 'full' | 'partial' | 'none'
+  error_count?: number | null
+  error_paths?: string | null  // JSON array
 }
 
 export async function fetchScans(): Promise<Scan[]> {
@@ -94,5 +98,22 @@ export async function deletePath(path: string): Promise<DeleteResult> {
     const err = await res.json()
     throw new Error(err.error || 'Failed to delete')
   }
+  return res.json()
+}
+
+export type ScanProgress = {
+  id: number
+  path: string
+  pid: number
+  started: string
+  items_found: number
+  items_per_sec: number | null
+  error_count: number
+  status: 'running' | 'completed' | 'failed'
+}
+
+export async function fetchScansProgress(): Promise<ScanProgress[]> {
+  const res = await fetch('/api/scans/progress')
+  if (!res.ok) throw new Error('Failed to fetch scans progress')
   return res.json()
 }

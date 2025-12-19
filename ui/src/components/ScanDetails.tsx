@@ -1,14 +1,51 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Box, Button, Checkbox, CircularProgress, TextField, Tooltip } from '@mui/material'
-import { FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
+import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
+import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import Plot from 'react-plotly.js'
 import { fetchScanDetails, startScan, fetchScanStatus, deletePath } from '../api'
-import type { Row, ScanDetails as ScanDetailsType, ScanJob } from '../api'
+import type { Row, ScanDetails as ScanDetailsType, ScanJob, ScanProgress } from '../api'
+import { useScanProgress } from '../hooks/useScanProgress'
 
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
 type SortDir = 'asc' | 'desc'
 type SortSpec = { key: SortKey; dir: SortDir }
+
+function formatNumber(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return n.toString()
+}
+
+function ScanProgressBanner({ progress, currentUri }: { progress: ScanProgress[]; currentUri: string }) {
+  // Find scans that are relevant to this path (exact match, ancestor, or descendant)
+  const relevantScans = progress.filter(p => {
+    const scanPath = p.path
+    // Exact match
+    if (scanPath === currentUri) return true
+    // Scan is ancestor of current (current is inside scan)
+    if (currentUri.startsWith(scanPath + '/')) return true
+    // Scan is descendant of current (scan is inside current)
+    if (scanPath.startsWith(currentUri + '/')) return true
+    return false
+  })
+
+  if (relevantScans.length === 0) return null
+
+  return (
+    <Alert severity="info" sx={{ mb: 2 }} icon={<CircularProgress size={20} />}>
+      {relevantScans.map(scan => (
+        <Box key={scan.id} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <strong>Scanning:</strong>
+          <code style={{ fontSize: '0.9em' }}>{scan.path}</code>
+          <span>{formatNumber(scan.items_found)} items</span>
+          {scan.items_per_sec && <span>({formatNumber(Math.round(scan.items_per_sec))}/sec)</span>}
+          {scan.error_count > 0 && <span style={{ color: '#ed6c02' }}>{scan.error_count} errors</span>}
+        </Box>
+      ))}
+    </Alert>
+  )
+}
 
 function sizeStr(bytes: number | null): string {
   if (bytes === null) return '-'
@@ -55,13 +92,13 @@ function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) 
       {routeType === 's3' && <span>s3://</span>}
       {paths.map((path, idx) => (
         <span key={idx}>
-          {routeType === 'file' && <span>/</span>}
+          {routeType === 'file' && <span className="breadcrumb-sep">/</span>}
           {idx === paths.length - 1 ? (
             <span>{segments[idx]}</span>
           ) : (
             <Link to={`${prefix}/${path}`}>{segments[idx]}</Link>
           )}
-          {routeType === 's3' && idx < paths.length - 1 && <span>/</span>}
+          {routeType === 's3' && idx < paths.length - 1 && <span className="breadcrumb-sep">/</span>}
         </span>
       ))}
     </div>
@@ -129,6 +166,41 @@ function SortableHeader({
   return tooltip ? <Tooltip title={tooltip}>{header}</Tooltip> : header
 }
 
+function PermissionErrorWarning({ errorCount, errorPaths, scanPath }: { errorCount: number; errorPaths: string[] | null; scanPath: string | null }) {
+  const [expanded, setExpanded] = useState(false)
+  const displayPaths = errorPaths?.slice(0, 10) ?? []
+  const hasMore = errorPaths && errorPaths.length > 10
+
+  return (
+    <Alert
+      severity="warning"
+      icon={<FaExclamationTriangle />}
+      sx={{ mb: 2, '& .MuiAlert-message': { width: '100%' } }}
+    >
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
+        {displayPaths.length > 0 && (expanded ? <FaChevronDown size={12} /> : <FaChevronRight size={12} />)}
+        <span>
+          <strong>{errorCount} permission error{errorCount !== 1 ? 's' : ''}</strong> during scan.
+          Some directories were not indexed.
+        </span>
+      </Box>
+      <Collapse in={expanded}>
+        {displayPaths.length > 0 && (
+          <Box sx={{ mt: 1, ml: 2 }}>
+            <div style={{ fontFamily: 'monospace', fontSize: '0.8rem', opacity: 0.9 }}>
+              {displayPaths.map((p, i) => <div key={i}>{p}</div>)}
+              {hasMore && <div style={{ opacity: 0.6 }}>... and {errorPaths!.length - 10} more</div>}
+            </div>
+          </Box>
+        )}
+      </Collapse>
+      <Box sx={{ mt: 1, fontSize: '0.85rem', opacity: 0.85 }}>
+        Tip: Run <code style={{ background: 'rgba(0,0,0,0.1)', padding: '2px 4px', borderRadius: 3 }}>disk-tree index --sudo {scanPath ?? '<path>'}</code> for full access.
+      </Box>
+    </Alert>
+  )
+}
+
 function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanStatus: 'full' | 'partial' | 'none'; parentScanTime: string | null }) {
   // If parent was fully scanned, children inherit that scan time (shown grayed)
   if (scanStatus === 'full' && !row.scan_time && parentScanTime) {
@@ -163,7 +235,11 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   onRowClick: (uri: string, index: number, event: React.MouseEvent | React.KeyboardEvent) => void
   onRowHover: (index: number | null) => void
 }) {
-  const prefix = routeType === 's3' ? `/s3/${uri.replace('s3://', '')}` : `/file${uri}`
+  // Build prefix for child links, avoiding double slashes
+  // For root (/), prefix should be /file not /file/
+  const prefix = routeType === 's3'
+    ? `/s3/${uri.replace('s3://', '').replace(/\/$/, '')}`
+    : uri === '/' ? '/file' : `/file${uri}`
   const allSelected = children.length > 0 && children.every(r => selectedPaths.has(r.uri))
   const someSelected = children.some(r => selectedPaths.has(r.uri))
 
@@ -384,6 +460,9 @@ export function ScanDetails() {
   const [expandDirection, setExpandDirection] = useState<'up' | 'down' | null>(null) // Which direction we're expanding
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
   const tableRef = useRef<HTMLDivElement>(null)
+
+  // Live scan progress from SSE
+  const scanProgress = useScanProgress()
 
   const handleSort = (key: SortKey) => {
     setSorts(prev => {
@@ -818,12 +897,29 @@ export function ScanDetails() {
   }
   if (!details) return <div>No data</div>
 
-  const { root, rows, scan_status, time } = details
+  const { root, rows, scan_status, time, error_count, error_paths } = details
+
+  // Parse error_paths JSON string to array (inline, no hook needed)
+  const parsedErrorPaths = error_paths ? (() => {
+    try {
+      return JSON.parse(error_paths) as string[]
+    } catch {
+      return null
+    }
+  })() : null
 
   return (
     <div ref={tableRef} tabIndex={0} style={{ outline: 'none' }}>
       <h1 style={{ marginBottom: '1rem' }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
+      <ScanProgressBanner progress={scanProgress} currentUri={uri} />
       {error && <p style={{ color: 'red' }}>{error}</p>}
+      {error_count && error_count > 0 && (
+        <PermissionErrorWarning
+          errorCount={error_count}
+          errorPaths={parsedErrorPaths}
+          scanPath={details.scan_path}
+        />
+      )}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
         <TextField
           size="small"
