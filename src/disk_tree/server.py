@@ -349,14 +349,14 @@ def get_scan():
         try:
             child_df = pd.read_parquet(child_scan['blob'])
             # Get the root row (path='.')
-            root_rows = child_df[child_df['path'] == '.']
-            if not root_rows.empty:
-                root = root_rows.iloc[0]
+            child_root_rows = child_df[child_df['path'] == '.']
+            if not child_root_rows.empty:
+                child_root = child_root_rows.iloc[0]
                 fresher_stats[child_scan['path']] = {
-                    'size': int(root['size']) if hasattr(root['size'], 'item') else root['size'],
-                    'mtime': int(root['mtime']) if hasattr(root['mtime'], 'item') else root['mtime'],
-                    'n_desc': int(root['n_desc']) if hasattr(root['n_desc'], 'item') else root['n_desc'],
-                    'n_children': int(root['n_children']) if hasattr(root['n_children'], 'item') else root['n_children'],
+                    'size': int(child_root['size']) if hasattr(child_root['size'], 'item') else child_root['size'],
+                    'mtime': int(child_root['mtime']) if hasattr(child_root['mtime'], 'item') else child_root['mtime'],
+                    'n_desc': int(child_root['n_desc']) if hasattr(child_root['n_desc'], 'item') else child_root['n_desc'],
+                    'n_children': int(child_root['n_children']) if hasattr(child_root['n_children'], 'item') else child_root['n_children'],
                     'scan_time': child_scan['time'],
                 }
         except Exception:
