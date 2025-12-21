@@ -5,6 +5,9 @@ export type Scan = {
   blob: string
   error_count?: number | null
   error_paths?: string | null  // JSON array
+  size?: number | null
+  n_children?: number | null
+  n_desc?: number | null
 }
 
 export type Row = {
@@ -115,5 +118,23 @@ export type ScanProgress = {
 export async function fetchScansProgress(): Promise<ScanProgress[]> {
   const res = await fetch('/api/scans/progress')
   if (!res.ok) throw new Error('Failed to fetch scans progress')
+  return res.json()
+}
+
+export type S3Bucket = {
+  name: string
+  created: string
+  last_scanned: string | null
+  size?: number | null
+  n_children?: number | null
+  n_desc?: number | null
+}
+
+export async function fetchS3Buckets(): Promise<S3Bucket[]> {
+  const res = await fetch('/api/s3/buckets')
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.error || 'Failed to fetch S3 buckets')
+  }
   return res.json()
 }
