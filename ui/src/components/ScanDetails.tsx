@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
-import Plot from 'react-plotly.js'
+import { LazyPlot as Plot } from './LazyPlot'
+import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, startScan, fetchScanStatus, deletePath } from '../api'
-import type { Row, ScanDetails as ScanDetailsType, ScanJob, ScanProgress } from '../api'
+import type { Row, ScanJob, ScanProgress } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
@@ -89,7 +90,7 @@ function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) 
 
   return (
     <div className="breadcrumbs">
-      {routeType === 's3' && <span>s3://</span>}
+      {routeType === 's3' && <Link to="/s3">s3://</Link>}
       {paths.map((path, idx) => (
         <span key={idx}>
           {routeType === 'file' && <span className="breadcrumb-sep">/</span>}
@@ -284,7 +285,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           <SortableHeader label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
           <SortableHeader label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
           <th></th>
-          <th></th>
+          {routeType !== 's3' && <th></th>}
         </tr>
       </thead>
       <tbody>
@@ -323,7 +324,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               </span>
             </Tooltip>
           </td>
-          <td></td>
+          {routeType !== 's3' && <td></td>}
         </tr>
         {children.map((row, idx) => {
           const childUri = row.uri
@@ -382,20 +383,22 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   </Tooltip>
                 )}
               </td>
-              <td onClick={e => e.stopPropagation()}>
-                <Tooltip title={`Delete ${row.kind === 'dir' ? 'directory' : 'file'}`}>
-                  <span>
-                    <Button
-                      size="small"
-                      onClick={() => onDelete(childUri)}
-                      disabled={deletingPaths.has(childUri)}
-                      sx={{ minWidth: 0, padding: '2px 4px', color: '#d32f2f' }}
-                    >
-                      {deletingPaths.has(childUri) ? <CircularProgress size={14} /> : <FaTrash size={12} />}
-                    </Button>
-                  </span>
-                </Tooltip>
-              </td>
+              {routeType !== 's3' && (
+                <td onClick={e => e.stopPropagation()}>
+                  <Tooltip title={`Delete ${row.kind === 'dir' ? 'directory' : 'file'}`}>
+                    <span>
+                      <Button
+                        size="small"
+                        onClick={() => onDelete(childUri)}
+                        disabled={deletingPaths.has(childUri)}
+                        sx={{ minWidth: 0, padding: '2px 4px', color: '#d32f2f' }}
+                      >
+                        {deletingPaths.has(childUri) ? <CircularProgress size={14} /> : <FaTrash size={12} />}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                </td>
+              )}
             </tr>
           )
         })}
@@ -444,9 +447,13 @@ export function ScanDetails() {
     ? `s3://${pathSegments}`
     : `/${pathSegments}`
 
-  const [details, setDetails] = useState<ScanDetailsType | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data: details, isLoading, error: queryError, refetch } = useQuery({
+    queryKey: ['scan-details', uri],
+    queryFn: () => fetchScanDetails(uri),
+    staleTime: 60 * 1000, // 1 minute - scan details don't change frequently
+  })
+  const [mutationError, setMutationError] = useState<string | null>(null)
+  const error = queryError?.message || mutationError
   const [scanning, setScanning] = useState(false)
   const [scanJob, setScanJob] = useState<ScanJob | null>(null)
   const [childJobs, setChildJobs] = useState<Map<string, ScanJob>>(new Map())
@@ -555,10 +562,18 @@ export function ScanDetails() {
     const metaKey = 'metaKey' in event ? event.metaKey || event.ctrlKey : false
 
     if (metaKey) {
-      // Meta-click: set new anchor, start fresh selection at this point
-      setSelectedPaths(new Set([uri]))
+      // Meta-click: toggle this row in selection
+      setSelectedPaths(prev => {
+        const next = new Set(prev)
+        if (next.has(uri)) {
+          next.delete(uri)
+        } else {
+          next.add(uri)
+        }
+        return next
+      })
       setAnchorIndex(index)
-      setExpandDirection(null) // Reset direction
+      setExpandDirection(null)
     } else if (shiftKey && anchorIndex !== null) {
       // Shift-click: select range from anchor to clicked
       const start = Math.min(anchorIndex, index)
@@ -571,12 +586,21 @@ export function ScanDetails() {
       }
       setSelectedPaths(newSelection)
     } else {
-      // Regular click: single select, set as new anchor
-      setSelectedPaths(new Set([uri]))
-      setAnchorIndex(index)
-      setExpandDirection(null)
+      // Regular click: toggle if only this row selected, otherwise select just this row
+      const isOnlySelected = selectedPaths.size === 1 && selectedPaths.has(uri)
+      if (isOnlySelected) {
+        // Clicking the only selected row deselects it
+        setSelectedPaths(new Set())
+        setAnchorIndex(null)
+        setExpandDirection(null)
+      } else {
+        // Select just this row
+        setSelectedPaths(new Set([uri]))
+        setAnchorIndex(index)
+        setExpandDirection(null)
+      }
     }
-  }, [anchorIndex, paginatedChildren])
+  }, [anchorIndex, paginatedChildren, selectedPaths])
 
   // Click outside table to deselect
   useEffect(() => {
@@ -595,8 +619,15 @@ export function ScanDetails() {
   // Keyboard navigation for up/down and shift+up/down (Superhuman-style)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle if we're focused on the table area or body
-      if (!tableRef.current?.contains(document.activeElement) && document.activeElement !== document.body) {
+      // Handle keyboard events if:
+      // 1. Table has focus, OR
+      // 2. Nothing has focus (body), OR
+      // 3. Mouse is hovering over the table (Superhuman-style: hover enables keyboard nav)
+      const tableHasFocus = tableRef.current?.contains(document.activeElement)
+      const nothingFocused = document.activeElement === document.body
+      const isHoveringTable = hoveredIndex !== null
+
+      if (!tableHasFocus && !nothingFocused && !isHoveringTable) {
         return
       }
 
@@ -724,7 +755,7 @@ export function ScanDetails() {
         const job = await startScan(row.uri)
         setChildJobs(prev => new Map(prev).set(row.uri, job))
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to start scan')
+        setMutationError(e instanceof Error ? e.message : 'Failed to start scan')
       }
     }
   }
@@ -751,7 +782,7 @@ export function ScanDetails() {
       try {
         await deletePath(path)
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'Failed to delete')
+        setMutationError(e instanceof Error ? e.message : 'Failed to delete')
       }
     }
 
@@ -762,26 +793,8 @@ export function ScanDetails() {
     })
 
     setSelectedPaths(new Set())
-    refreshDetails()
+    refetch()
   }
-
-  const loadDetails = (refresh = false) => {
-    if (!refresh) {
-      setLoading(true)
-      setDetails(null) // Clear previous data when loading new URI
-    }
-    setError(null)
-    fetchScanDetails(uri)
-      .then(setDetails)
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false))
-  }
-
-  const refreshDetails = () => loadDetails(true)
-
-  useEffect(() => {
-    loadDetails()
-  }, [uri])
 
   // Poll scan job status (main scan)
   useEffect(() => {
@@ -792,10 +805,10 @@ export function ScanDetails() {
       setScanJob(status)
       if (status.status === 'completed') {
         setScanning(false)
-        refreshDetails()
+        refetch()
       } else if (status.status === 'failed') {
         setScanning(false)
-        setError(status.error || 'Scan failed')
+        setMutationError(status.error || 'Scan failed')
       }
     }, 2000)
 
@@ -823,7 +836,7 @@ export function ScanDetails() {
 
       setChildJobs(updates)
       if (anyCompleted) {
-        refreshDetails()
+        refetch()
       }
     }, 2000)
 
@@ -837,7 +850,7 @@ export function ScanDetails() {
       setScanJob(job)
     } catch (e) {
       setScanning(false)
-      setError(e instanceof Error ? e.message : 'Failed to start scan')
+      setMutationError(e instanceof Error ? e.message : 'Failed to start scan')
     }
   }
 
@@ -846,7 +859,7 @@ export function ScanDetails() {
       const job = await startScan(childPath)
       setChildJobs(prev => new Map(prev).set(childPath, job))
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to start scan')
+      setMutationError(e instanceof Error ? e.message : 'Failed to start scan')
     }
   }
 
@@ -859,9 +872,9 @@ export function ScanDetails() {
     setDeletingPaths(prev => new Set(prev).add(path))
     try {
       await deletePath(path)
-      refreshDetails()
+      refetch()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete')
+      setMutationError(e instanceof Error ? e.message : 'Failed to delete')
     } finally {
       setDeletingPaths(prev => {
         const next = new Set(prev)
@@ -877,7 +890,7 @@ export function ScanDetails() {
       .map(([path]) => path)
   )
 
-  if (loading) return <div>Loading...</div>
+  if (isLoading) return <div>Loading...</div>
   if (error && !details) {
     return (
       <div>
@@ -946,16 +959,18 @@ export function ScanDetails() {
                 </Button>
               </Tooltip>
             )}
-            <Tooltip title={`Delete ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}`}>
-              <Button
-                size="small"
-                onClick={handleBulkDelete}
-                startIcon={<FaTrash size={12} />}
-                sx={{ minWidth: 0, color: '#d32f2f' }}
-              >
-                Delete
-              </Button>
-            </Tooltip>
+            {routeType !== 's3' && (
+              <Tooltip title={`Delete ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}`}>
+                <Button
+                  size="small"
+                  onClick={handleBulkDelete}
+                  startIcon={<FaTrash size={12} />}
+                  sx={{ minWidth: 0, color: '#d32f2f' }}
+                >
+                  Delete
+                </Button>
+              </Tooltip>
+            )}
             <Button
               size="small"
               onClick={() => setSelectedPaths(new Set())}

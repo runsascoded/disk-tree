@@ -1,10 +1,13 @@
 import { Link, useLocation } from 'react-router-dom'
 import { AppBar, Toolbar, Typography, Button, Box } from '@mui/material'
-import { FaDatabase, FaFolder } from 'react-icons/fa'
+import { FaCloud, FaDatabase, FaFolder } from 'react-icons/fa'
 
 export function Header() {
   const location = useLocation()
-  const isScansPage = location.pathname === '/'
+  const path = location.pathname
+  const isScansPage = path === '/'
+  const isLocalPage = path.startsWith('/file')
+  const isS3Page = path.startsWith('/s3')
 
   return (
     <AppBar position="static" color="transparent" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
@@ -26,10 +29,19 @@ export function Header() {
             component={Link}
             to="/file/"
             startIcon={<FaFolder />}
-            variant={!isScansPage ? 'contained' : 'text'}
+            variant={isLocalPage ? 'contained' : 'text'}
             size="small"
           >
-            Browse
+            Local
+          </Button>
+          <Button
+            component={Link}
+            to="/s3/"
+            startIcon={<FaCloud />}
+            variant={isS3Page ? 'contained' : 'text'}
+            size="small"
+          >
+            S3
           </Button>
         </Box>
       </Toolbar>

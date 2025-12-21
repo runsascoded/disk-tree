@@ -1,17 +1,19 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Box,
   Button,
   CircularProgress,
   LinearProgress,
+  MenuItem,
   Paper,
+  Select,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material'
-import { FaPlay, FaSync } from 'react-icons/fa'
-import { fetchScans, fetchRunningScans, startScan } from '../api'
+import { FaPlay } from 'react-icons/fa'
+import { fetchScans, startScan } from '../api'
 import type { Scan, ScanJob, ScanProgress } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 
@@ -40,6 +42,15 @@ function formatNumber(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return n.toString()
+}
+
+function formatSize(bytes: number | null | undefined): string {
+  if (bytes == null) return '-'
+  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(1)} TB`
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${bytes} B`
 }
 
 function LiveScanProgress({ progress }: { progress: ScanProgress[] }) {
@@ -81,33 +92,6 @@ function LiveScanProgress({ progress }: { progress: ScanProgress[] }) {
   )
 }
 
-function RunningScans({ jobs, onRefresh }: { jobs: ScanJob[]; onRefresh: () => void }) {
-  const activeJobs = jobs.filter(j => j.status === 'running' || j.status === 'pending')
-  if (activeJobs.length === 0) return null
-
-  return (
-    <Paper sx={{ p: 2, mb: 2 }}>
-      <Typography variant="subtitle2" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
-        <CircularProgress size={16} />
-        Scans in Progress (Web-initiated)
-      </Typography>
-      <table style={{ width: '100%' }}>
-        <tbody>
-          {activeJobs.map(job => (
-            <tr key={job.job_id}>
-              <td><code>{job.path}</code></td>
-              <td>{job.status}</td>
-              <td>{timeAgo(job.started)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <Button size="small" startIcon={<FaSync />} onClick={onRefresh} sx={{ mt: 1 }}>
-        Refresh
-      </Button>
-    </Paper>
-  )
-}
 
 function NewScanForm({ onStarted }: { onStarted: (job: ScanJob) => void }) {
   const [path, setPath] = useState('')
@@ -163,21 +147,25 @@ function NewScanForm({ onStarted }: { onStarted: (job: ScanJob) => void }) {
 
 export function ScanList() {
   const [scans, setScans] = useState<Scan[]>([])
-  const [runningJobs, setRunningJobs] = useState<ScanJob[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(50)
 
   // Live progress from SSE
   const scanProgress = useScanProgress()
 
+  // Pagination
+  const totalPages = Math.ceil(scans.length / pageSize)
+  const paginatedScans = useMemo(() => {
+    const start = page * pageSize
+    return scans.slice(start, start + pageSize)
+  }, [scans, page, pageSize])
+
   const loadData = async () => {
     try {
-      const [scansData, jobsData] = await Promise.all([
-        fetchScans(),
-        fetchRunningScans(),
-      ])
+      const scansData = await fetchScans()
       setScans(scansData)
-      setRunningJobs(jobsData)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
     } finally {
@@ -189,26 +177,6 @@ export function ScanList() {
     loadData()
   }, [])
 
-  // Poll for running scans (web-initiated only)
-  useEffect(() => {
-    const hasActive = runningJobs.some(j => j.status === 'running' || j.status === 'pending')
-    if (!hasActive) return
-
-    const interval = setInterval(async () => {
-      const jobs = await fetchRunningScans()
-      setRunningJobs(jobs)
-      // If a job completed, refresh the scans list
-      const wasActive = runningJobs.some(j => j.status === 'running' || j.status === 'pending')
-      const nowActive = jobs.some(j => j.status === 'running' || j.status === 'pending')
-      if (wasActive && !nowActive) {
-        const newScans = await fetchScans()
-        setScans(newScans)
-      }
-    }, 2000)
-
-    return () => clearInterval(interval)
-  }, [runningJobs])
-
   // Refresh scans list when a live scan completes (SSE shows empty but we had scans)
   const [prevProgressCount, setPrevProgressCount] = useState(0)
   useEffect(() => {
@@ -219,8 +187,9 @@ export function ScanList() {
     setPrevProgressCount(scanProgress.length)
   }, [scanProgress.length, prevProgressCount])
 
-  const handleNewScan = (job: ScanJob) => {
-    setRunningJobs(prev => [...prev, job])
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleNewScan = (_job: ScanJob) => {
+    // Scan progress is tracked via SSE, no need to track here
   }
 
   if (loading) return <div>Loading scans...</div>
@@ -231,30 +200,67 @@ export function ScanList() {
       <h1>Scans</h1>
       <NewScanForm onStarted={handleNewScan} />
       <LiveScanProgress progress={scanProgress} />
-      <RunningScans jobs={runningJobs} onRefresh={loadData} />
       <Tooltip title="Previously completed scans. Click a path to browse its contents.">
         <Typography variant="subtitle2" sx={{ mb: 1 }}>Completed Scans</Typography>
       </Tooltip>
       <table>
         <thead>
           <tr>
-            <th>Path</th>
-            <th>Scanned</th>
+            <th style={{ textAlign: 'left' }}>Path</th>
+            <th style={{ textAlign: 'right' }}>Size</th>
+            <th style={{ textAlign: 'right' }}>Items</th>
+            <th style={{ textAlign: 'right' }}>Children</th>
+            <th style={{ textAlign: 'left' }}>Scanned</th>
           </tr>
         </thead>
         <tbody>
-          {scans.map(scan => (
+          {paginatedScans.map(scan => (
             <tr key={scan.id}>
-              <td>
+              <td style={{ textAlign: 'left' }}>
                 <Link to={pathToRoute(scan.path)}>
                   <code>{scan.path}</code>
                 </Link>
               </td>
-              <td>{timeAgo(scan.time)}</td>
+              <td style={{ textAlign: 'right' }}>{formatSize(scan.size)}</td>
+              <td style={{ textAlign: 'right' }}>{scan.n_desc != null ? formatNumber(scan.n_desc) : '-'}</td>
+              <td style={{ textAlign: 'right' }}>{scan.n_children != null ? formatNumber(scan.n_children) : '-'}</td>
+              <td style={{ textAlign: 'left' }}>{timeAgo(scan.time)}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {scans.length > pageSize && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, fontSize: '0.85rem' }}>
+          <span style={{ opacity: 0.7 }}>
+            {page * pageSize + 1}-{Math.min((page + 1) * pageSize, scans.length)} of {scans.length}
+          </span>
+          <Box sx={{ display: 'flex', gap: 0.5 }}>
+            <Button size="small" disabled={page === 0} onClick={() => setPage(0)} sx={{ minWidth: 0, padding: '2px 6px' }}>
+              ⏮
+            </Button>
+            <Button size="small" disabled={page === 0} onClick={() => setPage(p => p - 1)} sx={{ minWidth: 0, padding: '2px 6px' }}>
+              ◀
+            </Button>
+            <Button size="small" disabled={page >= totalPages - 1} onClick={() => setPage(p => p + 1)} sx={{ minWidth: 0, padding: '2px 6px' }}>
+              ▶
+            </Button>
+            <Button size="small" disabled={page >= totalPages - 1} onClick={() => setPage(totalPages - 1)} sx={{ minWidth: 0, padding: '2px 6px' }}>
+              ⏭
+            </Button>
+          </Box>
+          <Select
+            size="small"
+            value={pageSize}
+            onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
+            sx={{ fontSize: '0.85rem', height: '28px' }}
+          >
+            <MenuItem value={25}>25</MenuItem>
+            <MenuItem value={50}>50</MenuItem>
+            <MenuItem value={100}>100</MenuItem>
+            <MenuItem value={250}>250</MenuItem>
+          </Select>
+        </Box>
+      )}
     </div>
   )
 }
