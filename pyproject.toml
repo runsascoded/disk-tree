@@ -52,3 +52,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/disk_tree"]
+
+# Include built UI assets in the wheel (if they exist)
+# Run `cd ui && pnpm build` before building the wheel
+[tool.hatch.build.targets.wheel.force-include]
+"ui/dist" = "disk_tree/static"

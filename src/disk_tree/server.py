@@ -1,6 +1,6 @@
 import json
 from os import listdir, remove, stat
-from os.path import abspath, dirname, isdir, isfile, join
+from os.path import abspath, dirname, exists, isdir, isfile, join
 import shutil
 import sqlite3
 import subprocess
@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 
 import pandas as pd
-from flask import Flask, jsonify, request, g, Response
+from flask import Flask, jsonify, request, g, Response, send_from_directory
 from flask_cors import CORS
 
 from disk_tree.config import SQLITE_PATH
@@ -19,6 +19,19 @@ app = Flask(__name__)
 CORS(app)
 
 DB_PATH = abspath(SQLITE_PATH)
+
+# Static file serving for bundled UI
+# Check multiple locations: packaged static/, dev ui/dist/
+_this_dir = dirname(abspath(__file__))
+_static_candidates = [
+    join(_this_dir, 'static'),           # Packaged: disk_tree/static/
+    join(_this_dir, '..', '..', 'ui', 'dist'),  # Dev: ../../ui/dist from src/disk_tree/
+]
+STATIC_DIR = None
+for candidate in _static_candidates:
+    if exists(join(candidate, 'index.html')):
+        STATIC_DIR = abspath(candidate)
+        break
 
 # Track in-progress scans: {job_id: {path, status, started, output, error}}
 running_scans: dict[str, dict] = {}
@@ -979,7 +992,38 @@ def delete_path():
     })
 
 
+# Static file serving routes (if UI is bundled)
+if STATIC_DIR:
+    @app.route('/')
+    def serve_index():
+        """Serve the SPA index.html."""
+        return send_from_directory(STATIC_DIR, 'index.html')
+
+    @app.route('/assets/<path:filename>')
+    def serve_assets(filename):
+        """Serve static assets (JS, CSS, fonts, images)."""
+        return send_from_directory(join(STATIC_DIR, 'assets'), filename)
+
+    @app.route('/<path:path>')
+    def serve_spa_routes(path):
+        """SPA catch-all: serve index.html for client-side routes.
+
+        Non-API routes that don't match a static file get index.html,
+        allowing React Router to handle them.
+        """
+        # Check if it's a static file that exists
+        static_path = join(STATIC_DIR, path)
+        if exists(static_path) and isfile(static_path):
+            return send_from_directory(STATIC_DIR, path)
+        # Otherwise serve index.html for SPA routing
+        return send_from_directory(STATIC_DIR, 'index.html')
+
+
 def main():
+    if STATIC_DIR:
+        print(f"Serving UI from: {STATIC_DIR}")
+    else:
+        print("No UI found. Run 'cd ui && pnpm build' to build the UI.")
     app.run(debug=True, port=5001)
 
 
