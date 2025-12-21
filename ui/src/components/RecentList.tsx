@@ -59,19 +59,19 @@ export function RecentList() {
               const isS3 = item.uri.startsWith('s3://')
               return (
                 <tr key={item.uri}>
-                  <td>
+                  <td style={{ textAlign: 'left' }}>
                     {isS3 ? (
                       <FaCloud style={{ color: '#ff9800' }} />
                     ) : (
                       <FaFolder style={{ color: '#4caf50' }} />
                     )}
                   </td>
-                  <td>
+                  <td style={{ textAlign: 'left' }}>
                     <Link to={uriToRoute(item.uri)}>
                       <code>{item.uri}</code>
                     </Link>
                   </td>
-                  <td style={{ opacity: 0.7 }}>{timeAgo(item.visitedAt)}</td>
+                  <td style={{ textAlign: 'left', opacity: 0.7 }}>{timeAgo(item.visitedAt)}</td>
                 </tr>
               )
             })}
