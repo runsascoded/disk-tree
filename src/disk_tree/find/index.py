@@ -47,9 +47,14 @@ def s3_files_iter(path: str) -> Iterator[dict]:
             mtime = int(parse(mtime_str).timestamp())
             size = int(strs[2])
             key = strs[3]
-            if not key.startswith(f'{key0}/') and key != key0:
-                raise ValueError(f"{path}: unexpected {key=}")
-            relpath = key[len(key0)+1:] if key != key0 else ''
+            # When key0 is empty (bucket root), all keys are valid
+            # Otherwise, keys must start with the prefix
+            if key0:
+                if not key.startswith(f'{key0}/') and key != key0:
+                    raise ValueError(f"{path}: unexpected {key=}")
+                relpath = key[len(key0)+1:] if key != key0 else ''
+            else:
+                relpath = key
             cur = relpath
             if not cur and not relpath:
                 continue
@@ -73,8 +78,8 @@ def s3_files_iter(path: str) -> Iterator[dict]:
                     size=0,
                     mtime=0,
                     kind='dir',
-                    parent=None if d == key0 else dirname(d),
-                    uri=f's3://{bkt}/{key0}/{d}',
+                    parent=dirname(d) if d else None,
+                    uri=f's3://{bkt}/{key0}/{d}' if key0 else f's3://{bkt}/{d}',
                 )
             yield o(
                 path=relpath,
@@ -234,6 +239,26 @@ def index(
         progress_callback(items_count, items_per_sec, errors.count)
 
     df = pd.DataFrame(paths)
+
+    # Handle empty bucket/directory: return early with just a root row
+    if df.empty:
+        df = pd.DataFrame([{
+            'path': '.',
+            'size': 0,
+            'mtime': 0,
+            'n_desc': 0,
+            'n_children': 0,
+            'kind': 'dir',
+            'parent': '',
+            'uri': path0,
+            'depth': 0,
+        }])
+        return IndexResult(
+            df=df,
+            error_count=errors.count,
+            error_paths=errors.paths,
+        )
+
     files = df[df.kind == 'file']
     dirs0 = df[df.kind == 'dir']
     cur = df
@@ -264,20 +289,33 @@ def index(
 
     with time("index-agg-dirs"):
         dirs = pd.concat(dir_dfs)
-        grouped = dirs.groupby('path')
-        sizes = grouped['size'].sum()
-        dirs = pd.DataFrame({
-            'path': sizes.index,
-            'size': sizes,
-            'mtime': grouped['mtime'].max(),
-            'n_desc': grouped['n_desc'].sum(),
-            'n_children': grouped['n_children'].sum(),
-            'kind': 'dir',
-        }).reset_index(drop=True)
-        dirs['parent'] = dirs.path.apply(dirname)
-        dirs.loc[dirs.parent == '', 'parent'] = '.'
-        dirs.loc[dirs.path == '', ['path', 'parent']] = [ '.', '' ]
-        dirs['uri'] = dirs.path.apply(lambda p: path0 if p == '.' else f'{path0}/{p}')
+        if dirs.empty:
+            # Empty directory/bucket: create a root row with zeros
+            dirs = pd.DataFrame([{
+                'path': '.',
+                'size': 0,
+                'mtime': 0,
+                'n_desc': 0,
+                'n_children': 0,
+                'kind': 'dir',
+                'parent': '',
+                'uri': path0,
+            }])
+        else:
+            grouped = dirs.groupby('path')
+            sizes = grouped['size'].sum()
+            dirs = pd.DataFrame({
+                'path': sizes.index,
+                'size': sizes,
+                'mtime': grouped['mtime'].max(),
+                'n_desc': grouped['n_desc'].sum(),
+                'n_children': grouped['n_children'].sum(),
+                'kind': 'dir',
+            }).reset_index(drop=True)
+            dirs['parent'] = dirs.path.apply(dirname)
+            dirs.loc[dirs.parent == '', 'parent'] = '.'
+            dirs.loc[dirs.path == '', ['path', 'parent']] = [ '.', '' ]
+            dirs['uri'] = dirs.path.apply(lambda p: path0 if p == '.' else f'{path0}/{p}')
         df = (
             pd.concat(
                 [dirs, files],
@@ -286,6 +324,9 @@ def index(
             .sort_values('path')
             .reset_index(drop=True)
         )
+        # Add depth column for efficient parquet filtering
+        # '.' = 0, 'foo' = 1, 'foo/bar' = 2, etc.
+        df['depth'] = df['path'].apply(lambda p: 0 if p == '.' else p.count('/') + 1)
         return IndexResult(
             df=df,
             error_count=errors.count,
