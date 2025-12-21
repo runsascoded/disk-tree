@@ -91,6 +91,10 @@ class Scan(Base):
     blob: Mapped[str] = mapped_column(String, nullable=False)
     error_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
     error_paths: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)  # JSON array
+    # Denormalized root stats (to avoid parquet reads on scan list)
+    size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    n_children: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    n_desc: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
 
     @classmethod
     def create(
@@ -137,7 +141,18 @@ class Scan(Base):
             raise RuntimeError(f"{out_path} exists")
         df.to_parquet(out_path)
 
-        # Save "scan" record with error info
+        # Extract root stats for denormalization
+        root_rows = df[df['parent'] == '']
+        root_size = None
+        root_n_children = None
+        root_n_desc = None
+        if not root_rows.empty:
+            root = root_rows.iloc[0]
+            root_size = int(root['size']) if pd.notna(root['size']) else None
+            root_n_children = int(root['n_children']) if pd.notna(root.get('n_children')) else None
+            root_n_desc = int(root['n_desc']) if pd.notna(root.get('n_desc')) else None
+
+        # Save "scan" record with error info and denormalized stats
         error_paths_json = json.dumps(result.error_paths) if result.error_paths else None
         scan = Scan(
             path=path,
@@ -145,6 +160,9 @@ class Scan(Base):
             blob=out_path,
             error_count=result.error_count if result.error_count > 0 else None,
             error_paths=error_paths_json,
+            size=root_size,
+            n_children=root_n_children,
+            n_desc=root_n_desc,
         )
         db.session.add(scan)
         db.session.commit()

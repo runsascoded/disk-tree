@@ -27,7 +27,7 @@ def test_client(test_db_dir, monkeypatch):
     scans_dir = os.path.join(test_db_dir, 'scans')
     os.makedirs(scans_dir)
 
-    # Create database with scan table
+    # Create database with scan table (including denormalized stats columns)
     conn = sqlite3.connect(db_path)
     conn.execute('''
         CREATE TABLE scan (
@@ -36,7 +36,10 @@ def test_client(test_db_dir, monkeypatch):
             time DATETIME NOT NULL,
             blob VARCHAR NOT NULL,
             error_count INTEGER,
-            error_paths TEXT
+            error_paths TEXT,
+            size INTEGER,
+            n_children INTEGER,
+            n_desc INTEGER
         )
     ''')
     conn.execute('CREATE INDEX ix_scan_path_time ON scan(path, time)')
@@ -45,6 +48,10 @@ def test_client(test_db_dir, monkeypatch):
 
     # Patch the DB_PATH
     monkeypatch.setattr('disk_tree.server.DB_PATH', db_path)
+
+    # Clear cache before each test
+    from disk_tree.server import clear_cache
+    clear_cache()
 
     app.config['TESTING'] = True
     with app.test_client() as client:
@@ -187,12 +194,12 @@ class TestFresherChildPatching:
 
         conn = sqlite3.connect(db_path)
         conn.execute(
-            'INSERT INTO scan (path, time, blob) VALUES (?, ?, ?)',
-            ('/test/parent', parent_time.isoformat(), parent_parquet),
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test/parent', parent_time.isoformat(), parent_parquet, 1000, 2, 3),
         )
         conn.execute(
-            'INSERT INTO scan (path, time, blob) VALUES (?, ?, ?)',
-            ('/test/parent/child1', child_time.isoformat(), child_parquet),
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test/parent/child1', child_time.isoformat(), child_parquet, 200, 1, 2),
         )
         conn.commit()
         conn.close()
@@ -290,3 +297,106 @@ class TestFresherChildPatching:
         assert child is not None
         assert child['size'] == 500, 'child size should NOT be patched from grandchild'
         assert child.get('patched') is not True
+
+
+class TestAncestorScanRelativePaths:
+    """Tests for viewing subdirectories of scans (ancestor scan case)."""
+
+    def test_children_have_relative_paths(self, test_client):
+        """When viewing subdir of a scan, children paths should be relative to viewed dir."""
+        client, db_path, scans_dir = test_client
+
+        # Scan at /test with nested structure
+        parquet_path = create_test_parquet(scans_dir, 'test', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 5, 'n_children': 2},
+            {'path': 'subdir', 'size': 600, 'mtime': 80, 'kind': 'dir', 'parent': '.', 'uri': '/test/subdir', 'n_desc': 3, 'n_children': 2},
+            {'path': 'subdir/child1', 'size': 300, 'mtime': 60, 'kind': 'dir', 'parent': 'subdir', 'uri': '/test/subdir/child1', 'n_desc': 1, 'n_children': 0},
+            {'path': 'subdir/child2', 'size': 300, 'mtime': 70, 'kind': 'file', 'parent': 'subdir', 'uri': '/test/subdir/child2', 'n_desc': 1, 'n_children': 0},
+            {'path': 'other', 'size': 400, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/other', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob) VALUES (?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet_path),
+        )
+        conn.commit()
+        conn.close()
+
+        # View /test/subdir (a subdir of the scan at /test)
+        response = client.get('/api/scan?uri=/test/subdir')
+        assert response.status_code == 200
+        data = response.json
+
+        # Root should be '.'
+        assert data['root']['path'] == '.'
+        assert data['root']['size'] == 600
+
+        # Children should have relative paths (child1, child2), NOT (subdir/child1, subdir/child2)
+        child_paths = sorted([c['path'] for c in data['children']])
+        assert child_paths == ['child1', 'child2'], f'Expected relative paths, got {child_paths}'
+
+    def test_deeply_nested_subdir_paths(self, test_client):
+        """Relative paths work correctly for deeply nested directories."""
+        client, db_path, scans_dir = test_client
+
+        # Scan at /root with deeply nested structure
+        parquet_path = create_test_parquet(scans_dir, 'deep', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/root', 'n_desc': 5, 'n_children': 1},
+            {'path': 'a', 'size': 800, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/root/a', 'n_desc': 4, 'n_children': 1},
+            {'path': 'a/b', 'size': 600, 'mtime': 80, 'kind': 'dir', 'parent': 'a', 'uri': '/root/a/b', 'n_desc': 3, 'n_children': 1},
+            {'path': 'a/b/c', 'size': 400, 'mtime': 70, 'kind': 'dir', 'parent': 'a/b', 'uri': '/root/a/b/c', 'n_desc': 2, 'n_children': 1},
+            {'path': 'a/b/c/file.txt', 'size': 100, 'mtime': 60, 'kind': 'file', 'parent': 'a/b/c', 'uri': '/root/a/b/c/file.txt', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob) VALUES (?, ?, ?)',
+            ('/root', '2025-01-01T12:00:00', parquet_path),
+        )
+        conn.commit()
+        conn.close()
+
+        # View /root/a/b (deeply nested)
+        response = client.get('/api/scan?uri=/root/a/b')
+        assert response.status_code == 200
+        data = response.json
+
+        assert data['root']['path'] == '.'
+        assert data['root']['size'] == 600
+
+        # Direct child should be 'c', not 'a/b/c'
+        assert len(data['children']) == 1
+        assert data['children'][0]['path'] == 'c', f'Expected "c", got {data["children"][0]["path"]}'
+
+    def test_s3_subdir_relative_paths(self, test_client):
+        """Relative paths work for S3 URIs when viewing subdir of scan."""
+        client, db_path, scans_dir = test_client
+
+        # Scan at s3://bucket with nested structure (simulating .dvc case)
+        parquet_path = create_test_parquet(scans_dir, 's3bucket', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': 's3://bucket', 'n_desc': 4, 'n_children': 1},
+            {'path': '.dvc', 'size': 800, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': 's3://bucket/.dvc', 'n_desc': 3, 'n_children': 2},
+            {'path': '.dvc/files', 'size': 500, 'mtime': 80, 'kind': 'dir', 'parent': '.dvc', 'uri': 's3://bucket/.dvc/files', 'n_desc': 1, 'n_children': 0},
+            {'path': '.dvc/cache', 'size': 300, 'mtime': 70, 'kind': 'dir', 'parent': '.dvc', 'uri': 's3://bucket/.dvc/cache', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob) VALUES (?, ?, ?)',
+            ('s3://bucket', '2025-01-01T12:00:00', parquet_path),
+        )
+        conn.commit()
+        conn.close()
+
+        # View s3://bucket/.dvc (subdir of the scan)
+        response = client.get('/api/scan?uri=s3://bucket/.dvc')
+        assert response.status_code == 200
+        data = response.json
+
+        assert data['root']['path'] == '.'
+        assert data['root']['uri'] == 's3://bucket/.dvc'
+
+        # Children should be 'files' and 'cache', NOT '.dvc/files' and '.dvc/cache'
+        child_paths = sorted([c['path'] for c in data['children']])
+        assert child_paths == ['cache', 'files'], f'Expected relative paths, got {child_paths}'

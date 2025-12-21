@@ -23,6 +23,58 @@ DB_PATH = abspath(SQLITE_PATH)
 # Track in-progress scans: {job_id: {path, status, started, output, error}}
 running_scans: dict[str, dict] = {}
 
+# Simple TTL cache for expensive operations
+_cache: dict[str, tuple[float, any]] = {}
+CACHE_TTL = 60  # seconds
+
+import pyarrow.parquet as pq
+
+
+def load_parquet_with_depth_filter(blob_path: str, max_depth: int | None = None) -> pd.DataFrame:
+    """Load parquet file, optionally filtering by depth column.
+
+    If max_depth is provided and the parquet has a 'depth' column, uses
+    predicate pushdown to only load rows where depth <= max_depth.
+    Falls back to full load for old parquets without depth column.
+    """
+    if max_depth is not None:
+        # Check if parquet has 'depth' column
+        try:
+            schema = pq.read_schema(blob_path)
+            if 'depth' in schema.names:
+                # Use predicate pushdown - only load rows with depth <= max_depth
+                return pd.read_parquet(blob_path, filters=[('depth', '<=', max_depth)])
+        except Exception:
+            pass  # Fall back to full load
+    # Full load (no depth column or no filter requested)
+    return pd.read_parquet(blob_path)
+
+
+def cached(key: str, ttl: int = CACHE_TTL):
+    """Decorator for caching expensive function results with TTL."""
+    def decorator(fn):
+        def wrapper(*args, **kwargs):
+            now = time.time()
+            if key in _cache:
+                cached_time, cached_result = _cache[key]
+                if now - cached_time < ttl:
+                    return cached_result
+            result = fn(*args, **kwargs)
+            _cache[key] = (now, result)
+            return result
+        return wrapper
+    return decorator
+
+
+def invalidate_cache(key: str):
+    """Remove a key from the cache."""
+    _cache.pop(key, None)
+
+
+def clear_cache():
+    """Clear all cached data."""
+    _cache.clear()
+
 
 def get_db():
     """Get database connection for current request."""
@@ -40,32 +92,118 @@ def close_db(error):
         db.close()
 
 
+def _fetch_scans_data():
+    """Fetch all scans with stats from SQLite (denormalized columns)."""
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    try:
+        # Get most recent scan for each path with denormalized stats
+        cursor = db.execute('''
+            SELECT s.*
+            FROM scan s
+            INNER JOIN (
+                SELECT path, MAX(time) as max_time
+                FROM scan
+                GROUP BY path
+            ) latest ON s.path = latest.path AND s.time = latest.max_time
+            ORDER BY s.time DESC
+        ''')
+        result = []
+        for row in cursor:
+            result.append({
+                'id': row['id'],
+                'path': row['path'],
+                'time': row['time'],
+                'blob': row['blob'],
+                'error_count': row['error_count'],
+                'error_paths': row['error_paths'],
+                'size': row['size'],
+                'n_children': row['n_children'],
+                'n_desc': row['n_desc'],
+            })
+        return result
+    finally:
+        db.close()
+
+
 @app.route('/api/scans')
 def get_scans():
-    """Return list of most recent scan per path."""
-    db = get_db()
-    # Get most recent scan for each path
-    cursor = db.execute('''
-        SELECT s.*
-        FROM scan s
-        INNER JOIN (
-            SELECT path, MAX(time) as max_time
-            FROM scan
-            GROUP BY path
-        ) latest ON s.path = latest.path AND s.time = latest.max_time
-        ORDER BY s.time DESC
-    ''')
-    result = []
-    for row in cursor:
-        result.append({
-            'id': row['id'],
-            'path': row['path'],
-            'time': row['time'],
-            'blob': row['blob'],
-            'error_count': row['error_count'],
-            'error_paths': row['error_paths'],
-        })
+    """Return list of most recent scan per path, with root stats."""
+    # Check cache first (60 second TTL)
+    cache_key = 'scans_list'
+    now = time.time()
+    if cache_key in _cache:
+        cached_time, cached_result = _cache[cache_key]
+        if now - cached_time < CACHE_TTL:
+            return jsonify(cached_result)
+
+    result = _fetch_scans_data()
+    _cache[cache_key] = (now, result)
     return jsonify(result)
+
+
+def _fetch_s3_buckets_data():
+    """Fetch S3 buckets with scan stats (expensive, should be cached)."""
+    result = subprocess.run(
+        ['aws', 's3', 'ls'],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr or 'Failed to list buckets')
+
+    buckets = []
+    for line in result.stdout.strip().split('\n'):
+        if not line:
+            continue
+        # Format: "2024-01-01 12:00:00 bucket-name"
+        parts = line.split(None, 2)
+        if len(parts) >= 3:
+            buckets.append({
+                'name': parts[2],
+                'created': f'{parts[0]} {parts[1]}',
+            })
+
+    # Get scan info and stats for each bucket (use denormalized columns)
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
+    try:
+        for bucket in buckets:
+            cursor = db.execute(
+                'SELECT time, size, n_children, n_desc FROM scan WHERE path = ? OR path LIKE ? ORDER BY time DESC LIMIT 1',
+                (f's3://{bucket["name"]}', f's3://{bucket["name"]}/%')
+            )
+            row = cursor.fetchone()
+            bucket['last_scanned'] = row['time'] if row else None
+            bucket['size'] = row['size'] if row else None
+            bucket['n_children'] = row['n_children'] if row else None
+            bucket['n_desc'] = row['n_desc'] if row else None
+    finally:
+        db.close()
+
+    return buckets
+
+
+@app.route('/api/s3/buckets')
+def list_s3_buckets():
+    """Return list of S3 buckets accessible to the current AWS profile."""
+    # Check cache first (60 second TTL)
+    cache_key = 's3_buckets'
+    now = time.time()
+    if cache_key in _cache:
+        cached_time, cached_result = _cache[cache_key]
+        if now - cached_time < CACHE_TTL:
+            return jsonify(cached_result)
+
+    try:
+        buckets = _fetch_s3_buckets_data()
+        _cache[cache_key] = (now, buckets)
+        return jsonify(buckets)
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Timeout listing buckets'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 def list_fs_children(path: str) -> list[dict]:
@@ -97,10 +235,70 @@ def list_fs_children(path: str) -> list[dict]:
     return children
 
 
+def list_s3_children(s3_uri: str) -> list[dict]:
+    """List S3 children of a prefix (non-recursive, immediate children only)."""
+    # aws s3 ls s3://bucket/prefix/ returns immediate children
+    # Format: "PRE dirname/" for dirs, "2024-01-01 12:00:00 size filename" for files
+    try:
+        # Ensure trailing slash for prefix listing
+        uri = s3_uri.rstrip('/') + '/'
+        result = subprocess.run(
+            ['aws', 's3', 'ls', uri],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            return []
+
+        children = []
+        for line in result.stdout.strip().split('\n'):
+            if not line:
+                continue
+            if line.startswith('PRE '):
+                # Directory: "PRE dirname/"
+                name = line[4:].rstrip('/')
+                children.append({
+                    'path': name,
+                    'uri': f'{s3_uri.rstrip("/")}/{name}',
+                    'size': None,
+                    'mtime': None,
+                    'kind': 'dir',
+                    'n_children': None,
+                    'n_desc': None,
+                    'scanned': False,
+                })
+            else:
+                # File: "2024-01-01 12:00:00 size filename"
+                parts = line.split(None, 3)
+                if len(parts) >= 4:
+                    from dateutil.parser import parse
+                    mtime_str = f'{parts[0]} {parts[1]}'
+                    try:
+                        mtime = int(parse(mtime_str).timestamp())
+                    except Exception:
+                        mtime = None
+                    size = int(parts[2]) if parts[2].isdigit() else None
+                    name = parts[3]
+                    children.append({
+                        'path': name,
+                        'uri': f'{s3_uri.rstrip("/")}/{name}',
+                        'size': size,
+                        'mtime': mtime,
+                        'kind': 'file',
+                        'n_children': None,
+                        'n_desc': None,
+                        'scanned': False,
+                    })
+        return children
+    except Exception:
+        return []
+
+
 def get_scanned_paths(db) -> dict[str, dict]:
-    """Get a mapping of scanned paths to their most recent scan info."""
+    """Get a mapping of scanned paths to their most recent scan info with denormalized stats."""
     cursor = db.execute('''
-        SELECT s.path, s.time, s.blob
+        SELECT s.path, s.time, s.blob, s.size, s.n_children, s.n_desc
         FROM scan s
         INNER JOIN (
             SELECT path, MAX(time) as max_time
@@ -149,10 +347,11 @@ def get_scan():
         # Go up one directory
         if test_path == '/' or test_path == 's3://':
             break
-        test_path = dirname(test_path)
-        if not test_path or test_path == test_path.rstrip('/'):
-            if not test_path.startswith('s3://'):
-                test_path = dirname(test_path) if test_path != '/' else None
+        parent = dirname(test_path)
+        # Avoid infinite loop: if dirname didn't change, we're at root
+        if parent == test_path:
+            break
+        test_path = parent
 
     if not scan:
         # No ancestor scan - build from filesystem + any child scans
@@ -172,16 +371,15 @@ def get_scan():
                     rel = scanned_path[len(prefix):]
                     immediate = rel.split('/')[0]
                     if immediate not in scan_data_by_name:
-                        # Load parquet to get stats
-                        df = pd.read_parquet(scan_info['blob'])
-                        root_row = df[df['path'] == '.'].iloc[0]
-                        scan_data_by_name[immediate] = {
-                            'size': int(root_row['size']),
-                            'mtime': int(root_row['mtime']),
-                            'n_children': int(root_row.get('n_children', 0)),
-                            'n_desc': int(root_row.get('n_desc', 0)),
-                            'scan_time': scan_info['time'],
-                        }
+                        # Use denormalized stats from SQLite - no parquet load needed
+                        if scan_info.get('size') is not None:
+                            scan_data_by_name[immediate] = {
+                                'size': scan_info['size'] or 0,
+                                'mtime': 0,  # mtime not denormalized
+                                'n_children': scan_info.get('n_children') or 0,
+                                'n_desc': scan_info.get('n_desc') or 0,
+                                'scan_time': scan_info['time'],
+                            }
 
             # Merge filesystem with scan data
             children_by_name = {}
@@ -192,14 +390,14 @@ def get_scan():
                 # Check if this child has a direct scan
                 if child_uri in scanned_paths:
                     scan_info = scanned_paths[child_uri]
-                    df = pd.read_parquet(scan_info['blob'])
-                    root_row = df[df['path'] == '.'].iloc[0]
-                    child['size'] = int(root_row['size'])
-                    child['mtime'] = int(root_row['mtime'])
-                    child['n_children'] = int(root_row.get('n_children', 0))
-                    child['n_desc'] = int(root_row.get('n_desc', 0))
-                    child['scanned'] = True
-                    child['scan_time'] = scan_info['time']
+                    # Use denormalized stats from SQLite - no parquet load needed
+                    if scan_info.get('size') is not None:
+                        child['size'] = scan_info['size'] or 0
+                        child['mtime'] = 0  # mtime not denormalized
+                        child['n_children'] = scan_info.get('n_children') or 0
+                        child['n_desc'] = scan_info.get('n_desc') or 0
+                        child['scanned'] = True
+                        child['scan_time'] = scan_info['time']
                 elif name in scan_data_by_name:
                     # Has a descendant scan - use that data
                     data = scan_data_by_name[name]
@@ -245,10 +443,111 @@ def get_scan():
                 'scan_status': 'partial' if scanned_children else 'none',
             })
 
+        # S3 path - list bucket/prefix contents
+        if search_path.startswith('s3://'):
+            s3_children = list_s3_children(search_path)
+
+            # Get all scanned paths to check which children have scans
+            scanned_paths = get_scanned_paths(db)
+
+            # Find child scans under this path
+            prefix = search_path.rstrip('/') + '/'
+            scan_data_by_name = {}  # immediate child name -> scan stats
+
+            for scanned_path, scan_info in scanned_paths.items():
+                if scanned_path.startswith(prefix):
+                    rel = scanned_path[len(prefix):]
+                    immediate = rel.split('/')[0]
+                    if immediate not in scan_data_by_name:
+                        # Use denormalized stats from SQLite - no parquet load needed
+                        if scan_info.get('size') is not None:
+                            scan_data_by_name[immediate] = {
+                                'size': scan_info['size'] or 0,
+                                'mtime': 0,  # mtime not denormalized
+                                'n_children': scan_info.get('n_children') or 0,
+                                'n_desc': scan_info.get('n_desc') or 0,
+                                'scan_time': scan_info['time'],
+                            }
+
+            # Merge S3 listing with scan data
+            children_by_name = {}
+            for child in s3_children:
+                name = child['path']
+                child_uri = child['uri']
+
+                # Check if this child has a direct scan
+                if child_uri in scanned_paths:
+                    scan_info = scanned_paths[child_uri]
+                    # Use denormalized stats from SQLite - no parquet load needed
+                    if scan_info.get('size') is not None:
+                        child['size'] = scan_info['size'] or 0
+                        child['mtime'] = 0  # mtime not denormalized
+                        child['n_children'] = scan_info.get('n_children') or 0
+                        child['n_desc'] = scan_info.get('n_desc') or 0
+                        child['scanned'] = True
+                        child['scan_time'] = scan_info['time']
+                elif name in scan_data_by_name:
+                    # Has a descendant scan - use that data
+                    data = scan_data_by_name[name]
+                    child['size'] = data['size']
+                    child['mtime'] = data['mtime']
+                    child['n_children'] = data['n_children']
+                    child['n_desc'] = data['n_desc']
+                    child['scanned'] = 'partial'
+                    child['scan_time'] = data['scan_time']
+
+                children_by_name[name] = child
+
+            children = list(children_by_name.values())
+            # Sort: scanned first (by size desc), then unscanned (by name)
+            children.sort(key=lambda x: (
+                0 if x.get('scanned') else 1,
+                -(x.get('size') or 0),
+                x['path'],
+            ))
+
+            # Compute virtual root stats from scanned children only
+            scanned_children = [c for c in children if c.get('scanned')]
+            total_size = sum(c.get('size') or 0 for c in scanned_children)
+            max_mtime = max((c.get('mtime') or 0 for c in scanned_children), default=0)
+            total_desc = sum(c.get('n_desc') or 0 for c in scanned_children)
+
+            return jsonify({
+                'root': {
+                    'path': '.',
+                    'uri': search_path,
+                    'size': total_size if scanned_children else None,
+                    'mtime': max_mtime if scanned_children else None,
+                    'kind': 'dir',
+                    'n_children': len(children),
+                    'n_desc': total_desc if scanned_children else None,
+                    'parent': None,
+                    'scanned': False,
+                },
+                'children': children,
+                'rows': [c for c in children if c.get('scanned')],
+                'time': None,
+                'scan_path': None,
+                'scan_status': 'partial' if scanned_children else 'none',
+            })
+
         return jsonify({'error': 'No scan found for path', 'uri': uri}), 404
 
-    # Load parquet
-    df = pd.read_parquet(scan['blob'])
+    # Compute max depth for predicate pushdown
+    # Exact match: viewed_path_depth = 0, so max_depth = depth
+    # Ancestor: viewed_path_depth = depth of relative path from scan root
+    if scan['path'] == uri:
+        max_depth = depth
+    else:
+        # Compute depth of viewed path relative to scan root
+        # e.g., scan='/home', uri='/home/foo/bar' → relative='foo/bar' → depth=2
+        scan_prefix = scan['path'].rstrip('/') + '/'
+        relative_path = uri[len(scan_prefix):] if uri.startswith(scan_prefix) else ''
+        viewed_path_depth = relative_path.count('/') + 1 if relative_path else 0
+        max_depth = viewed_path_depth + depth
+
+    # Load parquet with depth filter (only loads rows up to max_depth)
+    df = load_parquet_with_depth_filter(scan['blob'], max_depth)
 
     # Filter to requested URI prefix
     prefix = uri.rstrip('/') + '/'
@@ -262,7 +561,11 @@ def get_scan():
         root_mask = df['uri'] == uri
         children_mask = df['uri'].str.startswith(prefix)
 
-        # Recompute relative paths
+        # Recompute relative paths and parents
+        # The viewed dir path relative to scan root (e.g., '.dvc' when viewing s3://bucket/.dvc)
+        root_row_for_rel = df[root_mask]
+        viewed_dir_path = root_row_for_rel.iloc[0]['path'] if not root_row_for_rel.empty else ''
+
         def make_relative(row):
             if row['uri'] == uri:
                 return '.'
@@ -270,8 +573,21 @@ def get_scan():
                 return row['uri'][len(prefix):]
             return row['path']
 
+        def make_relative_parent(row):
+            orig_parent = row['parent']
+            # If parent is the viewed dir, it becomes '.'
+            if orig_parent == viewed_dir_path:
+                return '.'
+            # If parent starts with viewed dir + '/', strip prefix
+            parent_prefix = viewed_dir_path + '/'
+            if orig_parent.startswith(parent_prefix):
+                return orig_parent[len(parent_prefix):]
+            # Fallback (shouldn't happen for rows under prefix)
+            return orig_parent
+
         df = df.copy()
         df['rel_path'] = df.apply(make_relative, axis=1)
+        df['rel_parent'] = df.apply(make_relative_parent, axis=1)
     root_row = df[root_mask]
     if root_row.empty:
         return jsonify({'error': 'URI not found in scan', 'uri': uri, 'scan_path': scan['path']}), 404
@@ -300,16 +616,25 @@ def get_scan():
             return rel_path.count('/') + 1
 
         df['depth'] = df['rel_path'].apply(get_rel_depth)
-        children_df = df[(df['depth'] > 0) & (df['depth'] <= depth)]
-        direct_children_df = df[df['depth'] == 1]
+        children_df = df[children_mask & (df['depth'] > 0) & (df['depth'] <= depth)]
+        direct_children_df = df[children_mask & (df['depth'] == 1)]
 
     # Convert to list of dicts, handling numpy types
+    # use_rel_path: if True, use 'rel_path' column as 'path' (when scan is ancestor)
+    use_rel_path = scan['path'] != uri
+
     def row_to_dict(row):
         d = row.to_dict()
         # Convert numpy types to Python types
         for k, v in d.items():
             if hasattr(v, 'item'):
                 d[k] = v.item()
+        # Use rel_path and rel_parent when viewing a subdir of a scan
+        if use_rel_path:
+            if 'rel_path' in d:
+                d['path'] = d['rel_path']
+            if 'rel_parent' in d:
+                d['parent'] = d['rel_parent']
         return d
 
     children = [row_to_dict(row) for _, row in direct_children_df.iterrows()]
@@ -343,24 +668,18 @@ def get_scan():
         scan_time,
     )).fetchall()
 
-    # Build a map of child path -> fresher scan stats
+    # Build a map of child path -> fresher scan stats (using denormalized SQLite columns)
     fresher_stats = {}
     for child_scan in fresher_scans:
-        try:
-            child_df = pd.read_parquet(child_scan['blob'])
-            # Get the root row (path='.')
-            child_root_rows = child_df[child_df['path'] == '.']
-            if not child_root_rows.empty:
-                child_root = child_root_rows.iloc[0]
-                fresher_stats[child_scan['path']] = {
-                    'size': int(child_root['size']) if hasattr(child_root['size'], 'item') else child_root['size'],
-                    'mtime': int(child_root['mtime']) if hasattr(child_root['mtime'], 'item') else child_root['mtime'],
-                    'n_desc': int(child_root['n_desc']) if hasattr(child_root['n_desc'], 'item') else child_root['n_desc'],
-                    'n_children': int(child_root['n_children']) if hasattr(child_root['n_children'], 'item') else child_root['n_children'],
-                    'scan_time': child_scan['time'],
-                }
-        except Exception:
-            pass  # Skip if parquet can't be loaded
+        # Use denormalized stats from SQLite - no need to load parquet
+        if child_scan['size'] is not None:
+            fresher_stats[child_scan['path']] = {
+                'size': child_scan['size'],
+                'mtime': None,  # mtime not denormalized, but not critical for patching
+                'n_desc': child_scan['n_desc'],
+                'n_children': child_scan['n_children'],
+                'scan_time': child_scan['time'],
+            }
 
     # Patch fresher stats into children
     for c in children:

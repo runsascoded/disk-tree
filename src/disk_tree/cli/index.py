@@ -45,7 +45,11 @@ def index(
             scan, df = Scan.load_or_create(url, gc=gc, sudo=sudo)
 
     elapsed = time['scan']
-    res = df.set_index('path').loc['.']
+    # Find root row: try 'path == "."', fallback to 'parent == ""'
+    root_rows = df[df['path'] == '.']
+    if root_rows.empty:
+        root_rows = df[df['parent'] == '']
+    res = root_rows.iloc[0]
     n_desc = res.n_desc
     size = res['size']
     speed = n_desc / elapsed
