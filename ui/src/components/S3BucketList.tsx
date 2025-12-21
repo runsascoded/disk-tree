@@ -134,8 +134,10 @@ function NewS3ScanForm({ onStarted }: { onStarted: (path: string, job: ScanJob) 
   )
 }
 
+const EMPTY_BUCKETS: S3Bucket[] = []
+
 export function S3BucketList() {
-  const { data: rawBuckets = [], isLoading, error, refetch } = useQuery({
+  const { data: rawBuckets = EMPTY_BUCKETS, isLoading, error, refetch } = useQuery({
     queryKey: ['s3-buckets'],
     queryFn: fetchS3Buckets,
     staleTime: 5 * 60 * 1000, // 5 minutes - bucket list is expensive and rarely changes
