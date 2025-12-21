@@ -48,6 +48,7 @@ Key goals:
 - `GET /api/scans/progress` — Current progress of active scans
 - `GET /api/scans/progress/stream` — SSE stream for real-time progress
 - `POST /api/delete` — Delete a file/directory and update scan parquets
+- Static file serving for bundled UI (SPA with catch-all routing)
 
 **CLI** (`cli/`):
 ```bash
@@ -103,6 +104,26 @@ pnpm install
 pnpm dev        # http://localhost:5180
 ```
 
+## Packaging / Distribution
+
+The package is published to PyPI as `disk-tree` and can include the built web UI:
+
+```bash
+# Build with UI included
+cd ui && pnpm build   # Creates ui/dist/
+uv build              # Wheel includes disk_tree/static/ from ui/dist/
+
+# Install from PyPI
+pip install disk-tree
+disk-tree-server      # Serves both API and UI on :5001
+```
+
+The server auto-detects static assets:
+1. Packaged: `disk_tree/static/` (included in wheel via hatch `force-include`)
+2. Development: `ui/dist/` (relative to source)
+
+If no UI is found, server prints a message and only serves the API.
+
 ## Data Flow
 
 1. `disk-tree index /path` runs `gfind` or `aws s3 ls`
@@ -137,6 +158,7 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet).
 - S3 bucket list with treemap visualization
 - Delete functionality with scan parquet updates
 - Migration commands for existing data (`migrate`, `migrate-depth`)
+- Static file serving (bundled UI in PyPI wheel)
 
 ## Performance
 
