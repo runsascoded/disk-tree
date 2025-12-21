@@ -23,12 +23,14 @@ Key goals:
 - Local: `gfind -printf '%y %b %T@ %p\0'` → null-terminated, 512-byte block sizes (handles sparse files)
 - S3: `aws s3 ls --recursive` → parses listing format
 - Excludes CloudStorage paths (`~/Library/CloudStorage`) to avoid blocking on cloud I/O
-- Builds DataFrame with columns: `path`, `size`, `mtime`, `kind`, `parent`, `uri`, `n_desc`, `n_children`
+- Builds DataFrame with columns: `path`, `size`, `mtime`, `kind`, `parent`, `uri`, `n_desc`, `n_children`, `depth`
+- `depth` column enables predicate pushdown when loading parquet (major performance win)
 - Aggregates sizes upward through directory tree
 - Returns `IndexResult(df, error_count, error_paths)`
 
 **Data Model** (`sqla/model.py`):
-- `Scan` table: `id`, `path`, `time`, `blob`, `error_count`, `error_paths`
+- `Scan` table: `id`, `path`, `time`, `blob`, `error_count`, `error_paths`, `size`, `n_children`, `n_desc`
+  - Root stats (`size`, `n_children`, `n_desc`) denormalized to avoid parquet reads on scan list
 - `ScanProgress` table: real-time tracking of active scans
 - Results stored as Parquet in `~/.config/disk-tree/scans/<uuid>.parquet`
 - SQLite metadata DB at `~/.config/disk-tree/disk-tree.db`
@@ -36,10 +38,12 @@ Key goals:
 
 **Server API** (`server.py`):
 - Flask server on port 5001
-- `GET /api/scans` — List all scans (most recent per path)
-- `GET /api/scan?uri=<path>` — Get scan details for a path
-  - Patches in fresher child scans automatically
+- `GET /api/scans` — List all scans (most recent per path, with denormalized stats)
+- `GET /api/scan?uri=<path>&depth=N` — Get scan details for a path
+  - Uses depth filtering for parquet predicate pushdown
+  - Patches in fresher child scans automatically (uses SQLite stats, avoids parquet reads)
   - Falls back to filesystem listing if no scan exists
+- `GET /api/s3/buckets` — List S3 buckets with scan stats
 - `POST /api/scan/start` — Start a new scan (background thread)
 - `GET /api/scans/progress` — Current progress of active scans
 - `GET /api/scans/progress/stream` — SSE stream for real-time progress
@@ -55,12 +59,15 @@ disk-tree index [URL]     # Scan directory or s3:// bucket
 
 disk-tree scans           # List cached scans (JSON)
 
+disk-tree migrate         # Backfill SQLite stats from parquet files
+disk-tree migrate-depth   # Add depth column to existing parquets
+
 disk-tree-server          # Start Flask API server
 ```
 
 ### Web UI (`ui/`)
 
-Vite + React + TypeScript with Material-UI, Plotly treemaps.
+Vite + React + TypeScript with Material-UI, Plotly treemaps, TanStack Query.
 
 **Key features**:
 - Directory listing with size, mtime, n_children, n_desc columns
@@ -68,12 +75,16 @@ Vite + React + TypeScript with Material-UI, Plotly treemaps.
 - Rescan button with real-time progress (SSE)
 - Multi-select with keyboard navigation (Shift+arrows)
 - Bulk delete for selected items
-- Treemap visualization (Plotly)
+- Treemap visualization (Plotly, lazy-loaded)
 - Pagination and search/filter
+- S3 bucket list with treemap visualization
 
 **Key files**:
-- `src/App.tsx` — Main layout with scan list and detail view
-- `src/ScanDetails.tsx` — Directory listing component
+- `src/App.tsx` — Main layout with routing
+- `src/components/ScanList.tsx` — Scans list with pagination
+- `src/components/ScanDetails.tsx` — Directory listing component
+- `src/components/S3BucketList.tsx` — S3 bucket browser with treemap
+- `src/components/LazyPlot.tsx` — Code-split Plotly wrapper
 - `src/hooks/useScanProgress.ts` — SSE-based progress tracking
 
 ## Development
@@ -118,11 +129,20 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet).
 ## Current State (www branch)
 
 - CLI indexing works for local + S3
-- Parquet caching functional
+- Parquet caching with depth column for predicate pushdown
+- SQLite stats denormalization for fast scan listing
 - Flask API with real-time progress (SSE)
 - Fresher child scan patching (non-transitive, one level)
 - Web UI with directory listing, treemap, multi-select, bulk actions
+- S3 bucket list with treemap visualization
 - Delete functionality with scan parquet updates
+- Migration commands for existing data (`migrate`, `migrate-depth`)
+
+## Performance
+
+- `/api/scan?uri=/` optimized from ~4s to ~26ms (154x speedup)
+- Depth column enables parquet predicate pushdown (only load needed rows)
+- Denormalized stats avoid parquet reads for scan list and fresher child patching
 
 ## TODOs / Known Issues
 
