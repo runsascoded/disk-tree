@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { AppBar, Toolbar, Typography, Button, Box } from '@mui/material'
-import { FaCloud, FaDatabase, FaFolder } from 'react-icons/fa'
+import { FaCloud, FaDatabase, FaFolder, FaHistory } from 'react-icons/fa'
 
 export function Header() {
   const location = useLocation()
@@ -8,6 +8,7 @@ export function Header() {
   const isScansPage = path === '/'
   const isLocalPage = path.startsWith('/file')
   const isS3Page = path.startsWith('/s3')
+  const isRecentPage = path === '/recent'
 
   return (
     <AppBar position="static" color="transparent" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
@@ -42,6 +43,15 @@ export function Header() {
             size="small"
           >
             S3
+          </Button>
+          <Button
+            component={Link}
+            to="/recent"
+            startIcon={<FaHistory />}
+            variant={isRecentPage ? 'contained' : 'text'}
+            size="small"
+          >
+            Recent
           </Button>
         </Box>
       </Toolbar>

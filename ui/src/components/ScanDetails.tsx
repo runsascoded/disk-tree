@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, startScan, fetchScanStatus, deletePath } from '../api'
 import type { Row, ScanJob, ScanProgress } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
+import { useRecentPaths } from '../hooks/useRecentPaths'
 
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
 type SortDir = 'asc' | 'desc'
@@ -470,6 +471,14 @@ export function ScanDetails() {
 
   // Live scan progress from SSE
   const scanProgress = useScanProgress()
+
+  // Record visit to recent paths
+  const { recordVisit } = useRecentPaths()
+  useEffect(() => {
+    if (uri && uri !== '/' && uri !== 's3://') {
+      recordVisit(uri)
+    }
+  }, [uri, recordVisit])
 
   const handleSort = (key: SortKey) => {
     setSorts(prev => {
