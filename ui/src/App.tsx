@@ -5,6 +5,7 @@ import { Header } from './components/Header'
 import { ScanList } from './components/ScanList'
 import { ScanDetails } from './components/ScanDetails'
 import { S3BucketList } from './components/S3BucketList'
+import { RecentList } from './components/RecentList'
 import './App.css'
 
 function App() {
@@ -19,6 +20,7 @@ function App() {
             <Route path="/file/*" element={<ScanDetails />} />
             <Route path="/s3" element={<S3BucketList />} />
             <Route path="/s3/*" element={<ScanDetails />} />
+            <Route path="/recent" element={<RecentList />} />
           </Routes>
         </div>
       </BrowserRouter>
