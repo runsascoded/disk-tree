@@ -400,3 +400,227 @@ class TestAncestorScanRelativePaths:
         # Children should be 'files' and 'cache', NOT '.dvc/files' and '.dvc/cache'
         child_paths = sorted([c['path'] for c in data['children']])
         assert child_paths == ['cache', 'files'], f'Expected relative paths, got {child_paths}'
+
+
+class TestScanHistoryWithAncestors:
+    """Tests for GET /api/scans/history including ancestor scans."""
+
+    def test_returns_exact_match_scans(self, test_client):
+        """Returns scans that exactly match the requested path."""
+        client, db_path, scans_dir = test_client
+
+        parquet_path = create_test_parquet(scans_dir, 'test', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test/subdir', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test/subdir', '2025-01-01T12:00:00', parquet_path, 1000, 0, 1),
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.get('/api/scans/history?uri=/test/subdir')
+        assert response.status_code == 200
+        scans = response.json
+        assert len(scans) == 1
+        assert scans[0]['path'] == '/test/subdir'
+        assert scans[0]['scan_path'] == '/test/subdir'
+
+    def test_includes_ancestor_scans(self, test_client):
+        """Returns ancestor scans that contain data for the requested path."""
+        client, db_path, scans_dir = test_client
+
+        # Parent scan at /test containing subdir
+        parent_parquet = create_test_parquet(scans_dir, 'parent', [
+            {'path': '.', 'size': 2000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 3, 'n_children': 2},
+            {'path': 'subdir', 'size': 1000, 'mtime': 80, 'kind': 'dir', 'parent': '.', 'uri': '/test/subdir', 'n_desc': 1, 'n_children': 0},
+            {'path': 'other', 'size': 1000, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/other', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parent_parquet, 2000, 2, 3),
+        )
+        conn.commit()
+        conn.close()
+
+        # Request history for /test/subdir - should include the parent scan
+        response = client.get('/api/scans/history?uri=/test/subdir')
+        assert response.status_code == 200
+        scans = response.json
+        assert len(scans) == 1
+        assert scans[0]['path'] == '/test'  # Path is the scan's path
+        assert scans[0]['scan_path'] == '/test'  # scan_path indicates source
+        assert scans[0]['size'] == 1000  # Size extracted from parquet for /test/subdir
+
+    def test_combines_exact_and_ancestor_scans(self, test_client):
+        """Returns both exact match scans and ancestor scans."""
+        client, db_path, scans_dir = test_client
+
+        # Exact scan of /test/subdir
+        exact_parquet = create_test_parquet(scans_dir, 'exact', [
+            {'path': '.', 'size': 1500, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test/subdir', 'n_desc': 2, 'n_children': 1},
+        ])
+
+        # Ancestor scan at /test containing subdir
+        ancestor_parquet = create_test_parquet(scans_dir, 'ancestor', [
+            {'path': '.', 'size': 3000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 4, 'n_children': 2},
+            {'path': 'subdir', 'size': 1000, 'mtime': 80, 'kind': 'dir', 'parent': '.', 'uri': '/test/subdir', 'n_desc': 1, 'n_children': 0},
+            {'path': 'other', 'size': 2000, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/other', 'n_desc': 2, 'n_children': 1},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test/subdir', '2025-01-02T12:00:00', exact_parquet, 1500, 1, 2),
+        )
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', ancestor_parquet, 3000, 2, 4),
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.get('/api/scans/history?uri=/test/subdir')
+        assert response.status_code == 200
+        scans = response.json
+        assert len(scans) == 2
+
+        # Sort by time to check both are present
+        scan_paths = {s['scan_path'] for s in scans}
+        assert scan_paths == {'/test/subdir', '/test'}
+
+        # Verify sizes are correct for each
+        exact_scan = next(s for s in scans if s['scan_path'] == '/test/subdir')
+        ancestor_scan = next(s for s in scans if s['scan_path'] == '/test')
+        assert exact_scan['size'] == 1500  # Direct from denormalized stats
+        assert ancestor_scan['size'] == 1000  # Extracted from parquet
+
+
+class TestCompareWithAncestorScans:
+    """Tests for /api/compare endpoint with ancestor scans."""
+
+    def test_compare_exact_match_scans(self, test_client):
+        """Compare two scans that exactly match the requested path."""
+        client, db_path, scans_dir = test_client
+
+        parquet1 = create_test_parquet(scans_dir, 'scan1', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 2, 'n_children': 1},
+            {'path': 'file.txt', 'size': 500, 'mtime': 80, 'kind': 'file', 'parent': '.', 'uri': '/test/file.txt', 'n_desc': 1, 'n_children': 0},
+        ])
+        parquet2 = create_test_parquet(scans_dir, 'scan2', [
+            {'path': '.', 'size': 1500, 'mtime': 110, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 2, 'n_children': 1},
+            {'path': 'file.txt', 'size': 1000, 'mtime': 90, 'kind': 'file', 'parent': '.', 'uri': '/test/file.txt', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet1, 1000, 1, 2),
+        )
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-02T12:00:00', parquet2, 1500, 1, 2),
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.get('/api/compare?uri=/test&scan1=1&scan2=2')
+        assert response.status_code == 200
+        data = response.json
+
+        assert data['uri'] == '/test'
+        assert len(data['rows']) == 1
+        assert data['rows'][0]['path'] == 'file.txt'
+        assert data['rows'][0]['size_delta'] == 500
+        assert data['summary']['changed'] == 1
+
+    def test_compare_ancestor_scans_for_subdir(self, test_client):
+        """Compare two ancestor scans when viewing a subdirectory."""
+        client, db_path, scans_dir = test_client
+
+        # Two scans at /test, we want to compare /test/subdir
+        parquet1 = create_test_parquet(scans_dir, 'scan1', [
+            {'path': '.', 'size': 2000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 4, 'n_children': 2},
+            {'path': 'subdir', 'size': 1000, 'mtime': 80, 'kind': 'dir', 'parent': '.', 'uri': '/test/subdir', 'n_desc': 2, 'n_children': 1},
+            {'path': 'subdir/child', 'size': 500, 'mtime': 70, 'kind': 'dir', 'parent': 'subdir', 'uri': '/test/subdir/child', 'n_desc': 1, 'n_children': 0},
+            {'path': 'other', 'size': 1000, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/other', 'n_desc': 1, 'n_children': 0},
+        ])
+        parquet2 = create_test_parquet(scans_dir, 'scan2', [
+            {'path': '.', 'size': 2500, 'mtime': 110, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 4, 'n_children': 2},
+            {'path': 'subdir', 'size': 1500, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/subdir', 'n_desc': 2, 'n_children': 1},
+            {'path': 'subdir/child', 'size': 1000, 'mtime': 85, 'kind': 'dir', 'parent': 'subdir', 'uri': '/test/subdir/child', 'n_desc': 1, 'n_children': 0},
+            {'path': 'other', 'size': 1000, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/other', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet1, 2000, 2, 4),
+        )
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-02T12:00:00', parquet2, 2500, 2, 4),
+        )
+        conn.commit()
+        conn.close()
+
+        # Compare /test/subdir using the two ancestor scans
+        response = client.get('/api/compare?uri=/test/subdir&scan1=1&scan2=2')
+        assert response.status_code == 200
+        data = response.json
+
+        assert data['uri'] == '/test/subdir'
+        assert data['scan1']['scan_path'] == '/test'
+        assert data['scan2']['scan_path'] == '/test'
+        assert data['scan1']['size'] == 1000  # Size of /test/subdir in scan1
+        assert data['scan2']['size'] == 1500  # Size of /test/subdir in scan2
+
+        # Should show child as changed
+        assert len(data['rows']) == 1
+        assert data['rows'][0]['path'] == 'child'
+        assert data['rows'][0]['size_delta'] == 500
+        assert data['rows'][0]['uri'] == '/test/subdir/child'
+
+    def test_compare_detects_added_removed(self, test_client):
+        """Compare detects added and removed items in ancestor scans."""
+        client, db_path, scans_dir = test_client
+
+        # scan1: subdir has child1
+        parquet1 = create_test_parquet(scans_dir, 'scan1', [
+            {'path': '.', 'size': 2000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 3, 'n_children': 1},
+            {'path': 'subdir', 'size': 1000, 'mtime': 80, 'kind': 'dir', 'parent': '.', 'uri': '/test/subdir', 'n_desc': 2, 'n_children': 1},
+            {'path': 'subdir/child1', 'size': 500, 'mtime': 70, 'kind': 'dir', 'parent': 'subdir', 'uri': '/test/subdir/child1', 'n_desc': 1, 'n_children': 0},
+        ])
+        # scan2: subdir has child2 (child1 removed, child2 added)
+        parquet2 = create_test_parquet(scans_dir, 'scan2', [
+            {'path': '.', 'size': 2000, 'mtime': 110, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 3, 'n_children': 1},
+            {'path': 'subdir', 'size': 800, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/subdir', 'n_desc': 2, 'n_children': 1},
+            {'path': 'subdir/child2', 'size': 300, 'mtime': 85, 'kind': 'file', 'parent': 'subdir', 'uri': '/test/subdir/child2', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet1, 2000, 1, 3),
+        )
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-02T12:00:00', parquet2, 2000, 1, 3),
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.get('/api/compare?uri=/test/subdir&scan1=1&scan2=2')
+        assert response.status_code == 200
+        data = response.json
+
+        assert data['summary']['added'] == 1
+        assert data['summary']['removed'] == 1
+
+        rows_by_status = {r['path']: r['status'] for r in data['rows']}
+        assert rows_by_status.get('child1') == 'removed'
+        assert rows_by_status.get('child2') == 'added'
