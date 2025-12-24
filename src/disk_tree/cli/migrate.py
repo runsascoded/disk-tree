@@ -124,12 +124,16 @@ def migrate_depth():
 
         try:
             schema = pq.read_schema(blob_path)
-            if 'depth' in schema.names:
-                skipped += 1
-                continue
+            has_depth = 'depth' in schema.names
 
             df = pd.read_parquet(blob_path)
-            df['depth'] = df['path'].apply(lambda p: 0 if p == '.' else p.count('/') + 1)
+
+            # Add depth column if missing
+            if not has_depth:
+                df['depth'] = df['path'].apply(lambda p: 0 if p == '.' else p.count('/') + 1)
+
+            # Always re-sort by depth for efficient parquet filtering (breadth-first order)
+            df = df.sort_values(['depth', 'path']).reset_index(drop=True)
             df.to_parquet(blob_path)
             updated += 1
         except Exception as e:
@@ -137,4 +141,4 @@ def migrate_depth():
             errors += 1
 
     conn.close()
-    err(f"Depth migration complete: {updated} updated, {skipped} skipped, {errors} errors")
+    err(f"Depth migration complete: {updated} updated, {errors} errors")

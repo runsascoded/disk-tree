@@ -316,17 +316,16 @@ def index(
             dirs.loc[dirs.parent == '', 'parent'] = '.'
             dirs.loc[dirs.path == '', ['path', 'parent']] = [ '.', '' ]
             dirs['uri'] = dirs.path.apply(lambda p: path0 if p == '.' else f'{path0}/{p}')
-        df = (
-            pd.concat(
-                [dirs, files],
-                ignore_index=True,
-            )
-            .sort_values('path')
-            .reset_index(drop=True)
+        df = pd.concat(
+            [dirs, files],
+            ignore_index=True,
         )
         # Add depth column for efficient parquet filtering
         # '.' = 0, 'foo' = 1, 'foo/bar' = 2, etc.
         df['depth'] = df['path'].apply(lambda p: 0 if p == '.' else p.count('/') + 1)
+        # Sort by depth first (breadth-first order) for efficient parquet row group filtering
+        # This clusters rows by depth, enabling predicate pushdown to skip entire row groups
+        df = df.sort_values(['depth', 'path']).reset_index(drop=True)
         return IndexResult(
             df=df,
             error_count=errors.count,
