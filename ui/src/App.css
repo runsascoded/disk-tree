@@ -36,8 +36,8 @@ th:nth-child(2), td:nth-child(2) {
   text-align: center;
 }
 
-/* Path column - can shrink with ellipsis */
-td:nth-child(3) {
+/* Path column in scan details table - can shrink with ellipsis */
+.scan-details-table td:nth-child(3) {
   max-width: 0;
   width: 100%;
   overflow: hidden;

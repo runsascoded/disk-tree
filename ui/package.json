@@ -1,13 +1,17 @@
 {
   "name": "ui",
   "private": true,
+  "pnpm": {
+    "onlyBuiltDependencies": ["puppeteer", "esbuild"]
+  },
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "screenshots": "screenshots -c screenshots.json -h 5001 -o ../screenshots"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -23,6 +27,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@rdub/screenshots": "https://gitlab.com/runsascoded/js/screenshots/-/archive/dist/screenshots-dist.tar.gz",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",

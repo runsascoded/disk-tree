@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 import { Box, Button, Typography } from '@mui/material'
-import { FaCloud, FaFolder, FaHistory, FaTrash } from 'react-icons/fa'
+import { FaCloud, FaColumns, FaFolder, FaHistory, FaList, FaTrash } from 'react-icons/fa'
 import { useRecentPaths } from '../hooks/useRecentPaths'
+import type { ViewType } from '../hooks/useRecentPaths'
 
 function timeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000)
@@ -14,11 +15,12 @@ function timeAgo(timestamp: number): string {
   return `${days}d ago`
 }
 
-function uriToRoute(uri: string): string {
-  if (uri.startsWith('s3://')) {
-    return `/s3/${uri.slice(5)}`
+function uriToRoute(uri: string, viewType: ViewType): string {
+  const isS3 = uri.startsWith('s3://')
+  if (viewType === 'compare') {
+    return isS3 ? `/compare/s3/${uri.slice(5)}` : `/compare/file${uri}`
   }
-  return `/file${uri}`
+  return isS3 ? `/s3/${uri.slice(5)}` : `/file${uri}`
 }
 
 export function RecentList() {
@@ -50,6 +52,7 @@ export function RecentList() {
           <thead>
             <tr>
               <th></th>
+              <th></th>
               <th style={{ textAlign: 'left' }}>Path</th>
               <th style={{ textAlign: 'left' }}>Visited</th>
             </tr>
@@ -57,17 +60,25 @@ export function RecentList() {
           <tbody>
             {recent.map(item => {
               const isS3 = item.uri.startsWith('s3://')
+              const key = `${item.uri}:${item.viewType}`
               return (
-                <tr key={item.uri}>
-                  <td style={{ textAlign: 'left' }}>
+                <tr key={key}>
+                  <td style={{ textAlign: 'left', verticalAlign: 'middle' }}>
                     {isS3 ? (
-                      <FaCloud style={{ color: '#ff9800' }} />
+                      <FaCloud style={{ color: '#ff9800', verticalAlign: 'middle' }} title="S3" />
                     ) : (
-                      <FaFolder style={{ color: '#4caf50' }} />
+                      <FaFolder style={{ color: '#4caf50', verticalAlign: 'middle' }} title="Local" />
+                    )}
+                  </td>
+                  <td style={{ textAlign: 'left', verticalAlign: 'middle' }}>
+                    {item.viewType === 'compare' ? (
+                      <FaColumns style={{ color: '#58a6ff', verticalAlign: 'middle' }} title="Compare view" />
+                    ) : (
+                      <FaList style={{ color: '#8b949e', verticalAlign: 'middle' }} title="Tree view" />
                     )}
                   </td>
                   <td style={{ textAlign: 'left' }}>
-                    <Link to={uriToRoute(item.uri)}>
+                    <Link to={uriToRoute(item.uri, item.viewType)}>
                       <code>{item.uri}</code>
                     </Link>
                   </td>

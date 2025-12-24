@@ -6,6 +6,7 @@ import { ScanList } from './components/ScanList'
 import { ScanDetails } from './components/ScanDetails'
 import { S3BucketList } from './components/S3BucketList'
 import { RecentList } from './components/RecentList'
+import { CompareView } from './components/CompareView'
 import './App.css'
 
 function App() {
@@ -21,6 +22,7 @@ function App() {
             <Route path="/s3" element={<S3BucketList />} />
             <Route path="/s3/*" element={<ScanDetails />} />
             <Route path="/recent" element={<RecentList />} />
+            <Route path="/compare/*" element={<CompareView />} />
           </Routes>
         </div>
       </BrowserRouter>
