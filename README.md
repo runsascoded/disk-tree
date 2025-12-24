@@ -1,108 +1,130 @@
 # disk-tree
-Disk-space tree-maps and statistics
 
-https://github.com/runsascoded/disk-tree/assets/465045/6d5051a0-fc67-42b0-ae12-f4db6b19a78d
+Disk and cloud storage analyzer with caching, CLI, and web UI.
 
-## Index
 <!-- toc -->
 - [Install](#install)
-- [Examples](#examples)
-    - [S3 bucket](#s3)
-    - [Local directory](#local)
+- [Web UI](#web-ui)
+- [CLI](#cli)
+  - [Examples](#examples)
 - [Notes](#notes)
-    - [Caching](#caching)
-    - [Performance](#performance)
-    - [Max. entries](#max-entries)
-    - [TUI-only mode](#tui-only)
+  - [Caching](#caching)
+  - [Performance](#performance)
 <!-- /toc -->
 
-## Install <a id="install"></a>
+## Install
+
 ```bash
 pip install disk-tree
-disk-tree --help
-# Usage: disk-tree [OPTIONS] [URL]
+```
+
+## Web UI
+
+Start the server and open http://localhost:5001:
+
+```bash
+disk-tree-server
+```
+
+### Scan List
+
+View all cached scans, start new scans for local paths or S3 buckets:
+
+![Scan list](screenshots/scan-list.png)
+
+### Directory Browsing
+
+Browse directories with size, modification time, children, and descendant counts. Multi-select with keyboard navigation, bulk delete:
+
+![Directory listing](screenshots/directory-listing.png)
+
+### Treemap Visualization
+
+Interactive treemaps for visualizing space usage:
+
+![Treemap](screenshots/treemap.png)
+
+### S3 Buckets
+
+Browse and scan S3 buckets:
+
+![S3 buckets](screenshots/s3-buckets.png)
+
+## CLI
+
+```bash
+disk-tree index --help
+# Usage: disk-tree index [OPTIONS] [URL]
 #
 # Options:
-#   -c, --color TEXT        Plotly treemap color configs: "name", "size",
-#                           "size=<color-scale>" (cf.
-#                           https://plotly.com/python/builtin-
-#                           colorscales/#builtin-sequential-color-scales)
-#   -C, --cache-path TEXT   Path to SQLite DB (or directory containing disk-
-#                           tree.db) to use as cache; default:
-#                           $HOME/.config/disk-tree/disk-tree.db
-#   -f, --fsck              `file` scheme only: validate all cache entries that
-#                           begin with the provided path(s); when passed twice,
-#                           exit after performing fsck  [x>=0]
-#   -m, --max-entries TEXT  Only store/render the -m/--max-entries largest
-#                           directories/files found; default: "10k"
-#   -M, --no-max-entries    Show all directories/files, ignore -m/--max-entries
-#   -n, --sort-by-name      Sort output entries by name (default is by size)
-#   -o, --out-path TEXT     Paths to write output to. Supported extensions:
-#                           {jpg, png, svg, html}
-#   -O, --no-open           Skip attempting to `open` any output files
-#   -p, --profile TEXT      AWS_PROFILE to use
-#   -s, --size-mode         Pass once for SI units, twice for raw sizes  [x>=0]
-#   -t, --cache-ttl TEXT    TTL for cache entries; default: "1d"
-#   -T, --tmp-html          Write an HTML representation to a temporary file and
-#                           open in browser; pass twice to keep the temp file
-#                           around after exit  [x>=0]
-#   -x, --exclude TEXT      Exclude paths
-#   --help                  Show this message and exit.
+#   -C, --no-cache-read    Force fresh scan (ignore cache)
+#   -g, --gc               Garbage collect old scans
+#   -s, --sudo             Run gfind with sudo
+#   -m, --measure-memory   Track peak memory usage
+#   --help                 Show this message and exit.
+
+disk-tree scans           # List cached scans (JSON)
+disk-tree-server          # Start the web UI server
 ```
 
-## Examples <a id="examples"></a>
+### Examples
 
-### S3 bucket <a id="s3"></a>
-Visualizing [`s3://ctbk`](https://ctbk.s3.amazonaws.com/index.html):
+Scan an S3 bucket:
 ```bash
-disk-tree -os3/ctbk.html s3://ctbk
+disk-tree index s3://ctbk
 # 2333 files in 138 dirs, total size 45.1G
-# Writing: _s3/ctbk.html
-#       4B	test.txt
-#    66.1K	favicon.ico
-#     3.9M	index.html
-#     5.5M	static
-#    11.2M	.dvc
-#    95.0M	tmp
-#   579.1M	stations
-#     1.2G	aggregated
-#     6.0G	normalized
-#    37.2G	csvs
+#       4B  test.txt
+#    66.1K  favicon.ico
+#     3.9M  index.html
+#     5.5M  static
+#    11.2M  .dvc
+#    95.0M  tmp
+#   579.1M  stations
+#     1.2G  aggregated
+#     6.0G  normalized
+#    37.2G  csvs
 ```
 
-![](screenshots/disk-tree%20ctbk%20screenshot.png)
-
-### Local directory <a id="local"></a>
-Visualize a clone of this repo, color by size:
+Scan a local directory:
 ```bash
-disk-tree -odisk-tree.html -csize
+disk-tree index /Users/ryan/c/disk-tree
 # 97 files in 47 dirs, total size 1.5M
-# Writing: disk-tree.html
-#       0B	disk-tree/__init__.py
-#      77B	disk-tree/requirements.txt
-#     867B	disk-tree/setup.py
-#     2.3K	disk-tree/README.md
-#    23.8K	disk-tree/disk_tree
-#   291.8K	disk-tree/screenshots
-#   580.4K	disk-tree/.git
-#   628.6K	disk-tree/www
+#       0B  disk-tree/__init__.py
+#      77B  disk-tree/requirements.txt
+#     867B  disk-tree/setup.py
+#     2.3K  disk-tree/README.md
+#    23.8K  disk-tree/disk_tree
+#   291.8K  disk-tree/screenshots
+#   580.4K  disk-tree/.git
+#   628.6K  disk-tree/www
 ```
 
-![](screenshots/disk-tree%20repo%20screenshot.png)
-(default color scale is "RdBu"; see Plotly options [here][plotly color scales], `-csize=<scale>` to configure)
+## Notes
 
-## Notes <a id="notes"></a>
+### Caching
 
-### Caching <a id="caching"></a>
-`disk-tree` caches file stats in a SQLite database, defaulting to `~/.config/disk-tree/disk-tree.db` and a `1d` TTL (see `-C`/`--cache-path` and `-t`/`--ttl`, resp.).
+`disk-tree` caches scan results as Parquet files in `~/.config/disk-tree/scans/`, with metadata in `~/.config/disk-tree/disk-tree.db`. Override with `DISK_TREE_ROOT`.
 
-### Performance <a id="performance"></a>
-`disk-tree` is reasonably performant on S3 buckets (it caches the result of `aws s3 ls --recursive s3://…`, and hydrates its cache from there), but ["local mode"](#local) is slow, as it stats every file and directory in a given tree, in a single-threaded tree-traversal.
+### Performance
 
-### Max. entries <a id="max-entries"></a>
-Plotly treemaps fall over with too many elements; `-m`/`--max-entries` (default `10k`) determines the maximum number of nodes (files and directories) to attempt to render.
+- **Local filesystems**: Uses `gfind -printf` for fast stat collection (handles sparse files correctly with 512-byte block sizes)
+- **S3**: Caches `aws s3 ls --recursive` output
+- **Fresher child patching**: When viewing a parent directory, newer child scans automatically patch in updated stats
+- **Depth-based predicate pushdown**: Parquet queries filter by depth for fast loading
 
-### TUI-only mode <a id="tui-only"></a>
-If you omit the `-o<path>.html` in [the examples above](#examples), `disk-tree` will simply print the sizes of all children of the specified URL, and exit.
+## Development
 
-[plotly color scales]: https://plotly.com/python/builtin-colorscales/#builtin-sequential-color-scales
+```bash
+# Python
+uv sync
+disk-tree-server
+
+# Web UI
+cd ui
+pnpm install
+pnpm dev  # http://localhost:5180 (proxies API to :5001)
+
+# Screenshots
+cd ui
+pnpm screenshots
+```
