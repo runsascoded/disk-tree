@@ -40,27 +40,64 @@ running_scans: dict[str, dict] = {}
 _cache: dict[str, tuple[float, any]] = {}
 CACHE_TTL = 60  # seconds
 
+# LRU cache for parquet DataFrames (expensive to load)
+_parquet_cache: dict[str, tuple[float, pd.DataFrame]] = {}
+PARQUET_CACHE_TTL = 300  # 5 minutes
+PARQUET_CACHE_MAX_SIZE = 10  # Max number of parquets to cache
+
 import pyarrow.parquet as pq
 
 
-def load_parquet_with_depth_filter(blob_path: str, max_depth: int | None = None) -> pd.DataFrame:
+def load_parquet_with_depth_filter(
+    blob_path: str,
+    max_depth: int | None = None,
+    min_depth: int | None = None,
+) -> pd.DataFrame:
     """Load parquet file, optionally filtering by depth column.
 
-    If max_depth is provided and the parquet has a 'depth' column, uses
-    predicate pushdown to only load rows where depth <= max_depth.
+    If max_depth/min_depth are provided and the parquet has a 'depth' column,
+    uses predicate pushdown to only load rows matching the depth range.
     Falls back to full load for old parquets without depth column.
+
+    Results are cached in memory for performance.
     """
-    if max_depth is not None:
+    cache_key = f"{blob_path}:{min_depth}:{max_depth}"
+    now = time.time()
+
+    # Check cache
+    if cache_key in _parquet_cache:
+        cached_time, cached_df = _parquet_cache[cache_key]
+        if now - cached_time < PARQUET_CACHE_TTL:
+            return cached_df
+
+    # Load from disk
+    df = None
+    if max_depth is not None or min_depth is not None:
         # Check if parquet has 'depth' column
         try:
             schema = pq.read_schema(blob_path)
             if 'depth' in schema.names:
-                # Use predicate pushdown - only load rows with depth <= max_depth
-                return pd.read_parquet(blob_path, filters=[('depth', '<=', max_depth)])
+                filters = []
+                if max_depth is not None:
+                    filters.append(('depth', '<=', max_depth))
+                if min_depth is not None:
+                    filters.append(('depth', '>=', min_depth))
+                # Use predicate pushdown
+                df = pd.read_parquet(blob_path, filters=filters)
         except Exception:
             pass  # Fall back to full load
-    # Full load (no depth column or no filter requested)
-    return pd.read_parquet(blob_path)
+
+    if df is None:
+        # Full load (no depth column or no filter requested)
+        df = pd.read_parquet(blob_path)
+
+    # Cache the result (simple LRU: remove oldest if over limit)
+    if len(_parquet_cache) >= PARQUET_CACHE_MAX_SIZE:
+        oldest_key = min(_parquet_cache.keys(), key=lambda k: _parquet_cache[k][0])
+        del _parquet_cache[oldest_key]
+    _parquet_cache[cache_key] = (now, df)
+
+    return df
 
 
 def cached(key: str, ttl: int = CACHE_TTL):
@@ -328,10 +365,14 @@ def get_scan():
 
     Query params:
         uri: The path or s3:// URI to look up
+        scan_id: Optional specific scan ID to use (for time-travel)
         depth: Max depth of children to return (default 2)
+        max_rows: Max rows to return for treemap (default 1000, 0 for unlimited)
     """
     uri = request.args.get('uri', '/')
+    scan_id = request.args.get('scan_id')
     depth = int(request.args.get('depth', 2))
+    max_rows = int(request.args.get('max_rows', 1000))
 
     # Normalize URI
     uri = uri.rstrip('/')
@@ -344,27 +385,39 @@ def get_scan():
     else:
         search_path = uri if uri.startswith('/') else f'/{uri}'
 
-    # Try exact match first, then ancestors
     db = get_db()
     scan = None
-    test_path = search_path
-    while test_path:
-        cursor = db.execute(
-            'SELECT * FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1',
-            (test_path,)
-        )
+
+    # If scan_id provided, use that specific scan
+    if scan_id:
+        cursor = db.execute('SELECT * FROM scan WHERE id = ?', (scan_id,))
         row = cursor.fetchone()
         if row:
             scan = dict(row)
-            break
-        # Go up one directory
-        if test_path == '/' or test_path == 's3://':
-            break
-        parent = dirname(test_path)
-        # Avoid infinite loop: if dirname didn't change, we're at root
-        if parent == test_path:
-            break
-        test_path = parent
+            # Verify the scan covers the requested URI
+            scan_path = scan['path']
+            if not (search_path == scan_path or search_path.startswith(scan_path + '/')):
+                return jsonify({'error': f"Scan {scan_id} does not cover path {uri}"}), 400
+    else:
+        # Try exact match first, then ancestors
+        test_path = search_path
+        while test_path:
+            cursor = db.execute(
+                'SELECT * FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1',
+                (test_path,)
+            )
+            row = cursor.fetchone()
+            if row:
+                scan = dict(row)
+                break
+            # Go up one directory
+            if test_path == '/' or test_path == 's3://':
+                break
+            parent = dirname(test_path)
+            # Avoid infinite loop: if dirname didn't change, we're at root
+            if parent == test_path:
+                break
+            test_path = parent
 
     if not scan:
         # No ancestor scan - build from filesystem + any child scans
@@ -651,7 +704,29 @@ def get_scan():
         return d
 
     children = [row_to_dict(row) for _, row in direct_children_df.iterrows()]
-    rows = [row_to_dict(row) for _, row in children_df.iterrows()]
+
+    # Limit rows for treemap performance
+    if max_rows > 0 and len(children_df) > max_rows:
+        # Sort by size descending and take top N
+        sorted_df = children_df.sort_values('size', ascending=False).head(max_rows)
+        # Ensure parent chain is included for valid treemap structure
+        included_paths = set(sorted_df['path'].tolist())
+        parents_to_add = []
+        for _, row in sorted_df.iterrows():
+            parent = row.get('parent') if use_rel_path else row.get('parent')
+            while parent and parent != '.' and parent not in included_paths:
+                parent_row = children_df[children_df['path'] == parent]
+                if not parent_row.empty:
+                    parents_to_add.append(parent_row.iloc[0])
+                    included_paths.add(parent)
+                    parent = parent_row.iloc[0].get('parent')
+                else:
+                    break
+        if parents_to_add:
+            sorted_df = pd.concat([sorted_df, pd.DataFrame(parents_to_add)], ignore_index=True)
+        rows = [row_to_dict(row) for _, row in sorted_df.iterrows()]
+    else:
+        rows = [row_to_dict(row) for _, row in children_df.iterrows()]
 
     # Mark all children as scanned
     for c in children:
@@ -716,6 +791,297 @@ def get_scan():
         'error_count': scan.get('error_count'),
         'error_paths': scan.get('error_paths'),
     })
+
+
+@app.route('/api/scans/history')
+def get_scan_history():
+    """Return all scans for a given path, including ancestor scans.
+
+    Query params:
+        uri: The path to look up
+
+    Returns scans of the exact path AND scans of ancestor paths that contain
+    data for the requested URI. Each scan includes 'scan_path' to indicate
+    which path was actually scanned.
+    """
+    uri = request.args.get('uri', '/')
+    uri = uri.rstrip('/')
+    if not uri:
+        uri = '/'
+
+    db = get_db()
+
+    # Build list of paths to check: the exact path and all ancestors
+    paths_to_check = [uri]
+    test_path = uri
+    while test_path and test_path != '/':
+        parent = dirname(test_path)
+        if parent == test_path:
+            break
+        if parent:
+            paths_to_check.append(parent)
+        test_path = parent
+    # Include root for local paths
+    if not uri.startswith('s3://') and '/' not in paths_to_check:
+        paths_to_check.append('/')
+
+    # Query for scans of any of these paths
+    placeholders = ','.join('?' * len(paths_to_check))
+    scans = db.execute(
+        f'SELECT id, path, time, size, n_children, n_desc FROM scan WHERE path IN ({placeholders}) ORDER BY time DESC',
+        paths_to_check
+    ).fetchall()
+
+    # For ancestor scans, we need to get the stats for the specific subpath from the parquet
+    results = []
+    for s in scans:
+        scan_dict = dict(s)
+        scan_path = scan_dict['path']
+
+        if scan_path == uri:
+            # Exact match - use denormalized stats directly
+            scan_dict['scan_path'] = scan_path
+            results.append(scan_dict)
+        else:
+            # Ancestor scan - need to extract stats for the subpath from parquet
+            # Look up the blob path
+            blob_row = db.execute('SELECT blob FROM scan WHERE id = ?', (scan_dict['id'],)).fetchone()
+            if blob_row:
+                try:
+                    # The path in parquet is relative to scan root
+                    rel_path = uri[len(scan_path):].lstrip('/')
+                    # Calculate depth of target path (e.g., 'Library' = depth 1, 'Library/Caches' = depth 2)
+                    target_depth = rel_path.count('/') + 1
+                    # Use depth filtering to only load rows up to target depth (much faster)
+                    df = load_parquet_with_depth_filter(blob_row['blob'], target_depth)
+                    row = df[df['path'] == rel_path]
+                    if not row.empty:
+                        r = row.iloc[0]
+                        scan_dict['size'] = int(r['size']) if pd.notna(r['size']) else None
+                        scan_dict['n_children'] = int(r['n_children']) if pd.notna(r.get('n_children')) else None
+                        scan_dict['n_desc'] = int(r['n_desc']) if pd.notna(r.get('n_desc')) else None
+                        scan_dict['scan_path'] = scan_path
+                        results.append(scan_dict)
+                except Exception:
+                    # Skip this scan if we can't load it
+                    pass
+
+    return jsonify(results)
+
+
+@app.route('/api/compare')
+def compare_scans():
+    """Compare two scans of the same path.
+
+    Query params:
+        uri: The path to compare
+        scan1: ID of first (older) scan
+        scan2: ID of second (newer) scan
+        depth: Max depth of children to compare (default 1)
+
+    Scans can be of the exact URI or ancestor paths. When comparing ancestor
+    scans, we extract the relevant subtree for the requested URI.
+    """
+    uri = request.args.get('uri', '/')
+    scan1_id = request.args.get('scan1')
+    scan2_id = request.args.get('scan2')
+    depth = int(request.args.get('depth', 1))
+
+    if not scan1_id or not scan2_id:
+        return jsonify({'error': 'scan1 and scan2 parameters required'}), 400
+
+    # Check response cache (compare results are expensive to compute)
+    cache_key = f"compare:{uri}:{scan1_id}:{scan2_id}:{depth}"
+    now = time.time()
+    if cache_key in _cache:
+        cached_time, cached_result = _cache[cache_key]
+        if now - cached_time < CACHE_TTL:
+            return jsonify(cached_result)
+
+    db = get_db()
+
+    # Load both scans
+    scan1 = db.execute('SELECT * FROM scan WHERE id = ?', (scan1_id,)).fetchone()
+    scan2 = db.execute('SELECT * FROM scan WHERE id = ?', (scan2_id,)).fetchone()
+
+    if not scan1 or not scan2:
+        return jsonify({'error': 'Scan not found'}), 404
+
+    # Filter to direct children of the requested URI
+    uri = uri.rstrip('/')
+    if not uri:
+        uri = '/'
+
+    def get_children(scan, depth_limit):
+        """Get direct children of the target URI from a scan.
+
+        Handles both exact match scans and ancestor scans.
+        """
+        scan_path = scan['path']
+
+        # Calculate depth offset for ancestor scans
+        if scan_path == uri:
+            rel_prefix = ''
+            depth_offset = 0
+        else:
+            # URI is subdir of scan - calculate relative path
+            rel_prefix = uri[len(scan_path):].lstrip('/')
+            depth_offset = rel_prefix.count('/') + 1
+
+        # Load with EXACT depth filter - we only need children at depth_offset + 1
+        # This avoids loading millions of rows at other depths
+        target_depth = depth_offset + depth_limit
+        df = load_parquet_with_depth_filter(scan['blob'], max_depth=target_depth, min_depth=target_depth)
+
+        if scan_path == uri:
+            # Direct match - children have parent='.'
+            children = df[df['parent'] == '.'].copy()
+            children['rel_path'] = children['path']
+        else:
+            # URI is subdir of scan - filter to children of the relative path
+            # Children have parent == rel_prefix
+            children = df[df['parent'] == rel_prefix].copy()
+            # rel_path is just the filename (last component)
+            children['rel_path'] = children['path'].str.split('/').str[-1]
+
+        return children
+
+    children1 = get_children(scan1, depth)
+    children2 = get_children(scan2, depth)
+
+    # Build comparison using rel_path (the child name relative to the target URI)
+    paths1 = set(children1['rel_path'].tolist()) if 'rel_path' in children1.columns and len(children1) > 0 else set()
+    paths2 = set(children2['rel_path'].tolist()) if 'rel_path' in children2.columns and len(children2) > 0 else set()
+
+    added = paths2 - paths1
+    removed = paths1 - paths2
+    common = paths1 & paths2
+
+    # Helper to convert numpy types to native Python types
+    def to_native(v):
+        if v is None:
+            return None
+        if hasattr(v, 'item'):
+            return v.item()
+        return v
+
+    def row_to_dict(row):
+        d = row.to_dict()
+        for k, v in d.items():
+            d[k] = to_native(v)
+        return d
+
+    # Build URI prefix for drill-down links
+    uri_prefix = uri.rstrip('/') + '/'
+
+    results = []
+
+    # Added rows
+    for rel_path in added:
+        row = children2[children2['rel_path'] == rel_path].iloc[0]
+        d = row_to_dict(row)
+        d['path'] = rel_path  # Use rel_path as display path
+        d['uri'] = uri_prefix + rel_path  # Build full URI for linking
+        d['status'] = 'added'
+        d['size_delta'] = to_native(d.get('size', 0) or 0)
+        results.append(d)
+
+    # Removed rows
+    for rel_path in removed:
+        row = children1[children1['rel_path'] == rel_path].iloc[0]
+        d = row_to_dict(row)
+        d['path'] = rel_path  # Use rel_path as display path
+        d['uri'] = uri_prefix + rel_path  # Build full URI for linking
+        d['status'] = 'removed'
+        d['size_delta'] = -to_native(d.get('size', 0) or 0)
+        results.append(d)
+
+    # Changed rows
+    for rel_path in common:
+        row1 = children1[children1['rel_path'] == rel_path].iloc[0]
+        row2 = children2[children2['rel_path'] == rel_path].iloc[0]
+        d = row_to_dict(row2)
+        d['path'] = rel_path  # Use rel_path as display path
+        d['uri'] = uri_prefix + rel_path  # Build full URI for linking
+
+        # Compute deltas
+        size1 = to_native(row1.get('size', 0) or 0)
+        size2 = to_native(row2.get('size', 0) or 0)
+        d['size_delta'] = size2 - size1
+        d['size_old'] = size1
+
+        n_desc1 = to_native(row1.get('n_desc', 0) or 0)
+        n_desc2 = to_native(row2.get('n_desc', 0) or 0)
+        d['n_desc_delta'] = n_desc2 - n_desc1
+        d['n_desc_old'] = n_desc1
+
+        if d['size_delta'] != 0 or d['n_desc_delta'] != 0:
+            d['status'] = 'changed'
+        else:
+            d['status'] = 'unchanged'
+
+        results.append(d)
+
+    # Sort by absolute size delta
+    results.sort(key=lambda x: abs(x.get('size_delta', 0)), reverse=True)
+
+    # Compute totals
+    total_delta = sum(r.get('size_delta', 0) for r in results)
+
+    # Get the subtree stats if comparing ancestor scans
+    def get_subtree_stats(scan):
+        scan_path = scan['path']
+        if scan_path == uri:
+            return {
+                'size': to_native(scan['size']),
+                'n_desc': to_native(scan['n_desc']) if 'n_desc' in scan.keys() else None,
+            }
+        # Load the parquet with depth filtering and find the row for the target URI
+        rel_path = uri[len(scan_path):].lstrip('/')
+        target_depth = rel_path.count('/') + 1
+        df = load_parquet_with_depth_filter(scan['blob'], max_depth=target_depth, min_depth=target_depth)
+        row = df[df['path'] == rel_path]
+        if not row.empty:
+            r = row.iloc[0]
+            return {
+                'size': to_native(r['size']),
+                'n_desc': to_native(r.get('n_desc')),
+            }
+        return {'size': None, 'n_desc': None}
+
+    stats1 = get_subtree_stats(scan1)
+    stats2 = get_subtree_stats(scan2)
+
+    response = {
+        'uri': uri,
+        'scan1': {
+            'id': to_native(scan1['id']),
+            'time': scan1['time'],
+            'size': stats1['size'],
+            'n_desc': stats1['n_desc'],
+            'scan_path': scan1['path'],
+        },
+        'scan2': {
+            'id': to_native(scan2['id']),
+            'time': scan2['time'],
+            'size': stats2['size'],
+            'n_desc': stats2['n_desc'],
+            'scan_path': scan2['path'],
+        },
+        'rows': results,
+        'summary': {
+            'added': len(added),
+            'removed': len(removed),
+            'changed': len([r for r in results if r['status'] == 'changed']),
+            'unchanged': len([r for r in results if r['status'] == 'unchanged']),
+            'total_delta': to_native(total_delta),
+        }
+    }
+
+    # Cache the response
+    _cache[cache_key] = (time.time(), response)
+
+    return jsonify(response)
 
 
 def run_scan_job(job_id: str, path: str, force: bool = True):
@@ -983,6 +1349,10 @@ def delete_path():
     except Exception as e:
         # Deletion succeeded but scan update failed - log but don't fail the request
         print(f"Warning: Failed to update scans after deletion: {e}")
+
+    # Invalidate caches so next request gets fresh data
+    _cache.clear()
+    _parquet_cache.clear()
 
     return jsonify({
         'success': True,
