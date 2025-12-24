@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
-import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
+import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import { LazyPlot as Plot } from './LazyPlot'
 import { useQuery } from '@tanstack/react-query'
-import { fetchScanDetails, startScan, fetchScanStatus, deletePath } from '../api'
-import type { Row, ScanJob, ScanProgress } from '../api'
+import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath } from '../api'
+import type { Row, ScanJob, ScanProgress, ScanHistoryItem } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 
@@ -266,7 +266,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   }
 
   return (
-    <table>
+    <table className="scan-details-table">
       <thead>
         <tr>
           <th style={{ width: '1.5rem', padding: '0.25rem 0.1rem' }}>
@@ -311,7 +311,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               </Tooltip>
             )}
           </td>
-          <td>
+          <td style={{ display: 'flex', gap: '4px' }}>
             <Tooltip title={scanStatus === 'full' ? 'Rescan this directory' : 'Scan this directory'}>
               <span>
                 <Button
@@ -323,6 +323,13 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
                 </Button>
               </span>
+            </Tooltip>
+            <Tooltip title="Compare scans">
+              <Link to={`/compare${routeType === 's3' ? '/s3/' + uri.slice(5) : '/file' + uri}`}>
+                <Button size="small" sx={{ minWidth: 0, padding: '2px 4px' }}>
+                  <FaExchangeAlt size={12} />
+                </Button>
+              </Link>
             </Tooltip>
           </td>
           {routeType !== 's3' && <td></td>}
@@ -408,8 +415,74 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   )
 }
 
+const MAX_ITEMS_PER_SUBTREE = 100
+
 function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
-  const data = [root, ...rows]
+  // Limit items per top-level subtree for performance
+  const limitedRows = useMemo(() => {
+    // Group rows by their top-level parent (direct child of root)
+    const directChildren = rows.filter(r => r.parent === '.')
+    const subtrees = new Map<string, Row[]>()
+
+    // Initialize with direct children
+    for (const child of directChildren) {
+      subtrees.set(child.path, [child])
+    }
+
+    // Group descendants into their top-level subtree
+    for (const row of rows) {
+      if (row.parent === '.') continue // Already added
+
+      // Find top-level ancestor
+      let topLevel = row.parent
+      let current = row
+      while (topLevel && topLevel !== '.') {
+        const parentRow = rows.find(r => r.path === topLevel)
+        if (!parentRow || parentRow.parent === '.') break
+        topLevel = parentRow.parent
+        current = parentRow
+      }
+
+      // topLevel is now the direct child of root, or we use the immediate parent
+      const subtreeKey = topLevel && topLevel !== '.' ? topLevel : row.parent
+      if (subtreeKey && subtrees.has(subtreeKey)) {
+        subtrees.get(subtreeKey)!.push(row)
+      }
+    }
+
+    // For each subtree, take top N by size (keeping parent chains)
+    const result: Row[] = []
+    for (const [, subtreeRows] of subtrees) {
+      if (subtreeRows.length <= MAX_ITEMS_PER_SUBTREE) {
+        result.push(...subtreeRows)
+        continue
+      }
+
+      // Sort by size and take top N
+      const sorted = [...subtreeRows].sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
+      const topRows = sorted.slice(0, MAX_ITEMS_PER_SUBTREE)
+      const included = new Set(topRows.map(r => r.path))
+
+      // Ensure parent chain is included
+      for (const row of [...topRows]) {
+        let parent = row.parent
+        while (parent && parent !== '.' && !included.has(parent)) {
+          const parentRow = subtreeRows.find(r => r.path === parent)
+          if (parentRow) {
+            topRows.push(parentRow)
+            included.add(parent)
+          }
+          parent = parentRow?.parent
+        }
+      }
+
+      result.push(...topRows)
+    }
+
+    return result
+  }, [rows])
+
+  const data = [root, ...limitedRows]
 
   return (
     <Plot
@@ -448,9 +521,19 @@ export function ScanDetails() {
     ? `s3://${pathSegments}`
     : `/${pathSegments}`
 
+  // Selected scan ID for time-travel (undefined = latest)
+  const [selectedScanId, setSelectedScanId] = useState<number | undefined>(undefined)
+
+  // Fetch scan history for the dropdown
+  const { data: scanHistory } = useQuery({
+    queryKey: ['scan-history', uri],
+    queryFn: () => fetchScanHistory(uri),
+    staleTime: 60 * 1000,
+  })
+
   const { data: details, isLoading, error: queryError, refetch } = useQuery({
-    queryKey: ['scan-details', uri],
-    queryFn: () => fetchScanDetails(uri),
+    queryKey: ['scan-details', uri, selectedScanId],
+    queryFn: () => fetchScanDetails(uri, selectedScanId),
     staleTime: 60 * 1000, // 1 minute - scan details don't change frequently
   })
   const [mutationError, setMutationError] = useState<string | null>(null)
@@ -476,7 +559,7 @@ export function ScanDetails() {
   const { recordVisit } = useRecentPaths()
   useEffect(() => {
     if (uri && uri !== '/' && uri !== 's3://') {
-      recordVisit(uri)
+      recordVisit(uri, 'tree')
     }
   }, [uri, recordVisit])
 
@@ -930,9 +1013,41 @@ export function ScanDetails() {
     }
   })() : null
 
+  // Format scan time for dropdown display
+  const formatScanTime = (timeStr: string) => {
+    const date = new Date(timeStr)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+    const timeFormatted = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    if (diffDays === 0) return `Today ${timeFormatted}`
+    if (diffDays === 1) return `Yesterday ${timeFormatted}`
+    if (diffDays < 7) return `${diffDays}d ago ${timeFormatted}`
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ` ${timeFormatted}`
+  }
+
   return (
     <div ref={tableRef} tabIndex={0} style={{ outline: 'none' }}>
-      <h1 style={{ marginBottom: '1rem' }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1, flexWrap: 'wrap' }}>
+        <h1 style={{ margin: 0 }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
+        {scanHistory && scanHistory.length > 1 && (
+          <Tooltip title="View historical scans">
+            <select
+              value={selectedScanId ?? ''}
+              onChange={e => setSelectedScanId(e.target.value ? Number(e.target.value) : undefined)}
+              style={{ padding: '4px 8px', fontSize: '0.85rem', background: '#2d2d2d', color: '#e6edf3', border: '1px solid #444', borderRadius: 4 }}
+            >
+              <option value="">Latest scan</option>
+              {scanHistory.map(scan => (
+                <option key={scan.id} value={scan.id}>
+                  {formatScanTime(scan.time)} - {sizeStr(scan.size ?? 0)}
+                  {scan.scan_path !== uri && ` (from ${scan.scan_path})`}
+                </option>
+              ))}
+            </select>
+          </Tooltip>
+        )}
+      </Box>
       <ScanProgressBanner progress={scanProgress} currentUri={uri} />
       {error && <p style={{ color: 'red' }}>{error}</p>}
       {error_count && error_count > 0 && (

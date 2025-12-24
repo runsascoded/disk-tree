@@ -40,8 +40,12 @@ export async function fetchScans(): Promise<Scan[]> {
   return res.json()
 }
 
-export async function fetchScanDetails(uri: string): Promise<ScanDetails> {
-  const res = await fetch(`/api/scan?uri=${encodeURIComponent(uri)}`)
+export async function fetchScanDetails(uri: string, scanId?: number): Promise<ScanDetails> {
+  const params = new URLSearchParams({ uri })
+  if (scanId !== undefined) {
+    params.set('scan_id', String(scanId))
+  }
+  const res = await fetch(`/api/scan?${params}`)
   if (!res.ok) {
     const err = await res.json()
     throw new Error(err.error || 'Failed to fetch scan details')
@@ -135,6 +139,68 @@ export async function fetchS3Buckets(): Promise<S3Bucket[]> {
   if (!res.ok) {
     const err = await res.json()
     throw new Error(err.error || 'Failed to fetch S3 buckets')
+  }
+  return res.json()
+}
+
+// Scan history for compare page
+export type ScanHistoryItem = {
+  id: number
+  path: string
+  time: string
+  size?: number | null
+  n_children?: number | null
+  n_desc?: number | null
+  scan_path?: string  // The actual scanned path (may be ancestor of requested path)
+}
+
+export async function fetchScanHistory(uri: string): Promise<ScanHistoryItem[]> {
+  const res = await fetch(`/api/scans/history?uri=${encodeURIComponent(uri)}`)
+  if (!res.ok) throw new Error('Failed to fetch scan history')
+  return res.json()
+}
+
+// Compare scans
+export type CompareRow = {
+  path: string
+  size: number | null
+  mtime: number | null
+  kind: 'file' | 'dir'
+  parent: string | null
+  uri: string
+  n_desc: number | null
+  n_children: number | null
+  status: 'added' | 'removed' | 'changed' | 'unchanged'
+  size_delta: number
+  size_old?: number
+  n_desc_delta?: number
+  n_desc_old?: number
+}
+
+export type CompareResult = {
+  uri: string
+  scan1: { id: number; time: string; size: number | null; n_desc: number | null; scan_path?: string }
+  scan2: { id: number; time: string; size: number | null; n_desc: number | null; scan_path?: string }
+  rows: CompareRow[]
+  summary: {
+    added: number
+    removed: number
+    changed: number
+    unchanged: number
+    total_delta: number
+  }
+}
+
+export async function compareScans(
+  uri: string,
+  scan1: number,
+  scan2: number,
+): Promise<CompareResult> {
+  const params = new URLSearchParams({ uri, scan1: String(scan1), scan2: String(scan2) })
+  const res = await fetch(`/api/compare?${params}`)
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.error || 'Failed to compare scans')
   }
   return res.json()
 }
