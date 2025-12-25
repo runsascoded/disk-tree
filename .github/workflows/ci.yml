@@ -92,13 +92,7 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Create empty ui/dist for editable install
-        run: mkdir -p ui/dist
-
-      - name: Install Python dependencies
-        run: uv sync
-
-      # Node.js setup for Playwright
+      # Node.js setup for UI build and Playwright
       - uses: pnpm/action-setup@v4
         with:
           version: 9
@@ -111,6 +105,12 @@ jobs:
 
       - name: Install UI dependencies
         run: cd ui && pnpm install --frozen-lockfile
+
+      - name: Build UI
+        run: cd ui && pnpm build
+
+      - name: Install Python dependencies
+        run: uv sync
 
       - name: Install Playwright browsers
         run: cd ui && pnpm exec playwright install chromium --with-deps
