@@ -439,7 +439,7 @@ function CompareRowComponent({
   routeType,
   onScan,
   isScanning,
-  getProgress,
+  getProgress: _getProgress,
   scan1,
   scan2,
 }: {
@@ -473,7 +473,6 @@ function CompareRowComponent({
   const compareUrl = params.toString() ? `${basePath}?${params}` : basePath
 
   const td: React.CSSProperties = { padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.85em', whiteSpace: 'nowrap' }
-  const dim: React.CSSProperties = { color: '#8b949e' }
 
   // Size values
   const sizeBefore = row.status === 'added' ? '-' : formatSize(row.size_old ?? row.size)
