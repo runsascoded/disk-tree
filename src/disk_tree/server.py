@@ -1,5 +1,5 @@
 import json
-from os import listdir, remove, stat
+from os import listdir, makedirs, remove, stat
 from os.path import abspath, dirname, exists, isdir, isfile, join
 import shutil
 import sqlite3
@@ -19,6 +19,50 @@ app = Flask(__name__)
 CORS(app)
 
 DB_PATH = abspath(SQLITE_PATH)
+
+
+def init_db():
+    """Initialize the database with required tables if they don't exist."""
+    from os.path import dirname
+    makedirs(dirname(DB_PATH), exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS scan (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL,
+                time DATETIME NOT NULL,
+                blob TEXT NOT NULL,
+                error_count INTEGER,
+                error_paths TEXT,
+                size INTEGER,
+                n_children INTEGER,
+                n_desc INTEGER
+            )
+        ''')
+        conn.execute('''
+            CREATE INDEX IF NOT EXISTS ix_scan_path_time ON scan (path, time)
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS scan_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL UNIQUE,
+                pid INTEGER NOT NULL,
+                started DATETIME NOT NULL,
+                items_found INTEGER NOT NULL DEFAULT 0,
+                items_per_sec INTEGER,
+                error_count INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'running'
+            )
+        ''')
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# Initialize database on module load
+init_db()
+
 
 # Static file serving for bundled UI
 # Check multiple locations: packaged static/, dev ui/dist/
