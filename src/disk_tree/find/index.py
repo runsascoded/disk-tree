@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import timezone
 from dateutil.parser import parse
 import os
 import re
@@ -44,7 +45,7 @@ def s3_files_iter(path: str) -> Iterator[dict]:
         for line in tqdm(proc.stdout):
             strs = WS.split(line.rstrip('\n'), 3)
             mtime_str = f'{strs[0]} {strs[1]}'
-            mtime = int(parse(mtime_str).timestamp())
+            mtime = int(parse(mtime_str).replace(tzinfo=timezone.utc).timestamp())
             size = int(strs[2])
             key = strs[3]
             # When key0 is empty (bucket root), all keys are valid
