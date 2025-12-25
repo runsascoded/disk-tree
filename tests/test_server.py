@@ -624,3 +624,226 @@ class TestCompareWithAncestorScans:
         rows_by_status = {r['path']: r['status'] for r in data['rows']}
         assert rows_by_status.get('child1') == 'removed'
         assert rows_by_status.get('child2') == 'added'
+
+
+class TestDeleteEndpoint:
+    """Tests for POST /api/delete endpoint."""
+
+    def test_delete_requires_path(self, test_client):
+        """Returns 400 when path is not provided."""
+        client, _, _ = test_client
+        response = client.post('/api/delete', json={})
+        assert response.status_code == 400
+        assert 'Path is required' in response.json['error']
+
+    def test_delete_requires_absolute_path(self, test_client):
+        """Returns 400 for relative paths."""
+        client, _, _ = test_client
+        response = client.post('/api/delete', json={'path': 'relative/path'})
+        assert response.status_code == 400
+        assert 'absolute' in response.json['error'].lower()
+
+    def test_delete_nonexistent_path(self, test_client):
+        """Returns 404 for paths that don't exist."""
+        client, _, _ = test_client
+        response = client.post('/api/delete', json={'path': '/nonexistent/path/12345'})
+        assert response.status_code == 404
+
+    def test_delete_file_success(self, test_client):
+        """Successfully deletes a file and returns stats."""
+        client, db_path, scans_dir = test_client
+
+        # Create a file to delete
+        test_file = os.path.join(scans_dir, 'to_delete.txt')
+        with open(test_file, 'w') as f:
+            f.write('test content')
+
+        response = client.post('/api/delete', json={'path': test_file})
+        assert response.status_code == 200
+        data = response.json
+        assert data['success'] is True
+        assert data['path'] == test_file
+        assert data['deleted_size'] > 0
+        assert not os.path.exists(test_file)
+
+    def test_delete_clears_cache(self, test_client):
+        """Delete clears server caches so next request gets fresh data."""
+        client, db_path, scans_dir = test_client
+
+        # Create scan with a file
+        parquet_path = create_test_parquet(scans_dir, 'test', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 2, 'n_children': 1},
+            {'path': 'file.txt', 'size': 500, 'mtime': 80, 'kind': 'file', 'parent': '.', 'uri': '/test/file.txt', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet_path, 1000, 1, 2),
+        )
+        conn.commit()
+        conn.close()
+
+        # First request to populate cache
+        response1 = client.get('/api/scan?uri=/test')
+        assert response1.status_code == 200
+
+        # Create file to delete (outside of scan data, just to trigger cache clear)
+        test_file = os.path.join(scans_dir, 'deleteme.txt')
+        with open(test_file, 'w') as f:
+            f.write('x')
+
+        # Delete should clear caches
+        from disk_tree.server import _cache, _parquet_cache
+        assert len(_cache) > 0 or len(_parquet_cache) > 0  # Something should be cached
+
+        response = client.post('/api/delete', json={'path': test_file})
+        assert response.status_code == 200
+
+        # Caches should be cleared
+        assert len(_cache) == 0
+        assert len(_parquet_cache) == 0
+
+
+class TestScanIdParameter:
+    """Tests for scan_id parameter (time-travel feature)."""
+
+    def test_scan_id_uses_specific_scan(self, test_client):
+        """scan_id parameter uses the specified scan instead of latest."""
+        client, db_path, scans_dir = test_client
+
+        # Create two scans with different data
+        parquet1 = create_test_parquet(scans_dir, 'old', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 1, 'n_children': 0},
+        ])
+        parquet2 = create_test_parquet(scans_dir, 'new', [
+            {'path': '.', 'size': 2000, 'mtime': 200, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet1, 1000, 0, 1),
+        )
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-02T12:00:00', parquet2, 2000, 0, 1),
+        )
+        conn.commit()
+        conn.close()
+
+        # Without scan_id, should get latest (size=2000)
+        response = client.get('/api/scan?uri=/test')
+        assert response.status_code == 200
+        assert response.json['root']['size'] == 2000
+
+        # With scan_id=1, should get old scan (size=1000)
+        response = client.get('/api/scan?uri=/test&scan_id=1')
+        assert response.status_code == 200
+        assert response.json['root']['size'] == 1000
+
+    def test_scan_id_invalid_returns_error(self, test_client):
+        """Returns 400 if scan_id doesn't cover the requested path."""
+        client, db_path, scans_dir = test_client
+
+        parquet = create_test_parquet(scans_dir, 'test', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/other', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob) VALUES (?, ?, ?)',
+            ('/other', '2025-01-01T12:00:00', parquet),
+        )
+        conn.commit()
+        conn.close()
+
+        # Request /test with scan_id=1 which is for /other
+        response = client.get('/api/scan?uri=/test&scan_id=1')
+        assert response.status_code == 400
+        assert 'does not cover' in response.json['error']
+
+
+class TestDepthFiltering:
+    """Tests for depth-based parquet filtering."""
+
+    def test_depth_column_in_parquet(self, test_client):
+        """Parquet files with depth column support efficient filtering."""
+        client, db_path, scans_dir = test_client
+
+        # Create parquet with depth column
+        parquet_path = create_test_parquet(scans_dir, 'deep', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 4, 'n_children': 1, 'depth': 0},
+            {'path': 'a', 'size': 800, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/a', 'n_desc': 3, 'n_children': 1, 'depth': 1},
+            {'path': 'a/b', 'size': 600, 'mtime': 80, 'kind': 'dir', 'parent': 'a', 'uri': '/test/a/b', 'n_desc': 2, 'n_children': 1, 'depth': 2},
+            {'path': 'a/b/c', 'size': 400, 'mtime': 70, 'kind': 'file', 'parent': 'a/b', 'uri': '/test/a/b/c', 'n_desc': 1, 'n_children': 0, 'depth': 3},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet_path, 1000, 1, 4),
+        )
+        conn.commit()
+        conn.close()
+
+        # Request should work - depth filtering is an implementation detail
+        response = client.get('/api/scan?uri=/test')
+        assert response.status_code == 200
+        assert response.json['root']['size'] == 1000
+        assert len(response.json['children']) == 1
+        assert response.json['children'][0]['path'] == 'a'
+
+    def test_parquet_without_depth_still_works(self, test_client):
+        """Parquet files without depth column still work (fallback to full load)."""
+        client, db_path, scans_dir = test_client
+
+        # Create parquet WITHOUT depth column
+        parquet_path = create_test_parquet(scans_dir, 'nodepth', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 2, 'n_children': 1},
+            {'path': 'child', 'size': 500, 'mtime': 80, 'kind': 'dir', 'parent': '.', 'uri': '/test/child', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet_path, 1000, 1, 2),
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.get('/api/scan?uri=/test')
+        assert response.status_code == 200
+        assert response.json['root']['size'] == 1000
+
+
+class TestCacheInvalidation:
+    """Tests for cache behavior."""
+
+    def test_cache_populated_on_request(self, test_client):
+        """Requests populate the cache."""
+        client, db_path, scans_dir = test_client
+
+        parquet_path = create_test_parquet(scans_dir, 'test', [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 1, 'n_children': 0},
+        ])
+
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+            ('/test', '2025-01-01T12:00:00', parquet_path, 1000, 0, 1),
+        )
+        conn.commit()
+        conn.close()
+
+        from disk_tree.server import _parquet_cache, clear_cache
+        clear_cache()
+        _parquet_cache.clear()
+
+        assert len(_parquet_cache) == 0
+
+        response = client.get('/api/scan?uri=/test')
+        assert response.status_code == 200
+
+        # Parquet cache should now have an entry
+        assert len(_parquet_cache) >= 1

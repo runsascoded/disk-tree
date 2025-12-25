@@ -5,7 +5,7 @@ import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, Fa
 import { LazyPlot as Plot } from './LazyPlot'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath } from '../api'
-import type { Row, ScanJob, ScanProgress, ScanHistoryItem } from '../api'
+import type { Row, ScanJob, ScanProgress } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 
@@ -435,12 +435,10 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
 
       // Find top-level ancestor
       let topLevel = row.parent
-      let current = row
       while (topLevel && topLevel !== '.') {
         const parentRow = rows.find(r => r.path === topLevel)
         if (!parentRow || parentRow.parent === '.') break
         topLevel = parentRow.parent
-        current = parentRow
       }
 
       // topLevel is now the direct child of root, or we use the immediate parent
@@ -465,7 +463,7 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
 
       // Ensure parent chain is included
       for (const row of [...topRows]) {
-        let parent = row.parent
+        let parent: string | null | undefined = row.parent
         while (parent && parent !== '.' && !included.has(parent)) {
           const parentRow = subtreeRows.find(r => r.path === parent)
           if (parentRow) {
