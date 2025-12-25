@@ -18,7 +18,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'cd .. && disk-tree-server',
+    command: process.env.CI ? 'cd .. && uv run disk-tree-server' : 'cd .. && disk-tree-server',
     url: 'http://localhost:5001',
     reuseExistingServer: !process.env.CI,
     timeout: 30000,
