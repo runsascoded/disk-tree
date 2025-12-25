@@ -2,7 +2,10 @@
   "name": "ui",
   "private": true,
   "pnpm": {
-    "onlyBuiltDependencies": ["puppeteer", "esbuild"]
+    "onlyBuiltDependencies": [
+      "puppeteer",
+      "esbuild"
+    ]
   },
   "version": "0.0.0",
   "type": "module",
@@ -11,7 +14,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "screenshots": "screenshots -c screenshots.json -h 5001 -o ../screenshots"
+    "screenshots": "screenshots -c screenshots.json -h 5001 -o ../screenshots",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@emotion/react": "^11.14.0",
@@ -27,6 +32,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.57.0",
     "@rdub/screenshots": "https://gitlab.com/runsascoded/js/screenshots/-/archive/dist/screenshots-dist.tar.gz",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",
