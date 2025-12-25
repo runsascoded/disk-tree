@@ -4,8 +4,8 @@ test.describe('Navigation', () => {
   test('homepage shows scan list or empty state', async ({ page }) => {
     await page.goto('/')
 
-    // Should show the header with tabs
-    await expect(page.getByRole('link', { name: 'Scans' })).toBeVisible()
+    // Should show the header with tabs (with longer timeout for cold start)
+    await expect(page.getByRole('link', { name: 'Scans' })).toBeVisible({ timeout: 15000 })
     await expect(page.getByRole('link', { name: 'S3' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Recent' })).toBeVisible()
 
