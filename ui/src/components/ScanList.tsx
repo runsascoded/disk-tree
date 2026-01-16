@@ -16,20 +16,9 @@ import { FaPlay } from 'react-icons/fa'
 import { fetchScans, startScan } from '../api'
 import type { Scan, ScanJob, ScanProgress } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
+import { DataTable } from './DataTable'
+import type { Column } from './DataTable'
+import { timeAgo, formatCount } from '../utils/format'
 
 function pathToRoute(path: string): string {
   if (path.startsWith('s3://')) {
@@ -38,20 +27,21 @@ function pathToRoute(path: string): string {
   return `/file${path}`
 }
 
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toString()
-}
-
-function formatSize(bytes: number | null | undefined): string {
-  if (bytes == null) return '-'
-  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(1)} TB`
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${bytes} B`
-}
+const scanColumns: Column<Scan>[] = [
+  {
+    key: 'path',
+    label: 'Path',
+    render: scan => (
+      <Link to={pathToRoute(scan.path)}>
+        <code>{scan.path}</code>
+      </Link>
+    ),
+  },
+  { key: 'size', label: 'Size', type: 'size' },
+  { key: 'n_desc', label: 'Items', type: 'count' },
+  { key: 'n_children', label: 'Children', type: 'count' },
+  { key: 'time', label: 'Scanned', type: 'time' },
+]
 
 function LiveScanProgress({ progress }: { progress: ScanProgress[] }) {
   const activeScans = progress.filter(p => p.status === 'running')
@@ -76,9 +66,9 @@ function LiveScanProgress({ progress }: { progress: ScanProgress[] }) {
               />
             </Box>
             <Box sx={{ display: 'flex', gap: 3, color: 'text.secondary', fontSize: '0.85rem' }}>
-              <span><strong>{formatNumber(scan.items_found)}</strong> items</span>
+              <span><strong>{formatCount(scan.items_found)}</strong> items</span>
               {scan.items_per_sec && (
-                <span>{formatNumber(Math.round(scan.items_per_sec))} items/sec</span>
+                <span>{formatCount(Math.round(scan.items_per_sec))} items/sec</span>
               )}
               {scan.error_count > 0 && (
                 <span style={{ color: '#ed6c02' }}>{scan.error_count} errors</span>
@@ -203,32 +193,11 @@ export function ScanList() {
       <Tooltip title="Previously completed scans. Click a path to browse its contents.">
         <Typography variant="subtitle2" sx={{ mb: 1 }}>Completed Scans</Typography>
       </Tooltip>
-      <table>
-        <thead>
-          <tr>
-            <th style={{ textAlign: 'left' }}>Path</th>
-            <th style={{ textAlign: 'right', paddingLeft: '1.5em', width: '1%', whiteSpace: 'nowrap' }}>Size</th>
-            <th style={{ textAlign: 'right', paddingLeft: '1.5em', width: '1%', whiteSpace: 'nowrap' }}>Items</th>
-            <th style={{ textAlign: 'right', paddingLeft: '1.5em', width: '1%', whiteSpace: 'nowrap' }}>Children</th>
-            <th style={{ textAlign: 'right', paddingLeft: '1.5em', width: '1%', whiteSpace: 'nowrap' }}>Scanned</th>
-          </tr>
-        </thead>
-        <tbody>
-          {paginatedScans.map(scan => (
-            <tr key={scan.id}>
-              <td style={{ textAlign: 'left' }}>
-                <Link to={pathToRoute(scan.path)}>
-                  <code>{scan.path}</code>
-                </Link>
-              </td>
-              <td style={{ textAlign: 'right', paddingLeft: '1.5em', whiteSpace: 'nowrap' }}>{formatSize(scan.size)}</td>
-              <td style={{ textAlign: 'right', paddingLeft: '1.5em', whiteSpace: 'nowrap' }}>{scan.n_desc != null ? formatNumber(scan.n_desc) : '-'}</td>
-              <td style={{ textAlign: 'right', paddingLeft: '1.5em', whiteSpace: 'nowrap' }}>{scan.n_children != null ? formatNumber(scan.n_children) : '-'}</td>
-              <td style={{ textAlign: 'right', paddingLeft: '1.5em', whiteSpace: 'nowrap' }}>{timeAgo(scan.time)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <DataTable<Scan>
+        columns={scanColumns}
+        data={paginatedScans}
+        rowKey={scan => scan.id}
+      />
       {scans.length > pageSize && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, fontSize: '0.85rem' }}>
           <span style={{ opacity: 0.7 }}>

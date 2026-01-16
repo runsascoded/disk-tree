@@ -2,18 +2,9 @@ import { Link } from 'react-router-dom'
 import { Box, Button, Typography } from '@mui/material'
 import { FaCloud, FaColumns, FaFolder, FaHistory, FaList, FaTrash } from 'react-icons/fa'
 import { useRecentPaths } from '../hooks/useRecentPaths'
-import type { ViewType } from '../hooks/useRecentPaths'
-
-function timeAgo(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000)
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
+import type { RecentPath, ViewType } from '../hooks/useRecentPaths'
+import { DataTable } from './DataTable'
+import type { Column } from './DataTable'
 
 function uriToRoute(uri: string, viewType: ViewType): string {
   const isS3 = uri.startsWith('s3://')
@@ -22,6 +13,43 @@ function uriToRoute(uri: string, viewType: ViewType): string {
   }
   return isS3 ? `/s3/${uri.slice(5)}` : `/file${uri}`
 }
+
+const recentColumns: Column<RecentPath>[] = [
+  {
+    key: 'source',
+    label: '',
+    type: 'icon',
+    render: item => item.uri.startsWith('s3://') ? (
+      <FaCloud style={{ color: '#ff9800', verticalAlign: 'middle' }} title="S3" />
+    ) : (
+      <FaFolder style={{ color: '#4caf50', verticalAlign: 'middle' }} title="Local" />
+    ),
+  },
+  {
+    key: 'viewType',
+    label: '',
+    type: 'icon',
+    render: item => item.viewType === 'compare' ? (
+      <FaColumns style={{ color: '#58a6ff', verticalAlign: 'middle' }} title="Compare view" />
+    ) : (
+      <FaList style={{ color: '#8b949e', verticalAlign: 'middle' }} title="Tree view" />
+    ),
+  },
+  {
+    key: 'uri',
+    label: 'Path',
+    render: item => (
+      <Link to={uriToRoute(item.uri, item.viewType)}>
+        <code>{item.uri}</code>
+      </Link>
+    ),
+  },
+  {
+    key: 'visitedAt',
+    label: 'Visited',
+    type: 'time',
+  },
+]
 
 export function RecentList() {
   const { recent, clearRecent } = useRecentPaths()
@@ -48,46 +76,11 @@ export function RecentList() {
           No recently visited paths. Browse some directories to see them here.
         </Typography>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th></th>
-              <th></th>
-              <th style={{ textAlign: 'left' }}>Path</th>
-              <th style={{ textAlign: 'left' }}>Visited</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recent.map(item => {
-              const isS3 = item.uri.startsWith('s3://')
-              const key = `${item.uri}:${item.viewType}`
-              return (
-                <tr key={key}>
-                  <td style={{ textAlign: 'left', verticalAlign: 'middle' }}>
-                    {isS3 ? (
-                      <FaCloud style={{ color: '#ff9800', verticalAlign: 'middle' }} title="S3" />
-                    ) : (
-                      <FaFolder style={{ color: '#4caf50', verticalAlign: 'middle' }} title="Local" />
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'left', verticalAlign: 'middle' }}>
-                    {item.viewType === 'compare' ? (
-                      <FaColumns style={{ color: '#58a6ff', verticalAlign: 'middle' }} title="Compare view" />
-                    ) : (
-                      <FaList style={{ color: '#8b949e', verticalAlign: 'middle' }} title="Tree view" />
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'left' }}>
-                    <Link to={uriToRoute(item.uri, item.viewType)}>
-                      <code>{item.uri}</code>
-                    </Link>
-                  </td>
-                  <td style={{ textAlign: 'left', opacity: 0.7 }}>{timeAgo(item.visitedAt)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        <DataTable<RecentPath>
+          columns={recentColumns}
+          data={recent}
+          rowKey={item => `${item.uri}:${item.viewType}`}
+        />
       )}
     </div>
   )

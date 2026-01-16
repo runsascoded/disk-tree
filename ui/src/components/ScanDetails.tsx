@@ -8,16 +8,11 @@ import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deleteP
 import type { Row, ScanJob, ScanProgress } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
+import { formatSize, formatCount, timeAgo } from '../utils/format'
 
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
 type SortDir = 'asc' | 'desc'
 type SortSpec = { key: SortKey; dir: SortDir }
-
-function formatNumber(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toString()
-}
 
 function ScanProgressBanner({ progress, currentUri }: { progress: ScanProgress[]; currentUri: string }) {
   // Find scans that are relevant to this path (exact match, ancestor, or descendant)
@@ -40,40 +35,13 @@ function ScanProgressBanner({ progress, currentUri }: { progress: ScanProgress[]
         <Box key={scan.id} sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <strong>Scanning:</strong>
           <code style={{ fontSize: '0.9em' }}>{scan.path}</code>
-          <span>{formatNumber(scan.items_found)} items</span>
-          {scan.items_per_sec && <span>({formatNumber(Math.round(scan.items_per_sec))}/sec)</span>}
+          <span>{formatCount(scan.items_found)} items</span>
+          {scan.items_per_sec && <span>({formatCount(Math.round(scan.items_per_sec))}/sec)</span>}
           {scan.error_count > 0 && <span style={{ color: '#ed6c02' }}>{scan.error_count} errors</span>}
         </Box>
       ))}
     </Alert>
   )
-}
-
-function sizeStr(bytes: number | null): string {
-  if (bytes === null) return '-'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
-}
-
-function timeAgo(timestamp: number | null): string {
-  if (timestamp === null) return '-'
-  const date = new Date(timestamp * 1000)
-  const now = new Date()
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}d ago`
-  const months = Math.floor(days / 30)
-  if (months < 12) return `${months}mo ago`
-  const years = Math.floor(months / 12)
-  return `${years}y ago`
 }
 
 type RouteType = 'file' | 's3'
@@ -294,7 +262,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           <td></td>
           <td>{root.kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
           <td><code>.</code></td>
-          <td>{sizeStr(root.size)}</td>
+          <td>{formatSize(root.size)}</td>
           <td>{timeAgo(root.mtime)}</td>
           <td>{root.n_children?.toLocaleString()}</td>
           <td>{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
@@ -368,7 +336,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   <code>{row.path}</code>
                 </Link>
               </td>
-              <td>{sizeStr(row.size)}</td>
+              <td>{formatSize(row.size)}</td>
               <td>{timeAgo(row.mtime)}</td>
               <td>{row.n_children ? row.n_children.toLocaleString() : null}</td>
               <td>{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
@@ -492,7 +460,7 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
         // Root has no parent (''), all children should reference '.' as parent
         parents: data.map(r => r.path === '.' ? '' : (r.parent || '.')),
         values: data.map(r => r.size),
-        text: data.map(r => sizeStr(r.size)),
+        text: data.map(r => formatSize(r.size)),
         texttemplate: '%{label}<br>%{text}',
         hovertemplate: '%{label}<br>%{value} bytes<br>%{text}',
       }]}
@@ -855,7 +823,7 @@ export function ScanDetails() {
 
     const msg = selectedRows.length === 1
       ? `Delete "${selectedRows[0].path}"?`
-      : `Delete ${selectedRows.length} items (${sizeStr(selectedSize)})?`
+      : `Delete ${selectedRows.length} items (${formatSize(selectedSize)})?`
 
     if (!confirm(`${msg} This cannot be undone.`)) {
       return
@@ -1038,7 +1006,7 @@ export function ScanDetails() {
               <option value="">Latest scan</option>
               {scanHistory.map(scan => (
                 <option key={scan.id} value={scan.id}>
-                  {formatScanTime(scan.time)} - {sizeStr(scan.size ?? 0)}
+                  {formatScanTime(scan.time)} - {formatSize(scan.size ?? 0)}
                   {scan.scan_path !== uri && ` (from ${scan.scan_path})`}
                 </option>
               ))}
@@ -1067,7 +1035,7 @@ export function ScanDetails() {
         {selectedRows.length > 0 && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, fontSize: '0.85rem' }}>
             <span style={{ opacity: 0.8 }}>
-              {selectedRows.length} selected ({sizeStr(selectedSize)})
+              {selectedRows.length} selected ({formatSize(selectedSize)})
             </span>
             {selectedDirs.length > 0 && (
               <Tooltip title={`Scan ${selectedDirs.length} director${selectedDirs.length === 1 ? 'y' : 'ies'}`}>
