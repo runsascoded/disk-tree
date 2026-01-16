@@ -6,28 +6,7 @@ import { LazyPlot as Plot } from './LazyPlot'
 import { useQuery } from '@tanstack/react-query'
 import { fetchS3Buckets, startScan, fetchScanStatus } from '../api'
 import type { S3Bucket, ScanJob } from '../api'
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
-function sizeStr(bytes: number | null | undefined): string {
-  if (bytes === null || bytes === undefined) return '-'
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`
-}
+import { timeAgo, formatSize } from '../utils/format'
 
 function BucketsTreemap({ buckets }: { buckets: S3Bucket[] }) {
   // Only show buckets that have been scanned (have size data)
@@ -43,7 +22,7 @@ function BucketsTreemap({ buckets }: { buckets: S3Bucket[] }) {
   const labels = ['S3', ...scannedBuckets.map(b => b.name)]
   const parents = ['', ...scannedBuckets.map(() => 's3://')]
   const values = [totalSize, ...scannedBuckets.map(b => b.size ?? 0)]
-  const text = [sizeStr(totalSize), ...scannedBuckets.map(b => sizeStr(b.size))]
+  const text = [formatSize(totalSize), ...scannedBuckets.map(b => formatSize(b.size))]
 
   return (
     <Plot
@@ -424,8 +403,8 @@ export function S3BucketList() {
             {unscannedCount === selectedCount
               ? ` (${unscannedCount} unscanned)`
               : unscannedCount > 0
-                ? ` (${sizeStr(selectedSize)}, ${unscannedCount} unscanned)`
-                : ` (${sizeStr(selectedSize)})`}
+                ? ` (${formatSize(selectedSize)}, ${unscannedCount} unscanned)`
+                : ` (${formatSize(selectedSize)})`}
           </span>
           <Tooltip title={`Scan ${selectedCount} bucket${selectedCount === 1 ? '' : 's'}`}>
             <Button
@@ -509,7 +488,7 @@ export function S3BucketList() {
                         <code>{bucket.name}</code>
                       </Link>
                     </td>
-                    <td>{sizeStr(bucket.size)}</td>
+                    <td>{formatSize(bucket.size)}</td>
                     <td>{bucket.n_children?.toLocaleString() ?? '-'}</td>
                     <td>{bucket.n_desc?.toLocaleString() ?? '-'}</td>
                     <td>

@@ -17,41 +17,19 @@ import { compareScans, fetchScanHistory, startScan } from '../api'
 import type { CompareResult, CompareRow, ScanHistoryItem } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
+import { formatSize, formatCount, timeAgo } from '../utils/format'
 
 type SortColumn = 'size_old' | 'size_new' | 'size_delta' | 'desc_old' | 'desc_new' | 'desc_delta'
 type SortDirection = 'asc' | 'desc'
 
-function formatSize(bytes: number | null | undefined): string {
-  if (bytes == null) return '-'
-  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(1)} TB`
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${bytes} B`
-}
-
 function formatDelta(bytes: number): string {
   const sign = bytes >= 0 ? '+' : ''
-  return sign + formatSize(Math.abs(bytes)).replace(' ', '') + (bytes < 0 ? '' : '')
+  return sign + formatSize(Math.abs(bytes)).replace(' ', '')
 }
 
 function formatDateTime(dateStr: string): string {
   const date = new Date(dateStr)
   return date.toLocaleString()
-}
-
-function timeAgo(dateStr: string): string {
-  const date = new Date(dateStr)
-  const now = new Date()
-  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
-
-  if (seconds < 60) return `${seconds}s ago`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
 }
 
 const statusColors = {
@@ -85,16 +63,9 @@ function DeltaBar({ delta, maxDelta }: { delta: number; maxDelta: number }) {
   )
 }
 
-function formatNumber(n: number | null | undefined): string {
-  if (n == null) return '-'
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return n.toString()
-}
-
 function formatDeltaNumber(n: number): string {
   const sign = n > 0 ? '+' : ''
-  return sign + formatNumber(Math.abs(n))
+  return sign + formatCount(Math.abs(n))
 }
 
 // Check if a path is covered by a scan (path is at or below scan_path)
@@ -289,9 +260,9 @@ function ParentSummaryRow({
         <DeltaBar delta={sizeDelta} maxDelta={Math.max(maxSizeDelta, Math.abs(sizeDelta))} />
       </td>
       {/* Desc: before */}
-      <td style={{ ...td, ...dim, borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '12px' }}>{formatNumber(scan1.n_desc)}</td>
+      <td style={{ ...td, ...dim, borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '12px' }}>{formatCount(scan1.n_desc)}</td>
       {/* Desc: after */}
-      <td style={td}>{formatNumber(scan2.n_desc)}</td>
+      <td style={td}>{formatCount(scan2.n_desc)}</td>
       {/* Desc: delta */}
       <td style={{ ...td, color: descDeltaColor, fontWeight: descDelta !== 0 ? 'bold' : undefined }}>
         {formatDeltaNumber(descDelta)}
@@ -481,8 +452,8 @@ function CompareRowComponent({
   const sizeAfterColor = row.status === 'added' ? '#3fb950' : undefined
 
   // Desc values
-  const descBefore = row.status === 'added' ? '-' : formatNumber(row.n_desc_old ?? row.n_desc)
-  const descAfter = row.status === 'removed' ? '-' : formatNumber(row.n_desc)
+  const descBefore = row.status === 'added' ? '-' : formatCount(row.n_desc_old ?? row.n_desc)
+  const descAfter = row.status === 'removed' ? '-' : formatCount(row.n_desc)
   const descBeforeColor = row.status === 'removed' ? '#f85149' : '#8b949e'
   const descAfterColor = row.status === 'added' ? '#3fb950' : undefined
 
@@ -862,7 +833,7 @@ export function CompareView() {
               <Box>
                 <Typography variant="caption" color="text.secondary">Files</Typography>
                 <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                  {formatNumber(history[0].n_desc)}
+                  {formatCount(history[0].n_desc)}
                 </Typography>
               </Box>
             )}
