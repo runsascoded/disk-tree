@@ -44,6 +44,22 @@ th:nth-child(2), td:nth-child(2) {
   text-overflow: ellipsis;
 }
 
+/* Numeric columns in scan-details-table: Size(4), Modified(5), Children(6), Desc(7), Scanned(8) */
+.scan-details-table th:nth-child(n+4):nth-child(-n+8),
+.scan-details-table td:nth-child(n+4):nth-child(-n+8) {
+  text-align: right;
+  padding-left: 1em;
+  width: 1%;  /* shrink to fit content */
+}
+
+/* Numeric columns in s3-bucket-table: Size(4), Children(5), Desc(6), Last Scanned(7) */
+.s3-bucket-table th:nth-child(n+4):nth-child(-n+7),
+.s3-bucket-table td:nth-child(n+4):nth-child(-n+7) {
+  text-align: right;
+  padding-left: 1em;
+  width: 1%;  /* shrink to fit content */
+}
+
 /* Action columns - minimal width */
 th:nth-last-child(-n+2), td:nth-last-child(-n+2) {
   width: 1.5rem;

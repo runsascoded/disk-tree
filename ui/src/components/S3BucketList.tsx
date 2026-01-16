@@ -452,7 +452,7 @@ export function S3BucketList() {
         </Typography>
       ) : (
         <>
-          <table>
+          <table className="s3-bucket-table">
             <thead>
               <tr>
                 <th style={{ width: '1.5rem', padding: '0.25rem 0.1rem' }}>
