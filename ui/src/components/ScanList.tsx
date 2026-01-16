@@ -207,10 +207,10 @@ export function ScanList() {
         <thead>
           <tr>
             <th style={{ textAlign: 'left' }}>Path</th>
-            <th style={{ textAlign: 'right' }}>Size</th>
-            <th style={{ textAlign: 'right' }}>Items</th>
-            <th style={{ textAlign: 'right' }}>Children</th>
-            <th style={{ textAlign: 'left' }}>Scanned</th>
+            <th style={{ textAlign: 'right', paddingLeft: '1.5em', width: '1%', whiteSpace: 'nowrap' }}>Size</th>
+            <th style={{ textAlign: 'right', paddingLeft: '1.5em', width: '1%', whiteSpace: 'nowrap' }}>Items</th>
+            <th style={{ textAlign: 'right', paddingLeft: '1.5em', width: '1%', whiteSpace: 'nowrap' }}>Children</th>
+            <th style={{ textAlign: 'right', paddingLeft: '1.5em', width: '1%', whiteSpace: 'nowrap' }}>Scanned</th>
           </tr>
         </thead>
         <tbody>
@@ -221,10 +221,10 @@ export function ScanList() {
                   <code>{scan.path}</code>
                 </Link>
               </td>
-              <td style={{ textAlign: 'right' }}>{formatSize(scan.size)}</td>
-              <td style={{ textAlign: 'right' }}>{scan.n_desc != null ? formatNumber(scan.n_desc) : '-'}</td>
-              <td style={{ textAlign: 'right' }}>{scan.n_children != null ? formatNumber(scan.n_children) : '-'}</td>
-              <td style={{ textAlign: 'left' }}>{timeAgo(scan.time)}</td>
+              <td style={{ textAlign: 'right', paddingLeft: '1.5em', whiteSpace: 'nowrap' }}>{formatSize(scan.size)}</td>
+              <td style={{ textAlign: 'right', paddingLeft: '1.5em', whiteSpace: 'nowrap' }}>{scan.n_desc != null ? formatNumber(scan.n_desc) : '-'}</td>
+              <td style={{ textAlign: 'right', paddingLeft: '1.5em', whiteSpace: 'nowrap' }}>{scan.n_children != null ? formatNumber(scan.n_children) : '-'}</td>
+              <td style={{ textAlign: 'right', paddingLeft: '1.5em', whiteSpace: 'nowrap' }}>{timeAgo(scan.time)}</td>
             </tr>
           ))}
         </tbody>
