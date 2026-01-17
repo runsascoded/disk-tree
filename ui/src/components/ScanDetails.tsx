@@ -2,10 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
+import { useAction } from 'use-kbd'
 import { LazyPlot as Plot } from './LazyPlot'
 import { useQuery } from '@tanstack/react-query'
-import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, fetchFilePreview } from '../api'
-import type { Row, ScanJob, ScanProgress, FilePreview, CollapsedRow } from '../api'
+import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
+import type { Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo } from '../utils/format'
@@ -103,12 +104,14 @@ function SortableHeader({
   sorts,
   onSort,
   tooltip,
+  className,
 }: {
   label: string
   sortKey: SortKey
   sorts: SortSpec[]
   onSort: (key: SortKey) => void
   tooltip?: string
+  className?: string
 }) {
   const primarySort = sorts[0]
   const isPrimary = primarySort?.key === sortKey
@@ -116,6 +119,7 @@ function SortableHeader({
 
   const header = (
     <th
+      className={className}
       onClick={() => onSort(sortKey)}
       style={{ cursor: 'pointer', userSelect: 'none' }}
     >
@@ -185,7 +189,7 @@ function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanSt
   return <span style={{ opacity: 0.4 }}>-</span>
 }
 
-function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, selectedPaths, hoveredIndex, onRowClick, onRowHover, collapsedRows }: {
+function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, selectedPaths, hoveredIndex, mouseHoverIndex, onRowClick, onRowHover, collapsedRows, tableRef }: {
   root: Row
   children: Row[]
   uri: string
@@ -202,9 +206,11 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   deletingPaths: Set<string>
   selectedPaths: Set<string>
   hoveredIndex: number | null
+  mouseHoverIndex: number | null
   onRowClick: (uri: string, index: number, event: React.MouseEvent | React.KeyboardEvent) => void
   onRowHover: (index: number | null) => void
   collapsedRows?: CollapsedRow[] | null
+  tableRef?: React.RefObject<HTMLTableElement | null>
 }) {
   // Track whether the collapsed (auto-expanded) rows are shown expanded
   const [collapsedExpanded, setCollapsedExpanded] = useState(true)
@@ -238,10 +244,10 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   }
 
   return (
-    <table className="scan-details-table">
+    <table className="scan-details-table" ref={tableRef}>
       <thead>
         <tr>
-          <th style={{ width: '1.5rem', padding: '0.25rem 0.1rem' }}>
+          <th className="col-checkbox">
             <Checkbox
               size="small"
               checked={allSelected}
@@ -250,27 +256,27 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               sx={{ padding: 0 }}
             />
           </th>
-          <SortableHeader label="" sortKey="kind" sorts={sorts} onSort={onSort} tooltip="Sort by type (file/folder)" />
-          <SortableHeader label="Path" sortKey="path" sorts={sorts} onSort={onSort} />
-          <SortableHeader label="Size" sortKey="size" sorts={sorts} onSort={onSort} tooltip="Total size including all nested files and directories" />
-          <SortableHeader label="Modified" sortKey="mtime" sorts={sorts} onSort={onSort} tooltip="Most recent modification time of any file in this directory tree" />
-          <SortableHeader label="Children" sortKey="n_children" sorts={sorts} onSort={onSort} tooltip="Number of direct children (files and subdirectories)" />
-          <SortableHeader label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
-          <SortableHeader label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
-          <th></th>
-          {routeType !== 's3' && <th></th>}
+          <SortableHeader className="col-icon" label="" sortKey="kind" sorts={sorts} onSort={onSort} tooltip="Sort by type (file/folder)" />
+          <SortableHeader className="col-path" label="Path" sortKey="path" sorts={sorts} onSort={onSort} />
+          <SortableHeader className="col-numeric" label="Size" sortKey="size" sorts={sorts} onSort={onSort} tooltip="Total size including all nested files and directories" />
+          <SortableHeader className="col-numeric" label="Modified" sortKey="mtime" sorts={sorts} onSort={onSort} tooltip="Most recent modification time of any file in this directory tree" />
+          <SortableHeader className="col-numeric" label="Children" sortKey="n_children" sorts={sorts} onSort={onSort} tooltip="Number of direct children (files and subdirectories)" />
+          <SortableHeader className="col-numeric" label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
+          <SortableHeader className="col-numeric" label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
+          <th className="col-action"></th>
+          {routeType !== 's3' && <th className="col-action"></th>}
         </tr>
       </thead>
       <tbody>
         <tr className="root">
-          <td></td>
-          <td>{root.kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
-          <td><code>.</code></td>
-          <td>{formatSize(root.size)}</td>
-          <td>{timeAgo(root.mtime)}</td>
-          <td>{root.n_children?.toLocaleString()}</td>
-          <td>{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
-          <td>
+          <td className="col-checkbox"></td>
+          <td className="col-icon">{root.kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
+          <td className="col-path"><code>.</code></td>
+          <td className="col-numeric">{formatSize(root.size)}</td>
+          <td className="col-numeric">{timeAgo(root.mtime)}</td>
+          <td className="col-numeric">{root.n_children?.toLocaleString()}</td>
+          <td className="col-numeric">{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
+          <td className="col-numeric">
             {scanStatus === 'full' && scanTime ? (
               <span>{scanTimeAgo(scanTime)}</span>
             ) : scanStatus === 'partial' ? (
@@ -283,7 +289,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               </Tooltip>
             )}
           </td>
-          <td style={{ display: 'flex', gap: '4px' }}>
+          <td className="col-action" style={{ display: 'flex', gap: '4px' }}>
             <Tooltip title={scanStatus === 'full' ? 'Rescan this directory' : 'Scan this directory'}>
               <span>
                 <Button
@@ -304,7 +310,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               </Link>
             </Tooltip>
           </td>
-          {routeType !== 's3' && <td></td>}
+          {routeType !== 's3' && <td className="col-action"></td>}
         </tr>
         {/* Render collapsed/expanded parent rows (auto-expanded single-child dirs) */}
         {collapsedRows && collapsedRows.map((collapsedRow, depth) => {
@@ -320,8 +326,8 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           const ChevronIcon = collapsedExpanded ? FaChevronDown : FaChevronRight
           return (
             <tr key={`collapsed-${depth}`} className="collapsed-parent" style={{ background: 'rgba(100, 100, 100, 0.08)' }}>
-              <td></td>
-              <td>
+              <td className="col-checkbox"></td>
+              <td className="col-icon">
                 <span style={{ paddingLeft: indentPx, display: 'inline-flex', alignItems: 'center' }}>
                   {isFirst ? (
                     <ChevronIcon
@@ -335,17 +341,17 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   <FaFolderOpen style={{ color: '#ff9800' }} />
                 </span>
               </td>
-              <td>
+              <td className="col-path">
                 <Link to={`${prefix}/${collapsedRow.original_path}`}>
                   <code>{segment}</code>
                 </Link>
               </td>
-              <td>{formatSize(collapsedRow.size)}</td>
-              <td>{timeAgo(collapsedRow.mtime)}</td>
-              <td>{collapsedRow.n_children?.toLocaleString()}</td>
-              <td>{collapsedRow.n_desc && collapsedRow.n_desc > 1 ? collapsedRow.n_desc.toLocaleString() : null}</td>
-              <td>{scanStatus === 'full' && scanTime ? scanTimeAgo(scanTime) : null}</td>
-              <td>
+              <td className="col-numeric">{formatSize(collapsedRow.size)}</td>
+              <td className="col-numeric">{timeAgo(collapsedRow.mtime)}</td>
+              <td className="col-numeric">{collapsedRow.n_children?.toLocaleString()}</td>
+              <td className="col-numeric">{collapsedRow.n_desc && collapsedRow.n_desc > 1 ? collapsedRow.n_desc.toLocaleString() : null}</td>
+              <td className="col-numeric">{scanStatus === 'full' && scanTime ? scanTimeAgo(scanTime) : null}</td>
+              <td className="col-action">
                 <Tooltip title="Rescan this directory">
                   <span>
                     <Button
@@ -360,7 +366,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                 </Tooltip>
               </td>
               {routeType !== 's3' && (
-                <td>
+                <td className="col-action">
                   <Tooltip title="Delete directory">
                     <span>
                       <Button
@@ -383,7 +389,8 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           const childUri = row.uri
           const isChildScanning = scanningPaths.has(childUri)
           const isSelected = selectedPaths.has(childUri)
-          const isHovered = hoveredIndex === idx
+          const isCursor = hoveredIndex === idx  // Keyboard cursor position
+          const isMouseHover = mouseHoverIndex === idx  // Mouse hover (for visual feedback)
           // Indent children under collapsed rows when expanded
           const indentPx = collapsedRows && collapsedExpanded ? collapsedRows.length * 20 : 0
           // Build the collapsed path prefix from the last collapsed row's original_path
@@ -397,15 +404,19 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                 opacity: row.scanned || scanStatus === 'full' ? 1 : 0.6,
                 background: isSelected
                   ? 'var(--selected-bg, rgba(25, 118, 210, 0.12))'
-                  : isHovered
-                    ? 'var(--hover-bg, #f5f5f5)'
-                    : undefined,
+                  : isCursor
+                    ? 'var(--cursor-bg, rgba(25, 118, 210, 0.08))'
+                    : isMouseHover
+                      ? 'var(--hover-bg, #f5f5f5)'
+                      : undefined,
+                // Show cursor indicator with left border
+                boxShadow: isCursor ? 'inset 3px 0 0 var(--cursor-border, #1976d2)' : undefined,
               }}
               onClick={e => onRowClick(childUri, idx, e)}
               onMouseEnter={() => onRowHover(idx)}
               onMouseLeave={() => onRowHover(null)}
             >
-              <td onClick={e => e.stopPropagation()}>
+              <td className="col-checkbox" onClick={e => e.stopPropagation()}>
                 <Checkbox
                   size="small"
                   checked={isSelected}
@@ -416,8 +427,10 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   sx={{ padding: 0 }}
                 />
               </td>
-              <td style={{ paddingLeft: indentPx }}><RowIcon row={row} /></td>
-              <td>
+              <td className={`col-icon${indentPx ? ' indented' : ''}`}>
+                <RowIcon row={row} />
+              </td>
+              <td className="col-path">
                 <Link to={`${prefix}/${collapsedPrefix ? collapsedPrefix + '/' : ''}${row.path}`} onClick={e => e.stopPropagation()}>
                   <code>{row.path}</code>
                 </Link>
@@ -433,14 +446,14 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   )
                 })}
               </td>
-              <td>{formatSize(row.size)}</td>
-              <td>{timeAgo(row.mtime)}</td>
-              <td>{row.n_children ? row.n_children.toLocaleString() : null}</td>
-              <td>{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
-              <td>
+              <td className="col-numeric">{formatSize(row.size)}</td>
+              <td className="col-numeric">{timeAgo(row.mtime)}</td>
+              <td className="col-numeric">{row.n_children ? row.n_children.toLocaleString() : null}</td>
+              <td className="col-numeric">{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
+              <td className="col-numeric">
                 <ChildScanStatus row={row} scanStatus={scanStatus} parentScanTime={scanTime} />
               </td>
-              <td onClick={e => e.stopPropagation()}>
+              <td className="col-action" onClick={e => e.stopPropagation()}>
                 {row.kind === 'dir' && (
                   <Tooltip title={row.scanned ? 'Rescan this directory' : 'Scan this directory'}>
                     <span>
@@ -457,7 +470,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                 )}
               </td>
               {routeType !== 's3' && (
-                <td onClick={e => e.stopPropagation()}>
+                <td className="col-action" onClick={e => e.stopPropagation()}>
                   <Tooltip title={`Delete ${row.kind === 'dir' ? 'directory' : 'file'}`}>
                     <span>
                       <Button
@@ -480,87 +493,129 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   )
 }
 
-const MAX_ITEMS_PER_SUBTREE = 100
+type TreemapNode = {
+  id: string
+  label: string
+  parent: string
+  size: number
+  isOther?: boolean
+}
 
 function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
-  // Limit items per top-level subtree for performance
-  const limitedRows = useMemo(() => {
-    // Group rows by their top-level parent (direct child of root)
-    const directChildren = rows.filter(r => r.parent === '.')
-    const subtrees = new Map<string, Row[]>()
+  // Build treemap data with "Other" placeholders for unaccounted space
+  const data = useMemo(() => {
+    const nodes: TreemapNode[] = []
 
-    // Initialize with direct children
-    for (const child of directChildren) {
-      subtrees.set(child.path, [child])
-    }
+    // Add root
+    nodes.push({
+      id: '.',
+      label: root.path.split('/').pop() || '.',
+      parent: '',
+      size: root.size ?? 0,
+    })
 
-    // Group descendants into their top-level subtree
+    // Add all rows
     for (const row of rows) {
-      if (row.parent === '.') continue // Already added
+      nodes.push({
+        id: row.path,
+        label: row.path.split('/').pop() || row.path,
+        parent: row.parent || '.',
+        size: row.size ?? 0,
+      })
+    }
 
-      // Find top-level ancestor
-      let topLevel = row.parent
-      while (topLevel && topLevel !== '.') {
-        const parentRow = rows.find(r => r.path === topLevel)
-        if (!parentRow || parentRow.parent === '.') break
-        topLevel = parentRow.parent
+    // Group rows by parent to calculate "other" sizes
+    const childrenByParent = new Map<string, Row[]>()
+    for (const row of rows) {
+      const parent = row.parent || '.'
+      if (!childrenByParent.has(parent)) {
+        childrenByParent.set(parent, [])
       }
+      childrenByParent.get(parent)!.push(row)
+    }
 
-      // topLevel is now the direct child of root, or we use the immediate parent
-      const subtreeKey = topLevel && topLevel !== '.' ? topLevel : row.parent
-      if (subtreeKey && subtrees.has(subtreeKey)) {
-        subtrees.get(subtreeKey)!.push(row)
+    // Debug logging
+    const depth1 = childrenByParent.get('.') || []
+    const depth2ByParent = depth1.filter(r => r.kind === 'dir').map(r => {
+      const children = childrenByParent.get(r.path) || []
+      const childrenSize = children.reduce((s, c) => s + (c.size ?? 0), 0)
+      const unaccounted = (r.size ?? 0) - childrenSize
+      return {
+        path: r.path,
+        children: children.length,
+        size: r.size,
+        childrenSize,
+        unaccounted,
+        unaccountedMB: (unaccounted / 1e6).toFixed(1),
+      }
+    })
+    console.log('[Treemap]', {
+      totalRows: rows.length,
+      depth1Count: depth1.length,
+      depth2ByParent,
+    })
+
+    // Add "Other" nodes for directories with unaccounted size
+    // Check root
+    const rootChildren = childrenByParent.get('.') || []
+    const rootChildrenSize = rootChildren.reduce((sum, c) => sum + (c.size ?? 0), 0)
+    const rootUnaccounted = (root.size ?? 0) - rootChildrenSize
+    if (rootUnaccounted > 1_000_000) {
+      nodes.push({
+        id: './__other__',
+        label: 'other',
+        parent: '.',
+        size: rootUnaccounted,
+        isOther: true,
+      })
+    }
+
+    // Check each depth-1 directory (direct children of root) for unaccounted size
+    // Don't add "other" for depth-2 items since we don't show their children
+    for (const row of rows) {
+      if (row.kind !== 'dir') continue
+      if (row.parent !== '.') continue  // Only depth-1 directories
+      const children = childrenByParent.get(row.path) || []
+      const childrenSize = children.reduce((sum, c) => sum + (c.size ?? 0), 0)
+      const unaccounted = (row.size ?? 0) - childrenSize
+      // Show "other" if unaccounted space is >1MB (significant enough to display)
+      if (unaccounted > 1_000_000) {
+        console.log(`[Treemap] Adding "other" for ${row.path}: ${(unaccounted / 1e6).toFixed(1)}MB unaccounted`)
+        nodes.push({
+          id: `${row.path}/__other__`,
+          label: 'other',
+          parent: row.path,
+          size: unaccounted,
+          isOther: true,
+        })
       }
     }
 
-    // For each subtree, take top N by size (keeping parent chains)
-    const result: Row[] = []
-    for (const [, subtreeRows] of subtrees) {
-      if (subtreeRows.length <= MAX_ITEMS_PER_SUBTREE) {
-        result.push(...subtreeRows)
-        continue
-      }
+    return nodes
+  }, [root, rows])
 
-      // Sort by size and take top N
-      const sorted = [...subtreeRows].sort((a, b) => (b.size ?? 0) - (a.size ?? 0))
-      const topRows = sorted.slice(0, MAX_ITEMS_PER_SUBTREE)
-      const included = new Set(topRows.map(r => r.path))
-
-      // Ensure parent chain is included
-      for (const row of [...topRows]) {
-        let parent: string | null | undefined = row.parent
-        while (parent && parent !== '.' && !included.has(parent)) {
-          const parentRow = subtreeRows.find(r => r.path === parent)
-          if (parentRow) {
-            topRows.push(parentRow)
-            included.add(parent)
-          }
-          parent = parentRow?.parent
-        }
-      }
-
-      result.push(...topRows)
-    }
-
-    return result
-  }, [rows])
-
-  const data = [root, ...limitedRows]
+  // "Other" nodes are more visible gray with pattern-like appearance
+  // Use empty string for default color (Plotly interprets as auto-color)
+  const colors = data.map(n => n.isOther ? '#666666' : '')
 
   return (
     <Plot
       data={[{
         type: 'treemap',
         branchvalues: 'total',
-        ids: data.map(r => r.path),
-        labels: data.map(r => r.path.split('/').pop() || r.path),
-        // Root has no parent (''), all children should reference '.' as parent
-        parents: data.map(r => r.path === '.' ? '' : (r.parent || '.')),
-        values: data.map(r => r.size),
-        text: data.map(r => formatSize(r.size)),
+        ids: data.map(n => n.id),
+        labels: data.map(n => n.label),
+        parents: data.map(n => n.parent),
+        values: data.map(n => n.size),
+        text: data.map(n => formatSize(n.size)),
         texttemplate: '%{label}<br>%{text}',
-        hovertemplate: '%{label}<br>%{value} bytes<br>%{text}',
-      }]}
+        hovertemplate: '%{label}<br>%{text}<extra></extra>',
+        tiling: { pad: 1 },  // Reduce inner padding (default 3px)
+        marker: {
+          colors,
+          line: { width: 1, color: 'rgba(255, 255, 255, 0.3)' },
+        },
+      } as Plotly.Data]}
       layout={{
         margin: { t: 10, r: 10, b: 10, l: 10 },
         paper_bgcolor: 'transparent',
@@ -679,9 +734,10 @@ export function ScanDetails() {
     staleTime: 60 * 1000,
   })
 
+  const [treemapMaxRows, setTreemapMaxRows] = useState(DEFAULT_MAX_ROWS)
   const { data: details, isLoading, error: queryError, refetch } = useQuery({
-    queryKey: ['scan-details', uri, selectedScanId],
-    queryFn: () => fetchScanDetails(uri, selectedScanId),
+    queryKey: ['scan-details', uri, selectedScanId, treemapMaxRows],
+    queryFn: () => fetchScanDetails(uri, selectedScanId, 2, treemapMaxRows),
     staleTime: 60 * 1000, // 1 minute - scan details don't change frequently
   })
   const [mutationError, setMutationError] = useState<string | null>(null)
@@ -694,11 +750,16 @@ export function ScanDetails() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
   const [filter, setFilter] = useState('')
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
-  const [anchorIndex, setAnchorIndex] = useState<number | null>(null) // The fixed point of selection
-  const [expandDirection, setExpandDirection] = useState<'up' | 'down' | null>(null) // Which direction we're expanding
+  // Selection model (Superhuman-style):
+  // - hoveredIndex: keyboard cursor position (moving end of range)
+  // - rangeAnchor: fixed end of range selection
+  // - pinnedUris: items selected via meta-click that persist across range changes
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
-  const tableRef = useRef<HTMLDivElement>(null)
+  const [rangeAnchor, setRangeAnchor] = useState<number | null>(null)
+  const [pinnedUris, setPinnedUris] = useState<Set<string>>(new Set())
+  const [mouseHoverIndex, setMouseHoverIndex] = useState<number | null>(null)
+  const wrapperRef = useRef<HTMLDivElement>(null)
+  const tableRef = useRef<HTMLTableElement>(null)
 
   // Live scan progress from SSE
   const scanProgress = useScanProgress()
@@ -784,6 +845,21 @@ export function ScanDetails() {
     return sortedChildren.slice(start, start + pageSize)
   }, [sortedChildren, page, pageSize])
 
+  // Compute selectedPaths from pinnedUris + range(rangeAnchor, hoveredIndex)
+  const selectedPaths = useMemo(() => {
+    const result = new Set(pinnedUris)
+    if (hoveredIndex !== null && rangeAnchor !== null) {
+      const start = Math.min(hoveredIndex, rangeAnchor)
+      const end = Math.max(hoveredIndex, rangeAnchor)
+      for (let i = start; i <= end; i++) {
+        if (paginatedChildren[i]) {
+          result.add(paginatedChildren[i].uri)
+        }
+      }
+    }
+    return result
+  }, [pinnedUris, hoveredIndex, rangeAnchor, paginatedChildren])
+
   // Reset page when sort/filter changes or data reloads
   useEffect(() => {
     setPage(0)
@@ -791,9 +867,9 @@ export function ScanDetails() {
 
   // Clear selection when data changes
   useEffect(() => {
-    setSelectedPaths(new Set())
-    setAnchorIndex(null)
-    setExpandDirection(null)
+    setHoveredIndex(null)
+    setRangeAnchor(null)
+    setPinnedUris(new Set())
   }, [details])
 
   // Handle row click with shift/meta modifiers
@@ -802,9 +878,20 @@ export function ScanDetails() {
     const metaKey = 'metaKey' in event ? event.metaKey || event.ctrlKey : false
 
     if (metaKey) {
-      // Meta-click: toggle this row in selection
-      setSelectedPaths(prev => {
+      // Meta-click: pin current selection, then toggle this item and set new anchor
+      setPinnedUris(prev => {
         const next = new Set(prev)
+        // Add current range to pinned
+        if (hoveredIndex !== null && rangeAnchor !== null) {
+          const start = Math.min(hoveredIndex, rangeAnchor)
+          const end = Math.max(hoveredIndex, rangeAnchor)
+          for (let i = start; i <= end; i++) {
+            if (paginatedChildren[i]) {
+              next.add(paginatedChildren[i].uri)
+            }
+          }
+        }
+        // Toggle clicked item
         if (next.has(uri)) {
           next.delete(uri)
         } else {
@@ -812,43 +899,36 @@ export function ScanDetails() {
         }
         return next
       })
-      setAnchorIndex(index)
-      setExpandDirection(null)
-    } else if (shiftKey && anchorIndex !== null) {
-      // Shift-click: select range from anchor to clicked
-      const start = Math.min(anchorIndex, index)
-      const end = Math.max(anchorIndex, index)
-      const newSelection = new Set<string>()
-      for (let i = start; i <= end; i++) {
-        if (paginatedChildren[i]) {
-          newSelection.add(paginatedChildren[i].uri)
-        }
-      }
-      setSelectedPaths(newSelection)
+      setHoveredIndex(index)
+      setRangeAnchor(index)
+    } else if (shiftKey && rangeAnchor !== null) {
+      // Shift-click: extend range from anchor to clicked (pinnedUris stay)
+      setHoveredIndex(index)
     } else {
       // Regular click: toggle if only this row selected, otherwise select just this row
       const isOnlySelected = selectedPaths.size === 1 && selectedPaths.has(uri)
       if (isOnlySelected) {
         // Clicking the only selected row deselects it
-        setSelectedPaths(new Set())
-        setAnchorIndex(null)
-        setExpandDirection(null)
+        setHoveredIndex(null)
+        setRangeAnchor(null)
+        setPinnedUris(new Set())
       } else {
         // Select just this row
-        setSelectedPaths(new Set([uri]))
-        setAnchorIndex(index)
-        setExpandDirection(null)
+        setHoveredIndex(index)
+        setRangeAnchor(index)
+        setPinnedUris(new Set())
       }
     }
-  }, [anchorIndex, paginatedChildren, selectedPaths])
+  }, [hoveredIndex, rangeAnchor, paginatedChildren, selectedPaths])
 
   // Click outside table to deselect
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
+      // Clear selection when clicking outside the actual table element
       if (tableRef.current && !tableRef.current.contains(e.target as Node)) {
-        setSelectedPaths(new Set())
-        setAnchorIndex(null)
-        setExpandDirection(null)
+        setHoveredIndex(null)
+        setRangeAnchor(null)
+        setPinnedUris(new Set())
       }
     }
 
@@ -856,124 +936,108 @@ export function ScanDetails() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Keyboard navigation for up/down and shift+up/down (Superhuman-style)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Handle keyboard events if:
-      // 1. Table has focus, OR
-      // 2. Nothing has focus (body), OR
-      // 3. Mouse is hovering over the table (Superhuman-style: hover enables keyboard nav)
-      const tableHasFocus = tableRef.current?.contains(document.activeElement)
-      const nothingFocused = document.activeElement === document.body
-      const isHoveringTable = hoveredIndex !== null
-
-      if (!tableHasFocus && !nothingFocused && !isHoveringTable) {
-        return
-      }
-
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        e.preventDefault()
-        const keyDirection = e.key === 'ArrowUp' ? 'up' : 'down'
-
-        // Without shift: just move hover
-        if (!e.shiftKey) {
-          if (hoveredIndex === null) {
-            // Start at first or last depending on direction
-            setHoveredIndex(keyDirection === 'up' ? paginatedChildren.length - 1 : 0)
-          } else {
-            const newIndex = keyDirection === 'up'
-              ? Math.max(0, hoveredIndex - 1)
-              : Math.min(paginatedChildren.length - 1, hoveredIndex + 1)
-            setHoveredIndex(newIndex)
-          }
-          return
-        }
-
-        // With shift: selection logic
-        // If no anchor, start from hovered row (or first/last row)
-        if (anchorIndex === null) {
-          const startIndex = hoveredIndex ?? (keyDirection === 'up' ? paginatedChildren.length - 1 : 0)
-          if (startIndex >= 0 && startIndex < paginatedChildren.length) {
-            // First shift+arrow: select hovered + one in that direction (2 rows)
-            const nextIndex = keyDirection === 'up'
-              ? Math.max(0, startIndex - 1)
-              : Math.min(paginatedChildren.length - 1, startIndex + 1)
-
-            setAnchorIndex(startIndex)
-            if (nextIndex !== startIndex) {
-              setSelectedPaths(new Set([
-                paginatedChildren[startIndex].uri,
-                paginatedChildren[nextIndex].uri,
-              ]))
-            } else {
-              setSelectedPaths(new Set([paginatedChildren[startIndex].uri]))
-            }
-            setExpandDirection(keyDirection)
-          }
-          return
-        }
-
-        // Find current selection bounds
-        const selectedIndices = paginatedChildren
-          .map((r, i) => selectedPaths.has(r.uri) ? i : -1)
-          .filter(i => i >= 0)
-
-        if (selectedIndices.length === 0) return
-
-        const minSelected = Math.min(...selectedIndices)
-        const maxSelected = Math.max(...selectedIndices)
-
-        // If only one selected and no direction set, this press sets the expand direction
-        if (selectedIndices.length === 1 && expandDirection === null) {
-          setExpandDirection(keyDirection)
-        }
-
-        const currentDirection = expandDirection ?? keyDirection
-
-        if (keyDirection === currentDirection) {
-          // Expanding in the current direction
-          const newIndex = currentDirection === 'up'
-            ? Math.max(0, minSelected - 1)
-            : Math.min(paginatedChildren.length - 1, maxSelected + 1)
-
-          if (newIndex >= 0 && newIndex < paginatedChildren.length) {
-            setSelectedPaths(prev => {
-              const next = new Set(prev)
-              next.add(paginatedChildren[newIndex].uri)
-              return next
-            })
-          }
-        } else {
-          // Contracting (opposite direction)
-          if (selectedIndices.length > 1) {
-            // Remove from the expanding edge
-            const indexToRemove = currentDirection === 'up' ? minSelected : maxSelected
-            setSelectedPaths(prev => {
-              const next = new Set(prev)
-              next.delete(paginatedChildren[indexToRemove].uri)
-
-              // If we're down to one item, reset direction
-              if (next.size === 1) {
-                setExpandDirection(null)
-              }
-              return next
-            })
-          }
-          // If only one selected, opposite arrow does nothing (or could reset direction)
-        }
-      } else if (e.key === 'Escape') {
-        setSelectedPaths(new Set())
-        setAnchorIndex(null)
-        setExpandDirection(null)
-      } else if (e.key === 'a' && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        setSelectedPaths(new Set(paginatedChildren.map(r => r.uri)))
-      }
+  // Get initial cursor position (from mouse hover or start/end)
+  const getInitialIndex = useCallback((direction: 'up' | 'down') => {
+    if (mouseHoverIndex !== null && mouseHoverIndex >= 0 && mouseHoverIndex < paginatedChildren.length) {
+      return mouseHoverIndex
     }
+    return direction === 'up' ? paginatedChildren.length - 1 : 0
+  }, [mouseHoverIndex, paginatedChildren.length])
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [anchorIndex, expandDirection, hoveredIndex, paginatedChildren, selectedPaths])
+  // Move cursor up (clears selection, sets single-row selection)
+  useAction('table:up', {
+    label: 'Row up',
+    group: 'Table: Navigation',
+    defaultBindings: ['k', 'arrowup'],
+    handler: useCallback(() => {
+      if (paginatedChildren.length === 0) return
+      const newIndex = hoveredIndex === null
+        ? getInitialIndex('up')
+        : Math.max(0, hoveredIndex - 1)
+      setHoveredIndex(newIndex)
+      setRangeAnchor(newIndex)
+      setPinnedUris(new Set())
+    }, [hoveredIndex, paginatedChildren.length, getInitialIndex]),
+  })
+
+  // Move cursor down
+  useAction('table:down', {
+    label: 'Row down',
+    group: 'Table: Navigation',
+    defaultBindings: ['j', 'arrowdown'],
+    handler: useCallback(() => {
+      if (paginatedChildren.length === 0) return
+      const newIndex = hoveredIndex === null
+        ? getInitialIndex('down')
+        : Math.min(paginatedChildren.length - 1, hoveredIndex + 1)
+      setHoveredIndex(newIndex)
+      setRangeAnchor(newIndex)
+      setPinnedUris(new Set())
+    }, [hoveredIndex, paginatedChildren.length, getInitialIndex]),
+  })
+
+  // Extend selection up (keeps anchor fixed, moves cursor)
+  useAction('table:extend-up', {
+    label: 'Extend selection up',
+    group: 'Table: Selection',
+    defaultBindings: ['shift+k', 'shift+arrowup'],
+    handler: useCallback(() => {
+      if (paginatedChildren.length === 0) return
+      if (rangeAnchor === null) {
+        // First shift+arrow: set anchor and move cursor
+        const startIndex = hoveredIndex ?? getInitialIndex('up')
+        setRangeAnchor(startIndex)
+        setHoveredIndex(Math.max(0, startIndex - 1))
+      } else {
+        // Move cursor up (anchor stays fixed)
+        setHoveredIndex(prev => Math.max(0, (prev ?? rangeAnchor) - 1))
+      }
+    }, [hoveredIndex, rangeAnchor, paginatedChildren.length, getInitialIndex]),
+  })
+
+  // Extend selection down
+  useAction('table:extend-down', {
+    label: 'Extend selection down',
+    group: 'Table: Selection',
+    defaultBindings: ['shift+j', 'shift+arrowdown'],
+    handler: useCallback(() => {
+      if (paginatedChildren.length === 0) return
+      if (rangeAnchor === null) {
+        // First shift+arrow: set anchor and move cursor
+        const startIndex = hoveredIndex ?? getInitialIndex('down')
+        setRangeAnchor(startIndex)
+        setHoveredIndex(Math.min(paginatedChildren.length - 1, startIndex + 1))
+      } else {
+        // Move cursor down (anchor stays fixed)
+        setHoveredIndex(prev => Math.min(paginatedChildren.length - 1, (prev ?? rangeAnchor) + 1))
+      }
+    }, [hoveredIndex, rangeAnchor, paginatedChildren.length, getInitialIndex]),
+  })
+
+  // Clear selection
+  useAction('table:clear', {
+    label: 'Clear selection',
+    group: 'Table: Selection',
+    defaultBindings: ['escape'],
+    handler: useCallback(() => {
+      setHoveredIndex(null)
+      setRangeAnchor(null)
+      setPinnedUris(new Set())
+    }, []),
+  })
+
+  // Select all
+  useAction('table:select-all', {
+    label: 'Select all',
+    group: 'Table: Selection',
+    defaultBindings: ['meta+a'],
+    handler: useCallback(() => {
+      if (paginatedChildren.length === 0) return
+      setPinnedUris(new Set(paginatedChildren.map(r => r.uri)))
+      setHoveredIndex(paginatedChildren.length - 1)
+      setRangeAnchor(0)
+    }, [paginatedChildren]),
+  })
 
   // Compute selection summary
   const selectedRows = useMemo(() => {
@@ -1032,7 +1096,9 @@ export function ScanDetails() {
       return next
     })
 
-    setSelectedPaths(new Set())
+    setHoveredIndex(null)
+    setRangeAnchor(null)
+    setPinnedUris(new Set())
     refetch()
   }
 
@@ -1175,7 +1241,7 @@ export function ScanDetails() {
   }
 
   return (
-    <div ref={tableRef} tabIndex={0} style={{ outline: 'none' }}>
+    <div ref={wrapperRef} tabIndex={0} style={{ outline: 'none' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1, flexWrap: 'wrap' }}>
         <h1 style={{ margin: 0 }}>
           <Breadcrumbs uri={uri} routeType={routeType} />
@@ -1259,7 +1325,11 @@ export function ScanDetails() {
             )}
             <Button
               size="small"
-              onClick={() => setSelectedPaths(new Set())}
+              onClick={() => {
+                setHoveredIndex(null)
+                setRangeAnchor(null)
+                setPinnedUris(new Set())
+              }}
               sx={{ minWidth: 0, opacity: 0.7 }}
             >
               Clear
@@ -1284,9 +1354,11 @@ export function ScanDetails() {
         deletingPaths={deletingPaths}
         selectedPaths={selectedPaths}
         hoveredIndex={hoveredIndex}
+        mouseHoverIndex={mouseHoverIndex}
         onRowClick={handleRowClick}
-        onRowHover={setHoveredIndex}
+        onRowHover={setMouseHoverIndex}
         collapsedRows={collapsed_rows}
+        tableRef={tableRef}
       />
       {sortedChildren.length > pageSize && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem', fontSize: '0.85rem' }}>
@@ -1319,7 +1391,28 @@ export function ScanDetails() {
           </select>
         </div>
       )}
-      {rows.length > 0 && <Treemap root={root} rows={rows} />}
+      {rows.length > 0 && (
+        <Box sx={{ mt: 2 }}>
+          <Treemap root={root} rows={rows} />
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
+            <span>{rows.length} items</span>
+            <label>
+              Max:
+              <select
+                value={treemapMaxRows}
+                onChange={e => setTreemapMaxRows(Number(e.target.value))}
+                style={{ marginLeft: 4 }}
+              >
+                <option value={500}>500</option>
+                <option value={1000}>1,000</option>
+                <option value={2000}>2,000</option>
+                <option value={5000}>5,000</option>
+                <option value={0}>All</option>
+              </select>
+            </label>
+          </Box>
+        </Box>
+      )}
       {root.kind === 'file' && routeType === 'file' && <FilePreviewSection path={uri} />}
     </div>
   )

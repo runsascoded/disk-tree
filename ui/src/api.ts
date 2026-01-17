@@ -1,3 +1,6 @@
+// Default max rows for treemap performance (keep in sync with server DEFAULT_MAX_ROWS)
+export const DEFAULT_MAX_ROWS = 2000
+
 export type Scan = {
   id: number
   path: string
@@ -47,8 +50,8 @@ export async function fetchScans(): Promise<Scan[]> {
   return res.json()
 }
 
-export async function fetchScanDetails(uri: string, scanId?: number): Promise<ScanDetails> {
-  const params = new URLSearchParams({ uri })
+export async function fetchScanDetails(uri: string, scanId?: number, depth: number = 2, maxRows: number = DEFAULT_MAX_ROWS): Promise<ScanDetails> {
+  const params = new URLSearchParams({ uri, depth: String(depth), max_rows: String(maxRows) })
   if (scanId !== undefined) {
     params.set('scan_id', String(scanId))
   }

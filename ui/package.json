@@ -28,7 +28,8 @@
     "react-dom": "^19.2.0",
     "react-icons": "^5.5.0",
     "react-plotly.js": "^2.6.0",
-    "react-router-dom": "^7.10.1"
+    "react-router-dom": "^7.10.1",
+    "use-kbd": "^0.6.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
@@ -42,6 +43,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "sass": "^1.97.2",
     "scrns": "^0.2.1",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
