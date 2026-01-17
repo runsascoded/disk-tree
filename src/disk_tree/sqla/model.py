@@ -4,7 +4,6 @@ from datetime import datetime
 from os import makedirs, remove
 from os.path import join, exists
 from typing import Optional
-from uuid import uuid4
 
 import pandas as pd
 from sqlalchemy import Integer, String, DateTime, Index
@@ -12,8 +11,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from utz import err, iec
 
 from disk_tree import find
+from disk_tree.storage import get_backend
 from .base import Base
-from ..config import SCANS_DIR
 
 
 class ScanProgress(Base):
@@ -100,7 +99,6 @@ class Scan(Base):
     def create(
         cls,
         path: str,
-        scans_dir: str | None = None,
         gc: bool = False,
         sudo: bool = False,
         track_progress: bool = True,
@@ -132,14 +130,9 @@ class Scan(Base):
 
         df = result.df
 
-        uuid = uuid4()
-        if not scans_dir:
-            scans_dir = SCANS_DIR
-        makedirs(scans_dir, exist_ok=True)
-        out_path = join(scans_dir, f'{uuid}.parquet')
-        if exists(out_path):
-            raise RuntimeError(f"{out_path} exists")
-        df.to_parquet(out_path)
+        # Save via storage backend
+        backend = get_backend()
+        blob_ref = backend.save(df, path)
 
         # Extract root stats for denormalization
         root_rows = df[df['parent'] == '']
@@ -157,7 +150,7 @@ class Scan(Base):
         scan = Scan(
             path=path,
             time=now,
-            blob=out_path,
+            blob=blob_ref,
             error_count=result.error_count if result.error_count > 0 else None,
             error_paths=error_paths_json,
             size=root_size,
@@ -166,7 +159,7 @@ class Scan(Base):
         )
         db.session.add(scan)
         db.session.commit()
-        err(f"{path}: saved {len(df)} rows to {out_path}")
+        err(f"{path}: saved {len(df)} rows to {blob_ref} ({backend.name})")
         if result.error_count > 0:
             err(f"{path}: {result.error_count} permission errors")
         if gc:
@@ -182,15 +175,15 @@ class Scan(Base):
     ):
         from .db import db
 
+        backend = get_backend()
         scans = db.session.query(Scan).filter_by(path=path).filter(Scan.time < cutoff).all()
         err(f"{path}: deleting {len(scans)} old scans:")
         for scan in scans:
             blob = scan.blob
-            size = os.stat(blob).st_size
-            err(f"\t{scan.time}: {blob} ({iec(size)})")
+            err(f"\t{scan.time}: {blob}")
             db.session.delete(scan)
             db.session.commit()
-            remove(blob)
+            backend.delete(blob)
 
     @classmethod
     def load(
@@ -203,25 +196,22 @@ class Scan(Base):
         return db.session.query(cls).filter_by(path=abspath).order_by(cls.time.desc()).first()
 
     def df(self) -> pd.DataFrame:
-        pqt_path = self.blob
-        if not exists(pqt_path):
-            raise FileNotFoundError(f"Parquet file not found for scan: {pqt_path}")
-        df = pd.read_parquet(pqt_path)
-        err(f"{self.path}: loaded {len(df)} rows from {pqt_path}")
+        backend = get_backend()
+        df = backend.load(self.blob)
+        err(f"{self.path}: loaded {len(df)} rows from {self.blob} ({backend.name})")
         return df
 
     @classmethod
     def load_or_create(
         cls,
         path: str,
-        scans_dir: str | None = None,
         gc: bool = False,
         sudo: bool = False,
         track_progress: bool = True,
     ) -> tuple['Scan', pd.DataFrame]:
         scan = cls.load(path)
         if not scan:
-            return cls.create(path, scans_dir, gc=gc, sudo=sudo, track_progress=track_progress)
+            return cls.create(path, gc=gc, sudo=sudo, track_progress=track_progress)
         else:
             df = scan.df()
             cls.gc(path=path, cutoff=scan.time)

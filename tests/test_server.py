@@ -694,15 +694,13 @@ class TestDeleteEndpoint:
             f.write('x')
 
         # Delete should clear caches
-        from disk_tree.server import _cache, _parquet_cache
-        assert len(_cache) > 0 or len(_parquet_cache) > 0  # Something should be cached
+        from disk_tree.server import _cache
 
         response = client.post('/api/delete', json={'path': test_file})
         assert response.status_code == 200
 
-        # Caches should be cleared
+        # Server cache should be cleared
         assert len(_cache) == 0
-        assert len(_parquet_cache) == 0
 
 
 class TestScanIdParameter:
@@ -836,14 +834,9 @@ class TestCacheInvalidation:
         conn.commit()
         conn.close()
 
-        from disk_tree.server import _parquet_cache, clear_cache
+        from disk_tree.server import clear_cache
         clear_cache()
-        _parquet_cache.clear()
-
-        assert len(_parquet_cache) == 0
 
         response = client.get('/api/scan?uri=/test')
         assert response.status_code == 200
-
-        # Parquet cache should now have an entry
-        assert len(_parquet_cache) >= 1
+        # Request should succeed (caching is now internal to storage backend)
