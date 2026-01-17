@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request, g, Response, send_from_directory
 from flask_cors import CORS
 
 from disk_tree.config import SQLITE_PATH
+from disk_tree.storage import get_backend
 
 app = Flask(__name__)
 CORS(app)
@@ -84,64 +85,48 @@ running_scans: dict[str, dict] = {}
 _cache: dict[str, tuple[float, any]] = {}
 CACHE_TTL = 60  # seconds
 
-# LRU cache for parquet DataFrames (expensive to load)
-_parquet_cache: dict[str, tuple[float, pd.DataFrame]] = {}
-PARQUET_CACHE_TTL = 300  # 5 minutes
-PARQUET_CACHE_MAX_SIZE = 10  # Max number of parquets to cache
-
-import pyarrow.parquet as pq
-
-
-def load_parquet_with_depth_filter(
-    blob_path: str,
+def load_scan_data(
+    blob_ref: str,
     max_depth: int | None = None,
     min_depth: int | None = None,
+    follow_refs: bool = False,
 ) -> pd.DataFrame:
-    """Load parquet file, optionally filtering by depth column.
+    """Load scan data via the storage backend with optional depth filtering."""
+    backend = get_backend()
+    return backend.load(blob_ref, max_depth=max_depth, min_depth=min_depth, follow_refs=follow_refs)
 
-    If max_depth/min_depth are provided and the parquet has a 'depth' column,
-    uses predicate pushdown to only load rows matching the depth range.
-    Falls back to full load for old parquets without depth column.
 
-    Results are cached in memory for performance.
+def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
+    """Resolve the actual blob_ref and rebased rel_path for a path that may be in a chunk.
+
+    If rel_path maps to a chunked subtree, returns (chunk_blob_ref, rebased_path).
+    Otherwise returns (blob_ref, rel_path) unchanged.
     """
-    cache_key = f"{blob_path}:{min_depth}:{max_depth}"
-    now = time.time()
+    if not rel_path or rel_path == '.':
+        return blob_ref, rel_path
 
-    # Check cache
-    if cache_key in _parquet_cache:
-        cached_time, cached_df = _parquet_cache[cache_key]
-        if now - cached_time < PARQUET_CACHE_TTL:
-            return cached_df
+    # Load the root parquet to check for child_scan_id
+    df = pd.read_parquet(blob_ref)
+    if 'child_scan_id' not in df.columns:
+        return blob_ref, rel_path
 
-    # Load from disk
-    df = None
-    if max_depth is not None or min_depth is not None:
-        # Check if parquet has 'depth' column
-        try:
-            schema = pq.read_schema(blob_path)
-            if 'depth' in schema.names:
-                filters = []
-                if max_depth is not None:
-                    filters.append(('depth', '<=', max_depth))
-                if min_depth is not None:
-                    filters.append(('depth', '>=', min_depth))
-                # Use predicate pushdown
-                df = pd.read_parquet(blob_path, filters=filters)
-        except Exception:
-            pass  # Fall back to full load
+    # Check if any ancestor of rel_path has a child_scan_id
+    parts = rel_path.split('/')
+    for i in range(len(parts)):
+        ancestor = '/'.join(parts[:i+1])
+        match = df[df['path'] == ancestor]
+        if not match.empty:
+            row = match.iloc[0]
+            if pd.notna(row.get('child_scan_id')):
+                # This ancestor is chunked - resolve to the chunk
+                chunk_ref = row['child_scan_id']
+                if exists(chunk_ref):
+                    # Rebase the remaining path relative to chunk root
+                    remaining = '/'.join(parts[i+1:]) if i + 1 < len(parts) else '.'
+                    # Recursively resolve in case of nested chunks
+                    return resolve_chunk_for_path(chunk_ref, remaining)
 
-    if df is None:
-        # Full load (no depth column or no filter requested)
-        df = pd.read_parquet(blob_path)
-
-    # Cache the result (simple LRU: remove oldest if over limit)
-    if len(_parquet_cache) >= PARQUET_CACHE_MAX_SIZE:
-        oldest_key = min(_parquet_cache.keys(), key=lambda k: _parquet_cache[k][0])
-        del _parquet_cache[oldest_key]
-    _parquet_cache[cache_key] = (now, df)
-
-    return df
+    return blob_ref, rel_path
 
 
 def cached(key: str, ttl: int = CACHE_TTL):
@@ -643,31 +628,67 @@ def get_scan():
 
         return jsonify({'error': 'No scan found for path', 'uri': uri}), 404
 
-    # Compute max depth for predicate pushdown
-    # Exact match: viewed_path_depth = 0, so max_depth = depth
-    # Ancestor: viewed_path_depth = depth of relative path from scan root
+    # Compute relative path from scan root to requested URI
     if scan['path'] == uri:
-        max_depth = depth
+        relative_path = '.'
     else:
-        # Compute depth of viewed path relative to scan root
-        # e.g., scan='/home', uri='/home/foo/bar' → relative='foo/bar' → depth=2
         scan_prefix = scan['path'].rstrip('/') + '/'
         relative_path = uri[len(scan_prefix):] if uri.startswith(scan_prefix) else ''
-        viewed_path_depth = relative_path.count('/') + 1 if relative_path else 0
-        max_depth = viewed_path_depth + depth
+
+    # Resolve chunk: if the relative path is inside a chunked subtree, get the chunk blob
+    effective_blob, rebased_path = resolve_chunk_for_path(scan['blob'], relative_path)
+    is_chunked = effective_blob != scan['blob']
+
+    # Compute max depth for predicate pushdown
+    # viewed_path_depth is depth of rebased path (0 for '.', 1 for 'foo', etc.)
+    viewed_path_depth = 0 if rebased_path == '.' else rebased_path.count('/') + 1
+    max_depth = viewed_path_depth + depth
 
     # Load parquet with depth filter (only loads rows up to max_depth)
-    df = load_parquet_with_depth_filter(scan['blob'], max_depth)
+    df = load_scan_data(effective_blob, max_depth)
 
     # Filter to requested URI prefix
     prefix = uri.rstrip('/') + '/'
-    if scan['path'] == uri:
+
+    # When viewing from a chunk, paths are already rebased relative to chunk root
+    if is_chunked or rebased_path == '.':
+        # Paths in df are relative to chunk/scan root
+        # rebased_path is '.' for root, or 'subdir' for subdir within chunk
+        if rebased_path == '.':
+            root_mask = df['path'] == '.'
+            children_mask = (df['parent'] == '.') | ((df['parent'] == '') & (df['path'] != '.'))
+        else:
+            root_mask = df['path'] == rebased_path
+            children_prefix = rebased_path + '/'
+            children_mask = df['path'].str.startswith(children_prefix)
+
+            # Recompute relative paths for the viewed subdir within chunk
+            df = df.copy()
+            def make_relative(row):
+                if row['path'] == rebased_path:
+                    return '.'
+                elif row['path'].startswith(children_prefix):
+                    return row['path'][len(children_prefix):]
+                return row['path']
+
+            def make_relative_parent(row):
+                orig_parent = row['parent']
+                if orig_parent == rebased_path:
+                    return '.'
+                parent_prefix = rebased_path + '/'
+                if orig_parent.startswith(parent_prefix):
+                    return orig_parent[len(parent_prefix):]
+                return orig_parent
+
+            df['rel_path'] = df.apply(make_relative, axis=1)
+            df['rel_parent'] = df.apply(make_relative_parent, axis=1)
+    elif scan['path'] == uri:
         # Exact match - use '.' as root
         root_mask = df['path'] == '.'
         # Direct children have parent='.' (dirs) or parent='' (files)
         children_mask = (df['parent'] == '.') | ((df['parent'] == '') & (df['path'] != '.'))
     else:
-        # Scan is an ancestor - filter by URI
+        # Scan is an ancestor (non-chunked) - filter by URI
         root_mask = df['uri'] == uri
         children_mask = df['uri'].str.startswith(prefix)
 
@@ -707,8 +728,10 @@ def get_scan():
     root['parent'] = None
 
     # Get children up to requested depth
-    if scan['path'] == uri:
-        # Filter by path depth
+    # When at chunk root or exact scan match, paths in df are already correct (path column)
+    # Otherwise, use rel_path column
+    if scan['path'] == uri or (is_chunked and rebased_path == '.'):
+        # Filter by path depth - paths are already relative to current root
         def get_depth(path):
             if path == '.':
                 return 0
@@ -719,7 +742,7 @@ def get_scan():
         # Direct children have parent='.' (dirs) or parent='' (files)
         direct_children_df = df[(df['parent'] == '.') | ((df['parent'] == '') & (df['path'] != '.'))]
     else:
-        # Filter by relative path depth
+        # Filter by relative path depth (subdir within scan or chunk)
         def get_rel_depth(rel_path):
             if rel_path == '.':
                 return 0
@@ -730,8 +753,9 @@ def get_scan():
         direct_children_df = df[children_mask & (df['depth'] == 1)]
 
     # Convert to list of dicts, handling numpy types
-    # use_rel_path: if True, use 'rel_path' column as 'path' (when scan is ancestor)
-    use_rel_path = scan['path'] != uri
+    # use_rel_path: if True, use 'rel_path' column as 'path' (when viewing subdir within scan/chunk)
+    # At chunk root (rebased_path == '.'), paths are already correct, no transformation needed
+    use_rel_path = 'rel_path' in df.columns
 
     def row_to_dict(row):
         d = row.to_dict()
@@ -897,7 +921,7 @@ def get_scan_history():
                     # Calculate depth of target path (e.g., 'Library' = depth 1, 'Library/Caches' = depth 2)
                     target_depth = rel_path.count('/') + 1
                     # Use depth filtering to only load rows up to target depth (much faster)
-                    df = load_parquet_with_depth_filter(blob_row['blob'], target_depth)
+                    df = load_scan_data(blob_row['blob'], target_depth)
                     row = df[df['path'] == rel_path]
                     if not row.empty:
                         r = row.iloc[0]
@@ -975,7 +999,7 @@ def compare_scans():
         # Load with EXACT depth filter - we only need children at depth_offset + 1
         # This avoids loading millions of rows at other depths
         target_depth = depth_offset + depth_limit
-        df = load_parquet_with_depth_filter(scan['blob'], max_depth=target_depth, min_depth=target_depth)
+        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth)
 
         if scan_path == uri:
             # Direct match - children have parent='.'
@@ -1083,7 +1107,7 @@ def compare_scans():
         # Load the parquet with depth filtering and find the row for the target URI
         rel_path = uri[len(scan_path):].lstrip('/')
         target_depth = rel_path.count('/') + 1
-        df = load_parquet_with_depth_filter(scan['blob'], max_depth=target_depth, min_depth=target_depth)
+        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth)
         row = df[df['path'] == rel_path]
         if not row.empty:
             r = row.iloc[0]
@@ -1270,71 +1294,112 @@ def stream_scans_progress():
     )
 
 
-def update_parent_scans_after_delete(deleted_path: str, deleted_size: int, deleted_n_desc: int):
-    """Update all ancestor scans to subtract the deleted item's size and descendants."""
-    db = get_db()
+def hexdump(data: bytes, offset: int = 0) -> str:
+    """Generate hexdump -C style output."""
+    lines = []
+    for i in range(0, len(data), 16):
+        chunk = data[i:i+16]
+        hex_part = ' '.join(f'{b:02x}' for b in chunk[:8])
+        if len(chunk) > 8:
+            hex_part += '  ' + ' '.join(f'{b:02x}' for b in chunk[8:])
+        # Pad hex part to fixed width
+        hex_part = hex_part.ljust(49)
+        # ASCII part: printable chars or '.'
+        ascii_part = ''.join(chr(b) if 32 <= b < 127 else '.' for b in chunk)
+        lines.append(f'{offset + i:08x}  {hex_part} |{ascii_part}|')
+    return '\n'.join(lines)
 
-    # Find all scans that are ancestors of the deleted path
-    cursor = db.execute('SELECT id, path, blob FROM scan')
-    for row in cursor:
-        scan_path = row['path']
-        # Check if this scan is an ancestor of the deleted path
-        if deleted_path.startswith(scan_path + '/') or deleted_path == scan_path:
-            blob_path = row['blob']
+
+# Preview limits
+TEXT_PREVIEW_MAX = 64 * 1024      # 64KB for text
+HEX_PREVIEW_MAX = 2 * 1024        # 2KB for hex (128 lines)
+PREVIEW_ABSOLUTE_MAX = 1024 * 1024  # 1MB hard cap
+
+
+@app.route('/api/file/preview')
+def file_preview():
+    """Return preview of a file's contents.
+
+    Query params:
+        path: Absolute path to the file
+        max_size: Max bytes to read for text (default 64KB, max 1MB)
+        hex_size: Max bytes for hex dump (default 2KB, max 16KB)
+    """
+    path = request.args.get('path')
+    max_size = min(int(request.args.get('max_size', TEXT_PREVIEW_MAX)), PREVIEW_ABSOLUTE_MAX)
+    hex_size = min(int(request.args.get('hex_size', HEX_PREVIEW_MAX)), 16 * 1024)
+
+    if not path:
+        return jsonify({'error': 'Path is required'}), 400
+
+    if not path.startswith('/'):
+        return jsonify({'error': 'Path must be absolute'}), 400
+
+    if not isfile(path):
+        return jsonify({'error': 'File not found'}), 404
+
+    try:
+        file_size = stat(path).st_size
+
+        # Check if file is likely text
+        text_extensions = {'.txt', '.log', '.json', '.xml', '.html', '.css', '.js', '.ts',
+                          '.py', '.md', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+                          '.sh', '.bash', '.zsh', '.csv', '.tsv', '.sql', '.env', '.gitignore'}
+        ext = '.' + path.rsplit('.', 1)[-1].lower() if '.' in path else ''
+
+        # Read enough to determine type and provide preview
+        # For text detection, read up to max_size; for hex we'll truncate later
+        read_size = max(max_size, hex_size)
+        with open(path, 'rb') as f:
+            raw = f.read(read_size)
+
+        # Try to decode as text
+        try:
+            content = raw.decode('utf-8')
+            is_text = True
+        except UnicodeDecodeError:
             try:
-                df = pd.read_parquet(blob_path)
+                content = raw.decode('latin-1')
+                is_text = True
+            except:
+                is_text = False
+                content = None
 
-                # Calculate the relative path within this scan
-                if scan_path == deleted_path:
-                    rel_path = '.'
-                else:
-                    rel_path = deleted_path[len(scan_path) + 1:]
+        # Check for binary content (null bytes, etc.)
+        if is_text and '\x00' in content:
+            is_text = False
+            content = None
 
-                # Find the row for the deleted item and all its ancestors
-                # First, mark the deleted item's row (and descendants) for removal
-                deleted_mask = (df['path'] == rel_path) | df['path'].str.startswith(rel_path + '/')
+        # Apply appropriate limits
+        if is_text:
+            text_truncated = len(content) > max_size or file_size > max_size
+            content = content[:max_size] if content else None
+            hex_content = None
+            hex_truncated = False
+        else:
+            content = None
+            text_truncated = False
+            # Generate hex dump with smaller limit
+            hex_raw = raw[:hex_size]
+            hex_content = hexdump(hex_raw)
+            hex_truncated = file_size > hex_size
 
-                if not deleted_mask.any():
-                    continue
+        return jsonify({
+            'path': path,
+            'size': file_size,
+            'truncated': text_truncated,
+            'hex_truncated': hex_truncated,
+            'preview_bytes': hex_size if not is_text else max_size,
+            'is_text': is_text,
+            'content': content,
+            'hex': hex_content,
+            'extension': ext,
+        })
 
-                # Get the deleted rows to calculate totals
-                deleted_rows = df[deleted_mask]
-                total_deleted_size = deleted_rows[deleted_rows['path'] == rel_path]['size'].sum()
-                total_deleted_n_desc = len(deleted_rows)
-
-                # Remove the deleted rows
-                df = df[~deleted_mask].copy()
-
-                # Update all ancestor directories
-                path_parts = rel_path.split('/')
-                for i in range(len(path_parts)):
-                    if i == 0:
-                        ancestor_path = '.'
-                    else:
-                        ancestor_path = '/'.join(path_parts[:i])
-                        if not ancestor_path:
-                            ancestor_path = '.'
-
-                    ancestor_mask = df['path'] == ancestor_path
-                    if ancestor_mask.any():
-                        df.loc[ancestor_mask, 'size'] -= total_deleted_size
-                        df.loc[ancestor_mask, 'n_desc'] -= total_deleted_n_desc
-                        # Decrement n_children only for direct parent
-                        if i == len(path_parts) - 1 or (i == 0 and '/' not in rel_path):
-                            df.loc[ancestor_mask, 'n_children'] -= 1
-
-                # Also update the root '.' entry
-                root_mask = df['path'] == '.'
-                if root_mask.any() and rel_path != '.':
-                    # Size and n_desc already updated if '.' was in ancestors
-                    pass
-
-                # Save updated parquet
-                df.to_parquet(blob_path, index=False)
-
-            except Exception as e:
-                print(f"Error updating scan {scan_path}: {e}")
-                continue
+    except PermissionError:
+        return jsonify({'error': 'Permission denied'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/delete', methods=['POST'])
@@ -1358,25 +1423,13 @@ def delete_path():
     if not isfile(path) and not isdir(path):
         return jsonify({'error': 'Path does not exist'}), 404
 
-    # Get size before deletion for updating scans
-    try:
-        if isfile(path):
+    # Get file size (fast stat call); skip for directories
+    deleted_size = None
+    if isfile(path):
+        try:
             deleted_size = stat(path).st_size
-            deleted_n_desc = 1
-        else:
-            # For directories, we need to calculate total size
-            deleted_size = 0
-            deleted_n_desc = 0
-            for root, dirs, files in __import__('os').walk(path):
-                deleted_n_desc += len(files) + len(dirs)
-                for f in files:
-                    try:
-                        deleted_size += stat(join(root, f)).st_size
-                    except (OSError, PermissionError):
-                        pass
-            deleted_n_desc += 1  # Include the directory itself
-    except (OSError, PermissionError) as e:
-        return jsonify({'error': f'Cannot access path: {e}'}), 403
+        except (OSError, PermissionError):
+            pass
 
     # Perform the deletion
     try:
@@ -1387,16 +1440,101 @@ def delete_path():
     except (OSError, PermissionError) as e:
         return jsonify({'error': f'Failed to delete: {e}'}), 500
 
-    # Update parent scans
-    try:
-        update_parent_scans_after_delete(path, deleted_size, deleted_n_desc)
-    except Exception as e:
-        # Deletion succeeded but scan update failed - log but don't fail the request
-        print(f"Warning: Failed to update scans after deletion: {e}")
+    # Update the most recent scan that covers this path
+    deleted_n_desc = None
+    backend = get_backend()
+    db = get_db()
+
+    # Find the most recent scan covering this path (exact match or ancestor)
+    test_path = path
+    covering_scan = None
+    while test_path and test_path != '/':
+        cursor = db.execute(
+            'SELECT id, path, blob FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1',
+            (test_path,)
+        )
+        row = cursor.fetchone()
+        if row:
+            covering_scan = dict(row)
+            break
+        parent = dirname(test_path)
+        if parent == test_path:
+            break
+        test_path = parent
+
+    if covering_scan:
+        scan_path = covering_scan['path']
+        blob_ref = covering_scan['blob']
+        rel_path = path[len(scan_path):].lstrip('/') if path != scan_path else '.'
+
+        if backend.supports_updates:
+            # DuckDB/SQLite: efficient in-place update
+            stats = backend.delete_path(blob_ref, rel_path)
+            if stats:
+                deleted_size = stats.size
+                deleted_n_desc = stats.n_desc
+                # Update denormalized stats in SQLite scan metadata
+                root_stats = backend.get_path_stats(blob_ref, '.')
+                if root_stats:
+                    db.execute('''
+                        UPDATE scan SET size = ?, n_children = ?, n_desc = ?
+                        WHERE id = ?
+                    ''', (root_stats.size, root_stats.n_children, root_stats.n_desc, covering_scan['id']))
+                    db.commit()
+        else:
+            # Parquet: need to rewrite the file (expensive but only for most recent scan)
+            try:
+                df = backend.load(blob_ref)
+                deleted_mask = (df['path'] == rel_path) | df['path'].str.startswith(rel_path + '/')
+                if deleted_mask.any():
+                    deleted_rows = df[deleted_mask]
+                    target_row = deleted_rows[deleted_rows['path'] == rel_path]
+                    if not target_row.empty:
+                        deleted_size = int(target_row.iloc[0]['size'])
+                        deleted_n_desc = int(target_row.iloc[0].get('n_desc', 1) or 1)
+
+                    # Remove deleted rows and update ancestors
+                    df = df[~deleted_mask].copy()
+
+                    # Update ancestor stats
+                    parts = rel_path.split('/') if rel_path != '.' else []
+                    ancestors = ['.']
+                    for i in range(1, len(parts)):
+                        ancestors.append('/'.join(parts[:i]))
+
+                    for ancestor in ancestors:
+                        mask = df['path'] == ancestor
+                        if mask.any():
+                            df.loc[mask, 'size'] = df.loc[mask, 'size'] - (deleted_size or 0)
+                            df.loc[mask, 'n_desc'] = df.loc[mask, 'n_desc'] - (deleted_n_desc or 0)
+                            # n_children only for direct parent
+                            if ancestor == ('/'.join(parts[:-1]) if len(parts) > 1 else '.'):
+                                df.loc[mask, 'n_children'] = df.loc[mask, 'n_children'] - 1
+
+                    # Rewrite parquet (this is the expensive part)
+                    df.to_parquet(blob_ref, index=False)
+
+                    # Update denormalized stats in SQLite scan metadata
+                    root_row = df[df['path'] == '.']
+                    if not root_row.empty:
+                        r = root_row.iloc[0]
+                        db.execute('''
+                            UPDATE scan SET size = ?, n_children = ?, n_desc = ?
+                            WHERE id = ?
+                        ''', (
+                            int(r['size']) if pd.notna(r['size']) else None,
+                            int(r['n_children']) if pd.notna(r.get('n_children')) else None,
+                            int(r['n_desc']) if pd.notna(r.get('n_desc')) else None,
+                            covering_scan['id'],
+                        ))
+                        db.commit()
+            except Exception as e:
+                print(f"Warning: Failed to update scan after delete: {e}")
 
     # Invalidate caches so next request gets fresh data
     _cache.clear()
-    _parquet_cache.clear()
+    if hasattr(backend, 'clear_cache'):
+        backend.clear_cache()
 
     return jsonify({
         'success': True,

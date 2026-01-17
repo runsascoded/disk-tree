@@ -204,3 +204,29 @@ export async function compareScans(
   }
   return res.json()
 }
+
+// File preview
+export type FilePreview = {
+  path: string
+  size: number
+  truncated: boolean
+  hex_truncated: boolean
+  preview_bytes: number
+  is_text: boolean
+  content: string | null
+  hex: string | null
+  extension: string
+}
+
+export async function fetchFilePreview(path: string, maxSize?: number): Promise<FilePreview> {
+  const params = new URLSearchParams({ path })
+  if (maxSize !== undefined) {
+    params.set('max_size', String(maxSize))
+  }
+  const res = await fetch(`/api/file/preview?${params}`)
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.error || 'Failed to fetch file preview')
+  }
+  return res.json()
+}

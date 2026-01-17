@@ -4,8 +4,8 @@ import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, To
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import { LazyPlot as Plot } from './LazyPlot'
 import { useQuery } from '@tanstack/react-query'
-import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath } from '../api'
-import type { Row, ScanJob, ScanProgress } from '../api'
+import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, fetchFilePreview } from '../api'
+import type { Row, ScanJob, ScanProgress, FilePreview } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo } from '../utils/format'
@@ -326,7 +326,10 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                 <Checkbox
                   size="small"
                   checked={isSelected}
-                  onChange={e => onRowClick(childUri, idx, e as unknown as React.MouseEvent)}
+                  onChange={() => {
+                    // Checkbox always toggles (unlike row click which replaces selection)
+                    onRowClick(childUri, idx, { metaKey: true, ctrlKey: true, shiftKey: false } as React.MouseEvent)
+                  }}
                   sx={{ padding: 0 }}
                 />
               </td>
@@ -474,6 +477,91 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
       }}
       style={{ width: '100%', height: '400px' }}
     />
+  )
+}
+
+function FilePreviewSection({ path }: { path: string }) {
+  const { data: preview, isLoading, error } = useQuery({
+    queryKey: ['file-preview', path],
+    queryFn: () => fetchFilePreview(path),
+    staleTime: 60 * 1000,
+  })
+
+  if (isLoading) {
+    return (
+      <Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 1 }}>
+        <CircularProgress size={16} />
+        <span>Loading preview...</span>
+      </Box>
+    )
+  }
+
+  if (error) {
+    return (
+      <Alert severity="error" sx={{ mt: 2 }}>
+        Failed to load preview: {error instanceof Error ? error.message : 'Unknown error'}
+      </Alert>
+    )
+  }
+
+  if (!preview) {
+    return null
+  }
+
+  if (!preview.is_text) {
+    return (
+      <Box sx={{ mt: 2 }}>
+        <Box sx={{ mb: 1, fontSize: '0.85rem', opacity: 0.7 }}>
+          Binary file ({formatSize(preview.size)})
+          {preview.hex_truncated && ` — showing first ${formatSize(preview.preview_bytes)}`}
+        </Box>
+        {preview.hex && (
+          <Box
+            component="pre"
+            sx={{
+              p: 2,
+              bgcolor: 'rgba(0,0,0,0.3)',
+              borderRadius: 1,
+              overflow: 'auto',
+              maxHeight: '500px',
+              fontSize: '0.75rem',
+              lineHeight: 1.3,
+              fontFamily: 'monospace',
+              m: 0,
+              whiteSpace: 'pre',
+            }}
+          >
+            {preview.hex}
+          </Box>
+        )}
+      </Box>
+    )
+  }
+
+  return (
+    <Box sx={{ mt: 2 }}>
+      <Box sx={{ mb: 1, fontSize: '0.85rem', opacity: 0.7 }}>
+        Preview {preview.truncated && `(first ${formatSize(preview.preview_bytes)} of ${formatSize(preview.size)})`}
+      </Box>
+      <Box
+        component="pre"
+        sx={{
+          p: 2,
+          bgcolor: 'rgba(0,0,0,0.3)',
+          borderRadius: 1,
+          overflow: 'auto',
+          maxHeight: '500px',
+          fontSize: '0.8rem',
+          lineHeight: 1.4,
+          fontFamily: 'monospace',
+          m: 0,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {preview.content}
+      </Box>
+    </Box>
   )
 }
 
@@ -1123,6 +1211,7 @@ export function ScanDetails() {
         </div>
       )}
       {rows.length > 0 && <Treemap root={root} rows={rows} />}
+      {root.kind === 'file' && routeType === 'file' && <FilePreviewSection path={uri} />}
     </div>
   )
 }
