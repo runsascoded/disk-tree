@@ -36,6 +36,11 @@ th:nth-child(2), td:nth-child(2) {
   text-align: center;
 }
 
+/* Prevent text selection on shift-click for row selection */
+.scan-details-table {
+  user-select: none;
+}
+
 /* Path column in scan details table - can shrink with ellipsis */
 .scan-details-table td:nth-child(3) {
   max-width: 0;
