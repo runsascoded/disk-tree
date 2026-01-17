@@ -45,9 +45,6 @@ importers:
       '@playwright/test':
         specifier: ^1.57.0
         version: 1.57.0
-      '@rdub/screenshots':
-        specifier: https://gitlab.com/runsascoded/js/screenshots/-/archive/dist/screenshots-dist.tar.gz
-        version: https://gitlab.com/runsascoded/js/screenshots/-/archive/dist/screenshots-dist.tar.gz(typescript@5.9.3)
       '@types/node':
         specifier: ^24.10.1
         version: 24.10.4
@@ -75,6 +72,9 @@ importers:
       globals:
         specifier: ^16.5.0
         version: 16.5.0
+      scrns:
+        specifier: ^0.2.1
+        version: 0.2.1(typescript@5.9.3)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -610,11 +610,6 @@ packages:
   '@puppeteer/browsers@2.6.1':
     resolution: {integrity: sha512-aBSREisdsGH890S2rQqK82qmQYU3uFpSH8wcZWHgHzl3LfzsxAKbLNiAG9mO8v1Y0UICBeClICxPJvyr0rcuxg==}
     engines: {node: '>=18'}
-    hasBin: true
-
-  '@rdub/screenshots@https://gitlab.com/runsascoded/js/screenshots/-/archive/dist/screenshots-dist.tar.gz':
-    resolution: {tarball: https://gitlab.com/runsascoded/js/screenshots/-/archive/dist/screenshots-dist.tar.gz}
-    version: 0.1.0-dist.3904658
     hasBin: true
 
   '@rolldown/pluginutils@1.0.0-beta.53':
@@ -2192,6 +2187,10 @@ packages:
   scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
 
+  scrns@0.2.1:
+    resolution: {integrity: sha512-DfGUWAiZ7f6EUuur290Tvo7c7/VNQHHdhImwCd805FXRmrxwe3KY9cOLV4AbNjlcmnPoAxbB1r63vuusva47Ww==}
+    hasBin: true
+
   semver@6.3.1:
     resolution: {integrity: sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==}
     hasBin: true
@@ -3096,19 +3095,6 @@ snapshots:
       - bare-buffer
       - react-native-b4a
       - supports-color
-
-  '@rdub/screenshots@https://gitlab.com/runsascoded/js/screenshots/-/archive/dist/screenshots-dist.tar.gz(typescript@5.9.3)':
-    dependencies:
-      commander: 12.1.0
-      puppeteer: 23.11.1(typescript@5.9.3)
-    transitivePeerDependencies:
-      - bare-abort-controller
-      - bare-buffer
-      - bufferutil
-      - react-native-b4a
-      - supports-color
-      - typescript
-      - utf-8-validate
 
   '@rolldown/pluginutils@1.0.0-beta.53': {}
 
@@ -4918,6 +4904,19 @@ snapshots:
   sax@1.4.3: {}
 
   scheduler@0.27.0: {}
+
+  scrns@0.2.1(typescript@5.9.3):
+    dependencies:
+      commander: 12.1.0
+      puppeteer: 23.11.1(typescript@5.9.3)
+    transitivePeerDependencies:
+      - bare-abort-controller
+      - bare-buffer
+      - bufferutil
+      - react-native-b4a
+      - supports-color
+      - typescript
+      - utf-8-validate
 
   semver@6.3.1: {}
 
