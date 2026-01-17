@@ -21,6 +21,12 @@ export type Row = {
   n_children: number | null
   scanned?: boolean | 'partial'
   scan_time?: string
+  expand_preview?: string  // Preview of auto-expand path (e.g., "0" for vms that expands to vms/0)
+}
+
+// Row with extra fields for collapsed (auto-expanded) parents
+export type CollapsedRow = Row & {
+  original_path: string  // Path relative to the requested URI
 }
 
 export type ScanDetails = {
@@ -32,6 +38,7 @@ export type ScanDetails = {
   scan_status: 'full' | 'partial' | 'none'
   error_count?: number | null
   error_paths?: string | null  // JSON array
+  collapsed_rows?: CollapsedRow[] | null  // Auto-expanded single-child directories
 }
 
 export async function fetchScans(): Promise<Scan[]> {
