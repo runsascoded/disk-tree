@@ -5,7 +5,7 @@ import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, Fa
 import { LazyPlot as Plot } from './LazyPlot'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, fetchFilePreview } from '../api'
-import type { Row, ScanJob, ScanProgress, FilePreview } from '../api'
+import type { Row, ScanJob, ScanProgress, FilePreview, CollapsedRow } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo } from '../utils/format'
@@ -185,7 +185,7 @@ function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanSt
   return <span style={{ opacity: 0.4 }}>-</span>
 }
 
-function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, selectedPaths, hoveredIndex, onRowClick, onRowHover }: {
+function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, selectedPaths, hoveredIndex, onRowClick, onRowHover, collapsedRows }: {
   root: Row
   children: Row[]
   uri: string
@@ -204,7 +204,11 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   hoveredIndex: number | null
   onRowClick: (uri: string, index: number, event: React.MouseEvent | React.KeyboardEvent) => void
   onRowHover: (index: number | null) => void
+  collapsedRows?: CollapsedRow[] | null
 }) {
+  // Track whether the collapsed (auto-expanded) rows are shown expanded
+  const [collapsedExpanded, setCollapsedExpanded] = useState(true)
+
   // Build prefix for child links, avoiding double slashes
   // For root (/), prefix should be /file not /file/
   const prefix = routeType === 's3'
@@ -302,11 +306,90 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           </td>
           {routeType !== 's3' && <td></td>}
         </tr>
-        {children.map((row, idx) => {
+        {/* Render collapsed/expanded parent rows (auto-expanded single-child dirs) */}
+        {collapsedRows && collapsedRows.map((collapsedRow, depth) => {
+          const indentPx = depth * 20
+          const collapsedUri = collapsedRow.uri
+          const isScanning = scanningPaths.has(collapsedUri)
+          const isDeleting = deletingPaths.has(collapsedUri)
+          const isFirst = depth === 0
+          // Extract just the segment name from the path (last part)
+          const segment = collapsedRow.original_path.split('/').pop() || collapsedRow.original_path
+          // First row: clickable chevron to toggle; only show subsequent rows when expanded
+          if (!isFirst && !collapsedExpanded) return null
+          const ChevronIcon = collapsedExpanded ? FaChevronDown : FaChevronRight
+          return (
+            <tr key={`collapsed-${depth}`} className="collapsed-parent" style={{ background: 'rgba(100, 100, 100, 0.08)' }}>
+              <td></td>
+              <td>
+                <span style={{ paddingLeft: indentPx, display: 'inline-flex', alignItems: 'center' }}>
+                  {isFirst ? (
+                    <ChevronIcon
+                      size={10}
+                      style={{ marginRight: 4, opacity: 0.7, cursor: 'pointer' }}
+                      onClick={() => setCollapsedExpanded(prev => !prev)}
+                    />
+                  ) : (
+                    <FaChevronDown size={10} style={{ marginRight: 4, opacity: 0.5 }} />
+                  )}
+                  <FaFolderOpen style={{ color: '#ff9800' }} />
+                </span>
+              </td>
+              <td>
+                <Link to={`${prefix}/${collapsedRow.original_path}`}>
+                  <code>{segment}</code>
+                </Link>
+              </td>
+              <td>{formatSize(collapsedRow.size)}</td>
+              <td>{timeAgo(collapsedRow.mtime)}</td>
+              <td>{collapsedRow.n_children?.toLocaleString()}</td>
+              <td>{collapsedRow.n_desc && collapsedRow.n_desc > 1 ? collapsedRow.n_desc.toLocaleString() : null}</td>
+              <td>{scanStatus === 'full' && scanTime ? scanTimeAgo(scanTime) : null}</td>
+              <td>
+                <Tooltip title="Rescan this directory">
+                  <span>
+                    <Button
+                      size="small"
+                      onClick={() => onScanChild(collapsedUri)}
+                      disabled={isScanning}
+                      sx={{ minWidth: 0, padding: '2px 4px' }}
+                    >
+                      {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
+                    </Button>
+                  </span>
+                </Tooltip>
+              </td>
+              {routeType !== 's3' && (
+                <td>
+                  <Tooltip title="Delete directory">
+                    <span>
+                      <Button
+                        size="small"
+                        onClick={() => onDelete(collapsedUri)}
+                        disabled={isDeleting}
+                        sx={{ minWidth: 0, padding: '2px 4px', color: '#d32f2f' }}
+                      >
+                        {isDeleting ? <CircularProgress size={14} /> : <FaTrash size={12} />}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                </td>
+              )}
+            </tr>
+          )
+        })}
+        {/* Only show children when collapsed rows are expanded (or there are no collapsed rows) */}
+        {(!collapsedRows || collapsedExpanded) && children.map((row, idx) => {
           const childUri = row.uri
           const isChildScanning = scanningPaths.has(childUri)
           const isSelected = selectedPaths.has(childUri)
           const isHovered = hoveredIndex === idx
+          // Indent children under collapsed rows when expanded
+          const indentPx = collapsedRows && collapsedExpanded ? collapsedRows.length * 20 : 0
+          // Build the collapsed path prefix from the last collapsed row's original_path
+          const collapsedPrefix = collapsedRows?.length
+            ? collapsedRows[collapsedRows.length - 1].original_path
+            : ''
           return (
             <tr
               key={row.path}
@@ -333,11 +416,22 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   sx={{ padding: 0 }}
                 />
               </td>
-              <td><RowIcon row={row} /></td>
+              <td style={{ paddingLeft: indentPx }}><RowIcon row={row} /></td>
               <td>
-                <Link to={`${prefix}/${row.path}`} onClick={e => e.stopPropagation()}>
+                <Link to={`${prefix}/${collapsedPrefix ? collapsedPrefix + '/' : ''}${row.path}`} onClick={e => e.stopPropagation()}>
                   <code>{row.path}</code>
                 </Link>
+                {row.expand_preview && row.expand_preview.split('/').map((segment, idx, arr) => {
+                  const pathToSegment = `${row.path}/${arr.slice(0, idx + 1).join('/')}`
+                  return (
+                    <span key={idx}>
+                      {' / '}
+                      <Link to={`${prefix}/${collapsedPrefix ? collapsedPrefix + '/' : ''}${pathToSegment}`} onClick={e => e.stopPropagation()}>
+                        <code>{segment}</code>
+                      </Link>
+                    </span>
+                  )
+                })}
               </td>
               <td>{formatSize(row.size)}</td>
               <td>{timeAgo(row.mtime)}</td>
@@ -1056,7 +1150,7 @@ export function ScanDetails() {
   }
   if (!details) return <div>No data</div>
 
-  const { root, rows, scan_status, time, error_count, error_paths } = details
+  const { root, rows, scan_status, time, error_count, error_paths, collapsed_rows } = details
 
   // Parse error_paths JSON string to array (inline, no hook needed)
   const parsedErrorPaths = error_paths ? (() => {
@@ -1083,7 +1177,21 @@ export function ScanDetails() {
   return (
     <div ref={tableRef} tabIndex={0} style={{ outline: 'none' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1, flexWrap: 'wrap' }}>
-        <h1 style={{ margin: 0 }}><Breadcrumbs uri={uri} routeType={routeType} /></h1>
+        <h1 style={{ margin: 0 }}>
+          <Breadcrumbs uri={uri} routeType={routeType} />
+          {collapsed_rows && collapsed_rows.map((row, idx) => {
+            const segment = row.original_path.split('/').pop() || row.original_path
+            const fullPath = `${uri}/${row.original_path}`
+            return (
+              <span key={idx}>
+                <span className="breadcrumb-sep">/</span>
+                <Link to={`${routeType === 's3' ? '/s3/' : '/file'}${fullPath}`}>
+                  {segment}
+                </Link>
+              </span>
+            )
+          })}
+        </h1>
         {scanHistory && scanHistory.length > 1 && (
           <Tooltip title="View historical scans">
             <select
@@ -1178,6 +1286,7 @@ export function ScanDetails() {
         hoveredIndex={hoveredIndex}
         onRowClick={handleRowClick}
         onRowHover={setHoveredIndex}
+        collapsedRows={collapsed_rows}
       />
       {sortedChildren.length > pageSize && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem', fontSize: '0.85rem' }}>

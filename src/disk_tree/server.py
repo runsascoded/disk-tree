@@ -397,11 +397,13 @@ def get_scan():
         scan_id: Optional specific scan ID to use (for time-travel)
         depth: Max depth of children to return (default 2)
         max_rows: Max rows to return for treemap (default 1000, 0 for unlimited)
+        expand_single: Auto-expand single-child directories (default true)
     """
     uri = request.args.get('uri', '/')
     scan_id = request.args.get('scan_id')
     depth = int(request.args.get('depth', 2))
     max_rows = int(request.args.get('max_rows', 1000))
+    expand_single = request.args.get('expand_single', 'true').lower() != 'false'
 
     # Normalize URI
     uri = uri.rstrip('/')
@@ -801,6 +803,71 @@ def get_scan():
         c['scanned'] = True
         c['scan_time'] = scan['time']
 
+    # Auto-expand single-child directories
+    collapsed_rows = []  # List of row dicts for collapsed parent directories
+    if expand_single:
+        # Keep expanding while there's exactly 1 child that's a directory
+        while len(children) == 1 and children[0].get('kind') == 'dir':
+            single_child = children[0]
+            single_child_path = single_child['path']
+
+            # Find grandchildren (children of the single child)
+            # They have parent == single_child_path
+            if use_rel_path:
+                grandchildren_df = children_df[children_df['rel_parent'] == single_child_path]
+            else:
+                grandchildren_df = children_df[children_df['parent'] == single_child_path]
+
+            if grandchildren_df.empty:
+                # No grandchildren data loaded (need deeper depth), stop expanding
+                break
+
+            # Convert grandchildren to list
+            grandchildren = [row_to_dict(row) for _, row in grandchildren_df.iterrows()]
+            for gc in grandchildren:
+                gc['scanned'] = True
+                gc['scan_time'] = scan['time']
+
+            # Save full row data for the collapsed parent (before we modify it)
+            # Include the original path for URI construction
+            collapsed_row = dict(single_child)
+            collapsed_row['original_path'] = single_child_path
+            collapsed_rows.append(collapsed_row)
+
+            # Update paths: strip the single_child_path prefix from grandchildren paths
+            prefix_to_strip = single_child_path + '/'
+            for gc in grandchildren:
+                if gc['path'].startswith(prefix_to_strip):
+                    gc['path'] = gc['path'][len(prefix_to_strip):]
+                if gc.get('parent') == single_child_path:
+                    gc['parent'] = '.'
+                elif gc.get('parent', '').startswith(prefix_to_strip):
+                    gc['parent'] = gc['parent'][len(prefix_to_strip):]
+
+            # Update root to be the single child
+            root = single_child
+            root['path'] = '.'
+            root['parent'] = None
+
+            # Grandchildren become the new children
+            children = grandchildren
+
+            # Also update rows for treemap - strip prefix and filter out the collapsed path
+            # (which becomes root, added separately by frontend)
+            new_rows = []
+            for r in rows:
+                if r['path'] == single_child_path:
+                    # Skip - this becomes root, which is added separately
+                    continue
+                if r['path'].startswith(prefix_to_strip):
+                    r['path'] = r['path'][len(prefix_to_strip):]
+                if r.get('parent') == single_child_path:
+                    r['parent'] = '.'
+                elif r.get('parent', '').startswith(prefix_to_strip):
+                    r['parent'] = r['parent'][len(prefix_to_strip):]
+                new_rows.append(r)
+            rows = new_rows
+
     # Patch in fresher child scans: find direct child paths with newer scans
     scan_time = scan['time']
     child_uri_prefix = uri.rstrip('/') + '/'
@@ -849,6 +916,37 @@ def get_scan():
             c['scan_time'] = stats['scan_time']
             c['patched'] = True  # Mark that this was patched from a fresher scan
 
+    # Add expand_preview for child directories that would auto-expand
+    # This shows users what path they'll land on when clicking (e.g., "vms" shows "vms / 0")
+    if expand_single:
+        for c in children:
+            if c.get('kind') != 'dir' or c.get('n_children') != 1:
+                continue
+            # Build the expand preview chain
+            preview_parts = []
+            current_path = c['path']
+            while True:
+                # Find children of current_path
+                if use_rel_path:
+                    sub_df = children_df[children_df['rel_parent'] == current_path]
+                else:
+                    sub_df = children_df[children_df['parent'] == current_path]
+                if len(sub_df) != 1:
+                    break
+                sub_row = sub_df.iloc[0]
+                if sub_row.get('kind') != 'dir':
+                    break
+                # Add to preview
+                sub_path = sub_row['rel_path'] if use_rel_path else sub_row['path']
+                sub_name = sub_path.split('/')[-1]
+                preview_parts.append(sub_name)
+                # Check if this also has exactly 1 child
+                if sub_row.get('n_children') != 1:
+                    break
+                current_path = sub_path
+            if preview_parts:
+                c['expand_preview'] = '/'.join(preview_parts)
+
     return jsonify({
         'root': root,
         'children': sorted(children, key=lambda x: -x.get('size', 0)),
@@ -858,6 +956,7 @@ def get_scan():
         'scan_status': 'full',
         'error_count': scan.get('error_count'),
         'error_paths': scan.get('error_paths'),
+        'collapsed_rows': collapsed_rows if collapsed_rows else None,
     })
 
 
