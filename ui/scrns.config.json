@@ -1,0 +1,27 @@
+{
+  "scan-list": {
+    "query": "",
+    "width": 1200,
+    "height": 700,
+    "selector": "table tbody tr"
+  },
+  "directory-listing": {
+    "query": "file/Users/ryan/c",
+    "width": 1200,
+    "height": 700,
+    "selector": "table tbody tr"
+  },
+  "treemap": {
+    "query": "s3/ctbk?view=treemap",
+    "width": 1200,
+    "height": 800,
+    "selector": ".js-plotly-plot",
+    "preScreenshotSleep": 1000
+  },
+  "s3-buckets": {
+    "query": "s3",
+    "width": 1200,
+    "height": 700,
+    "selector": "table tbody tr"
+  }
+}
