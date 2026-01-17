@@ -1,12 +1,13 @@
 """Migration commands for disk-tree database."""
-from os.path import isfile
+from os import makedirs, rename
+from os.path import basename, isfile, join
 
 import pandas as pd
-from click import command
+from click import command, option
 from utz import err
 
 from disk_tree.cli.base import cli
-from disk_tree.config import SQLITE_PATH as DB_PATH
+from disk_tree.config import SCANS_DIR, SQLITE_PATH as DB_PATH
 
 
 @cli.command('migrate')
@@ -142,3 +143,108 @@ def migrate_depth():
 
     conn.close()
     err(f"Depth migration complete: {updated} updated, {errors} errors")
+
+
+@cli.command('migrate-hybrid')
+@option('-n', '--dry-run', is_flag=True, help="Show what would be done without making changes")
+def migrate_hybrid(dry_run: bool):
+    """Migrate existing parquet scans to hybrid chunked format.
+
+    Re-saves each scan using HybridBackend, which auto-chunks large subtrees.
+    Original parquets are moved to a backup directory.
+    """
+    import sqlite3
+    from disk_tree.storage.hybrid import HybridBackend
+
+    if not isfile(DB_PATH):
+        err(f"Database not found: {DB_PATH}")
+        return
+
+    # Create backup directory
+    backup_dir = join(SCANS_DIR, 'backup_pre_hybrid')
+    if not dry_run:
+        makedirs(backup_dir, exist_ok=True)
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id, path, blob FROM scan ORDER BY time")
+    rows = cursor.fetchall()
+    err(f"Migrating {len(rows)} scans to hybrid format...")
+
+    backend = HybridBackend()
+
+    migrated = 0
+    chunked = 0
+    skipped = 0
+    errors = 0
+
+    for row in rows:
+        scan_id = row['id']
+        scan_path = row['path']
+        old_blob = row['blob']
+
+        if not isfile(old_blob):
+            err(f"  Parquet not found: {old_blob}")
+            errors += 1
+            continue
+
+        try:
+            df = pd.read_parquet(old_blob)
+            n_rows = len(df)
+
+            # Check if already has child_scan_id (already hybrid)
+            if 'child_scan_id' in df.columns and df['child_scan_id'].notna().any():
+                err(f"  Already hybrid: {scan_path} ({n_rows} rows)")
+                skipped += 1
+                continue
+
+            if dry_run:
+                # Estimate if chunking will happen
+                if 'n_desc' in df.columns and 'depth' in df.columns:
+                    depth1_dirs = df[(df['depth'] == 1) & (df['kind'] == 'dir')]
+                    large = depth1_dirs[depth1_dirs['n_desc'] >= backend.chunk_threshold]
+                    if not large.empty:
+                        err(f"  Would chunk: {scan_path} ({n_rows} rows, {len(large)} large subtrees)")
+                        chunked += 1
+                    else:
+                        err(f"  Would migrate: {scan_path} ({n_rows} rows, no chunking needed)")
+                else:
+                    err(f"  Would migrate: {scan_path} ({n_rows} rows)")
+                migrated += 1
+                continue
+
+            # Save using hybrid backend
+            new_blob = backend.save(df, scan_path)
+
+            # Check if chunking occurred
+            chunk_stats = backend.get_chunk_stats(new_blob)
+            num_chunks = chunk_stats.get('total_chunks', 0)
+
+            # Update database
+            cursor.execute("UPDATE scan SET blob = ? WHERE id = ?", (new_blob, scan_id))
+            conn.commit()
+
+            # Move original to backup
+            backup_path = join(backup_dir, basename(old_blob))
+            rename(old_blob, backup_path)
+
+            if num_chunks > 0:
+                err(f"  Chunked: {scan_path} ({n_rows} rows → {num_chunks} chunks)")
+                chunked += 1
+            else:
+                err(f"  Migrated: {scan_path} ({n_rows} rows)")
+            migrated += 1
+
+        except Exception as e:
+            err(f"  Error processing {scan_path}: {e}")
+            errors += 1
+
+    conn.close()
+
+    if dry_run:
+        err(f"Dry run complete: {migrated} would migrate ({chunked} would chunk), {skipped} skipped, {errors} errors")
+    else:
+        err(f"Migration complete: {migrated} migrated ({chunked} chunked), {skipped} skipped, {errors} errors")
+        err(f"Originals backed up to: {backup_dir}")
