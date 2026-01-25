@@ -21,6 +21,9 @@ CORS(app)
 
 DB_PATH = abspath(SQLITE_PATH)
 
+# Default max_rows for treemap performance
+DEFAULT_MAX_ROWS = 2000
+
 
 def init_db():
     """Initialize the database with required tables if they don't exist."""
@@ -396,13 +399,13 @@ def get_scan():
         uri: The path or s3:// URI to look up
         scan_id: Optional specific scan ID to use (for time-travel)
         depth: Max depth of children to return (default 2)
-        max_rows: Max rows to return for treemap (default 1000, 0 for unlimited)
+        max_rows: Max rows to return for treemap (default DEFAULT_MAX_ROWS, 0 for unlimited)
         expand_single: Auto-expand single-child directories (default true)
     """
     uri = request.args.get('uri', '/')
     scan_id = request.args.get('scan_id')
     depth = int(request.args.get('depth', 2))
-    max_rows = int(request.args.get('max_rows', 1000))
+    max_rows = int(request.args.get('max_rows', DEFAULT_MAX_ROWS))
     expand_single = request.args.get('expand_single', 'true').lower() != 'false'
 
     # Normalize URI
@@ -774,6 +777,33 @@ def get_scan():
         return d
 
     children = [row_to_dict(row) for _, row in direct_children_df.iterrows()]
+
+    # Load items from child scans for treemap completeness
+    # For directories with child_scan_id, load their direct children (depth-1 items)
+    # This ensures we show the top-level breakdown of each chunked directory
+    if 'child_scan_id' in df.columns:
+        child_scan_dfs = []
+        for _, row in direct_children_df.iterrows():
+            child_scan = row.get('child_scan_id')
+            if pd.notna(child_scan) and exists(child_scan):
+                try:
+                    child_df = pd.read_parquet(child_scan)
+                    # Only load direct children (depth=1) from child scans
+                    # These become depth=2 in the parent context
+                    child_df = child_df[child_df['depth'] == 1]
+                    if len(child_df) > 0:
+                        # Prefix paths with parent directory name
+                        parent_path = row['path'] if not use_rel_path else row.get('rel_path', row['path'])
+                        child_df = child_df.copy()
+                        child_df['path'] = parent_path + '/' + child_df['path']
+                        child_df['parent'] = parent_path  # All become children of this dir
+                        # Adjust depth: depth-1 in child becomes depth-2 in parent
+                        child_df['depth'] = 2
+                        child_scan_dfs.append(child_df)
+                except Exception as e:
+                    print(f"Error loading child scan {child_scan}: {e}")
+        if child_scan_dfs:
+            children_df = pd.concat([children_df] + child_scan_dfs, ignore_index=True)
 
     # Limit rows for treemap performance
     if max_rows > 0 and len(children_df) > max_rows:
