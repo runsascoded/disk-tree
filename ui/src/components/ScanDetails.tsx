@@ -924,8 +924,8 @@ export function ScanDetails() {
   // Click outside table to deselect
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      // Clear selection when clicking outside the actual table element
-      if (tableRef.current && !tableRef.current.contains(e.target as Node)) {
+      // Clear selection when clicking outside the wrapper (table + toolbar)
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
         setHoveredIndex(null)
         setRangeAnchor(null)
         setPinnedUris(new Set())
