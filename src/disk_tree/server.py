@@ -1580,22 +1580,24 @@ def delete_path():
     backend = get_backend()
     db = get_db()
 
-    # Find the most recent scan covering this path (exact match or ancestor)
+    # Find all scans covering this path, then pick the most recent
+    candidate_scans = []
     test_path = path
-    covering_scan = None
     while test_path and test_path != '/':
         cursor = db.execute(
-            'SELECT id, path, blob FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1',
+            'SELECT id, path, blob, time FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1',
             (test_path,)
         )
         row = cursor.fetchone()
         if row:
-            covering_scan = dict(row)
-            break
+            candidate_scans.append(dict(row))
         parent = dirname(test_path)
         if parent == test_path:
             break
         test_path = parent
+
+    # Pick the most recent scan
+    covering_scan = max(candidate_scans, key=lambda s: s['time']) if candidate_scans else None
 
     if covering_scan:
         scan_path = covering_scan['path']
