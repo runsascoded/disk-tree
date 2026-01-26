@@ -240,3 +240,40 @@ export async function fetchFilePreview(path: string, maxSize?: number): Promise<
   }
   return res.json()
 }
+
+// Storage backend info
+export type BackendInfo = {
+  name: string
+  supports_updates: boolean
+  stats?: {
+    num_scans?: number
+    total_rows?: number
+    total_size_tracked?: number
+    db_file_size?: number
+  }
+}
+
+export type AvailableBackend = {
+  name: string
+  description: string
+  supports_updates: boolean
+  current: boolean
+}
+
+export type AvailableBackendsResponse = {
+  backends: AvailableBackend[]
+  current: string
+  switch_instructions: string
+}
+
+export async function fetchBackendInfo(): Promise<BackendInfo> {
+  const res = await fetch('/api/backend')
+  if (!res.ok) throw new Error('Failed to fetch backend info')
+  return res.json()
+}
+
+export async function fetchAvailableBackends(): Promise<AvailableBackendsResponse> {
+  const res = await fetch('/api/backend/available')
+  if (!res.ok) throw new Error('Failed to fetch available backends')
+  return res.json()
+}

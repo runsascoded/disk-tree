@@ -1682,6 +1682,72 @@ def delete_path():
     })
 
 
+@app.route('/api/backend', methods=['GET'])
+def get_backend_info():
+    """Get information about the current storage backend.
+
+    Returns:
+        name: Backend name (parquet, duckdb, sqlite, hybrid)
+        supports_updates: Whether in-place updates are supported
+        stats: Backend-specific statistics (if available)
+    """
+    backend = get_backend()
+    result = {
+        'name': backend.name,
+        'supports_updates': backend.supports_updates,
+    }
+
+    # Add backend-specific stats if available
+    if hasattr(backend, 'get_stats'):
+        try:
+            result['stats'] = backend.get_stats()
+        except Exception:
+            pass
+
+    return jsonify(result)
+
+
+@app.route('/api/backend/available', methods=['GET'])
+def get_available_backends():
+    """List available storage backends.
+
+    Returns list of backends with their capabilities.
+    Note: Switching backends requires restarting with DISK_TREE_BACKEND env var.
+    """
+    backends = [
+        {
+            'name': 'hybrid',
+            'description': 'Chunked parquet files (default)',
+            'supports_updates': True,
+        },
+        {
+            'name': 'duckdb',
+            'description': 'Single DuckDB database',
+            'supports_updates': True,
+        },
+        {
+            'name': 'sqlite',
+            'description': 'Single SQLite database',
+            'supports_updates': True,
+        },
+        {
+            'name': 'parquet',
+            'description': 'Individual parquet files (legacy)',
+            'supports_updates': False,
+        },
+    ]
+
+    current = get_backend().name
+    for b in backends:
+        b['current'] = b['name'] == current
+
+    return jsonify({
+        'backends': backends,
+        'current': current,
+        'switch_instructions': 'Set DISK_TREE_BACKEND env var and restart server',
+    })
+
+
 # Static file serving routes (if UI is bundled)
 if STATIC_DIR:
     @app.route('/')
