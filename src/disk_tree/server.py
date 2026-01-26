@@ -1545,12 +1545,12 @@ def delete_path():
         return jsonify({'error': 'Path is required'}), 400
 
     # Security: only allow deleting within user's home directory or specific paths
-    # For now, require absolute paths and check they exist
+    # For now, require absolute paths
     if not path.startswith('/'):
         return jsonify({'error': 'Path must be absolute'}), 400
 
-    if not isfile(path) and not isdir(path):
-        return jsonify({'error': 'Path does not exist'}), 404
+    # Check if file/dir exists on disk
+    path_exists = isfile(path) or isdir(path)
 
     # Get file size (fast stat call); skip for directories
     deleted_size = None
@@ -1560,14 +1560,15 @@ def delete_path():
         except (OSError, PermissionError):
             pass
 
-    # Perform the deletion
-    try:
-        if isfile(path):
-            remove(path)
-        else:
-            shutil.rmtree(path)
-    except (OSError, PermissionError) as e:
-        return jsonify({'error': f'Failed to delete: {e}'}), 500
+    # Perform the deletion if path exists
+    if path_exists:
+        try:
+            if isfile(path):
+                remove(path)
+            else:
+                shutil.rmtree(path)
+        except (OSError, PermissionError) as e:
+            return jsonify({'error': f'Failed to delete: {e}'}), 500
 
     # Update the most recent scan that covers this path
     deleted_n_desc = None
@@ -1670,6 +1671,7 @@ def delete_path():
         'path': path,
         'deleted_size': deleted_size,
         'deleted_n_desc': deleted_n_desc,
+        'already_deleted': not path_exists,
     })
 
 
