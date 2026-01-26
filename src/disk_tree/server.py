@@ -433,7 +433,9 @@ def get_scan():
             if not (search_path == scan_path or search_path.startswith(scan_path + '/')):
                 return jsonify({'error': f"Scan {scan_id} does not cover path {uri}"}), 400
     else:
-        # Try exact match first, then ancestors
+        # Find the most recent scan covering this path (exact or ancestor)
+        # Collect all candidate scans, then pick the freshest
+        candidate_scans = []
         test_path = search_path
         while test_path:
             cursor = db.execute(
@@ -442,8 +444,7 @@ def get_scan():
             )
             row = cursor.fetchone()
             if row:
-                scan = dict(row)
-                break
+                candidate_scans.append(dict(row))
             # Go up one directory
             if test_path == '/' or test_path == 's3://':
                 break
@@ -452,6 +453,10 @@ def get_scan():
             if parent == test_path:
                 break
             test_path = parent
+
+        # Pick the most recent scan
+        if candidate_scans:
+            scan = max(candidate_scans, key=lambda s: s['time'])
 
     if not scan:
         # No ancestor scan - build from filesystem + any child scans
