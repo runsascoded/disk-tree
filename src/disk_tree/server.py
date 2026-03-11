@@ -1817,11 +1817,14 @@ if STATIC_DIR:
 
 
 def main():
+    import os
+    debug = os.environ.get('FLASK_DEBUG', '0').lower() in ('1', 'true', 'yes')
+    port = int(os.environ.get('PORT', '5001'))
     if STATIC_DIR:
         print(f"Serving UI from: {STATIC_DIR}")
     else:
         print("No UI found. Run 'cd ui && pnpm build' to build the UI.")
-    app.run(debug=True, port=5001)
+    app.run(debug=debug, port=port)
 
 
 if __name__ == '__main__':
