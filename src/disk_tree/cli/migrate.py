@@ -32,6 +32,7 @@ def migrate():
         ('size', 'INTEGER'),
         ('n_children', 'INTEGER'),
         ('n_desc', 'INTEGER'),
+        ('mtime', 'INTEGER'),
     ]
     for col_name, col_type in new_columns:
         if col_name not in columns:
@@ -42,7 +43,7 @@ def migrate():
             err(f"Column already exists: {col_name}")
 
     # Backfill stats from parquet files
-    cursor.execute("SELECT id, path, blob, size FROM scan")
+    cursor.execute("SELECT id, path, blob, size, mtime FROM scan")
     rows = cursor.fetchall()
     err(f"Backfilling stats for {len(rows)} scans...")
 
@@ -53,9 +54,10 @@ def migrate():
         scan_id = row['id']
         blob_path = row['blob']
         existing_size = row['size']
+        existing_mtime = row['mtime']
 
-        # Skip if already has size (already migrated)
-        if existing_size is not None:
+        # Skip if already fully migrated (has both size and mtime)
+        if existing_size is not None and existing_mtime is not None:
             skipped += 1
             continue
 
@@ -79,10 +81,11 @@ def migrate():
             size = int(root['size']) if pd.notna(root['size']) else None
             n_children = int(root['n_children']) if pd.notna(root.get('n_children')) else None
             n_desc = int(root['n_desc']) if pd.notna(root.get('n_desc')) else None
+            mtime = int(root['mtime']) if pd.notna(root.get('mtime')) else None
 
             cursor.execute(
-                "UPDATE scan SET size = ?, n_children = ?, n_desc = ? WHERE id = ?",
-                (size, n_children, n_desc, scan_id),
+                "UPDATE scan SET size = ?, n_children = ?, n_desc = ?, mtime = ? WHERE id = ?",
+                (size, n_children, n_desc, mtime, scan_id),
             )
             conn.commit()
             updated += 1
