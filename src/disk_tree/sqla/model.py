@@ -107,7 +107,7 @@ class Scan(Base):
 
         if not path.startswith('s3://'):
             path = os.path.abspath(path)
-        path = path.rstrip('/')
+        path = path.rstrip('/') or '/'
         now = datetime.now().astimezone()
 
         # Set up progress tracking
