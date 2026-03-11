@@ -1,0 +1,953 @@
+path,size,mtime,n_desc,n_children,kind,parent,uri,depth
+.,1624487667639,1627862543,952,18,dir,,s3://runsascoded/gopro,0
+2021-07-03,62748476082,1626318433,24,2,dir,.,s3://runsascoded/gopro/2021-07-03,1
+2021-07-05,69165512512,1626320563,25,2,dir,.,s3://runsascoded/gopro/2021-07-05,1
+2021-07-10,136999276245,1627229066,65,19,dir,.,s3://runsascoded/gopro/2021-07-10,1
+2021-07-11,166274355830,1626329570,78,26,dir,.,s3://runsascoded/gopro/2021-07-11,1
+2021-07-14,100473239016,1626345967,58,5,dir,.,s3://runsascoded/gopro/2021-07-14,1
+2021-07-15,224828085980,1626401936,59,1,dir,.,s3://runsascoded/gopro/2021-07-15,1
+2021-07-16,75596929125,1627236122,75,2,dir,.,s3://runsascoded/gopro/2021-07-16,1
+2021-07-17,18904148143,1627236791,27,11,dir,.,s3://runsascoded/gopro/2021-07-17,1
+2021-07-20,82268729685,1627247252,32,2,dir,.,s3://runsascoded/gopro/2021-07-20,1
+2021-07-21,37040888879,1627249199,14,2,dir,.,s3://runsascoded/gopro/2021-07-21,1
+2021-07-22,32976460447,1627250898,11,1,dir,.,s3://runsascoded/gopro/2021-07-22,1
+2021-07-23,49274175755,1627253393,19,2,dir,.,s3://runsascoded/gopro/2021-07-23,1
+2021-07-24,56676758146,1627256531,27,2,dir,.,s3://runsascoded/gopro/2021-07-24,1
+2021-07-25,79254897449,1627308592,122,101,dir,.,s3://runsascoded/gopro/2021-07-25,1
+2021-07-26,54374201460,1627517060,74,3,dir,.,s3://runsascoded/gopro/2021-07-26,1
+2021-07-27,116579250978,1627518168,154,3,dir,.,s3://runsascoded/gopro/2021-07-27,1
+2021-07-28,114776778488,1627854865,42,10,dir,.,s3://runsascoded/gopro/2021-07-28,1
+2021-07-31,146275503419,1627862543,45,7,dir,.,s3://runsascoded/gopro/2021-07-31,1
+2021-07-03/HERO8 Black,24506233904,1626317219,10,9,dir,2021-07-03,s3://runsascoded/gopro/2021-07-03/HERO8 Black,2
+2021-07-03/HERO9 Black,38242242178,1626318433,13,12,dir,2021-07-03,s3://runsascoded/gopro/2021-07-03/HERO9 Black,2
+2021-07-05/HERO8 Black,27402465519,1626319104,11,10,dir,2021-07-05,s3://runsascoded/gopro/2021-07-05/HERO8 Black,2
+2021-07-05/HERO9 Black,41763046993,1626320563,13,12,dir,2021-07-05,s3://runsascoded/gopro/2021-07-05/HERO9 Black,2
+2021-07-10/HERO8 Black,58343217282,1626322374,20,19,dir,2021-07-10,s3://runsascoded/gopro/2021-07-10/HERO8 Black,2
+2021-07-10/HERO9 Black,78008970702,1626324560,27,26,dir,2021-07-10,s3://runsascoded/gopro/2021-07-10/HERO9 Black,2
+2021-07-10/NJ_SI_loop.fit,234976,1627228977,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/NJ_SI_loop.fit,2
+2021-07-10/NJ_SI_loop.gpx,799466,1627228978,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/NJ_SI_loop.gpx,2
+2021-07-10/NJ_SI_loop.json,10682817,1627228983,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/NJ_SI_loop.json,2
+2021-07-10/barrier crash.png,45920983,1627229015,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/barrier crash.png,2
+2021-07-10/bridge sign block 1.png,44320794,1627228989,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/bridge sign block 1.png,2
+2021-07-10/bridge sign block 2.png,44726848,1627229033,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/bridge sign block 2.png,2
+2021-07-10/bridge to newark 1.png,44974014,1627229003,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/bridge to newark 1.png,2
+2021-07-10/bridge to newark 2.png,44750037,1627229029,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/bridge to newark 2.png,2
+2021-07-10/bridge to newark 3.png,45690221,1627229014,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/bridge to newark 3.png,2
+2021-07-10/bridge to newark 4.png,45916585,1627229013,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/bridge to newark 4.png,2
+2021-07-10/dz newark ave.png,45627534,1627229037,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/dz newark ave.png,2
+2021-07-10/hackensack ave 1.png,46036482,1627229044,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/hackensack ave 1.png,2
+2021-07-10/hackensack ave 2.png,46525475,1627229044,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/hackensack ave 2.png,2
+2021-07-10/hackensack ave 3.png,42581443,1627229052,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/hackensack ave 3.png,2
+2021-07-10/hackensack ave 4.png,46462663,1627229061,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/hackensack ave 4.png,2
+2021-07-10/hackensack ave 5.png,46390346,1627229066,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/hackensack ave 5.png,2
+2021-07-10/missing barrier.png,45447577,1627229066,1,0,file,2021-07-10,s3://runsascoded/gopro/2021-07-10/missing barrier.png,2
+2021-07-11/HERO8 Black,67918775485,1626326603,25,24,dir,2021-07-11,s3://runsascoded/gopro/2021-07-11/HERO8 Black,2
+2021-07-11/HERO9 Black,90475308754,1626329240,28,27,dir,2021-07-11,s3://runsascoded/gopro/2021-07-11/HERO9 Black,2
+2021-07-11/bbl 1 broadway mh.mp4,172164022,1626329101,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/bbl 1 broadway mh.mp4,2
+2021-07-11/bbl 2 jay st bk.mp4,52034742,1626329106,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/bbl 2 jay st bk.mp4,2
+2021-07-11/bbl 3 2x hoyt st bk.mp4,83373232,1626329115,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/bbl 3 2x hoyt st bk.mp4,2
+2021-07-11/bbl 4 van brunt st bk.mp4,27211477,1626329113,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/bbl 4 van brunt st bk.mp4,2
+2021-07-11/bbl 4 van brunt st bk.png,38940532,1626329120,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/bbl 4 van brunt st bk.png,2
+2021-07-11/bbl 5 kent ave bk.mp4,34443080,1626329122,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/bbl 5 kent ave bk.mp4,2
+2021-07-11/cdf bkb park.mp4,216632116,1626329156,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/cdf bkb park.mp4,2
+2021-07-11/coles tricycle.png,45933784,1626329132,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/coles tricycle.png,2
+"2021-07-11/door zones, moto muffler 4th ave bk.mp4",163641649,1626329151,1,0,file,2021-07-11,"s3://runsascoded/gopro/2021-07-11/door zones, moto muffler 4th ave bk.mp4",2
+2021-07-11/dz 1.png,39751015,1626329142,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/dz 1.png,2
+2021-07-11/dz 2.png,38473948,1626329151,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/dz 2.png,2
+2021-07-11/front 5x bush terminal to greenpoint.mp4,2762376523,1626329570,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/front 5x bush terminal to greenpoint.mp4,2
+2021-07-11/front 5x greenpoint to jc.mp4,1464703969,1626329366,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/front 5x greenpoint to jc.mp4,2
+2021-07-11/front 5x jc to bush terminal.mp4,1709336757,1626329412,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/front 5x jc to bush terminal.mp4,2
+2021-07-11/gga 1 grove st observer.mp4,179971657,1626329187,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/gga 1 grove st observer.mp4,2
+2021-07-11/gga 2 2x hoyt bk.mp4,27210391,1626329194,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/gga 2 2x hoyt bk.mp4,2
+2021-07-11/gga 3 9th st bk.mp4,87772325,1626329209,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/gga 3 9th st bk.mp4,2
+2021-07-11/gga 4 bay st bk.mp4,101810981,1626329225,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/gga 4 bay st bk.mp4,2
+2021-07-11/gga 5 franklin st greenpoint bk.mp4,329681898,1626329277,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/gga 5 franklin st greenpoint bk.mp4,2
+2021-07-11/gga 6 marin 18th st jc.mp4,45837302,1626329250,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/gga 6 marin 18th st jc.mp4,2
+2021-07-11/grate close pass.mp4,67551140,1626329263,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/grate close pass.mp4,2
+2021-07-11/lh 1 kent ave bk.mp4,24664486,1626329270,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/lh 1 kent ave bk.mp4,2
+2021-07-11/mhb motos.mp4,129933625,1626329291,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/mhb motos.mp4,2
+2021-07-11/observer hole 1.png,36820940,1626329284,1,0,file,2021-07-11,s3://runsascoded/gopro/2021-07-11/observer hole 1.png,2
+2021-07-14/HERO8 Black,2645523547,1626329543,13,10,dir,2021-07-14,s3://runsascoded/gopro/2021-07-14/HERO8 Black,2
+2021-07-14/HERO9 Black,97613491515,1626345967,41,38,dir,2021-07-14,s3://runsascoded/gopro/2021-07-14/HERO9 Black,2
+2021-07-14/dz newark ave.png,11428974,1626329574,1,0,file,2021-07-14,s3://runsascoded/gopro/2021-07-14/dz newark ave.png,2
+2021-07-14/gga newark ave 1.mp4,46073782,1626329584,1,0,file,2021-07-14,s3://runsascoded/gopro/2021-07-14/gga newark ave 1.mp4,2
+2021-07-14/gga newark ave 2.mp4,156721198,1626329612,1,0,file,2021-07-14,s3://runsascoded/gopro/2021-07-14/gga newark ave 2.mp4,2
+2021-07-15/HERO9 Black,224828085980,1626401936,58,57,dir,2021-07-15,s3://runsascoded/gopro/2021-07-15/HERO9 Black,2
+2021-07-16/HERO8 Black,15941291138,1627231944,26,25,dir,2021-07-16,s3://runsascoded/gopro/2021-07-16/HERO8 Black,2
+2021-07-16/HERO9 Black,59655637987,1627236122,48,47,dir,2021-07-16,s3://runsascoded/gopro/2021-07-16/HERO9 Black,2
+2021-07-17/HERO8 Black,15927107575,1627236791,7,6,dir,2021-07-17,s3://runsascoded/gopro/2021-07-17/HERO8 Black,2
+2021-07-17/HERO9 Black,1565273907,1627236499,10,9,dir,2021-07-17,s3://runsascoded/gopro/2021-07-17/HERO9 Black,2
+2021-07-17/arrive lofi.mp4,167353078,1627236360,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/arrive lofi.mp4,2
+2021-07-17/arrive lofi.png,44122855,1627236376,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/arrive lofi.png,2
+2021-07-17/baldwin 4x.mp4,505312612,1627236509,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/baldwin 4x.mp4,2
+2021-07-17/bergen 2.png,43889546,1627236497,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/bergen 2.png,2
+2021-07-17/bergen.png,45343497,1627236511,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/bergen.png,2
+2021-07-17/chris arrive.png,44507576,1627236514,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/chris arrive.png,2
+2021-07-17/roll out 1.png,43370599,1627236522,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/roll out 1.png,2
+2021-07-17/roll out 2.png,42237530,1627236523,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/roll out 2.png,2
+2021-07-17/roll out 2x.mp4,475629368,1627236634,1,0,file,2021-07-17,s3://runsascoded/gopro/2021-07-17/roll out 2x.mp4,2
+2021-07-20/HERO8 Black,34830178756,1627246201,14,13,dir,2021-07-20,s3://runsascoded/gopro/2021-07-20/HERO8 Black,2
+2021-07-20/HERO9 Black,47438550929,1627247252,17,16,dir,2021-07-20,s3://runsascoded/gopro/2021-07-20/HERO9 Black,2
+2021-07-21/HERO8 Black,18040928169,1627248016,6,5,dir,2021-07-21,s3://runsascoded/gopro/2021-07-21/HERO8 Black,2
+2021-07-21/HERO9 Black,18999960710,1627249199,7,6,dir,2021-07-21,s3://runsascoded/gopro/2021-07-21/HERO9 Black,2
+2021-07-22/HERO9 Black,32976460447,1627250898,10,9,dir,2021-07-22,s3://runsascoded/gopro/2021-07-22/HERO9 Black,2
+2021-07-23/HERO8 Black,20795684405,1627251931,8,7,dir,2021-07-23,s3://runsascoded/gopro/2021-07-23/HERO8 Black,2
+2021-07-23/HERO9 Black,28478491350,1627253393,10,9,dir,2021-07-23,s3://runsascoded/gopro/2021-07-23/HERO9 Black,2
+2021-07-24/HERO8 Black,35917501238,1627255527,15,14,dir,2021-07-24,s3://runsascoded/gopro/2021-07-24/HERO8 Black,2
+2021-07-24/HERO9 Black,20759256908,1627256531,11,10,dir,2021-07-24,s3://runsascoded/gopro/2021-07-24/HERO9 Black,2
+2021-07-25/HERO8 Black,29835469329,1627258169,10,9,dir,2021-07-25,s3://runsascoded/gopro/2021-07-25/HERO8 Black,2
+2021-07-25/HERO9 Black,41529346827,1627260034,12,11,dir,2021-07-25,s3://runsascoded/gopro/2021-07-25/HERO9 Black,2
+2021-07-25/camera fix 2.mp4,133006123,1627305846,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/camera fix 2.mp4,2
+2021-07-25/camera fix.mp4,295343837,1627296994,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/camera fix.mp4,2
+2021-07-25/empr 2.png,35358620,1627296953,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/empr 2.png,2
+2021-07-25/empr 3.png,34979376,1627296953,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/empr 3.png,2
+2021-07-25/empr.mp4,316549295,1627305938,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/empr.mp4,2
+2021-07-25/end 1.png,33214246,1627296953,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/end 1.png,2
+2021-07-25/end 2.png,35068045,1627296954,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/end 2.png,2
+2021-07-25/end 3.png,35883052,1627296963,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/end 3.png,2
+2021-07-25/end 4.png,37236832,1627296966,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/end 4.png,2
+2021-07-25/end 5.png,37527476,1627296962,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/end 5.png,2
+2021-07-25/end 6.png,37406743,1627296964,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/end 6.png,2
+2021-07-25/end 7.png,37545174,1627296975,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/end 7.png,2
+2021-07-25/fall 2.mp4,345698524,1627308592,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/fall 2.mp4,2
+2021-07-25/fall front.mp4,91201416,1627296990,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/fall front.mp4,2
+2021-07-25/fall rear.mp4,338591057,1627297069,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/fall rear.mp4,2
+2021-07-25/falls 1.png,35402883,1627296989,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/falls 1.png,2
+2021-07-25/farms.mp4,288921260,1627300350,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/farms.mp4,2
+2021-07-25/gas station 1.png,36651289,1627296985,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/gas station 1.png,2
+2021-07-25/gas station 2.png,36888212,1627296998,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/gas station 2.png,2
+2021-07-25/gas station roll out.mp4,542853190,1627300281,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/gas station roll out.mp4,2
+2021-07-25/group old long ridge 1.png,34475845,1627296999,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/group old long ridge 1.png,2
+2021-07-25/group upper shad.png,39168957,1627297002,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/group upper shad.png,2
+2021-07-25/h empr 1.png,34023336,1627297002,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/h empr 1.png,2
+2021-07-25/hmn old long ridge.png,35993809,1627297015,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/hmn old long ridge.png,2
+2021-07-25/hnlr empr 1.png,35469727,1627297006,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/hnlr empr 1.png,2
+2021-07-25/hnrm taconic 1.png,39271486,1627297025,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/hnrm taconic 1.png,2
+2021-07-25/hr riverbank.png,34231096,1627297009,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/hr riverbank.png,2
+2021-07-25/hrn left pine brook.png,33193101,1627297018,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/hrn left pine brook.png,2
+2021-07-25/hrn riverbank 2.png,38018947,1627297019,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/hrn riverbank 2.png,2
+2021-07-25/hrn riverbank 3.png,39882198,1627297021,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/hrn riverbank 3.png,2
+2021-07-25/hrn riverbank.png,37422413,1627297025,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/hrn riverbank.png,2
+2021-07-25/leah 1.png,40510751,1627297028,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/leah 1.png,2
+2021-07-25/leah 2.png,39527693,1627297039,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/leah 2.png,2
+2021-07-25/leah old long ridge 1.png,32708873,1627297029,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/leah old long ridge 1.png,2
+2021-07-25/lh lower shad 1.png,37940064,1627297037,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lh lower shad 1.png,2
+2021-07-25/lhnr empr 1.png,40222832,1627297039,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lhnr empr 1.png,2
+2021-07-25/lhnr taconic 1.png,33758708,1627297040,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lhnr taconic 1.png,2
+2021-07-25/lhrn empr 1.png,39491104,1627297048,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lhrn empr 1.png,2
+2021-07-25/lp farms 1.png,36176834,1627297049,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lp farms 1.png,2
+2021-07-25/lph pine brook.png,35259697,1627297072,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lph pine brook.png,2
+2021-07-25/lr taconic 1.png,40146768,1627297052,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lr taconic 1.png,2
+2021-07-25/lr taconic left 2.png,35115051,1627297070,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lr taconic left 2.png,2
+2021-07-25/lr taconic left.png,37282991,1627297071,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/lr taconic left.png,2
+2021-07-25/mark 1.png,36715400,1627297053,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark 1.png,2
+2021-07-25/mark 2.png,38680901,1627297055,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark 2.png,2
+2021-07-25/mark 3.png,38896236,1627297057,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark 3.png,2
+2021-07-25/mark 4.png,38725574,1627297059,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark 4.png,2
+2021-07-25/mark 5.png,39428877,1627297061,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark 5.png,2
+2021-07-25/mark 6.png,39897844,1627297063,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark 6.png,2
+2021-07-25/mark long ridge 1.png,38065556,1627297065,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark long ridge 1.png,2
+2021-07-25/mark long ridge 2.png,35753710,1627297067,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark long ridge 2.png,2
+2021-07-25/mark upper shad.mp4,207159103,1627300233,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mark upper shad.mp4,2
+2021-07-25/mlh lower shad 1.png,36803049,1627297074,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mlh lower shad 1.png,2
+2021-07-25/mn 1.png,39698956,1627297079,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mn 1.png,2
+2021-07-25/mn 2.png,40158626,1627297081,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mn 2.png,2
+2021-07-25/mn 3.png,38640917,1627297083,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mn 3.png,2
+2021-07-25/mpl farms 1.png,37715942,1627297085,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mpl farms 1.png,2
+2021-07-25/mpl farms 2.png,35923531,1627297175,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mpl farms 2.png,2
+2021-07-25/mpl farms 3.png,37782095,1627297092,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/mpl farms 3.png,2
+2021-07-25/naomi 1.png,40099598,1627297089,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/naomi 1.png,2
+2021-07-25/nh church 1.png,38466748,1627297175,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/nh church 1.png,2
+2021-07-25/nhr long ridge.png,38329002,1627297172,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/nhr long ridge.png,2
+2021-07-25/old long ridge.mp4,575835051,1627300322,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/old long ridge.mp4,2
+2021-07-25/pine brook 1.png,35062946,1627297176,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/pine brook 1.png,2
+2021-07-25/pine brook 2.png,34735667,1627297093,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/pine brook 2.png,2
+2021-07-25/pine brook 3.png,33069296,1627297096,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/pine brook 3.png,2
+2021-07-25/pine brook 4.png,39175691,1627297097,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/pine brook 4.png,2
+2021-07-25/pine brook 5.png,36628780,1627297099,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/pine brook 5.png,2
+2021-07-25/pine brook.mp4,292965305,1627305877,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/pine brook.mp4,2
+2021-07-25/pml old long ridge.png,32481566,1627297101,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/pml old long ridge.png,2
+2021-07-25/r farms 1.png,35123828,1627297103,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/r farms 1.png,2
+2021-07-25/riverbank 1.png,37081195,1627297105,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/riverbank 1.png,2
+2021-07-25/riverbank 2.png,38010759,1627297107,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/riverbank 2.png,2
+2021-07-25/riverbank 3.png,33408474,1627297109,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/riverbank 3.png,2
+2021-07-25/riverbank 4.png,34979756,1627297111,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/riverbank 4.png,2
+2021-07-25/riverbank 5.png,33551071,1627297113,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/riverbank 5.png,2
+2021-07-25/riverbank 6.png,35410464,1627297115,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/riverbank 6.png,2
+2021-07-25/riverbank 7.png,36491315,1627297117,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/riverbank 7.png,2
+2021-07-25/rm 1.png,38776116,1627297119,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/rm 1.png,2
+2021-07-25/rm farms 1.png,36527412,1627297121,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/rm farms 1.png,2
+2021-07-25/rm farms 2.png,36844488,1627297123,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/rm farms 2.png,2
+2021-07-25/rm farms 3.png,37610403,1627297125,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/rm farms 3.png,2
+2021-07-25/rmn farms 1.png,36208980,1627297127,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/rmn farms 1.png,2
+2021-07-25/rn sweep 1.png,40668177,1627297129,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/rn sweep 1.png,2
+2021-07-25/roundtop to gas station.mp4,317056563,1627305904,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/roundtop to gas station.mp4,2
+2021-07-25/ryan taconic right.png,40656412,1627297132,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/ryan taconic right.png,2
+2021-07-25/shad w.mp4,335708707,1627305927,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/shad w.mp4,2
+2021-07-25/start 1.png,35047296,1627297133,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/start 1.png,2
+2021-07-25/start 2.png,42603597,1627297136,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/start 2.png,2
+2021-07-25/taconic 1.png,36618024,1627297138,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/taconic 1.png,2
+2021-07-25/taconic 2.png,37249847,1627297140,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/taconic 2.png,2
+2021-07-25/taconic 3.png,34253692,1627297142,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/taconic 3.png,2
+2021-07-25/taconic 4.png,36077604,1627297144,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/taconic 4.png,2
+2021-07-25/taconic 5.png,37538645,1627297146,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/taconic 5.png,2
+2021-07-25/taconic 6.png,38063966,1627297148,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/taconic 6.png,2
+2021-07-25/taconic 7.png,39046229,1627297150,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/taconic 7.png,2
+2021-07-25/taconic.mp4,323306556,1627297168,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/taconic.mp4,2
+2021-07-25/upper shad 1.png,39398851,1627297170,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/upper shad 1.png,2
+2021-07-25/upper shad roll out.mp4,375247968,1627300347,1,0,file,2021-07-25,s3://runsascoded/gopro/2021-07-25/upper shad roll out.mp4,2
+2021-07-26/HERO8 Black,21841859366,1627428646,31,30,dir,2021-07-26,s3://runsascoded/gopro/2021-07-26/HERO8 Black,2
+2021-07-26/HERO9 Black,29092158587,1627432272,41,40,dir,2021-07-26,s3://runsascoded/gopro/2021-07-26/HERO9 Black,2
+2021-07-26/pnp vert 4x 2.mp4,3440183507,1627517060,1,0,file,2021-07-26,s3://runsascoded/gopro/2021-07-26/pnp vert 4x 2.mp4,2
+2021-07-27/HERO8 Black,46559233520,1627436231,66,65,dir,2021-07-27,s3://runsascoded/gopro/2021-07-27/HERO8 Black,2
+2021-07-27/HERO9 Black,61958045075,1627439934,86,85,dir,2021-07-27,s3://runsascoded/gopro/2021-07-27/HERO9 Black,2
+2021-07-27/vert stack 4x trimmed.mp4,8061972383,1627518168,1,0,file,2021-07-27,s3://runsascoded/gopro/2021-07-27/vert stack 4x trimmed.mp4,2
+2021-07-28/._noni view.png,4096,1627517340,1,0,file,2021-07-28,s3://runsascoded/gopro/2021-07-28/._noni view.png,2
+2021-07-28/._vertical 4x trimmed.mp4,4096,1627551905,1,0,file,2021-07-28,s3://runsascoded/gopro/2021-07-28/._vertical 4x trimmed.mp4,2
+2021-07-28/.ipynb_checkpoints,72,1627854865,2,1,dir,2021-07-28,s3://runsascoded/gopro/2021-07-28/.ipynb_checkpoints,2
+2021-07-28/HERO8 Black,45995850672,1627520499,14,13,dir,2021-07-28,s3://runsascoded/gopro/2021-07-28/HERO8 Black,2
+2021-07-28/HERO9 Black,61266376391,1627523142,18,17,dir,2021-07-28,s3://runsascoded/gopro/2021-07-28/HERO9 Black,2
+2021-07-28/chapters.json,12963,1627854865,1,0,file,2021-07-28,s3://runsascoded/gopro/2021-07-28/chapters.json,2
+2021-07-28/extract_chapter_info.ipynb,55196,1627854865,1,0,file,2021-07-28,s3://runsascoded/gopro/2021-07-28/extract_chapter_info.ipynb,2
+2021-07-28/metadata.txt,3364,1627854865,1,0,file,2021-07-28,s3://runsascoded/gopro/2021-07-28/metadata.txt,2
+2021-07-28/noni view.png,45348513,1627522770,1,0,file,2021-07-28,s3://runsascoded/gopro/2021-07-28/noni view.png,2
+2021-07-28/vertical 4x trimmed.mp4,7469123125,1627552474,1,0,file,2021-07-28,s3://runsascoded/gopro/2021-07-28/vertical 4x trimmed.mp4,2
+2021-07-31/HERO9 Black,145471221303,1627862543,38,37,dir,2021-07-31,s3://runsascoded/gopro/2021-07-31/HERO9 Black,2
+2021-07-31/all 200x.mp4,602905751,1627862390,1,0,file,2021-07-31,s3://runsascoded/gopro/2021-07-31/all 200x.mp4,2
+2021-07-31/flower chat.png,37527946,1627862307,1,0,file,2021-07-31,s3://runsascoded/gopro/2021-07-31/flower chat.png,2
+2021-07-31/mulch moat.png,46749861,1627862323,1,0,file,2021-07-31,s3://runsascoded/gopro/2021-07-31/mulch moat.png,2
+2021-07-31/mulch.png,38824799,1627862337,1,0,file,2021-07-31,s3://runsascoded/gopro/2021-07-31/mulch.png,2
+2021-07-31/ryan 1.png,38772588,1627862351,1,0,file,2021-07-31,s3://runsascoded/gopro/2021-07-31/ryan 1.png,2
+2021-07-31/sidewalk 1.png,39501171,1627862365,1,0,file,2021-07-31,s3://runsascoded/gopro/2021-07-31/sidewalk 1.png,2
+2021-07-03/HERO8 Black/._GH010726.MP4,4096,1626316116,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/._GH010726.MP4,3
+2021-07-03/HERO8 Black/GH010723.MP4,3439241733,1626316648,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/GH010723.MP4,3
+2021-07-03/HERO8 Black/GH010724.MP4,4003823013,1626316780,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/GH010724.MP4,3
+2021-07-03/HERO8 Black/GH010725.MP4,4003499998,1626316834,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/GH010725.MP4,3
+2021-07-03/HERO8 Black/GH010726.MP4,2002271485,1626316621,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/GH010726.MP4,3
+2021-07-03/HERO8 Black/GH020724.MP4,4003555735,1626317083,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/GH020724.MP4,3
+2021-07-03/HERO8 Black/GH020725.MP4,4003552713,1626317219,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/GH020725.MP4,3
+2021-07-03/HERO8 Black/GH030724.MP4,922122574,1626316787,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/GH030724.MP4,3
+2021-07-03/HERO8 Black/GH030725.MP4,2128162557,1626317112,1,0,file,2021-07-03/HERO8 Black,s3://runsascoded/gopro/2021-07-03/HERO8 Black/GH030725.MP4,3
+2021-07-03/HERO9 Black/GH010455.MP4,4004198503,1626317395,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH010455.MP4,3
+2021-07-03/HERO9 Black/GH010456.MP4,4004106517,1626317422,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH010456.MP4,3
+2021-07-03/HERO9 Black/GH010457.MP4,4004190556,1626317686,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH010457.MP4,3
+2021-07-03/HERO9 Black/GH010458.MP4,1115483621,1626317286,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH010458.MP4,3
+2021-07-03/HERO9 Black/GH010459.MP4,4004117049,1626317821,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH010459.MP4,3
+2021-07-03/HERO9 Black/GH020455.MP4,688438070,1626317394,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH020455.MP4,3
+2021-07-03/HERO9 Black/GH020456.MP4,4003982218,1626318004,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH020456.MP4,3
+2021-07-03/HERO9 Black/GH020457.MP4,4001447732,1626317988,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH020457.MP4,3
+2021-07-03/HERO9 Black/GH020459.MP4,3068186122,1626317880,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH020459.MP4,3
+2021-07-03/HERO9 Black/GH030456.MP4,3851820913,1626318253,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH030456.MP4,3
+2021-07-03/HERO9 Black/GH030457.MP4,4003882063,1626318433,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH030457.MP4,3
+2021-07-03/HERO9 Black/GH040457.MP4,1492388814,1626318103,1,0,file,2021-07-03/HERO9 Black,s3://runsascoded/gopro/2021-07-03/HERO9 Black/GH040457.MP4,3
+2021-07-05/HERO8 Black/GH010727.MP4,4003825536,1626318598,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH010727.MP4,3
+2021-07-05/HERO8 Black/GH010728.MP4,4003635754,1626318598,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH010728.MP4,3
+2021-07-05/HERO8 Black/GH010729.MP4,2207178972,1626318430,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH010729.MP4,3
+2021-07-05/HERO8 Black/GH010730.MP4,4003971428,1626318861,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH010730.MP4,3
+2021-07-05/HERO8 Black/GH010731.MP4,4003623428,1626319029,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH010731.MP4,3
+2021-07-05/HERO8 Black/GH020727.MP4,11808145,1626318438,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH020727.MP4,3
+2021-07-05/HERO8 Black/GH020728.MP4,4003836985,1626319030,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH020728.MP4,3
+2021-07-05/HERO8 Black/GH020730.MP4,3305893473,1626319104,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH020730.MP4,3
+2021-07-05/HERO8 Black/GH020731.MP4,1452264258,1626318810,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH020731.MP4,3
+2021-07-05/HERO8 Black/GH030728.MP4,406427540,1626318875,1,0,file,2021-07-05/HERO8 Black,s3://runsascoded/gopro/2021-07-05/HERO8 Black/GH030728.MP4,3
+2021-07-05/HERO9 Black/GH010460.MP4,4004149040,1626319464,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH010460.MP4,3
+2021-07-05/HERO9 Black/GH010461.MP4,4004273893,1626319475,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH010461.MP4,3
+2021-07-05/HERO9 Black/GH010462.MP4,2962495216,1626319475,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH010462.MP4,3
+2021-07-05/HERO9 Black/GH010463.MP4,4004145420,1626319643,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH010463.MP4,3
+2021-07-05/HERO9 Black/GH010464.MP4,4004172901,1626319694,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH010464.MP4,3
+2021-07-05/HERO9 Black/GH020460.MP4,4004020992,1626320075,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH020460.MP4,3
+2021-07-05/HERO9 Black/GH020461.MP4,4003905658,1626320086,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH020461.MP4,3
+2021-07-05/HERO9 Black/GH020463.MP4,4004034904,1626320077,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH020463.MP4,3
+2021-07-05/HERO9 Black/GH020464.MP4,3163729120,1626320106,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH020464.MP4,3
+2021-07-05/HERO9 Black/GH030460.MP4,2683609935,1626320097,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH030460.MP4,3
+2021-07-05/HERO9 Black/GH030461.MP4,3196628400,1626320563,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH030461.MP4,3
+2021-07-05/HERO9 Black/GH030463.MP4,1727881514,1626320340,1,0,file,2021-07-05/HERO9 Black,s3://runsascoded/gopro/2021-07-05/HERO9 Black/GH030463.MP4,3
+2021-07-10/HERO8 Black/GH010732.MP4,4003802562,1626320685,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH010732.MP4,3
+2021-07-10/HERO8 Black/GH010733.MP4,4003813256,1626320698,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH010733.MP4,3
+2021-07-10/HERO8 Black/GH010734.MP4,4003662110,1626320712,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH010734.MP4,3
+2021-07-10/HERO8 Black/GH010735.MP4,4003759905,1626320939,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH010735.MP4,3
+2021-07-10/HERO8 Black/GH010736.MP4,4003870555,1626321165,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH010736.MP4,3
+2021-07-10/HERO8 Black/GH010737.MP4,4003793216,1626321280,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH010737.MP4,3
+2021-07-10/HERO8 Black/GH010738.MP4,1560601101,1626320938,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH010738.MP4,3
+2021-07-10/HERO8 Black/GH010739.MP4,1953462241,1626321002,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH010739.MP4,3
+2021-07-10/HERO8 Black/GH020732.MP4,4003537097,1626321545,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH020732.MP4,3
+2021-07-10/HERO8 Black/GH020733.MP4,1583992380,1626321185,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH020733.MP4,3
+2021-07-10/HERO8 Black/GH020734.MP4,3006771808,1626321462,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH020734.MP4,3
+2021-07-10/HERO8 Black/GH020735.MP4,4003496442,1626321769,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH020735.MP4,3
+2021-07-10/HERO8 Black/GH020736.MP4,4003529993,1626321771,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH020736.MP4,3
+2021-07-10/HERO8 Black/GH020737.MP4,4003547269,1626321883,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH020737.MP4,3
+2021-07-10/HERO8 Black/GH030732.MP4,1654612644,1626321714,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH030732.MP4,3
+2021-07-10/HERO8 Black/GH030735.MP4,3022258156,1626322002,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH030735.MP4,3
+2021-07-10/HERO8 Black/GH030736.MP4,575961623,1626321809,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH030736.MP4,3
+2021-07-10/HERO8 Black/GH030737.MP4,4003695232,1626322374,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH030737.MP4,3
+2021-07-10/HERO8 Black/GH040737.MP4,945049692,1626321915,1,0,file,2021-07-10/HERO8 Black,s3://runsascoded/gopro/2021-07-10/HERO8 Black/GH040737.MP4,3
+2021-07-10/HERO9 Black/GH010465.MP4,0,1626321809,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010465.MP4,3
+2021-07-10/HERO9 Black/GH010466.MP4,4004222388,1626322434,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010466.MP4,3
+2021-07-10/HERO9 Black/GH010467.MP4,82344071,1626321896,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010467.MP4,3
+2021-07-10/HERO9 Black/GH010468.MP4,4004208697,1626322498,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010468.MP4,3
+2021-07-10/HERO9 Black/GH010469.MP4,4004219646,1626322520,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010469.MP4,3
+2021-07-10/HERO9 Black/GH010470.MP4,4004264401,1626322605,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010470.MP4,3
+2021-07-10/HERO9 Black/GH010471.MP4,4004258652,1626322975,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010471.MP4,3
+2021-07-10/HERO9 Black/GH010472.MP4,4004027908,1626323033,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010472.MP4,3
+2021-07-10/HERO9 Black/GH010473.MP4,611095445,1626322588,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010473.MP4,3
+2021-07-10/HERO9 Black/GH010474.MP4,2077098924,1626322842,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010474.MP4,3
+2021-07-10/HERO9 Black/GH010475.MP4,2522803126,1626322972,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH010475.MP4,3
+2021-07-10/HERO9 Black/GH020466.MP4,4003894821,1626323205,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH020466.MP4,3
+2021-07-10/HERO9 Black/GH020468.MP4,3443102234,1626323368,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH020468.MP4,3
+2021-07-10/HERO9 Black/GH020469.MP4,4004018839,1626323592,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH020469.MP4,3
+2021-07-10/HERO9 Black/GH020470.MP4,4003801261,1626323584,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH020470.MP4,3
+2021-07-10/HERO9 Black/GH020471.MP4,4004068755,1626323644,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH020471.MP4,3
+2021-07-10/HERO9 Black/GH020472.MP4,4003988578,1626323812,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH020472.MP4,3
+2021-07-10/HERO9 Black/GH030466.MP4,4003919908,1626323953,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH030466.MP4,3
+2021-07-10/HERO9 Black/GH030469.MP4,1320922880,1626323789,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH030469.MP4,3
+2021-07-10/HERO9 Black/GH030470.MP4,4003753406,1626324194,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH030470.MP4,3
+2021-07-10/HERO9 Black/GH030471.MP4,3414285368,1626324156,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH030471.MP4,3
+2021-07-10/HERO9 Black/GH030472.MP4,4003606871,1626324387,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH030472.MP4,3
+2021-07-10/HERO9 Black/GH040466.MP4,776636152,1626323942,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH040466.MP4,3
+2021-07-10/HERO9 Black/GH040470.MP4,2513217678,1626324316,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH040470.MP4,3
+2021-07-10/HERO9 Black/GH040472.MP4,4003799923,1626324560,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH040472.MP4,3
+2021-07-10/HERO9 Black/GH050472.MP4,1187410770,1626324340,1,0,file,2021-07-10/HERO9 Black,s3://runsascoded/gopro/2021-07-10/HERO9 Black/GH050472.MP4,3
+2021-07-11/HERO8 Black/._GH010749.MP4,4096,1626324195,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/._GH010749.MP4,3
+2021-07-11/HERO8 Black/._GH020749.MP4,4096,1626324195,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/._GH020749.MP4,3
+2021-07-11/HERO8 Black/GH010740.MP4,3708193793,1626324760,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010740.MP4,3
+2021-07-11/HERO8 Black/GH010741.MP4,4003899381,1626324931,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010741.MP4,3
+2021-07-11/HERO8 Black/GH010742.MP4,353266986,1626324392,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010742.MP4,3
+2021-07-11/HERO8 Black/GH010743.MP4,4003853977,1626325001,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010743.MP4,3
+2021-07-11/HERO8 Black/GH010744.MP4,2973983009,1626324823,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010744.MP4,3
+2021-07-11/HERO8 Black/GH010745.MP4,1584089402,1626324811,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010745.MP4,3
+2021-07-11/HERO8 Black/GH010746.MP4,4003785529,1626325359,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010746.MP4,3
+2021-07-11/HERO8 Black/GH010747.MP4,4003877929,1626325404,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010747.MP4,3
+2021-07-11/HERO8 Black/GH010748.MP4,4003370784,1626325417,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010748.MP4,3
+2021-07-11/HERO8 Black/GH010749.MP4,4003503714,1626325537,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH010749.MP4,3
+2021-07-11/HERO8 Black/GH020741.MP4,4003461353,1626325596,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH020741.MP4,3
+2021-07-11/HERO8 Black/GH020743.MP4,4003432039,1626325959,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH020743.MP4,3
+2021-07-11/HERO8 Black/GH020746.MP4,4003615127,1626326013,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH020746.MP4,3
+2021-07-11/HERO8 Black/GH020747.MP4,983822228,1626325576,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH020747.MP4,3
+2021-07-11/HERO8 Black/GH020748.MP4,4003674986,1626326129,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH020748.MP4,3
+2021-07-11/HERO8 Black/GH020749.MP4,2022700323,1626325890,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH020749.MP4,3
+2021-07-11/HERO8 Black/GH030741.MP4,4003601023,1626326190,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH030741.MP4,3
+2021-07-11/HERO8 Black/GH030743.MP4,4003569257,1626326488,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH030743.MP4,3
+2021-07-11/HERO8 Black/GH030746.MP4,745208006,1626326077,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH030746.MP4,3
+2021-07-11/HERO8 Black/GH030748.MP4,3157554180,1626326498,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH030748.MP4,3
+2021-07-11/HERO8 Black/GH040741.MP4,3488799070,1626326603,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH040741.MP4,3
+2021-07-11/HERO8 Black/GH040743.MP4,857505197,1626326258,1,0,file,2021-07-11/HERO8 Black,s3://runsascoded/gopro/2021-07-11/HERO8 Black/GH040743.MP4,3
+2021-07-11/HERO9 Black/GH010476.MP4,4004050246,1626326800,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010476.MP4,3
+2021-07-11/HERO9 Black/GH010477.MP4,4004129634,1626326872,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010477.MP4,3
+2021-07-11/HERO9 Black/GH010478.MP4,473478578,1626326561,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010478.MP4,3
+2021-07-11/HERO9 Black/GH010479.MP4,4004027968,1626327081,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010479.MP4,3
+2021-07-11/HERO9 Black/GH010480.MP4,3946075627,1626327169,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010480.MP4,3
+2021-07-11/HERO9 Black/GH010481.MP4,2108585952,1626326909,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010481.MP4,3
+2021-07-11/HERO9 Black/GH010482.MP4,4004205573,1626327411,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010482.MP4,3
+2021-07-11/HERO9 Black/GH010483.MP4,4004315271,1626327474,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010483.MP4,3
+2021-07-11/HERO9 Black/GH010484.MP4,4003106191,1626327496,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010484.MP4,3
+2021-07-11/HERO9 Black/GH010485.MP4,4003136801,1626327686,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH010485.MP4,3
+2021-07-11/HERO9 Black/GH020476.MP4,846953868,1626327299,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH020476.MP4,3
+2021-07-11/HERO9 Black/GH020477.MP4,4003994381,1626327902,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH020477.MP4,3
+2021-07-11/HERO9 Black/GH020479.MP4,4003925984,1626328006,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH020479.MP4,3
+2021-07-11/HERO9 Black/GH020482.MP4,4004036772,1626328088,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH020482.MP4,3
+2021-07-11/HERO9 Black/GH020483.MP4,2734337301,1626327899,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH020483.MP4,3
+2021-07-11/HERO9 Black/GH020484.MP4,4003222352,1626328292,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH020484.MP4,3
+2021-07-11/HERO9 Black/GH020485.MP4,3914650312,1626328507,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH020485.MP4,3
+2021-07-11/HERO9 Black/GH030477.MP4,4003861596,1626328523,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH030477.MP4,3
+2021-07-11/HERO9 Black/GH030479.MP4,4003671142,1626328621,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH030479.MP4,3
+2021-07-11/HERO9 Black/GH030482.MP4,3713336582,1626328649,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH030482.MP4,3
+2021-07-11/HERO9 Black/GH030484.MP4,4003674685,1626328891,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH030484.MP4,3
+2021-07-11/HERO9 Black/GH040477.MP4,4004080485,1626329096,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH040477.MP4,3
+2021-07-11/HERO9 Black/GH040479.MP4,4003988757,1626329135,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH040479.MP4,3
+2021-07-11/HERO9 Black/GH040484.MP4,2880856664,1626329073,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH040484.MP4,3
+2021-07-11/HERO9 Black/GH050477.MP4,4003881679,1626329240,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH050477.MP4,3
+2021-07-11/HERO9 Black/GH050479.MP4,1084407060,1626329051,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH050479.MP4,3
+2021-07-11/HERO9 Black/GH060477.MP4,707317293,1626329152,1,0,file,2021-07-11/HERO9 Black,s3://runsascoded/gopro/2021-07-11/HERO9 Black/GH060477.MP4,3
+2021-07-14/HERO8 Black/.ipynb_checkpoints,53017,1626329286,3,2,dir,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/.ipynb_checkpoints,3
+2021-07-14/HERO8 Black/GH010750-gpmd.json,229868,1626329287,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010750-gpmd.json,3
+2021-07-14/HERO8 Black/GH010750.MP4,967482430,1626329427,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010750.MP4,3
+2021-07-14/HERO8 Black/GH010750.gpmd,1063888,1626329292,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010750.gpmd,3
+2021-07-14/HERO8 Black/GH010750.ipynb,52945,1626329294,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010750.ipynb,3
+2021-07-14/HERO8 Black/GH010750.json,7898,1626329295,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010750.json,3
+2021-07-14/HERO8 Black/GH010751-gpmd.json,384063,1626329296,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010751-gpmd.json,3
+2021-07-14/HERO8 Black/GH010751.MP4,1674402945,1626329543,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010751.MP4,3
+2021-07-14/HERO8 Black/GH010751.gpmd,1838988,1626329368,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010751.gpmd,3
+2021-07-14/HERO8 Black/GH010751.json,7505,1626329368,1,0,file,2021-07-14/HERO8 Black,s3://runsascoded/gopro/2021-07-14/HERO8 Black/GH010751.json,3
+2021-07-14/HERO9 Black/._GH010486.MP4,4096,1626329369,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/._GH010486.MP4,3
+2021-07-14/HERO9 Black/._GX010488.MP4,4096,1626329370,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/._GX010488.MP4,3
+2021-07-14/HERO9 Black/._GX020488.MP4,4096,1626329371,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/._GX020488.MP4,3
+2021-07-14/HERO9 Black/.ipynb_checkpoints,91577,1626329373,3,2,dir,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/.ipynb_checkpoints,3
+2021-07-14/HERO9 Black/GH010486-gpmd.json,27341,1626329374,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010486-gpmd.json,3
+2021-07-14/HERO9 Black/GH010486.MP4,1251668324,1626329564,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010486.MP4,3
+2021-07-14/HERO9 Black/GH010486.gpmd,1059312,1626329413,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010486.gpmd,3
+2021-07-14/HERO9 Black/GH010486.ipynb,62842,1626329413,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010486.ipynb,3
+2021-07-14/HERO9 Black/GH010486.json,7901,1626329415,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010486.json,3
+2021-07-14/HERO9 Black/GH010487-gpmd.json,497477,1626329416,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010487-gpmd.json,3
+2021-07-14/HERO9 Black/GH010487.MP4,2231953715,1626329722,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010487.MP4,3
+2021-07-14/HERO9 Black/GH010487.gpmd,2004212,1626329428,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010487.gpmd,3
+2021-07-14/HERO9 Black/GH010487.ipynb,28735,1626329428,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010487.ipynb,3
+2021-07-14/HERO9 Black/GH010487.json,7902,1626329429,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GH010487.json,3
+2021-07-14/HERO9 Black/GX010488.MP4,4005552259,1626329907,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX010488.MP4,3
+2021-07-14/HERO9 Black/GX010489.MP4,4005241576,1626343670,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX010489.MP4,3
+2021-07-14/HERO9 Black/GX020488.MP4,4005517799,1626329944,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX020488.MP4,3
+2021-07-14/HERO9 Black/GX020489.MP4,4005564533,1626343481,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX020489.MP4,3
+2021-07-14/HERO9 Black/GX030488.MP4,4005483965,1626344099,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX030488.MP4,3
+2021-07-14/HERO9 Black/GX030489.MP4,4005625948,1626344089,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX030489.MP4,3
+2021-07-14/HERO9 Black/GX040488.MP4,3101772731,1626343761,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX040488.MP4,3
+2021-07-14/HERO9 Black/GX040489.MP4,4005251165,1626344138,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX040489.MP4,3
+2021-07-14/HERO9 Black/GX050489.MP4,4005654442,1626344301,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX050489.MP4,3
+2021-07-14/HERO9 Black/GX060489.MP4,4005731807,1626344362,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX060489.MP4,3
+2021-07-14/HERO9 Black/GX070489.MP4,4005754966,1626344708,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX070489.MP4,3
+2021-07-14/HERO9 Black/GX080489.MP4,4005563837,1626344697,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX080489.MP4,3
+2021-07-14/HERO9 Black/GX090489.MP4,4005454775,1626344762,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX090489.MP4,3
+2021-07-14/HERO9 Black/GX100489.MP4,4005559740,1626344932,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX100489.MP4,3
+2021-07-14/HERO9 Black/GX110489.MP4,4005632413,1626344995,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX110489.MP4,3
+2021-07-14/HERO9 Black/GX120489.MP4,4005515787,1626345328,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX120489.MP4,3
+2021-07-14/HERO9 Black/GX130489.MP4,4005501711,1626345350,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX130489.MP4,3
+2021-07-14/HERO9 Black/GX140489.MP4,4005541448,1626345416,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX140489.MP4,3
+2021-07-14/HERO9 Black/GX150489.MP4,4005355388,1626345584,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX150489.MP4,3
+2021-07-14/HERO9 Black/GX160489.MP4,4005429789,1626345643,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX160489.MP4,3
+2021-07-14/HERO9 Black/GX170489.MP4,4005521094,1626345929,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX170489.MP4,3
+2021-07-14/HERO9 Black/GX180489.MP4,4005631562,1626345930,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX180489.MP4,3
+2021-07-14/HERO9 Black/GX190489.MP4,4005749559,1626345959,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX190489.MP4,3
+2021-07-14/HERO9 Black/GX200489.MP4,2902461595,1626345967,1,0,file,2021-07-14/HERO9 Black,s3://runsascoded/gopro/2021-07-14/HERO9 Black/GX200489.MP4,3
+2021-07-15/HERO9 Black/GX010490.MP4,4005467541,1626395220,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX010490.MP4,3
+2021-07-15/HERO9 Black/GX020490.MP4,4005388554,1626395917,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX020490.MP4,3
+2021-07-15/HERO9 Black/GX030490.MP4,4005445446,1626395918,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX030490.MP4,3
+2021-07-15/HERO9 Black/GX040490.MP4,4005708825,1626395453,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX040490.MP4,3
+2021-07-15/HERO9 Black/GX050490.MP4,4005762237,1626395915,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX050490.MP4,3
+2021-07-15/HERO9 Black/GX060490.MP4,4005328858,1626395965,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX060490.MP4,3
+2021-07-15/HERO9 Black/GX070490.MP4,4005112272,1626396062,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX070490.MP4,3
+2021-07-15/HERO9 Black/GX080490.MP4,4005941603,1626396520,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX080490.MP4,3
+2021-07-15/HERO9 Black/GX090490.MP4,4005223366,1626396525,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX090490.MP4,3
+2021-07-15/HERO9 Black/GX100490.MP4,4005960608,1626396536,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX100490.MP4,3
+2021-07-15/HERO9 Black/GX110490.MP4,4005261438,1626396572,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX110490.MP4,3
+2021-07-15/HERO9 Black/GX120490.MP4,4005315729,1626396684,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX120490.MP4,3
+2021-07-15/HERO9 Black/GX130490.MP4,4005636768,1626397129,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX130490.MP4,3
+2021-07-15/HERO9 Black/GX140490.MP4,4005456467,1626397134,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX140490.MP4,3
+2021-07-15/HERO9 Black/GX150490.MP4,4005667101,1626397157,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX150490.MP4,3
+2021-07-15/HERO9 Black/GX160490.MP4,4005536632,1626397171,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX160490.MP4,3
+2021-07-15/HERO9 Black/GX170490.MP4,4005896065,1626397279,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX170490.MP4,3
+2021-07-15/HERO9 Black/GX180490.MP4,4005133159,1626397729,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX180490.MP4,3
+2021-07-15/HERO9 Black/GX190490.MP4,4005895417,1626397754,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX190490.MP4,3
+2021-07-15/HERO9 Black/GX200490.MP4,4005341646,1626397758,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX200490.MP4,3
+2021-07-15/HERO9 Black/GX210490.MP4,4005535711,1626397777,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX210490.MP4,3
+2021-07-15/HERO9 Black/GX220490.MP4,4005270119,1626397877,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX220490.MP4,3
+2021-07-15/HERO9 Black/GX230490.MP4,4005720843,1626398338,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX230490.MP4,3
+2021-07-15/HERO9 Black/GX240490.MP4,4005344291,1626398351,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX240490.MP4,3
+2021-07-15/HERO9 Black/GX250490.MP4,4005874189,1626398378,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX250490.MP4,3
+2021-07-15/HERO9 Black/GX260490.MP4,4005530666,1626398386,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX260490.MP4,3
+2021-07-15/HERO9 Black/GX270490.MP4,4004995111,1626398488,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX270490.MP4,3
+2021-07-15/HERO9 Black/GX280490.MP4,4006009523,1626398950,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX280490.MP4,3
+2021-07-15/HERO9 Black/GX290490.MP4,4005290151,1626398968,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX290490.MP4,3
+2021-07-15/HERO9 Black/GX300490.MP4,4005616521,1626398974,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX300490.MP4,3
+2021-07-15/HERO9 Black/GX310490.MP4,4005496148,1626398991,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX310490.MP4,3
+2021-07-15/HERO9 Black/GX320490.MP4,4005704422,1626399091,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX320490.MP4,3
+2021-07-15/HERO9 Black/GX330490.MP4,4005827908,1626399558,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX330490.MP4,3
+2021-07-15/HERO9 Black/GX340490.MP4,4005123378,1626399568,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX340490.MP4,3
+2021-07-15/HERO9 Black/GX350490.MP4,4005350633,1626399581,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX350490.MP4,3
+2021-07-15/HERO9 Black/GX360490.MP4,4005595686,1626399598,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX360490.MP4,3
+2021-07-15/HERO9 Black/GX370490.MP4,4005557654,1626399694,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX370490.MP4,3
+2021-07-15/HERO9 Black/GX380490.MP4,4005442663,1626400144,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX380490.MP4,3
+2021-07-15/HERO9 Black/GX390490.MP4,4005418799,1626400167,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX390490.MP4,3
+2021-07-15/HERO9 Black/GX400490.MP4,4000480494,1626400182,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX400490.MP4,3
+2021-07-15/HERO9 Black/GX410490.MP4,4005052383,1626400215,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX410490.MP4,3
+2021-07-15/HERO9 Black/GX420490.MP4,4005786650,1626400309,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX420490.MP4,3
+2021-07-15/HERO9 Black/GX430490.MP4,4005530889,1626400750,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX430490.MP4,3
+2021-07-15/HERO9 Black/GX440490.MP4,4005366101,1626400777,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX440490.MP4,3
+2021-07-15/HERO9 Black/GX450490.MP4,4005824888,1626400796,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX450490.MP4,3
+2021-07-15/HERO9 Black/GX460490.MP4,4005601125,1626400835,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX460490.MP4,3
+2021-07-15/HERO9 Black/GX470490.MP4,4005239760,1626400908,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX470490.MP4,3
+2021-07-15/HERO9 Black/GX480490.MP4,4005659962,1626401373,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX480490.MP4,3
+2021-07-15/HERO9 Black/GX490490.MP4,4005473086,1626401390,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX490490.MP4,3
+2021-07-15/HERO9 Black/GX500490.MP4,4005849340,1626401394,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX500490.MP4,3
+2021-07-15/HERO9 Black/GX510490.MP4,4005011498,1626401432,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX510490.MP4,3
+2021-07-15/HERO9 Black/GX520490.MP4,4000368766,1626401518,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX520490.MP4,3
+2021-07-15/HERO9 Black/GX530490.MP4,4005444394,1626401922,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX530490.MP4,3
+2021-07-15/HERO9 Black/GX540490.MP4,4005274953,1626401925,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX540490.MP4,3
+2021-07-15/HERO9 Black/GX550490.MP4,4005792723,1626401920,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX550490.MP4,3
+2021-07-15/HERO9 Black/GX560490.MP4,4005619573,1626401936,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX560490.MP4,3
+2021-07-15/HERO9 Black/GX570490.MP4,529525247,1626401601,1,0,file,2021-07-15/HERO9 Black,s3://runsascoded/gopro/2021-07-15/HERO9 Black/GX570490.MP4,3
+2021-07-16/HERO8 Black/GH010752-gpmd.json,923782,1627229060,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010752-gpmd.json,3
+2021-07-16/HERO8 Black/GH010752.MP4,4003818672,1627229574,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010752.MP4,3
+2021-07-16/HERO8 Black/GH010752.gpmd,4396084,1627229394,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010752.gpmd,3
+2021-07-16/HERO8 Black/GH010752.gpx,1231818,1627229391,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010752.gpx,3
+2021-07-16/HERO8 Black/GH010752.json,7905,1627229391,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010752.json,3
+2021-07-16/HERO8 Black/GH010753-gpmd.json,1634356,1627229393,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010753-gpmd.json,3
+2021-07-16/HERO8 Black/GH010753.MP4,4003703073,1627231944,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010753.MP4,3
+2021-07-16/HERO8 Black/GH010753.gpmd,4395820,1627229887,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010753.gpmd,3
+2021-07-16/HERO8 Black/GH010753.gpx,1514464,1627229570,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010753.gpx,3
+2021-07-16/HERO8 Black/GH010753.json,7905,1627229570,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH010753.json,3
+2021-07-16/HERO8 Black/GH020752-gpmd.json,583030,1627229570,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020752-gpmd.json,3
+2021-07-16/HERO8 Black/GH020752.MP4,2074430381,1627229834,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020752.MP4,3
+2021-07-16/HERO8 Black/GH020752.gpmd,2279344,1627229828,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020752.gpmd,3
+2021-07-16/HERO8 Black/GH020752.gpx,735276,1627229827,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020752.gpx,3
+2021-07-16/HERO8 Black/GH020752.json,7901,1627229827,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020752.json,3
+2021-07-16/HERO8 Black/GH020753-gpmd.json,1618456,1627229828,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020753-gpmd.json,3
+2021-07-16/HERO8 Black/GH020753.MP4,4003693269,1627231883,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020753.MP4,3
+2021-07-16/HERO8 Black/GH020753.gpmd,4395032,1627229886,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020753.gpmd,3
+2021-07-16/HERO8 Black/GH020753.gpx,1513427,1627229887,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020753.gpx,3
+2021-07-16/HERO8 Black/GH020753.json,7905,1627229882,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH020753.json,3
+2021-07-16/HERO8 Black/GH030753-gpmd.json,738395,1627229888,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH030753-gpmd.json,3
+2021-07-16/HERO8 Black/GH030753.MP4,1826952374,1627230853,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH030753.MP4,3
+2021-07-16/HERO8 Black/GH030753.gpmd,2006772,1627229891,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH030753.gpmd,3
+2021-07-16/HERO8 Black/GH030753.gpx,687796,1627229892,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH030753.gpx,3
+2021-07-16/HERO8 Black/GH030753.json,7901,1627229892,1,0,file,2021-07-16/HERO8 Black,s3://runsascoded/gopro/2021-07-16/HERO8 Black/GH030753.json,3
+2021-07-16/HERO9 Black/._GH010493.MP4,4096,1627229914,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/._GH010493.MP4,3
+2021-07-16/HERO9 Black/GH010491-gpmd.json,895147,1627229915,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010491-gpmd.json,3
+2021-07-16/HERO9 Black/GH010491.MP4,4004270070,1627232250,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010491.MP4,3
+2021-07-16/HERO9 Black/GH010491.gpmd,3589332,1627229918,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010491.gpmd,3
+2021-07-16/HERO9 Black/GH010491.gpx,1126242,1627229922,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010491.gpx,3
+2021-07-16/HERO9 Black/GH010491.json,7903,1627229923,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010491.json,3
+2021-07-16/HERO9 Black/GH010492-gpmd.json,895295,1627229927,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010492-gpmd.json,3
+2021-07-16/HERO9 Black/GH010492.MP4,4004057370,1627232260,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010492.MP4,3
+2021-07-16/HERO9 Black/GH010492.gpmd,3588612,1627230857,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010492.gpmd,3
+2021-07-16/HERO9 Black/GH010492.gpx,1126476,1627230856,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010492.gpx,3
+2021-07-16/HERO9 Black/GH010492.json,7903,1627230860,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010492.json,3
+2021-07-16/HERO9 Black/GH010493.MP4,4004307491,1627233194,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010493.MP4,3
+2021-07-16/HERO9 Black/GH010494.MP4,4003915240,1627233973,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH010494.MP4,3
+2021-07-16/HERO9 Black/GH020491-gpmd.json,895292,1627231947,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020491-gpmd.json,3
+2021-07-16/HERO9 Black/GH020491.MP4,4004159977,1627234009,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020491.MP4,3
+2021-07-16/HERO9 Black/GH020491.gpmd,3588880,1627232255,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020491.gpmd,3
+2021-07-16/HERO9 Black/GH020491.gpx,1126476,1627232258,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020491.gpx,3
+2021-07-16/HERO9 Black/GH020491.json,7903,1627232260,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020491.json,3
+2021-07-16/HERO9 Black/GH020492-gpmd.json,895388,1627232262,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020492-gpmd.json,3
+2021-07-16/HERO9 Black/GH020492.MP4,4003919126,1627234127,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020492.MP4,3
+2021-07-16/HERO9 Black/GH020492.gpmd,3588668,1627232267,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020492.gpmd,3
+2021-07-16/HERO9 Black/GH020492.gpx,1126593,1627232272,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020492.gpx,3
+2021-07-16/HERO9 Black/GH020492.json,7903,1627232274,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020492.json,3
+2021-07-16/HERO9 Black/GH020493.MP4,4003952832,1627234125,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020493.MP4,3
+2021-07-16/HERO9 Black/GH020494.MP4,4003758555,1627234555,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH020494.MP4,3
+2021-07-16/HERO9 Black/GH030491-gpmd.json,15261,1627233974,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030491-gpmd.json,3
+2021-07-16/HERO9 Black/GH030491.MP4,76832894,1627234000,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030491.MP4,3
+2021-07-16/HERO9 Black/GH030491.gpmd,70484,1627234001,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030491.gpmd,3
+2021-07-16/HERO9 Black/GH030491.gpx,19422,1627234003,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030491.gpx,3
+2021-07-16/HERO9 Black/GH030491.json,7909,1627234004,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030491.json,3
+2021-07-16/HERO9 Black/GH030492-gpmd.json,895456,1627234007,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030492-gpmd.json,3
+2021-07-16/HERO9 Black/GH030492.MP4,4004145469,1627235051,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030492.MP4,3
+2021-07-16/HERO9 Black/GH030492.gpmd,3588692,1627234011,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030492.gpmd,3
+2021-07-16/HERO9 Black/GH030492.gpx,1126710,1627234013,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030492.gpx,3
+2021-07-16/HERO9 Black/GH030492.json,7903,1627234013,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030492.json,3
+2021-07-16/HERO9 Black/GH030493.MP4,4003826014,1627235064,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030493.MP4,3
+2021-07-16/HERO9 Black/GH030494.MP4,2228731437,1627234711,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH030494.MP4,3
+2021-07-16/HERO9 Black/GH040492-gpmd.json,241915,1627234129,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH040492-gpmd.json,3
+2021-07-16/HERO9 Black/GH040492.MP4,1087266978,1627234419,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH040492.MP4,3
+2021-07-16/HERO9 Black/GH040492.gpmd,975944,1627234421,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH040492.gpmd,3
+2021-07-16/HERO9 Black/GH040492.gpx,304551,1627234421,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH040492.gpx,3
+2021-07-16/HERO9 Black/GH040492.json,7901,1627234423,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH040492.json,3
+2021-07-16/HERO9 Black/GH040493.MP4,4004127114,1627235481,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH040493.MP4,3
+2021-07-16/HERO9 Black/GH050493.MP4,4003759933,1627235621,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH050493.MP4,3
+2021-07-16/HERO9 Black/GH060493.MP4,4003970035,1627235775,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH060493.MP4,3
+2021-07-16/HERO9 Black/GH070493.MP4,4003871967,1627236122,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH070493.MP4,3
+2021-07-16/HERO9 Black/GH080493.MP4,177025228,1627235115,1,0,file,2021-07-16/HERO9 Black,s3://runsascoded/gopro/2021-07-16/HERO9 Black/GH080493.MP4,3
+2021-07-17/HERO8 Black/GH010754.MP4,2384897046,1627235757,1,0,file,2021-07-17/HERO8 Black,s3://runsascoded/gopro/2021-07-17/HERO8 Black/GH010754.MP4,3
+2021-07-17/HERO8 Black/GH010755.MP4,674181998,1627235662,1,0,file,2021-07-17/HERO8 Black,s3://runsascoded/gopro/2021-07-17/HERO8 Black/GH010755.MP4,3
+2021-07-17/HERO8 Black/GH010756.MP4,4003826951,1627236652,1,0,file,2021-07-17/HERO8 Black,s3://runsascoded/gopro/2021-07-17/HERO8 Black/GH010756.MP4,3
+2021-07-17/HERO8 Black/GH010757.MP4,3111795602,1627236481,1,0,file,2021-07-17/HERO8 Black,s3://runsascoded/gopro/2021-07-17/HERO8 Black/GH010757.MP4,3
+2021-07-17/HERO8 Black/GH010758.MP4,4003801892,1627236791,1,0,file,2021-07-17/HERO8 Black,s3://runsascoded/gopro/2021-07-17/HERO8 Black/GH010758.MP4,3
+2021-07-17/HERO8 Black/GH020756.MP4,1748604086,1627236243,1,0,file,2021-07-17/HERO8 Black,s3://runsascoded/gopro/2021-07-17/HERO8 Black/GH020756.MP4,3
+2021-07-17/HERO9 Black/GH010495.MP4,74129464,1627236148,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010495.MP4,3
+2021-07-17/HERO9 Black/GH010496.MP4,134745339,1627236189,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010496.MP4,3
+2021-07-17/HERO9 Black/GH010497.MP4,88806204,1627236219,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010497.MP4,3
+2021-07-17/HERO9 Black/GH010498.MP4,119105749,1627236254,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010498.MP4,3
+2021-07-17/HERO9 Black/GH010499.MP4,119266594,1627236278,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010499.MP4,3
+2021-07-17/HERO9 Black/GH010500.MP4,194749263,1627236309,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010500.MP4,3
+2021-07-17/HERO9 Black/GH010501.MP4,89189283,1627236306,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010501.MP4,3
+2021-07-17/HERO9 Black/GH010502.MP4,13599466,1627236313,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010502.MP4,3
+2021-07-17/HERO9 Black/GH010503.MP4,731682545,1627236499,1,0,file,2021-07-17/HERO9 Black,s3://runsascoded/gopro/2021-07-17/HERO9 Black/GH010503.MP4,3
+2021-07-20/HERO8 Black/GH010759.MP4,4003631243,1627244016,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH010759.MP4,3
+2021-07-20/HERO8 Black/GH010761.MP4,9608445,1627243743,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH010761.MP4,3
+2021-07-20/HERO8 Black/GH010762.MP4,4004100378,1627244352,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH010762.MP4,3
+2021-07-20/HERO8 Black/GH010763.MP4,4003773822,1627245154,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH010763.MP4,3
+2021-07-20/HERO8 Black/GH010764.MP4,3197795823,1627244911,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH010764.MP4,3
+2021-07-20/HERO8 Black/GH010765.MP4,4004000028,1627245115,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH010765.MP4,3
+2021-07-20/HERO8 Black/GH010766.MP4,4003517529,1627245216,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH010766.MP4,3
+2021-07-20/HERO8 Black/GH020759.MP4,1020504070,1627244621,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH020759.MP4,3
+2021-07-20/HERO8 Black/GH020762.MP4,3841280771,1627245620,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH020762.MP4,3
+2021-07-20/HERO8 Black/GH020763.MP4,1193850563,1627245224,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH020763.MP4,3
+2021-07-20/HERO8 Black/GH020765.MP4,1538432098,1627245518,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH020765.MP4,3
+2021-07-20/HERO8 Black/GH020766.MP4,4003570994,1627246201,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GH020766.MP4,3
+2021-07-20/HERO8 Black/GOPR0760.JPG,6112992,1627245220,1,0,file,2021-07-20/HERO8 Black,s3://runsascoded/gopro/2021-07-20/HERO8 Black/GOPR0760.JPG,3
+2021-07-20/HERO9 Black/GH010504.MP4,4004380160,1627237641,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH010504.MP4,3
+2021-07-20/HERO9 Black/GH010506.MP4,14239217,1627236531,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH010506.MP4,3
+2021-07-20/HERO9 Black/GH010507.MP4,4004189656,1627237652,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH010507.MP4,3
+2021-07-20/HERO9 Black/GH010508.MP4,4004283868,1627237739,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH010508.MP4,3
+2021-07-20/HERO9 Black/GH010509.MP4,4004215288,1627246258,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH010509.MP4,3
+2021-07-20/HERO9 Black/GH010510.MP4,4004319826,1627246263,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH010510.MP4,3
+2021-07-20/HERO9 Black/GH010511.MP4,4003864258,1627246565,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH010511.MP4,3
+2021-07-20/HERO9 Black/GH020504.MP4,2825807197,1627237588,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH020504.MP4,3
+2021-07-20/HERO9 Black/GH020507.MP4,4004074961,1627237838,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH020507.MP4,3
+2021-07-20/HERO9 Black/GH020508.MP4,2959599829,1627238017,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH020508.MP4,3
+2021-07-20/HERO9 Black/GH020509.MP4,580058477,1627245774,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH020509.MP4,3
+2021-07-20/HERO9 Black/GH020510.MP4,3342448232,1627246645,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH020510.MP4,3
+2021-07-20/HERO9 Black/GH020511.MP4,4004190350,1627247252,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH020511.MP4,3
+2021-07-20/HERO9 Black/GH030507.MP4,3214717042,1627238039,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH030507.MP4,3
+2021-07-20/HERO9 Black/GH030511.MP4,2460509269,1627246910,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GH030511.MP4,3
+2021-07-20/HERO9 Black/GOPR0505.JPG,7653299,1627237658,1,0,file,2021-07-20/HERO9 Black,s3://runsascoded/gopro/2021-07-20/HERO9 Black/GOPR0505.JPG,3
+2021-07-21/HERO8 Black/GH010767.MP4,2928767750,1627247037,1,0,file,2021-07-21/HERO8 Black,s3://runsascoded/gopro/2021-07-21/HERO8 Black/GH010767.MP4,3
+2021-07-21/HERO8 Black/GH010768.MP4,4002871257,1627247615,1,0,file,2021-07-21/HERO8 Black,s3://runsascoded/gopro/2021-07-21/HERO8 Black/GH010768.MP4,3
+2021-07-21/HERO8 Black/GH010769.MP4,4003358937,1627247699,1,0,file,2021-07-21/HERO8 Black,s3://runsascoded/gopro/2021-07-21/HERO8 Black/GH010769.MP4,3
+2021-07-21/HERO8 Black/GH020769.MP4,3376283250,1627247798,1,0,file,2021-07-21/HERO8 Black,s3://runsascoded/gopro/2021-07-21/HERO8 Black/GH020769.MP4,3
+2021-07-21/HERO8 Black/GH030766.MP4,3729646975,1627248016,1,0,file,2021-07-21/HERO8 Black,s3://runsascoded/gopro/2021-07-21/HERO8 Black/GH030766.MP4,3
+2021-07-21/HERO9 Black/GH010512.MP4,3908404865,1627248273,1,0,file,2021-07-21/HERO9 Black,s3://runsascoded/gopro/2021-07-21/HERO9 Black/GH010512.MP4,3
+2021-07-21/HERO9 Black/GH010513.MP4,4004050175,1627248747,1,0,file,2021-07-21/HERO9 Black,s3://runsascoded/gopro/2021-07-21/HERO9 Black/GH010513.MP4,3
+2021-07-21/HERO9 Black/GH010514.MP4,4004139128,1627248880,1,0,file,2021-07-21/HERO9 Black,s3://runsascoded/gopro/2021-07-21/HERO9 Black/GH010514.MP4,3
+2021-07-21/HERO9 Black/GH020513.MP4,1260471945,1627248128,1,0,file,2021-07-21/HERO9 Black,s3://runsascoded/gopro/2021-07-21/HERO9 Black/GH020513.MP4,3
+2021-07-21/HERO9 Black/GH020514.MP4,4003668483,1627249199,1,0,file,2021-07-21/HERO9 Black,s3://runsascoded/gopro/2021-07-21/HERO9 Black/GH020514.MP4,3
+2021-07-21/HERO9 Black/GH030514.MP4,1819226114,1627248651,1,0,file,2021-07-21/HERO9 Black,s3://runsascoded/gopro/2021-07-21/HERO9 Black/GH030514.MP4,3
+2021-07-22/HERO9 Black/GH010515.MP4,4004313614,1627249464,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH010515.MP4,3
+2021-07-22/HERO9 Black/GH020515.MP4,4003790169,1627249789,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH020515.MP4,3
+2021-07-22/HERO9 Black/GH030515.MP4,4004187199,1627249854,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH030515.MP4,3
+2021-07-22/HERO9 Black/GH040515.MP4,4003761248,1627249939,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH040515.MP4,3
+2021-07-22/HERO9 Black/GH050515.MP4,4004064214,1627250248,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH050515.MP4,3
+2021-07-22/HERO9 Black/GH060515.MP4,4003915232,1627250518,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH060515.MP4,3
+2021-07-22/HERO9 Black/GH070515.MP4,4003791766,1627250837,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH070515.MP4,3
+2021-07-22/HERO9 Black/GH080515.MP4,4003956020,1627250898,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH080515.MP4,3
+2021-07-22/HERO9 Black/GH090515.MP4,944680985,1627250187,1,0,file,2021-07-22/HERO9 Black,s3://runsascoded/gopro/2021-07-22/HERO9 Black/GH090515.MP4,3
+2021-07-23/HERO8 Black/GH010770.MP4,4003836321,1627251238,1,0,file,2021-07-23/HERO8 Black,s3://runsascoded/gopro/2021-07-23/HERO8 Black/GH010770.MP4,3
+2021-07-23/HERO8 Black/GH010771.MP4,4003772063,1627251298,1,0,file,2021-07-23/HERO8 Black,s3://runsascoded/gopro/2021-07-23/HERO8 Black/GH010771.MP4,3
+2021-07-23/HERO8 Black/GH010772.MP4,1704744393,1627250964,1,0,file,2021-07-23/HERO8 Black,s3://runsascoded/gopro/2021-07-23/HERO8 Black/GH010772.MP4,3
+2021-07-23/HERO8 Black/GH010773.MP4,4003443590,1627251876,1,0,file,2021-07-23/HERO8 Black,s3://runsascoded/gopro/2021-07-23/HERO8 Black/GH010773.MP4,3
+2021-07-23/HERO8 Black/GH020770.MP4,86318440,1627250925,1,0,file,2021-07-23/HERO8 Black,s3://runsascoded/gopro/2021-07-23/HERO8 Black/GH020770.MP4,3
+2021-07-23/HERO8 Black/GH020771.MP4,3885943810,1627251931,1,0,file,2021-07-23/HERO8 Black,s3://runsascoded/gopro/2021-07-23/HERO8 Black/GH020771.MP4,3
+2021-07-23/HERO8 Black/GH020773.MP4,3107625788,1627251774,1,0,file,2021-07-23/HERO8 Black,s3://runsascoded/gopro/2021-07-23/HERO8 Black/GH020773.MP4,3
+2021-07-23/HERO9 Black/GH010516.MP4,4004360932,1627252278,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH010516.MP4,3
+2021-07-23/HERO9 Black/GH010517.MP4,4004267940,1627252339,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH010517.MP4,3
+2021-07-23/HERO9 Black/GH010518.MP4,2266862918,1627252371,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH010518.MP4,3
+2021-07-23/HERO9 Black/GH010519.MP4,4003908643,1627252916,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH010519.MP4,3
+2021-07-23/HERO9 Black/GH020516.MP4,2271400940,1627252531,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH020516.MP4,3
+2021-07-23/HERO9 Black/GH020517.MP4,4003943926,1627253334,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH020517.MP4,3
+2021-07-23/HERO9 Black/GH020519.MP4,4003730312,1627253393,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH020519.MP4,3
+2021-07-23/HERO9 Black/GH030517.MP4,2479231901,1627253022,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH030517.MP4,3
+2021-07-23/HERO9 Black/GH030519.MP4,1440783838,1627252914,1,0,file,2021-07-23/HERO9 Black,s3://runsascoded/gopro/2021-07-23/HERO9 Black/GH030519.MP4,3
+2021-07-24/HERO8 Black/GH010774.MP4,82731953,1627252937,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH010774.MP4,3
+2021-07-24/HERO8 Black/GH010776.MP4,4003698328,1627253983,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH010776.MP4,3
+2021-07-24/HERO8 Black/GH010777.MP4,3079972576,1627253767,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH010777.MP4,3
+2021-07-24/HERO8 Black/GH010778.MP4,1501784020,1627253430,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH010778.MP4,3
+2021-07-24/HERO8 Black/GH010779.MP4,1292096942,1627253687,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH010779.MP4,3
+2021-07-24/HERO8 Black/GH010780.MP4,488350099,1627253532,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH010780.MP4,3
+2021-07-24/HERO8 Black/GH020776.MP4,4003460126,1627254484,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH020776.MP4,3
+2021-07-24/HERO8 Black/GH030776.MP4,4003599477,1627254581,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH030776.MP4,3
+2021-07-24/HERO8 Black/GH040776.MP4,4003562973,1627254725,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH040776.MP4,3
+2021-07-24/HERO8 Black/GH050776.MP4,4003655779,1627254812,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH050776.MP4,3
+2021-07-24/HERO8 Black/GH060776.MP4,4003458105,1627255026,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH060776.MP4,3
+2021-07-24/HERO8 Black/GH070776.MP4,4003582803,1627255527,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH070776.MP4,3
+2021-07-24/HERO8 Black/GH080776.MP4,1442691817,1627254959,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GH080776.MP4,3
+2021-07-24/HERO8 Black/GOPR0775.JPG,4856240,1627254731,1,0,file,2021-07-24/HERO8 Black,s3://runsascoded/gopro/2021-07-24/HERO8 Black/GOPR0775.JPG,3
+2021-07-24/HERO9 Black/GH010520.MP4,3308221760,1627255584,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH010520.MP4,3
+2021-07-24/HERO9 Black/GH010521.MP4,115604128,1627254846,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH010521.MP4,3
+2021-07-24/HERO9 Black/GH010522.MP4,4004335929,1627255889,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH010522.MP4,3
+2021-07-24/HERO9 Black/GH010523.MP4,2003555517,1627255485,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH010523.MP4,3
+2021-07-24/HERO9 Black/GH010524.MP4,1688367095,1627255470,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH010524.MP4,3
+2021-07-24/HERO9 Black/GH010525.MP4,637833787,1627255638,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH010525.MP4,3
+2021-07-24/HERO9 Black/GH010526.MP4,4004094036,1627256531,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH010526.MP4,3
+2021-07-24/HERO9 Black/GH010527.MP4,3727029340,1627256508,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH010527.MP4,3
+2021-07-24/HERO9 Black/GH020522.MP4,78403426,1627255611,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH020522.MP4,3
+2021-07-24/HERO9 Black/GH020526.MP4,1191811890,1627255930,1,0,file,2021-07-24/HERO9 Black,s3://runsascoded/gopro/2021-07-24/HERO9 Black/GH020526.MP4,3
+2021-07-25/HERO8 Black/GH010781.MP4,4003774606,1627256709,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH010781.MP4,3
+2021-07-25/HERO8 Black/GH010782.MP4,4003872125,1627256989,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH010782.MP4,3
+2021-07-25/HERO8 Black/GH010783.MP4,4003781757,1627257021,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH010783.MP4,3
+2021-07-25/HERO8 Black/GH020781.MP4,4003606961,1627257660,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH020781.MP4,3
+2021-07-25/HERO8 Black/GH020782.MP4,2889898885,1627257357,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH020782.MP4,3
+2021-07-25/HERO8 Black/GH020783.MP4,4003624293,1627257873,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH020783.MP4,3
+2021-07-25/HERO8 Black/GH030781.MP4,386974450,1627257103,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH030781.MP4,3
+2021-07-25/HERO8 Black/GH030783.MP4,4003558066,1627258169,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH030783.MP4,3
+2021-07-25/HERO8 Black/GH040783.MP4,2536378186,1627257840,1,0,file,2021-07-25/HERO8 Black,s3://runsascoded/gopro/2021-07-25/HERO8 Black/GH040783.MP4,3
+2021-07-25/HERO9 Black/GH010528.MP4,4004181007,1627258514,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH010528.MP4,3
+2021-07-25/HERO9 Black/GH010529.MP4,4004255298,1627258810,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH010529.MP4,3
+2021-07-25/HERO9 Black/GH020528.MP4,4003926750,1627258966,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH020528.MP4,3
+2021-07-25/HERO9 Black/GH020529.MP4,4003926200,1627258993,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH020529.MP4,3
+2021-07-25/HERO9 Black/GH030528.MP4,4003888818,1627259266,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH030528.MP4,3
+2021-07-25/HERO9 Black/GH030529.MP4,4003907490,1627259569,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH030529.MP4,3
+2021-07-25/HERO9 Black/GH040528.MP4,4004015939,1627259852,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH040528.MP4,3
+2021-07-25/HERO9 Black/GH040529.MP4,4003836701,1627259975,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH040529.MP4,3
+2021-07-25/HERO9 Black/GH050528.MP4,4003844614,1627259994,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH050528.MP4,3
+2021-07-25/HERO9 Black/GH050529.MP4,3465700067,1627260034,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH050529.MP4,3
+2021-07-25/HERO9 Black/GH060528.MP4,2027863943,1627260021,1,0,file,2021-07-25/HERO9 Black,s3://runsascoded/gopro/2021-07-25/HERO9 Black/GH060528.MP4,3
+2021-07-26/HERO8 Black/GH010784-gpmd.json,1192164,1627428643,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH010784-gpmd.json,3
+2021-07-26/HERO8 Black/GH010784.MP4,4003855952,1627342195,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH010784.MP4,3
+2021-07-26/HERO8 Black/GH010784.gpmd,4393680,1627428646,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH010784.gpmd,3
+2021-07-26/HERO8 Black/GH010784.gpx,1486562,1627428643,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH010784.gpx,3
+2021-07-26/HERO8 Black/GH010784.json,7509,1627428642,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH010784.json,3
+2021-07-26/HERO8 Black/GH020784-gpmd.json,1224592,1627428644,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH020784-gpmd.json,3
+2021-07-26/HERO8 Black/GH020784.MP4,4003489904,1627341161,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH020784.MP4,3
+2021-07-26/HERO8 Black/GH020784.gpmd,4396704,1627428646,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH020784.gpmd,3
+2021-07-26/HERO8 Black/GH020784.gpx,1532536,1627428644,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH020784.gpx,3
+2021-07-26/HERO8 Black/GH020784.json,7509,1627428642,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH020784.json,3
+2021-07-26/HERO8 Black/GH030784-gpmd.json,1212820,1627428643,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH030784-gpmd.json,3
+2021-07-26/HERO8 Black/GH030784.MP4,4003568899,1627341773,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH030784.MP4,3
+2021-07-26/HERO8 Black/GH030784.gpmd,4404256,1627428646,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH030784.gpmd,3
+2021-07-26/HERO8 Black/GH030784.gpx,1517415,1627428643,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH030784.gpx,3
+2021-07-26/HERO8 Black/GH030784.json,7509,1627428642,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH030784.json,3
+2021-07-26/HERO8 Black/GH040784-gpmd.json,1179864,1627428643,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH040784-gpmd.json,3
+2021-07-26/HERO8 Black/GH040784.MP4,4003587979,1627342208,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH040784.MP4,3
+2021-07-26/HERO8 Black/GH040784.gpmd,4387972,1627428645,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH040784.gpmd,3
+2021-07-26/HERO8 Black/GH040784.gpx,1476803,1627428644,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH040784.gpx,3
+2021-07-26/HERO8 Black/GH040784.json,7509,1627428644,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH040784.json,3
+2021-07-26/HERO8 Black/GH050784-gpmd.json,1174684,1627428644,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH050784-gpmd.json,3
+2021-07-26/HERO8 Black/GH050784.MP4,4003550680,1627342174,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH050784.MP4,3
+2021-07-26/HERO8 Black/GH050784.gpmd,4391576,1627428645,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH050784.gpmd,3
+2021-07-26/HERO8 Black/GH050784.gpx,1476338,1627428644,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH050784.gpx,3
+2021-07-26/HERO8 Black/GH050784.json,7509,1627428644,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH050784.json,3
+2021-07-26/HERO8 Black/GH060784-gpmd.json,548594,1627428644,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH060784-gpmd.json,3
+2021-07-26/HERO8 Black/GH060784.MP4,1785116160,1627341430,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH060784.MP4,3
+2021-07-26/HERO8 Black/GH060784.gpmd,1962268,1627428646,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH060784.gpmd,3
+2021-07-26/HERO8 Black/GH060784.gpx,685914,1627428645,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH060784.gpx,3
+2021-07-26/HERO8 Black/GH060784.json,7505,1627428645,1,0,file,2021-07-26/HERO8 Black,s3://runsascoded/gopro/2021-07-26/HERO8 Black/GH060784.json,3
+2021-07-26/HERO9 Black/GH010530-gpmd.json,913867,1627428645,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH010530-gpmd.json,3
+2021-07-26/HERO9 Black/GH010530.MP4,4004155612,1627342853,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH010530.MP4,3
+2021-07-26/HERO9 Black/GH010530.gpmd,3591060,1627428646,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH010530.gpmd,3
+2021-07-26/HERO9 Black/GH010530.gpx,1144889,1627428646,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH010530.gpx,3
+2021-07-26/HERO9 Black/GH010530.json,7507,1627428645,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH010530.json,3
+2021-07-26/HERO9 Black/GH020530-gpmd.json,914547,1627428646,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH020530-gpmd.json,3
+2021-07-26/HERO9 Black/GH020530.MP4,4003975254,1627429914,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH020530.MP4,3
+2021-07-26/HERO9 Black/GH020530.gpmd,3589288,1627429244,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH020530.gpmd,3
+2021-07-26/HERO9 Black/GH020530.gpx,1145728,1627429065,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH020530.gpx,3
+2021-07-26/HERO9 Black/GH020530.json,7507,1627429238,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH020530.json,3
+2021-07-26/HERO9 Black/GH030530-gpmd.json,914559,1627429240,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH030530-gpmd.json,3
+2021-07-26/HERO9 Black/GH030530.MP4,4003819209,1627432043,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH030530.MP4,3
+2021-07-26/HERO9 Black/GH030530.gpmd,3604384,1627429247,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH030530.gpmd,3
+2021-07-26/HERO9 Black/GH030530.gpx,1145728,1627429248,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH030530.gpx,3
+2021-07-26/HERO9 Black/GH030530.json,7507,1627429244,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH030530.json,3
+2021-07-26/HERO9 Black/GH040530-gpmd.json,914528,1627429256,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH040530-gpmd.json,3
+2021-07-26/HERO9 Black/GH040530.MP4,4004127335,1627430533,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH040530.MP4,3
+2021-07-26/HERO9 Black/GH040530.gpmd,3589196,1627429254,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH040530.gpmd,3
+2021-07-26/HERO9 Black/GH040530.gpx,1145728,1627429259,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH040530.gpx,3
+2021-07-26/HERO9 Black/GH040530.json,7507,1627429255,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH040530.json,3
+2021-07-26/HERO9 Black/GH050530-gpmd.json,914639,1627429257,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH050530-gpmd.json,3
+2021-07-26/HERO9 Black/GH050530.MP4,4003884658,1627432085,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH050530.MP4,3
+2021-07-26/HERO9 Black/GH050530.gpmd,3589252,1627429276,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH050530.gpmd,3
+2021-07-26/HERO9 Black/GH050530.gpx,1145847,1627429283,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH050530.gpx,3
+2021-07-26/HERO9 Black/GH050530.json,7507,1627429291,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH050530.json,3
+2021-07-26/HERO9 Black/GH060530-gpmd.json,914618,1627429303,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH060530-gpmd.json,3
+2021-07-26/HERO9 Black/GH060530.MP4,4003933136,1627432042,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH060530.MP4,3
+2021-07-26/HERO9 Black/GH060530.gpmd,3589308,1627429919,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH060530.gpmd,3
+2021-07-26/HERO9 Black/GH060530.gpx,1145847,1627429920,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH060530.gpx,3
+2021-07-26/HERO9 Black/GH060530.json,7507,1627429921,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH060530.json,3
+2021-07-26/HERO9 Black/GH070530-gpmd.json,914711,1627429926,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH070530-gpmd.json,3
+2021-07-26/HERO9 Black/GH070530.MP4,4003886575,1627432272,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH070530.MP4,3
+2021-07-26/HERO9 Black/GH070530.gpmd,3590604,1627430538,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH070530.gpmd,3
+2021-07-26/HERO9 Black/GH070530.gpx,1145966,1627430538,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH070530.gpx,3
+2021-07-26/HERO9 Black/GH070530.json,7507,1627430540,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH070530.json,3
+2021-07-26/HERO9 Black/GH080530-gpmd.json,231642,1627430544,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH080530-gpmd.json,3
+2021-07-26/HERO9 Black/GH080530.MP4,1023312626,1627431160,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH080530.MP4,3
+2021-07-26/HERO9 Black/GH080530.gpmd,917836,1627431163,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH080530.gpmd,3
+2021-07-26/HERO9 Black/GH080530.gpx,290356,1627431171,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH080530.gpx,3
+2021-07-26/HERO9 Black/GH080530.json,7505,1627431180,1,0,file,2021-07-26/HERO9 Black,s3://runsascoded/gopro/2021-07-26/HERO9 Black/GH080530.json,3
+2021-07-27/HERO8 Black/GH010785-gpmd.json,1182769,1627431192,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010785-gpmd.json,3
+2021-07-27/HERO8 Black/GH010785.MP4,4003784043,1627432977,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010785.MP4,3
+2021-07-27/HERO8 Black/GH010785.gpmd,4389208,1627432047,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010785.gpmd,3
+2021-07-27/HERO8 Black/GH010785.gpx,1481101,1627432045,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010785.gpx,3
+2021-07-27/HERO8 Black/GH010785.json,7509,1627432045,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010785.json,3
+2021-07-27/HERO8 Black/GH010786-gpmd.json,1637428,1627432051,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010786-gpmd.json,3
+2021-07-27/HERO8 Black/GH010786.MP4,4003708073,1627433495,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010786.MP4,3
+2021-07-27/HERO8 Black/GH010786.gpmd,4395924,1627432053,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010786.gpmd,3
+2021-07-27/HERO8 Black/GH010786.gpx,1517801,1627432052,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010786.gpx,3
+2021-07-27/HERO8 Black/GH010786.json,7605,1627432055,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010786.json,3
+2021-07-27/HERO8 Black/GH010787-gpmd.json,1643852,1627432059,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010787-gpmd.json,3
+2021-07-27/HERO8 Black/GH010787.MP4,4003829417,1627433498,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010787.MP4,3
+2021-07-27/HERO8 Black/GH010787.gpmd,4396056,1627432091,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010787.gpmd,3
+2021-07-27/HERO8 Black/GH010787.gpx,1520971,1627432093,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010787.gpx,3
+2021-07-27/HERO8 Black/GH010787.json,7605,1627432093,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH010787.json,3
+2021-07-27/HERO8 Black/GH020785-gpmd.json,1029883,1627432097,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020785-gpmd.json,3
+2021-07-27/HERO8 Black/GH020785.MP4,3659328879,1627433427,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020785.MP4,3
+2021-07-27/HERO8 Black/GH020785.gpmd,4003696,1627432279,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020785.gpmd,3
+2021-07-27/HERO8 Black/GH020785.gpx,1291355,1627432278,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020785.gpx,3
+2021-07-27/HERO8 Black/GH020785.json,7509,1627432280,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020785.json,3
+2021-07-27/HERO8 Black/GH020786-gpmd.json,1638452,1627432284,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020786-gpmd.json,3
+2021-07-27/HERO8 Black/GH020786.MP4,4003652404,1627433726,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020786.MP4,3
+2021-07-27/HERO8 Black/GH020786.gpmd,4396356,1627432981,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020786.gpmd,3
+2021-07-27/HERO8 Black/GH020786.gpx,1516055,1627432984,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020786.gpx,3
+2021-07-27/HERO8 Black/GH020786.json,7605,1627432986,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020786.json,3
+2021-07-27/HERO8 Black/GH020787-gpmd.json,1655843,1627432991,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020787-gpmd.json,3
+2021-07-27/HERO8 Black/GH020787.MP4,4003532804,1627434525,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020787.MP4,3
+2021-07-27/HERO8 Black/GH020787.gpmd,4396432,1627433433,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020787.gpmd,3
+2021-07-27/HERO8 Black/GH020787.gpx,1522584,1627433434,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020787.gpx,3
+2021-07-27/HERO8 Black/GH020787.json,7605,1627433435,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH020787.json,3
+2021-07-27/HERO8 Black/GH030786-gpmd.json,1643877,1627433439,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030786-gpmd.json,3
+2021-07-27/HERO8 Black/GH030786.MP4,4003530677,1627435111,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030786.MP4,3
+2021-07-27/HERO8 Black/GH030786.gpmd,4396232,1627433501,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030786.gpmd,3
+2021-07-27/HERO8 Black/GH030786.gpx,1515450,1627433502,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030786.gpx,3
+2021-07-27/HERO8 Black/GH030786.json,7605,1627433499,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030786.json,3
+2021-07-27/HERO8 Black/GH030787-gpmd.json,1648232,1627433503,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030787-gpmd.json,3
+2021-07-27/HERO8 Black/GH030787.MP4,4003658682,1627435170,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030787.MP4,3
+2021-07-27/HERO8 Black/GH030787.gpmd,4396380,1627433507,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030787.gpmd,3
+2021-07-27/HERO8 Black/GH030787.gpx,1522702,1627433508,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030787.gpx,3
+2021-07-27/HERO8 Black/GH030787.json,7605,1627433508,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH030787.json,3
+2021-07-27/HERO8 Black/GH040786-gpmd.json,1635333,1627433513,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040786-gpmd.json,3
+2021-07-27/HERO8 Black/GH040786.MP4,4003562263,1627435176,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040786.MP4,3
+2021-07-27/HERO8 Black/GH040786.gpmd,4396244,1627433730,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040786.gpmd,3
+2021-07-27/HERO8 Black/GH040786.gpx,1519982,1627433730,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040786.gpx,3
+2021-07-27/HERO8 Black/GH040786.json,7605,1627433732,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040786.json,3
+2021-07-27/HERO8 Black/GH040787-gpmd.json,1651842,1627433735,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040787-gpmd.json,3
+2021-07-27/HERO8 Black/GH040787.MP4,4003449799,1627435398,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040787.MP4,3
+2021-07-27/HERO8 Black/GH040787.gpmd,4396504,1627434528,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040787.gpmd,3
+2021-07-27/HERO8 Black/GH040787.gpx,1521499,1627434530,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040787.gpx,3
+2021-07-27/HERO8 Black/GH040787.json,7605,1627434530,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH040787.json,3
+2021-07-27/HERO8 Black/GH050786-gpmd.json,93705,1627434534,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050786-gpmd.json,3
+2021-07-27/HERO8 Black/GH050786.MP4,237019647,1627434620,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050786.MP4,3
+2021-07-27/HERO8 Black/GH050786.gpmd,260572,1627434623,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050786.gpmd,3
+2021-07-27/HERO8 Black/GH050786.gpx,86639,1627434624,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050786.gpx,3
+2021-07-27/HERO8 Black/GH050786.json,7589,1627434626,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050786.json,3
+2021-07-27/HERO8 Black/GH050787-gpmd.json,1651439,1627434630,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050787-gpmd.json,3
+2021-07-27/HERO8 Black/GH050787.MP4,4003514917,1627436231,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050787.MP4,3
+2021-07-27/HERO8 Black/GH050787.gpmd,4395956,1627435115,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050787.gpmd,3
+2021-07-27/HERO8 Black/GH050787.gpx,1521150,1627435117,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050787.gpx,3
+2021-07-27/HERO8 Black/GH050787.json,7605,1627435117,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH050787.json,3
+2021-07-27/HERO8 Black/GH060787-gpmd.json,1040948,1627435122,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH060787-gpmd.json,3
+2021-07-27/HERO8 Black/GH060787.MP4,2539898152,1627436035,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH060787.MP4,3
+2021-07-27/HERO8 Black/GH060787.gpmd,2790388,1627435173,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH060787.gpmd,3
+2021-07-27/HERO8 Black/GH060787.gpx,964266,1627435175,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH060787.gpx,3
+2021-07-27/HERO8 Black/GH060787.json,7605,1627435176,1,0,file,2021-07-27/HERO8 Black,s3://runsascoded/gopro/2021-07-27/HERO8 Black/GH060787.json,3
+2021-07-27/HERO9 Black/GH010531-gpmd.json,1204162,1627435177,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010531-gpmd.json,3
+2021-07-27/HERO9 Black/GH010531.MP4,4004221950,1627436620,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010531.MP4,3
+2021-07-27/HERO9 Black/GH010531.gpmd,3587272,1627435180,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010531.gpmd,3
+2021-07-27/HERO9 Black/GH010531.gpx,1134542,1627435181,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010531.gpx,3
+2021-07-27/HERO9 Black/GH010531.json,7603,1627435182,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010531.json,3
+2021-07-27/HERO9 Black/GH010532-gpmd.json,1248288,1627435186,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010532-gpmd.json,3
+2021-07-27/HERO9 Black/GH010532.MP4,4004149928,1627436632,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010532.MP4,3
+2021-07-27/HERO9 Black/GH010532.gpmd,3589000,1627435403,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010532.gpmd,3
+2021-07-27/HERO9 Black/GH010532.gpx,1151647,1627435404,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010532.gpx,3
+2021-07-27/HERO9 Black/GH010532.json,7507,1627435406,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010532.json,3
+2021-07-27/HERO9 Black/GH010533-gpmd.json,1207605,1627435410,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010533-gpmd.json,3
+2021-07-27/HERO9 Black/GH010533.MP4,4004127666,1627436839,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010533.MP4,3
+2021-07-27/HERO9 Black/GH010533.gpmd,3589160,1627436038,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010533.gpmd,3
+2021-07-27/HERO9 Black/GH010533.gpx,1152312,1627436039,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010533.gpx,3
+2021-07-27/HERO9 Black/GH010533.json,7603,1627436040,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH010533.json,3
+2021-07-27/HERO9 Black/GH020531-gpmd.json,1211282,1627436045,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020531-gpmd.json,3
+2021-07-27/HERO9 Black/GH020531.MP4,4003841265,1627437419,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020531.MP4,3
+2021-07-27/HERO9 Black/GH020531.gpmd,3587224,1627436236,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020531.gpmd,3
+2021-07-27/HERO9 Black/GH020531.gpx,1134436,1627436238,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020531.gpx,3
+2021-07-27/HERO9 Black/GH020531.json,7603,1627436239,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020531.json,3
+2021-07-27/HERO9 Black/GH020532-gpmd.json,1253423,1627436242,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020532-gpmd.json,3
+2021-07-27/HERO9 Black/GH020532.MP4,4004223627,1627437619,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020532.MP4,3
+2021-07-27/HERO9 Black/GH020532.gpmd,3589004,1627436623,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020532.gpmd,3
+2021-07-27/HERO9 Black/GH020532.gpx,1148659,1627436626,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020532.gpx,3
+2021-07-27/HERO9 Black/GH020532.json,7507,1627436627,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020532.json,3
+2021-07-27/HERO9 Black/GH020533-gpmd.json,924164,1627436631,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020533-gpmd.json,3
+2021-07-27/HERO9 Black/GH020533.MP4,4004008010,1627437991,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020533.MP4,3
+2021-07-27/HERO9 Black/GH020533.gpmd,3589212,1627436634,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020533.gpmd,3
+2021-07-27/HERO9 Black/GH020533.gpx,1155354,1627436636,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020533.gpx,3
+2021-07-27/HERO9 Black/GH020533.json,7603,1627436637,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH020533.json,3
+2021-07-27/HERO9 Black/GH030531-gpmd.json,657164,1627436639,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030531-gpmd.json,3
+2021-07-27/HERO9 Black/GH030531.MP4,2197639130,1627437376,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030531.MP4,3
+2021-07-27/HERO9 Black/GH030531.gpmd,1967612,1627436842,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030531.gpmd,3
+2021-07-27/HERO9 Black/GH030531.gpx,604216,1627436843,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030531.gpx,3
+2021-07-27/HERO9 Black/GH030531.json,7602,1627436846,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030531.json,3
+2021-07-27/HERO9 Black/GH030532-gpmd.json,1228675,1627436848,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030532-gpmd.json,3
+2021-07-27/HERO9 Black/GH030532.MP4,4003652509,1627438218,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030532.MP4,3
+2021-07-27/HERO9 Black/GH030532.gpmd,3588800,1627437378,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030532.gpmd,3
+2021-07-27/HERO9 Black/GH030532.gpx,1152719,1627437377,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030532.gpx,3
+2021-07-27/HERO9 Black/GH030532.json,7507,1627437378,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030532.json,3
+2021-07-27/HERO9 Black/GH030533-gpmd.json,924253,1627437382,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030533-gpmd.json,3
+2021-07-27/HERO9 Black/GH030533.MP4,4003933308,1627438754,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030533.MP4,3
+2021-07-27/HERO9 Black/GH030533.gpmd,3589068,1627437423,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030533.gpmd,3
+2021-07-27/HERO9 Black/GH030533.gpx,1155474,1627437425,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030533.gpx,3
+2021-07-27/HERO9 Black/GH030533.json,7603,1627437427,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH030533.json,3
+2021-07-27/HERO9 Black/GH040532-gpmd.json,923693,1627437428,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040532-gpmd.json,3
+2021-07-27/HERO9 Black/GH040532.MP4,4003885659,1627438804,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040532.MP4,3
+2021-07-27/HERO9 Black/GH040532.gpmd,3588832,1627437622,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040532.gpmd,3
+2021-07-27/HERO9 Black/GH040532.gpx,1154754,1627437626,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040532.gpx,3
+2021-07-27/HERO9 Black/GH040532.json,7507,1627437626,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040532.json,3
+2021-07-27/HERO9 Black/GH040533-gpmd.json,924258,1627437629,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040533-gpmd.json,3
+2021-07-27/HERO9 Black/GH040533.MP4,4004021303,1627438969,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040533.MP4,3
+2021-07-27/HERO9 Black/GH040533.gpmd,3589232,1627437994,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040533.gpmd,3
+2021-07-27/HERO9 Black/GH040533.gpx,1155474,1627437996,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040533.gpx,3
+2021-07-27/HERO9 Black/GH040533.json,7603,1627437997,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH040533.json,3
+2021-07-27/HERO9 Black/GH050532-gpmd.json,924126,1627438000,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050532-gpmd.json,3
+2021-07-27/HERO9 Black/GH050532.MP4,4004031970,1627439353,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050532.MP4,3
+2021-07-27/HERO9 Black/GH050532.gpmd,3588972,1627438223,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050532.gpmd,3
+2021-07-27/HERO9 Black/GH050532.gpx,1155354,1627438223,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050532.gpx,3
+2021-07-27/HERO9 Black/GH050532.json,7507,1627438224,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050532.json,3
+2021-07-27/HERO9 Black/GH050533-gpmd.json,924175,1627438228,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050533-gpmd.json,3
+2021-07-27/HERO9 Black/GH050533.MP4,4003840228,1627439550,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050533.MP4,3
+2021-07-27/HERO9 Black/GH050533.gpmd,3589212,1627438757,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050533.gpmd,3
+2021-07-27/HERO9 Black/GH050533.gpx,1155354,1627438758,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050533.gpx,3
+2021-07-27/HERO9 Black/GH050533.json,7603,1627438760,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH050533.json,3
+2021-07-27/HERO9 Black/GH060532-gpmd.json,375665,1627438762,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060532-gpmd.json,3
+2021-07-27/HERO9 Black/GH060532.MP4,1630333209,1627439319,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060532.MP4,3
+2021-07-27/HERO9 Black/GH060532.gpmd,1462724,1627438805,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060532.gpmd,3
+2021-07-27/HERO9 Black/GH060532.gpx,469794,1627438808,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060532.gpx,3
+2021-07-27/HERO9 Black/GH060532.json,7506,1627438809,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060532.json,3
+2021-07-27/HERO9 Black/GH060533-gpmd.json,924254,1627438811,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060533-gpmd.json,3
+2021-07-27/HERO9 Black/GH060533.MP4,4004014442,1627439900,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060533.MP4,3
+2021-07-27/HERO9 Black/GH060533.gpmd,3589280,1627438972,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060533.gpmd,3
+2021-07-27/HERO9 Black/GH060533.gpx,1155474,1627438974,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060533.gpx,3
+2021-07-27/HERO9 Black/GH060533.json,7603,1627438976,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH060533.json,3
+2021-07-27/HERO9 Black/GH070533-gpmd.json,924269,1627438979,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH070533-gpmd.json,3
+2021-07-27/HERO9 Black/GH070533.MP4,4003860723,1627439934,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH070533.MP4,3
+2021-07-27/HERO9 Black/GH070533.gpmd,3589232,1627439326,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH070533.gpmd,3
+2021-07-27/HERO9 Black/GH070533.gpx,1155474,1627439327,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH070533.gpx,3
+2021-07-27/HERO9 Black/GH070533.json,7603,1627439328,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH070533.json,3
+2021-07-27/HERO9 Black/GH080533-gpmd.json,457749,1627439331,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH080533-gpmd.json,3
+2021-07-27/HERO9 Black/GH080533.MP4,1984676392,1627439832,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH080533.MP4,3
+2021-07-27/HERO9 Black/GH080533.gpmd,1780612,1627439355,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH080533.gpmd,3
+2021-07-27/HERO9 Black/GH080533.gpx,572394,1627439356,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH080533.gpx,3
+2021-07-27/HERO9 Black/GH080533.json,7602,1627439360,1,0,file,2021-07-27/HERO9 Black,s3://runsascoded/gopro/2021-07-27/HERO9 Black/GH080533.json,3
+2021-07-28/.ipynb_checkpoints/extract_chapter_info-checkpoint.ipynb,72,1627854865,1,0,file,2021-07-28/.ipynb_checkpoints,s3://runsascoded/gopro/2021-07-28/.ipynb_checkpoints/extract_chapter_info-checkpoint.ipynb,3
+2021-07-28/HERO8 Black/GH010788.MP4,4003758247,1627518395,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH010788.MP4,3
+2021-07-28/HERO8 Black/GH010789.MP4,4003746121,1627518398,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH010789.MP4,3
+2021-07-28/HERO8 Black/GH020788.MP4,4003598276,1627518396,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH020788.MP4,3
+2021-07-28/HERO8 Black/GH020789.MP4,4003501392,1627518396,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH020789.MP4,3
+2021-07-28/HERO8 Black/GH030788.MP4,4003512290,1627519219,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH030788.MP4,3
+2021-07-28/HERO8 Black/GH030789.MP4,4003752942,1627519442,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH030789.MP4,3
+2021-07-28/HERO8 Black/GH040788.MP4,4003492562,1627519446,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH040788.MP4,3
+2021-07-28/HERO8 Black/GH040789.MP4,4003362619,1627519443,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH040789.MP4,3
+2021-07-28/HERO8 Black/GH050788.MP4,4003692839,1627519445,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH050788.MP4,3
+2021-07-28/HERO8 Black/GH050789.MP4,4003704733,1627520270,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH050789.MP4,3
+2021-07-28/HERO8 Black/GH060788.MP4,1368695341,1627519801,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH060788.MP4,3
+2021-07-28/HERO8 Black/GH060789.MP4,4003521806,1627520499,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH060789.MP4,3
+2021-07-28/HERO8 Black/GH070789.MP4,587511504,1627519605,1,0,file,2021-07-28/HERO8 Black,s3://runsascoded/gopro/2021-07-28/HERO8 Black/GH070789.MP4,3
+2021-07-28/HERO9 Black/GH010534.MP4,4004346923,1627520497,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH010534.MP4,3
+2021-07-28/HERO9 Black/GH010535.MP4,4004210393,1627520665,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH010535.MP4,3
+2021-07-28/HERO9 Black/GH020534.MP4,4003776259,1627520857,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH020534.MP4,3
+2021-07-28/HERO9 Black/GH020535.MP4,4003963812,1627521316,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH020535.MP4,3
+2021-07-28/HERO9 Black/GH030534.MP4,4003909491,1627521546,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH030534.MP4,3
+2021-07-28/HERO9 Black/GH030535.MP4,4003922882,1627521541,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH030535.MP4,3
+2021-07-28/HERO9 Black/GH040534.MP4,4003828269,1627521708,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH040534.MP4,3
+2021-07-28/HERO9 Black/GH040535.MP4,4003990775,1627521903,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH040535.MP4,3
+2021-07-28/HERO9 Black/GH050534.MP4,4003965934,1627522359,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH050534.MP4,3
+2021-07-28/HERO9 Black/GH050535.MP4,4003830494,1627522585,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH050535.MP4,3
+2021-07-28/HERO9 Black/GH060534.MP4,4003931767,1627522592,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH060534.MP4,3
+2021-07-28/HERO9 Black/GH060535.MP4,4003966355,1627522753,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH060535.MP4,3
+2021-07-28/HERO9 Black/GH070534.MP4,4004088882,1627522909,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH070534.MP4,3
+2021-07-28/HERO9 Black/GH070535.MP4,4004008706,1627523095,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH070535.MP4,3
+2021-07-28/HERO9 Black/GH080534.MP4,465880872,1627522711,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH080534.MP4,3
+2021-07-28/HERO9 Black/GH080535.MP4,4003864110,1627523142,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH080535.MP4,3
+2021-07-28/HERO9 Black/GH090535.MP4,740890467,1627522888,1,0,file,2021-07-28/HERO9 Black,s3://runsascoded/gopro/2021-07-28/HERO9 Black/GH090535.MP4,3
+2021-07-31/HERO9 Black/GX010536.MP4,4007083474,1627856272,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX010536.MP4,3
+2021-07-31/HERO9 Black/GX020536.MP4,4007178462,1627855618,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX020536.MP4,3
+2021-07-31/HERO9 Black/GX030536.MP4,4007318138,1627855531,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX030536.MP4,3
+2021-07-31/HERO9 Black/GX040536.MP4,4007103240,1627856009,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX040536.MP4,3
+2021-07-31/HERO9 Black/GX050536.MP4,4007282588,1627856276,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX050536.MP4,3
+2021-07-31/HERO9 Black/GX060536.MP4,4007312258,1627856622,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX060536.MP4,3
+2021-07-31/HERO9 Black/GX070536.MP4,4007196538,1627856710,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX070536.MP4,3
+2021-07-31/HERO9 Black/GX080536.MP4,4007207121,1627857087,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX080536.MP4,3
+2021-07-31/HERO9 Black/GX090536.MP4,4007465263,1627857338,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX090536.MP4,3
+2021-07-31/HERO9 Black/GX100536.MP4,4007033965,1627857343,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX100536.MP4,3
+2021-07-31/HERO9 Black/GX110536.MP4,4007380204,1627857667,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX110536.MP4,3
+2021-07-31/HERO9 Black/GX120536.MP4,4007053179,1627857751,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX120536.MP4,3
+2021-07-31/HERO9 Black/GX130536.MP4,4007440307,1627858127,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX130536.MP4,3
+2021-07-31/HERO9 Black/GX140536.MP4,4007089479,1627858387,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX140536.MP4,3
+2021-07-31/HERO9 Black/GX150536.MP4,4007524566,1627858392,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX150536.MP4,3
+2021-07-31/HERO9 Black/GX160536.MP4,4006997198,1627858722,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX160536.MP4,3
+2021-07-31/HERO9 Black/GX170536.MP4,4007217738,1627858804,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX170536.MP4,3
+2021-07-31/HERO9 Black/GX180536.MP4,4007357801,1627859183,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX180536.MP4,3
+2021-07-31/HERO9 Black/GX190536.MP4,4007263202,1627859433,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX190536.MP4,3
+2021-07-31/HERO9 Black/GX200536.MP4,4007129050,1627859437,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX200536.MP4,3
+2021-07-31/HERO9 Black/GX210536.MP4,4007287635,1627859763,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX210536.MP4,3
+2021-07-31/HERO9 Black/GX220536.MP4,4007137010,1627859845,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX220536.MP4,3
+2021-07-31/HERO9 Black/GX230536.MP4,4007281847,1627860219,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX230536.MP4,3
+2021-07-31/HERO9 Black/GX240536.MP4,4007693225,1627860470,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX240536.MP4,3
+2021-07-31/HERO9 Black/GX250536.MP4,4006910255,1627860480,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX250536.MP4,3
+2021-07-31/HERO9 Black/GX260536.MP4,4007409750,1627860799,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX260536.MP4,3
+2021-07-31/HERO9 Black/GX270536.MP4,4007056583,1627860878,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX270536.MP4,3
+2021-07-31/HERO9 Black/GX280536.MP4,4007417907,1627861253,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX280536.MP4,3
+2021-07-31/HERO9 Black/GX290536.MP4,4007235540,1627861504,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX290536.MP4,3
+2021-07-31/HERO9 Black/GX300536.MP4,4007130980,1627861513,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX300536.MP4,3
+2021-07-31/HERO9 Black/GX310536.MP4,4007437833,1627861833,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX310536.MP4,3
+2021-07-31/HERO9 Black/GX320536.MP4,4007277778,1627861912,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX320536.MP4,3
+2021-07-31/HERO9 Black/GX330536.MP4,4007213073,1627862293,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX330536.MP4,3
+2021-07-31/HERO9 Black/GX340536.MP4,4007207589,1627862475,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX340536.MP4,3
+2021-07-31/HERO9 Black/GX350536.MP4,4007257187,1627862479,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX350536.MP4,3
+2021-07-31/HERO9 Black/GX360536.MP4,4007223768,1627862543,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX360536.MP4,3
+2021-07-31/HERO9 Black/GX370536.MP4,1210409572,1627862239,1,0,file,2021-07-31/HERO9 Black,s3://runsascoded/gopro/2021-07-31/HERO9 Black/GX370536.MP4,3
+2021-07-14/HERO8 Black/.ipynb_checkpoints/GH010486-checkpoint.ipynb,52945,1626329286,1,0,file,2021-07-14/HERO8 Black/.ipynb_checkpoints,s3://runsascoded/gopro/2021-07-14/HERO8 Black/.ipynb_checkpoints/GH010486-checkpoint.ipynb,4
+2021-07-14/HERO8 Black/.ipynb_checkpoints/GH010750-checkpoint.ipynb,72,1626329286,1,0,file,2021-07-14/HERO8 Black/.ipynb_checkpoints,s3://runsascoded/gopro/2021-07-14/HERO8 Black/.ipynb_checkpoints/GH010750-checkpoint.ipynb,4
+2021-07-14/HERO9 Black/.ipynb_checkpoints/GH010486-checkpoint.ipynb,62842,1626329372,1,0,file,2021-07-14/HERO9 Black/.ipynb_checkpoints,s3://runsascoded/gopro/2021-07-14/HERO9 Black/.ipynb_checkpoints/GH010486-checkpoint.ipynb,4
+2021-07-14/HERO9 Black/.ipynb_checkpoints/GH010487-checkpoint.ipynb,28735,1626329373,1,0,file,2021-07-14/HERO9 Black/.ipynb_checkpoints,s3://runsascoded/gopro/2021-07-14/HERO9 Black/.ipynb_checkpoints/GH010487-checkpoint.ipynb,4

@@ -50,8 +50,13 @@ class ParquetBackend(StorageBackend):
         blob_ref: str,
         max_depth: int | None = None,
         min_depth: int | None = None,
+        follow_refs: bool = False,
     ) -> pd.DataFrame:
-        """Load parquet with optional depth filtering via predicate pushdown."""
+        """Load parquet with optional depth filtering via predicate pushdown.
+
+        Args:
+            follow_refs: Ignored (parquet doesn't use chunked refs)
+        """
         cache_key = f"{blob_ref}:{min_depth}:{max_depth}"
         now = time.time()
 

@@ -95,8 +95,13 @@ class SQLiteBackend(StorageBackend):
         blob_ref: str,
         max_depth: int | None = None,
         min_depth: int | None = None,
+        follow_refs: bool = False,
     ) -> pd.DataFrame:
-        """Load scan data with optional depth filtering."""
+        """Load scan data with optional depth filtering.
+
+        Args:
+            follow_refs: Ignored (SQLite doesn't use chunked refs)
+        """
         query = "SELECT path, size, mtime, kind, parent, uri, n_desc, n_children, depth FROM scan_data WHERE blob_ref = ?"
         params = [blob_ref]
 
@@ -147,7 +152,8 @@ class SQLiteBackend(StorageBackend):
             return None
 
         deleted_size = stats.size
-        deleted_n_desc = stats.n_desc
+        # n_desc to subtract = item's n_desc + 1 (the item itself counts as a descendant of ancestors)
+        deleted_n_desc = stats.n_desc + 1
 
         # Delete the path and all descendants
         self.conn.execute('''

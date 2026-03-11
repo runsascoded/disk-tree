@@ -51,6 +51,7 @@ class StorageBackend(ABC):
         blob_ref: str,
         max_depth: int | None = None,
         min_depth: int | None = None,
+        follow_refs: bool = False,
     ) -> pd.DataFrame:
         """Load scan data with optional depth filtering.
 
@@ -58,6 +59,7 @@ class StorageBackend(ABC):
             blob_ref: The blob reference from Scan.blob
             max_depth: Only return rows with depth <= max_depth
             min_depth: Only return rows with depth >= min_depth
+            follow_refs: If True, recursively load child chunks (hybrid backend only)
 
         Returns:
             DataFrame with scan data

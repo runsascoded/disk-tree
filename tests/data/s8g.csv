@@ -1,0 +1,876 @@
+path,size,mtime,n_desc,n_children,kind,parent,uri,depth
+.,1180230597944320,1725025956,875,38,dir,,/Volumes/s8/gopro,0
+2022-06-17,4717071343616,1725025956,6,1,dir,.,/Volumes/s8/gopro/2022-06-17,1
+2022-06-21,45535661691392,1702188236,69,1,dir,.,/Volumes/s8/gopro/2022-06-21,1
+2022-06-23,15248281573376,1702189797,14,1,dir,.,/Volumes/s8/gopro/2022-06-23,1
+2022-06-24,72359963043840,1724895965,49,4,dir,.,/Volumes/s8/gopro/2022-06-24,1
+2022-06-25,24030644456448,1702199310,14,1,dir,.,/Volumes/s8/gopro/2022-06-25,1
+2022-06-28,42916695769088,1702202072,18,1,dir,.,/Volumes/s8/gopro/2022-06-28,1
+2022-06-29,23209380024832,1702202809,8,1,dir,.,/Volumes/s8/gopro/2022-06-29,1
+2022-07-08,69388522790912,1724895965,26,1,dir,.,/Volumes/s8/gopro/2022-07-08,1
+2022-07-11,3941877776384,1724895965,6,1,dir,.,/Volumes/s8/gopro/2022-07-11,1
+2022-07-13,6573591557632,1724895965,10,1,dir,.,/Volumes/s8/gopro/2022-07-13,1
+2022-07-16,34305451223552,1724899290,48,1,dir,.,/Volumes/s8/gopro/2022-07-16,1
+2022-07-28,25005671153664,1724895965,10,1,dir,.,/Volumes/s8/gopro/2022-07-28,1
+2022-07-29,11389174705152,1724895965,6,1,dir,.,/Volumes/s8/gopro/2022-07-29,1
+2022-07-30,2715902246912,1724899290,6,1,dir,.,/Volumes/s8/gopro/2022-07-30,1
+2022-07-31,29345299147776,1724895965,10,1,dir,.,/Volumes/s8/gopro/2022-07-31,1
+2022-08-01,55225682394112,1724899290,24,3,dir,.,/Volumes/s8/gopro/2022-08-01,1
+2022-08-04,34770386241024,1724899290,14,1,dir,.,/Volumes/s8/gopro/2022-08-04,1
+2022-08-05,37572747001856,1724895965,16,1,dir,.,/Volumes/s8/gopro/2022-08-05,1
+2022-08-07,9350045997568,1724895965,12,1,dir,.,/Volumes/s8/gopro/2022-08-07,1
+2022-08-09,23038293292544,1724895965,12,1,dir,.,/Volumes/s8/gopro/2022-08-09,1
+2022-08-14,74145692157952,1724896013,40,15,dir,.,/Volumes/s8/gopro/2022-08-14,1
+2022-08-19,12772163350528,1661115752,14,13,dir,.,/Volumes/s8/gopro/2022-08-19,1
+2022-09-16,23858469347328,1666983533,14,1,dir,.,/Volumes/s8/gopro/2022-09-16,1
+2022-09-18,12985085511168,1666983840,8,1,dir,.,/Volumes/s8/gopro/2022-09-18,1
+2022-09-19,9646882148352,1666984090,6,1,dir,.,/Volumes/s8/gopro/2022-09-19,1
+2022-09-20,17762839777792,1666984467,8,1,dir,.,/Volumes/s8/gopro/2022-09-20,1
+2022-09-24,32227852007936,1666984536,34,1,dir,.,/Volumes/s8/gopro/2022-09-24,1
+2022-10-07,8249894616576,1665517973,26,25,dir,.,/Volumes/s8/gopro/2022-10-07,1
+2022-11-06,74770639717376,1724896013,55,22,dir,.,/Volumes/s8/gopro/2022-11-06,1
+2022-11-12,52263144093184,1724986192,123,27,dir,.,/Volumes/s8/gopro/2022-11-12,1
+2022-11-23,28139072670720,1724896013,10,1,dir,.,/Volumes/s8/gopro/2022-11-23,1
+2022-12-04,5275547092480,1724896013,4,1,dir,.,/Volumes/s8/gopro/2022-12-04,1
+2023-06-04,107677122780672,1724986192,77,20,dir,.,/Volumes/s8/gopro/2023-06-04,1
+2023-06-30,87763634673664,1724986192,38,4,dir,.,/Volumes/s8/gopro/2023-06-30,1
+2023-07-03,61794161374720,1724896013,20,1,dir,.,/Volumes/s8/gopro/2023-07-03,1
+2023-12-27,189421938176,1703722187,16,8,dir,.,/Volumes/s8/gopro/2023-12-27,1
+2023-12-28 fisher parking,68625366528,1703861803,2,1,dir,.,/Volumes/s8/gopro/2023-12-28 fisher parking,1
+mp4s.txt,5191168,1724896358,1,0,file,,/Volumes/s8/gopro/mp4s.txt,1
+2022-06-17/Camera01,4717071291392,1725025956,5,4,dir,2022-06-17,/Volumes/s8/gopro/2022-06-17/Camera01,2
+2022-06-21/Camera01,45535661639168,1702188236,68,67,dir,2022-06-21,/Volumes/s8/gopro/2022-06-21/Camera01,2
+2022-06-23/Camera01,15248281521152,1702189797,13,12,dir,2022-06-23,/Volumes/s8/gopro/2022-06-23/Camera01,2
+2022-06-24/01 roll out edited.png,4741978624,1657119582,1,0,file,2022-06-24,/Volumes/s8/gopro/2022-06-24/01 roll out edited.png,2
+2022-06-24/Camera01,72355219353600,1724895965,45,44,dir,2022-06-24,/Volumes/s8/gopro/2022-06-24/Camera01,2
+2022-06-24/light up the loop yt.chapters.json,1434112,1657136747,1,0,file,2022-06-24,/Volumes/s8/gopro/2022-06-24/light up the loop yt.chapters.json,2
+2022-06-24/light up the loop yt.chapters.txt,173056,1657136751,1,0,file,2022-06-24,/Volumes/s8/gopro/2022-06-24/light up the loop yt.chapters.txt,2
+2022-06-25/Camera01,24030644404224,1702199310,13,12,dir,2022-06-25,/Volumes/s8/gopro/2022-06-25/Camera01,2
+2022-06-28/Camera01,42916695716864,1702202072,17,16,dir,2022-06-28,/Volumes/s8/gopro/2022-06-28/Camera01,2
+2022-06-29/Camera01,23209379972608,1702202809,7,6,dir,2022-06-29,/Volumes/s8/gopro/2022-06-29/Camera01,2
+2022-07-08/Camera01,69388522738688,1724895965,25,24,dir,2022-07-08,/Volumes/s8/gopro/2022-07-08/Camera01,2
+2022-07-11/Camera01,3941877724160,1724895965,5,4,dir,2022-07-11,/Volumes/s8/gopro/2022-07-11/Camera01,2
+2022-07-13/Camera01,6573591505408,1724895965,9,8,dir,2022-07-13,/Volumes/s8/gopro/2022-07-13/Camera01,2
+2022-07-16/Camera01,34305451171328,1724895965,47,46,dir,2022-07-16,/Volumes/s8/gopro/2022-07-16/Camera01,2
+2022-07-28/Camera01,25005671101440,1724895965,9,8,dir,2022-07-28,/Volumes/s8/gopro/2022-07-28/Camera01,2
+2022-07-29/Camera01,11389174652928,1724895965,5,4,dir,2022-07-29,/Volumes/s8/gopro/2022-07-29/Camera01,2
+2022-07-30/Camera01,2715902194688,1724895965,5,4,dir,2022-07-30,/Volumes/s8/gopro/2022-07-30/Camera01,2
+2022-07-31/Camera01,29345299095552,1724895965,9,8,dir,2022-07-31,/Volumes/s8/gopro/2022-07-31/Camera01,2
+2022-08-01/Camera01,55224012830208,1724895965,21,20,dir,2022-08-01,/Volumes/s8/gopro/2022-08-01/Camera01,2
+2022-08-01/lsp train hall.jpg,982545408,1659815744,1,0,file,2022-08-01,/Volumes/s8/gopro/2022-08-01/lsp train hall.jpg,2
+2022-08-01/newark island.jpg,686931456,1659815750,1,0,file,2022-08-01,/Volumes/s8/gopro/2022-08-01/newark island.jpg,2
+2022-08-04/Camera01,34770386188800,1724895965,13,12,dir,2022-08-04,/Volumes/s8/gopro/2022-08-04/Camera01,2
+2022-08-05/Camera01,37572746949632,1724895965,15,14,dir,2022-08-05,/Volumes/s8/gopro/2022-08-05/Camera01,2
+2022-08-07/Camera01,9350045945344,1724895965,11,10,dir,2022-08-07,/Volumes/s8/gopro/2022-08-07/Camera01,2
+2022-08-09/Camera01,23038293240320,1724895965,11,10,dir,2022-08-09,/Volumes/s8/gopro/2022-08-09/Camera01,2
+2022-08-14/7th St to Hoboken NJT Terminal.mp4,2819266921984,1660590790,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/7th St to Hoboken NJT Terminal.mp4,2
+"2022-08-14/7th St, Coles v.mp4",349341828608,1660616208,1,0,file,2022-08-14,"/Volumes/s8/gopro/2022-08-14/7th St, Coles v.mp4",2
+2022-08-14/Camera01,63085681891840,1724896013,25,24,dir,2022-08-14,/Volumes/s8/gopro/2022-08-14/Camera01,2
+2022-08-14/Observer full v-MP4 75Mbps.mp4,357323281920,1660620662,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/Observer full v-MP4 75Mbps.mp4,2
+2022-08-14/Observer to NJT v.mp4,1170245894144,1660618434,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/Observer to NJT v.mp4,2
+2022-08-14/Observer v.mp4,364895761408,1660616877,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/Observer v.mp4,2
+2022-08-14/bk bridge full h-MP4 75Mbps.mp4,848870522880,1661099484,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/bk bridge full h-MP4 75Mbps.mp4,2
+2022-08-14/bk bridge v-MP4 60Mbps.mp4,226943121408,1661014705,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/bk bridge v-MP4 60Mbps.mp4,2
+2022-08-14/bk bridge v-MP4 65Mbps.mp4,245710337024,1661011606,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/bk bridge v-MP4 65Mbps.mp4,2
+2022-08-14/bk bridge v-MP4 75Mbps.mp4,283568450048,1660607271,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/bk bridge v-MP4 75Mbps.mp4,2
+2022-08-14/bk bridge v.mp4,1731544230400,1660606519,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/bk bridge v.mp4,2
+2022-08-14/bk bridge.mp4,1771785852416,1660593016,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/bk bridge.mp4,2
+2022-08-14/brookfield at dusk v.mp4,287714152448,1660597328,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/brookfield at dusk v.mp4,2
+2022-08-14/sinatra dr pbl.jpg,590558720,1660601829,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/sinatra dr pbl.jpg,2
+2022-08-14/vanmoof lockup.mp4,602209056768,1660594795,1,0,file,2022-08-14,/Volumes/s8/gopro/2022-08-14/vanmoof lockup.mp4,2
+2022-08-19/14th St to Palisade h.mp4,2973084995584,1660964548,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/14th St to Palisade h.mp4,2
+2022-08-19/14th St to Palisade v altima.mp4,1900099886080,1661114416,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/14th St to Palisade v altima.mp4,2
+2022-08-19/14th St to Palisade v.mp4,2973191194624,1660965423,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/14th St to Palisade v.mp4,2
+2022-08-19/full h shorter-MP4 75Mbps.chapters.json,1761280,1661112974,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/full h shorter-MP4 75Mbps.chapters.json,2
+2022-08-19/full h shorter-MP4 75Mbps.chapters.txt,229888,1661112974,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/full h shorter-MP4 75Mbps.chapters.txt,2
+2022-08-19/full h shorter-MP4 75Mbps.mp4,1340554613760,1661112412,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/full h shorter-MP4 75Mbps.mp4,2
+2022-08-19/full h-MP4 75Mbps.mp4,1855764000256,1660970015,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/full h-MP4 75Mbps.mp4,2
+2022-08-19/full v altima-MP4 75Mbps.mp4,273005125632,1661115752,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/full v altima-MP4 75Mbps.mp4,2
+2022-08-19/full v short-MP4 75Mbps.mp4,284000628736,1661102335,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/full v short-MP4 75Mbps.mp4,2
+2022-08-19/full v-MP4 75Mbps bak.mp4,421543460864,1660969433,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/full v-MP4 75Mbps bak.mp4,2
+2022-08-19/full v-MP4 75Mbps.mp4,430221848576,1661101616,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/full v-MP4 75Mbps.mp4,2
+2022-08-19/pier h.mp4,160279738880,1660964059,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/pier h.mp4,2
+2022-08-19/pier v.mp4,160415605248,1660964401,1,0,file,2022-08-19,/Volumes/s8/gopro/2022-08-19/pier v.mp4,2
+2022-09-16/Camera01,23858469295104,1666983533,13,12,dir,2022-09-16,/Volumes/s8/gopro/2022-09-16/Camera01,2
+2022-09-18/Camera01,12985085458944,1666983840,7,6,dir,2022-09-18,/Volumes/s8/gopro/2022-09-18/Camera01,2
+2022-09-19/Camera01,9646882096128,1666984090,5,4,dir,2022-09-19,/Volumes/s8/gopro/2022-09-19/Camera01,2
+2022-09-20/Camera01,17762839725568,1666984467,7,6,dir,2022-09-20,/Volumes/s8/gopro/2022-09-20/Camera01,2
+2022-09-24/Camera01,32227851955712,1666984536,33,32,dir,2022-09-24,/Volumes/s8/gopro/2022-09-24/Camera01,2
+2022-10-07/.DS_Store,3147776,1665461256,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/.DS_Store,2
+2022-10-07/18th.mp4,368909065216,1665263377,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/18th.mp4,2
+2022-10-07/bergen sip summit newark.mp4,946782078464,1665262201,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/bergen sip summit newark.mp4,2
+2022-10-07/bike jc dept infra handlebar survey.chapters.json,4862464,1665489347,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/bike jc dept infra handlebar survey.chapters.json,2
+2022-10-07/bike jc dept infra handlebar survey.chapters.txt,378880,1665489347,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/bike jc dept infra handlebar survey.chapters.txt,2
+2022-10-07/bike jc dept infra handlebar survey.mp4,1691093947392,1665462893,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/bike jc dept infra handlebar survey.mp4,2
+2022-10-07/bike jc jc infra handlebar survey.jpg,368863744,1665270656,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/bike jc jc infra handlebar survey.jpg,2
+2022-10-07/ccd.mp4,556302450688,1665262666,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/ccd.mp4,2
+2022-10-07/coles.mp4,253173255680,1665263458,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/coles.mp4,2
+2022-10-07/grand johnston  pacific.mp4,677525980160,1665259854,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/grand johnston  pacific.mp4,2
+2022-10-07/grove grand.mp4,1267973281792,1665259270,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/grove grand.mp4,2
+2022-10-07/mcg to bergen sq.mp4,256198294016,1665260764,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/mcg to bergen sq.mp4,2
+2022-10-07/merseles montgomery.mp4,927742489088,1665260928,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/merseles montgomery.mp4,2
+2022-10-07/mlk school block bergen pbl.jpg,851082240,1665183197,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/mlk school block bergen pbl.jpg,2
+2022-10-07/newark 5th 4th 0.jpg,926492160,1665182129,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/newark 5th 4th 0.jpg,2
+2022-10-07/newark 5th 4th 1.jpg,936886272,1665494268,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/newark 5th 4th 1.jpg,2
+2022-10-07/newark 5th 4th 2.jpg,940636160,1665494302,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/newark 5th 4th 2.jpg,2
+2022-10-07/newark 5th 4th 3.jpg,921599488,1665494367,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/newark 5th 4th 3.jpg,2
+2022-10-07/newark at 7th flex posts.jpg,793717760,1665517759,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/newark at 7th flex posts.jpg,2
+2022-10-07/newark brunswick.mp4,446182162432,1665262204,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/newark brunswick.mp4,2
+2022-10-07/route screenshot.png,1842301952,1665457865,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/route screenshot.png,2
+2022-10-07/stroller 12th st underpass.mp4,10077209600,1665256759,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/stroller 12th st underpass.mp4,2
+2022-10-07/wards bmp.png,2710649856,1665461243,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/wards bmp.png,2
+2022-10-07/wards pbls.png,2638309888,1665461251,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/wards pbls.png,2
+2022-10-07/washington.mp4,834995003392,1665263486,1,0,file,2022-10-07,/Volumes/s8/gopro/2022-10-07/washington.mp4,2
+2022-11-06/1st ave bridge h.mp4,193231704576,1667826232,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/1st ave bridge h.mp4,2
+2022-11-06/1st ave to finish h.mp4,2596430429696,1667771397,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/1st ave to finish h.mp4,2
+2022-11-06/Camera01,61842509982208,1724896013,33,32,dir,2022-11-06,/Volumes/s8/gopro/2022-11-06/Camera01,2
+2022-11-06/NYC Marathon Ride 2022.chapters.json,3094528,1667837135,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/NYC Marathon Ride 2022.chapters.json,2
+2022-11-06/NYC Marathon Ride 2022.chapters.txt,587776,1667837140,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/NYC Marathon Ride 2022.chapters.txt,2
+2022-11-06/NYC Marathon Ride 2022.mp4,467674583552,1667836203,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/NYC Marathon Ride 2022.mp4,2
+2022-11-06/VID_20220823_042031_00_002.mp4,389926393344,1667767851,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/VID_20220823_042031_00_002.mp4,2
+2022-11-06/VID_20220823_050322_00_003.mp4,362009973248,1667767851,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/VID_20220823_050322_00_003.mp4,2
+2022-11-06/VID_20220823_053242_00_004.mp4,331594766848,1667767851,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/VID_20220823_053242_00_004.mp4,2
+2022-11-06/arrival h.mp4,118541434880,1667767965,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/arrival h.mp4,2
+2022-11-06/bedford gp mcg.mp4,172334288896,1667825075,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/bedford gp mcg.mp4,2
+2022-11-06/bedford to greenpoint h.mp4,1406808303104,1667769770,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/bedford to greenpoint h.mp4,2
+2022-11-06/central park loop exit h.mp4,130753248256,1667830077,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/central park loop exit h.mp4,2
+2022-11-06/central park to finish h.mp4,1330052963840,1667828588,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/central park to finish h.mp4,2
+2022-11-06/gp to qbb h.mp4,1410829143552,1667770031,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/gp to qbb h.mp4,2
+2022-11-06/greenpoint flyby h.mp4,28695153152,1667768120,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/greenpoint flyby h.mp4,2
+2022-11-06/nypd bikes.jpg,940615680,1667766849,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/nypd bikes.jpg,2
+2022-11-06/pulaski h.mp4,118531766784,1667824878,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/pulaski h.mp4,2
+2022-11-06/qbb h.mp4,750776283648,1667826826,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/qbb h.mp4,2
+2022-11-06/runners 1 h.mp4,83566250496,1667770147,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/runners 1 h.mp4,2
+2022-11-06/start 4th ave bk.mp4,2776701394432,1667770689,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/start 4th ave bk.mp4,2
+2022-11-06/willis ave bridge h.mp4,258726937088,1667825988,1,0,file,2022-11-06,/Volumes/s8/gopro/2022-11-06/willis ave bridge h.mp4,2
+2022-11-12/.DS_Store,4196352,1668656037,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/.DS_Store,2
+2022-11-12/2022-11-12.iml,171520,1668440313,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/2022-11-12.iml,2
+2022-11-12/Anthony Romano.mp4,15555898368,1668350380,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Anthony Romano.mp4,2
+2022-11-12/Barkha Patel.mp4,91443438080,1668352647,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Barkha Patel.mp4,2
+2022-11-12/Bill O'Dea.mp4,93546819584,1668355732,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Bill O'Dea.mp4,2
+2022-11-12/Camera01,49224445276160,1724986192,23,22,dir,2022-11-12,/Volumes/s8/gopro/2022-11-12/Camera01,2
+2022-11-12/Chris Adair.mp4,93716630528,1668352676,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Chris Adair.mp4,2
+"2022-11-12/Closing, Matt Smith Tony Borelli.mp4",95663697408,1668348849,1,0,file,2022-11-12,"/Volumes/s8/gopro/2022-11-12/Closing, Matt Smith Tony Borelli.mp4",2
+2022-11-12/Frank Gilmore.mp4,58485789696,1668350126,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Frank Gilmore.mp4,2
+2022-11-12/James Solomon.mp4,124512795136,1668354274,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/James Solomon.mp4,2
+2022-11-12/Jimmy Lee.mp4,33569245184,1668350249,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Jimmy Lee.mp4,2
+2022-11-12/John Reichman.mp4,90545264640,1668354098,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/John Reichman.mp4,2
+2022-11-12/Matt Smith.mp4,15952986112,1668350294,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Matt Smith.mp4,2
+2022-11-12/Opening Tony.mp4,23957288448,1668350303,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Opening Tony.mp4,2
+2022-11-12/Phil Cohen.mp4,41720511488,1668350321,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Phil Cohen.mp4,2
+2022-11-12/Tony Borelli.mp4,44714490368,1668350339,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Tony Borelli.mp4,2
+2022-11-12/Yousef Saleh.mp4,73930643456,1668350370,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/Yousef Saleh.mp4,2
+2022-11-12/rally,698899185152,1668445311,24,23,dir,2022-11-12,/Volumes/s8/gopro/2022-11-12/rally,2
+2022-11-12/rally captions test.mp4,17656761856,1668375936,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/rally captions test.mp4,2
+2022-11-12/rally captions.md,5957120,1668445418,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/rally captions.md,2
+2022-11-12/rally w chapters.chapters.json,1984000,1668362888,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/rally w chapters.chapters.json,2
+2022-11-12/rally w chapters.chapters.txt,307712,1668362888,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/rally w chapters.chapters.txt,2
+2022-11-12/rally w chapters.mp4,708226803712,1668362813,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/rally w chapters.mp4,2
+2022-11-12/rally with captions.mp4,707967986688,1668376642,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/rally with captions.mp4,2
+2022-11-12/rally_iTT_English.itt,12275200,1668375847,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/rally_iTT_English.itt,2
+2022-11-12/turnpiketrap-playlist.html,1841320960,1668445097,1,0,file,2022-11-12,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist.html,2
+2022-11-12/turnpiketrap-playlist_files,6765863424,1668445097,51,50,dir,2022-11-12,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files,2
+2022-11-23/Camera01,28139072618496,1724896013,9,8,dir,2022-11-23,/Volumes/s8/gopro/2022-11-23/Camera01,2
+2022-12-04/Camera01,5275547040256,1724896013,3,2,dir,2022-12-04,/Volumes/s8/gopro/2022-12-04/Camera01,2
+2023-06-04/.DS_Store,5244928,1689456350,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/.DS_Store,2
+2023-06-04/Camera01,93004913698816,1724986192,42,29,dir,2023-06-04,/Volumes/s8/gopro/2023-06-04/Camera01,2
+2023-06-04/Mark Ward Tour drone,10390733603840,1686180840,16,15,dir,2023-06-04,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone,2
+2023-06-04/all 4x.chapters.json,4335616,1689536545,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/all 4x.chapters.json,2
+2023-06-04/all 4x.chapters.txt,241152,1689536545,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/all 4x.chapters.txt,2
+2023-06-04/all 4x.mp4,3466306557440,1689532363,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/all 4x.mp4,2
+2023-06-04/jonathan chris start 2.jpg,1075309056,1685924971,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/jonathan chris start 2.jpg,2
+2023-06-04/jonathan chris start.jpg,1071831040,1685924961,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/jonathan chris start.jpg,2
+2023-06-04/ocean bramhall stop.jpg,1001919488,1685970810,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/ocean bramhall stop.jpg,2
+2023-06-04/start 4x 1min.mp4,75364682240,1702252030,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/start 4x 1min.mp4,2
+2023-06-04/start 4x 1min_10M.mp4,38305650688,1702253136,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/start 4x 1min_10M.mp4,2
+2023-06-04/start 4x 1min_5M.mp4,19464528896,1702253219,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/start 4x 1min_5M.mp4,2
+2023-06-04/start.jpg,307598848,1689536420,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/start.jpg,2
+2023-06-04/start.png,4415443968,1689536315,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/start.png,2
+2023-06-04/start_50p.jpg,114908160,1689536401,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/start_50p.jpg,2
+2023-06-04/start_50p.png,1469072384,1689536388,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/start_50p.png,2
+2023-06-04/tony ribbon 1.jpg,1027166720,1685925017,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/tony ribbon 1.jpg,2
+2023-06-04/ward tour stationary time lapses.chapters.json,2459648,1702248610,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/ward tour stationary time lapses.chapters.json,2
+2023-06-04/ward tour stationary time lapses.chapters.txt,223232,1702248611,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/ward tour stationary time lapses.chapters.txt,2
+2023-06-04/ward tour stationary time lapses.mp4,671537921536,1702248324,1,0,file,2023-06-04,/Volumes/s8/gopro/2023-06-04/ward tour stationary time lapses.mp4,2
+2023-06-30/.DS_Store,4196352,1702225631,1,0,file,2023-06-30,/Volumes/s8/gopro/2023-06-30/.DS_Store,2
+2023-06-30/Camera01,71059046507008,1724986192,27,26,dir,2023-06-30,/Volumes/s8/gopro/2023-06-30/Camera01,2
+2023-06-30/Harlem_Valley_Rail_Trail.gpx,647934464,1702227014,1,0,file,2023-06-30,/Volumes/s8/gopro/2023-06-30/Harlem_Valley_Rail_Trail.gpx,2
+2023-06-30/flats,16703935931392,1702222418,8,7,dir,2023-06-30,/Volumes/s8/gopro/2023-06-30/flats,2
+2023-07-03/Camera01,61794161322496,1724896013,19,18,dir,2023-07-03,/Volumes/s8/gopro/2023-07-03/Camera01,2
+2023-12-27/Columbus vs. Washington bike lanes,120121494016,1703715813,8,7,dir,2023-12-27,/Volumes/s8/gopro/2023-12-27/Columbus vs. Washington bike lanes,2
+2023-12-27/ccd.jpg,250606080,1703722100,1,0,file,2023-12-27,/Volumes/s8/gopro/2023-12-27/ccd.jpg,2
+2023-12-27/columbus vs washington.mp4,44450558976,1703718547,1,0,file,2023-12-27,/Volumes/s8/gopro/2023-12-27/columbus vs washington.mp4,2
+2023-12-27/columbus vs washington_2M.mp4,4996402176,1703719204,1,0,file,2023-12-27,/Volumes/s8/gopro/2023-12-27/columbus vs washington_2M.mp4,2
+2023-12-27/columbus vs washington_3M.mp4,7307452416,1703719281,1,0,file,2023-12-27,/Volumes/s8/gopro/2023-12-27/columbus vs washington_3M.mp4,2
+2023-12-27/columbus vs washington_5M.mp4,11882394624,1703718857,1,0,file,2023-12-27,/Volumes/s8/gopro/2023-12-27/columbus vs washington_5M.mp4,2
+2023-12-27/washington 2.jpg,208777728,1703722187,1,0,file,2023-12-27,/Volumes/s8/gopro/2023-12-27/washington 2.jpg,2
+2023-12-27/washington.jpg,204078080,1703722137,1,0,file,2023-12-27,/Volumes/s8/gopro/2023-12-27/washington.jpg,2
+2023-12-28 fisher parking/fisher parking.mp4,68625314304,1703861803,1,0,file,2023-12-28 fisher parking,/Volumes/s8/gopro/2023-12-28 fisher parking/fisher parking.mp4,2
+2022-06-17/Camera01/VID_20220617_185656_00_027.insv,1231036243456,1657102499,1,0,file,2022-06-17/Camera01,/Volumes/s8/gopro/2022-06-17/Camera01/VID_20220617_185656_00_027.insv,3
+2022-06-17/Camera01/VID_20220617_185656_10_027.insv,1224065679360,1657102825,1,0,file,2022-06-17/Camera01,/Volumes/s8/gopro/2022-06-17/Camera01/VID_20220617_185656_10_027.insv,3
+2022-06-17/Camera01/VID_20220617_191409_00_028.insv,1134540348928,1657103015,1,0,file,2022-06-17/Camera01,/Volumes/s8/gopro/2022-06-17/Camera01/VID_20220617_191409_00_028.insv,3
+2022-06-17/Camera01/VID_20220617_191409_10_028.insv,1127428915200,1657103492,1,0,file,2022-06-17/Camera01,/Volumes/s8/gopro/2022-06-17/Camera01/VID_20220617_191409_10_028.insv,3
+2022-06-21/Camera01/139 2.jpg,937365504,1657102503,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/139 2.jpg,3
+2022-06-21/Camera01/139.jpg,874819072,1657102505,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/139.jpg,3
+2022-06-21/Camera01/VID_20220621_161815_00_029.insv,756656761344,1657103472,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_161815_00_029.insv,3
+2022-06-21/Camera01/VID_20220621_161815_10_029.insv,751619276800,1657103462,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_161815_10_029.insv,3
+2022-06-21/Camera01/VID_20220621_163449_00_030.insv,745716124160,1657103758,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_163449_00_030.insv,3
+2022-06-21/Camera01/VID_20220621_163449_10_030.insv,740881858560,1657103924,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_163449_10_030.insv,3
+2022-06-21/Camera01/VID_20220621_164945_00_031.insv,346557229056,1657103885,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_164945_00_031.insv,3
+2022-06-21/Camera01/VID_20220621_164945_10_031.insv,343597383680,1657103889,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_164945_10_031.insv,3
+2022-06-21/Camera01/VID_20220621_173601_00_032.insv,5804928059904,1657111044,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_173601_00_032.insv,3
+2022-06-21/Camera01/VID_20220621_173601_10_032.insv,5776731013120,1657111358,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_173601_10_032.insv,3
+2022-06-21/Camera01/VID_20220621_180621_00_033.insv,2202010971648,1657106561,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_180621_00_033.insv,3
+2022-06-21/Camera01/VID_20220621_180621_10_033.insv,2190433320960,1657106554,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_180621_10_033.insv,3
+2022-06-21/Camera01/VID_20220621_182243_00_034.insv,5804741704192,1657111627,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_182243_00_034.insv,3
+2022-06-21/Camera01/VID_20220621_182243_10_034.insv,5776731013120,1657114588,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_182243_10_034.insv,3
+2022-06-21/Camera01/VID_20220621_185302_00_035.insv,1856752442880,1657108979,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_185302_00_035.insv,3
+2022-06-21/Camera01/VID_20220621_185302_00_035_2022-06-22_16-46-49_screenshot.jpg,859841536,1657108985,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_185302_00_035_2022-06-22_16-46-49_screenshot.jpg,3
+2022-06-21/Camera01/VID_20220621_185302_00_035_2022-06-22_16-58-39_screenshot.jpg,702934016,1657108990,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_185302_00_035_2022-06-22_16-58-39_screenshot.jpg,3
+2022-06-21/Camera01/VID_20220621_185302_10_035.insv,1846835937280,1657111773,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_185302_10_035.insv,3
+2022-06-21/Camera01/VID_20220621_190433_00_036.insv,2525519602176,1657114658,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_190433_00_036.insv,3
+2022-06-21/Camera01/VID_20220621_190433_10_036.insv,2512555868160,1657114860,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_190433_10_036.insv,3
+2022-06-21/Camera01/VID_20220621_191803_00_037.insv,152443715584,1657111892,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_191803_00_037.insv,3
+2022-06-21/Camera01/VID_20220621_191803_10_037.insv,150323855360,1657111994,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_191803_10_037.insv,3
+2022-06-21/Camera01/VID_20220621_193302_00_038.insv,1435879489024,1657113908,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_193302_00_038.insv,3
+2022-06-21/Camera01/VID_20220621_193302_10_038.insv,1428076625920,1657113993,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_193302_10_038.insv,3
+2022-06-21/Camera01/VID_20220621_194515_00_039.insv,767240632832,1657114901,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_194515_00_039.insv,3
+2022-06-21/Camera01/VID_20220621_194515_10_039.insv,762356695040,1657114960,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_194515_10_039.insv,3
+2022-06-21/Camera01/VID_20220621_194924_00_040.insv,410922638336,1657115111,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_194924_00_040.insv,3
+2022-06-21/Camera01/VID_20220621_194924_10_040.insv,408021893120,1657115174,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/VID_20220621_194924_10_040.insv,3
+2022-06-21/Camera01/bb newark.jpg,914121216,1657114865,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/bb newark.jpg,3
+2022-06-21/Camera01/bb summit.jpg,792814592,1657114870,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/bb summit.jpg,3
+2022-06-21/Camera01/central 1.jpg,963379712,1657114875,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/central 1.jpg,3
+2022-06-21/Camera01/central 2.jpg,954521088,1657114881,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/central 2.jpg,3
+2022-06-21/Camera01/coles 2.jpg,885236736,1657114886,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/coles 2.jpg,3
+2022-06-21/Camera01/coles mural.jpg,868907520,1657114891,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/coles mural.jpg,3
+2022-06-21/Camera01/coles park 2.jpg,859898368,1657114897,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/coles park 2.jpg,3
+2022-06-21/Camera01/coles park.jpg,902112256,1657114901,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/coles park.jpg,3
+2022-06-21/Camera01/dual wield.jpg,697654784,1657114903,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/dual wield.jpg,3
+2022-06-21/Camera01/hoboken ave 1.jpg,863591936,1657114904,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/hoboken ave 1.jpg,3
+2022-06-21/Camera01/hoboken ave.jpg,900245504,1657114907,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/hoboken ave.jpg,3
+2022-06-21/Camera01/jfk.jpg,929007616,1657114908,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/jfk.jpg,3
+2022-06-21/Camera01/monmouth.jpg,893648384,1657114911,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/monmouth.jpg,3
+2022-06-21/Camera01/newark 1.jpg,939932672,1657114912,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark 1.jpg,3
+2022-06-21/Camera01/newark 2.jpg,830525440,1657114915,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark 2.jpg,3
+2022-06-21/Camera01/newark 3.jpg,884034560,1657114915,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark 3.jpg,3
+2022-06-21/Camera01/newark ave slippy part 2.jpg,706521088,1657114919,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark ave slippy part 2.jpg,3
+2022-06-21/Camera01/newark ave slippy part.jpg,852228096,1657114920,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark ave slippy part.jpg,3
+2022-06-21/Camera01/newark jersey 2.jpg,884952064,1657114924,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark jersey 2.jpg,3
+2022-06-21/Camera01/newark jersey.jpg,1029895168,1657114924,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark jersey.jpg,3
+2022-06-21/Camera01/newark manholes.jpg,876272640,1657114928,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark manholes.jpg,3
+2022-06-21/Camera01/newark saleh 5.jpg,941751296,1657114928,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark saleh 5.jpg,3
+2022-06-21/Camera01/newark saleh 6.jpg,845781504,1657114932,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark saleh 6.jpg,3
+2022-06-21/Camera01/newark saleh 7.jpg,1003628032,1657114933,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark saleh 7.jpg,3
+2022-06-21/Camera01/newark saleh.jpg,968465920,1657114937,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/newark saleh.jpg,3
+2022-06-21/Camera01/nweark 4.jpg,849849344,1657114937,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/nweark 4.jpg,3
+2022-06-21/Camera01/palisade uc 1.jpg,811076608,1657114941,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/palisade uc 1.jpg,3
+2022-06-21/Camera01/rave cave.jpg,831442944,1657114942,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/rave cave.jpg,3
+2022-06-21/Camera01/saleh arch.jpg,937276416,1657114945,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/saleh arch.jpg,3
+2022-06-21/Camera01/saleh newark 1.jpg,883462656,1657114946,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/saleh newark 1.jpg,3
+2022-06-21/Camera01/saleh newark 2.jpg,901794304,1657114949,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/saleh newark 2.jpg,3
+2022-06-21/Camera01/saleh palisade 2.jpg,948993536,1657114950,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/saleh palisade 2.jpg,3
+2022-06-21/Camera01/saleh palisade 3.jpg,869403136,1657114953,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/saleh palisade 3.jpg,3
+2022-06-21/Camera01/saleh palisade.jpg,1031564800,1657114954,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/saleh palisade.jpg,3
+2022-06-21/Camera01/saleh reservoir 2.jpg,974539776,1657114956,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/saleh reservoir 2.jpg,3
+2022-06-21/Camera01/saleh reservoir.jpg,886279168,1657114957,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/saleh reservoir.jpg,3
+2022-06-21/Camera01/summit saleh.jpg,861392384,1657114960,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/summit saleh.jpg,3
+2022-06-21/Camera01/tonnele 1.jpg,897146880,1657114960,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/tonnele 1.jpg,3
+2022-06-21/Camera01/tonnele 2.jpg,878015488,1657114963,1,0,file,2022-06-21/Camera01,/Volumes/s8/gopro/2022-06-21/Camera01/tonnele 2.jpg,3
+2022-06-23/Camera01/VID_20220623_095632_00_001.insv,131017971200,1657115146,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_095632_00_001.insv,3
+2022-06-23/Camera01/VID_20220623_095632_10_001.insv,128849018880,1657115151,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_095632_10_001.insv,3
+2022-06-23/Camera01/VID_20220623_095831_00_002.insv,1187977788928,1657116587,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_095831_00_002.insv,3
+2022-06-23/Camera01/VID_20220623_095831_10_002.insv,1181116006400,1657116702,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_095831_10_002.insv,3
+2022-06-23/Camera01/VID_20220623_100745_00_003.insv,2967889165824,1657119648,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_100745_00_003.insv,3
+2022-06-23/Camera01/VID_20220623_100745_10_003.insv,2952790016000,1657119630,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_100745_10_003.insv,3
+2022-06-23/Camera01/VID_20220623_102945_00_004.insv,1037185694208,1657116581,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_102945_00_004.insv,3
+2022-06-23/Camera01/VID_20220623_102945_10_004.insv,1030792151040,1657118546,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_102945_10_004.insv,3
+2022-06-23/Camera01/VID_20220623_165957_00_005.insv,1824735263232,1657119564,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_165957_00_005.insv,3
+2022-06-23/Camera01/VID_20220623_165957_10_005.insv,1814623682560,1657119654,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_165957_10_005.insv,3
+2022-06-23/Camera01/VID_20220623_221848_00_006.insv,497383280128,1657119185,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_221848_00_006.insv,3
+2022-06-23/Camera01/VID_20220623_221848_10_006.insv,493921239040,1657119802,1,0,file,2022-06-23/Camera01,/Volumes/s8/gopro/2022-06-23/Camera01/VID_20220623_221848_10_006.insv,3
+2022-06-24/Camera01/VID_20220624_120739_00_007.insv,2407417633280,1656087608,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_120739_00_007.insv,3
+2022-06-24/Camera01/VID_20220624_120739_10_007.insv,2394444267520,1656087604,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_120739_10_007.insv,3
+2022-06-24/Camera01/VID_20220624_123251_00_008.insv,368539921408,1656088484,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_123251_00_008.insv,3
+2022-06-24/Camera01/VID_20220624_123251_10_008.insv,365072220160,1656088482,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_123251_10_008.insv,3
+2022-06-24/Camera01/VID_20220624_125740_00_009.insv,476572974592,1656090008,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_125740_00_009.insv,3
+2022-06-24/Camera01/VID_20220624_125740_10_009.insv,472446402560,1656090006,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_125740_10_009.insv,3
+2022-06-24/Camera01/VID_20220624_135532_00_010.insv,1803411414528,1656093895,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_135532_00_010.insv,3
+2022-06-24/Camera01/VID_20220624_135532_10_010.insv,1793148846080,1656093891,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_135532_10_010.insv,3
+2022-06-24/Camera01/VID_20220624_173750_00_011.insv,422043036160,1656106800,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_173750_00_011.insv,3
+2022-06-24/Camera01/VID_20220624_173750_10_011.insv,418759311360,1656106798,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_173750_10_011.insv,3
+2022-06-24/Camera01/VID_20220624_174414_00_012.insv,2051294379520,1656107694,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_174414_00_012.insv,3
+2022-06-24/Camera01/VID_20220624_174414_10_012.insv,2040109465600,1656107690,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_174414_10_012.insv,3
+2022-06-24/Camera01/VID_20220624_185602_00_013.insv,217403971584,1656111430,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_185602_00_013.insv,3
+2022-06-24/Camera01/VID_20220624_185602_10_013.insv,214748364800,1656111428,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_185602_10_013.insv,3
+2022-06-24/Camera01/VID_20220624_190029_00_014.insv,5804816018944,1656113440,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_190029_00_014.insv,3
+2022-06-24/Camera01/VID_20220624_190029_10_014.insv,5776731013120,1656113433,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_190029_10_014.insv,3
+2022-06-24/Camera01/VID_20220624_193049_00_015.insv,928856477184,1656113739,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_193049_00_015.insv,3
+2022-06-24/Camera01/VID_20220624_193049_10_015.insv,923417968640,1656113736,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_193049_10_015.insv,3
+2022-06-24/Camera01/VID_20220624_200626_00_016.insv,3193982609920,1656116581,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_200626_00_016.insv,3
+2022-06-24/Camera01/VID_20220624_200626_10_016.insv,3178275799040,1656116577,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_200626_10_016.insv,3
+2022-06-24/Camera01/VID_20220624_202727_00_017.insv,1392265136640,1656117282,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_202727_00_017.insv,3
+2022-06-24/Camera01/VID_20220624_202727_10_017.insv,1385126952960,1656117279,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_202727_10_017.insv,3
+2022-06-24/Camera01/VID_20220624_205611_00_018.insv,3183571512832,1656119564,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_205611_00_018.insv,3
+2022-06-24/Camera01/VID_20220624_205611_10_018.insv,3167538380800,1656119559,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_205611_10_018.insv,3
+2022-06-24/Camera01/VID_20220624_211938_00_019.insv,4348398135808,1656121336,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_211938_00_019.insv,3
+2022-06-24/Camera01/VID_20220624_211938_10_019.insv,4327179550720,1656121330,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_211938_10_019.insv,3
+2022-06-24/Camera01/VID_20220624_214525_00_020.insv,12022766080,1656121532,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_214525_00_020.insv,3
+2022-06-24/Camera01/VID_20220624_214525_10_020.insv,10737418240,1656121527,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_214525_10_020.insv,3
+2022-06-24/Camera01/VID_20220624_214601_00_021.insv,788452817408,1656121805,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_214601_00_021.insv,3
+2022-06-24/Camera01/VID_20220624_214601_10_021.insv,783831531520,1656121803,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_214601_10_021.insv,3
+2022-06-24/Camera01/VID_20220624_215216_00_022.insv,5804689153536,1656123747,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_215216_00_022.insv,3
+2022-06-24/Camera01/VID_20220624_215216_10_022.insv,5776731013120,1656123739,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_215216_10_022.insv,3
+2022-06-24/Camera01/VID_20220624_222236_00_023.insv,2288043254272,1656124468,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_222236_00_023.insv,3
+2022-06-24/Camera01/VID_20220624_222236_10_023.insv,2276332666880,1656124464,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_222236_10_023.insv,3
+2022-06-24/Camera01/VID_20220624_232957_00_024.insv,778151034368,1656128041,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_232957_00_024.insv,3
+2022-06-24/Camera01/VID_20220624_232957_10_024.insv,773094113280,1656128038,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/VID_20220624_232957_10_024.insv,3
+2022-06-24/Camera01/citibikes jsq.jpg,1048479232,1657136707,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/citibikes jsq.jpg,3
+2022-06-24/Camera01/city hall roe protest.jpg,1051871744,1657136712,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/city hall roe protest.jpg,3
+2022-06-24/Camera01/gene 1.jpg,1021037568,1657136717,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/gene 1.jpg,3
+2022-06-24/Camera01/jimmy.jpg,961853440,1657136722,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/jimmy.jpg,3
+2022-06-24/Camera01/matt wtc.jpg,906124800,1657136727,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/matt wtc.jpg,3
+2022-06-24/Camera01/mike 1.jpg,730615808,1657136732,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/mike 1.jpg,3
+2022-06-24/Camera01/ph 1.jpg,800307712,1657136737,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/ph 1.jpg,3
+2022-06-24/Camera01/salumeria.jpg,1040728064,1657136742,1,0,file,2022-06-24/Camera01,/Volumes/s8/gopro/2022-06-24/Camera01/salumeria.jpg,3
+2022-06-25/Camera01/VID_20220625_171731_00_001.insv,3086828612096,1657140782,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_171731_00_001.insv,3
+2022-06-25/Camera01/VID_20220625_171731_10_001.insv,3070901616640,1657140969,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_171731_10_001.insv,3
+2022-06-25/Camera01/VID_20220625_173643_00_002.insv,314438736896,1657138069,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_173643_00_002.insv,3
+2022-06-25/Camera01/VID_20220625_173643_10_002.insv,311385128960,1657138493,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_173643_10_002.insv,3
+2022-06-25/Camera01/VID_20220625_174243_00_003.insv,335869417472,1657138905,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_174243_00_003.insv,3
+2022-06-25/Camera01/VID_20220625_174243_10_003.insv,332859965440,1657139337,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_174243_10_003.insv,3
+2022-06-25/Camera01/VID_20220625_174629_00_004.insv,1134040108544,1657140871,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_174629_00_004.insv,3
+2022-06-25/Camera01/VID_20220625_174629_10_004.insv,1127428915200,1657141389,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_174629_10_004.insv,3
+2022-06-25/Camera01/VID_20220625_175553_00_005.insv,2083525656064,1657142656,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_175553_00_005.insv,3
+2022-06-25/Camera01/VID_20220625_175553_10_005.insv,2072321720320,1657143306,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_175553_10_005.insv,3
+2022-06-25/Camera01/VID_20220625_192133_00_006.insv,5092982873600,1657146996,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_192133_00_006.insv,3
+2022-06-25/Camera01/VID_20220625_192133_10_006.insv,5068061409280,1657147041,1,0,file,2022-06-25/Camera01,/Volumes/s8/gopro/2022-06-25/Camera01/VID_20220625_192133_10_006.insv,3
+2022-06-28/Camera01/VID_20220628_141320_00_007.insv,304730253312,1657141773,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_141320_00_007.insv,3
+2022-06-28/Camera01/VID_20220628_141320_10_007.insv,300647710720,1657142145,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_141320_10_007.insv,3
+2022-06-28/Camera01/VID_20220628_142018_00_008.insv,3217296858624,1657145955,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_142018_00_008.insv,3
+2022-06-28/Camera01/VID_20220628_142018_10_008.insv,3199750635520,1657146451,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_142018_10_008.insv,3
+2022-06-28/Camera01/VID_20220628_143734_00_009.insv,239480613888,1657143590,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_143734_00_009.insv,3
+2022-06-28/Camera01/VID_20220628_143734_10_009.insv,236223201280,1657143864,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_143734_10_009.insv,3
+2022-06-28/Camera01/VID_20220628_144056_00_010.insv,2936151453184,1657147427,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_144056_00_010.insv,3
+2022-06-28/Camera01/VID_20220628_144056_10_010.insv,2920577761280,1657149546,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_144056_10_010.insv,3
+2022-06-28/Camera01/VID_20220628_145732_00_011.insv,1846968775168,1657148755,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_145732_00_011.insv,3
+2022-06-28/Camera01/VID_20220628_145732_10_011.insv,1836098519040,1657149253,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_145732_10_011.insv,3
+2022-06-28/Camera01/VID_20220628_152954_00_012.insv,5805315079680,1657154146,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_152954_00_012.insv,3
+2022-06-28/Camera01/VID_20220628_152954_10_012.insv,5776731013120,1657154483,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_152954_10_012.insv,3
+2022-06-28/Camera01/VID_20220628_160014_00_013.insv,5590025936384,1657155567,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_160014_00_013.insv,3
+2022-06-28/Camera01/VID_20220628_160014_10_013.insv,5561982648320,1657156015,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_160014_10_013.insv,3
+2022-06-28/Camera01/VID_20220628_163103_00_014.insv,1577051880960,1657151446,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_163103_00_014.insv,3
+2022-06-28/Camera01/VID_20220628_163103_10_014.insv,1567663063040,1657153434,1,0,file,2022-06-28/Camera01,/Volumes/s8/gopro/2022-06-28/Camera01/VID_20220628_163103_10_014.insv,3
+2022-06-29/Camera01/VID_20220629_111249_00_015.insv,5806246066688,1657159463,1,0,file,2022-06-29/Camera01,/Volumes/s8/gopro/2022-06-29/Camera01/VID_20220629_111249_00_015.insv,3
+2022-06-29/Camera01/VID_20220629_111249_10_015.insv,5776731013120,1657159860,1,0,file,2022-06-29/Camera01,/Volumes/s8/gopro/2022-06-29/Camera01/VID_20220629_111249_10_015.insv,3
+2022-06-29/Camera01/VID_20220629_114309_00_016.insv,5805390151168,1657160008,1,0,file,2022-06-29/Camera01,/Volumes/s8/gopro/2022-06-29/Camera01/VID_20220629_114309_00_016.insv,3
+2022-06-29/Camera01/VID_20220629_114309_10_016.insv,5776731013120,1657160229,1,0,file,2022-06-29/Camera01,/Volumes/s8/gopro/2022-06-29/Camera01/VID_20220629_114309_10_016.insv,3
+2022-06-29/Camera01/VID_20220629_121329_00_017.insv,22806752768,1657156051,1,0,file,2022-06-29/Camera01,/Volumes/s8/gopro/2022-06-29/Camera01/VID_20220629_121329_00_017.insv,3
+2022-06-29/Camera01/VID_20220629_121329_10_017.insv,21474836480,1657156085,1,0,file,2022-06-29/Camera01,/Volumes/s8/gopro/2022-06-29/Camera01/VID_20220629_121329_10_017.insv,3
+2022-07-08/Camera01/VID_20220708_180637_00_001.insv,1328487894528,1657318411,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_180637_00_001.insv,3
+2022-07-08/Camera01/VID_20220708_180637_10_001.insv,1320702443520,1657318409,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_180637_10_001.insv,3
+2022-07-08/Camera01/VID_20220708_192127_00_002.insv,5804784913920,1657324298,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_192127_00_002.insv,3
+2022-07-08/Camera01/VID_20220708_192127_10_002.insv,5776731013120,1657324291,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_192127_10_002.insv,3
+2022-07-08/Camera01/VID_20220708_195147_00_003.insv,3711985405440,1657325466,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_195147_00_003.insv,3
+2022-07-08/Camera01/VID_20220708_195147_10_003.insv,3693671874560,1657325461,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_195147_10_003.insv,3
+2022-07-08/Camera01/VID_20220708_201221_00_004.insv,130683230720,1657325583,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_201221_00_004.insv,3
+2022-07-08/Camera01/VID_20220708_201221_10_004.insv,128849018880,1657325581,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_201221_10_004.insv,3
+2022-07-08/Camera01/VID_20220708_201330_00_005.insv,4995623570944,1657327170,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_201330_00_005.insv,3
+2022-07-08/Camera01/VID_20220708_201330_10_005.insv,4971424645120,1657327163,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_201330_10_005.insv,3
+2022-07-08/Camera01/VID_20220708_204859_00_006.insv,5804733995520,1657329550,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_204859_00_006.insv,3
+2022-07-08/Camera01/VID_20220708_204859_10_006.insv,5776731013120,1657329543,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_204859_10_006.insv,3
+2022-07-08/Camera01/VID_20220708_211919_00_007.insv,821285137920,1657329815,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_211919_00_007.insv,3
+2022-07-08/Camera01/VID_20220708_211919_10_007.insv,816043786240,1657329813,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_211919_10_007.insv,3
+2022-07-08/Camera01/VID_20220708_212752_00_008.insv,5804662656512,1657331882,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_212752_00_008.insv,3
+2022-07-08/Camera01/VID_20220708_212752_10_008.insv,5776731013120,1657331875,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_212752_10_008.insv,3
+2022-07-08/Camera01/VID_20220708_215812_00_009.insv,4855435025920,1657333408,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_215812_00_009.insv,3
+2022-07-08/Camera01/VID_20220708_215812_10_009.insv,4831838208000,1657333401,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_215812_10_009.insv,3
+2022-07-08/Camera01/VID_20220708_222402_00_010.insv,66060209664,1657333461,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_222402_00_010.insv,3
+2022-07-08/Camera01/VID_20220708_222402_10_010.insv,64424509440,1657333459,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_222402_10_010.insv,3
+2022-07-08/Camera01/VID_20220708_223745_00_011.insv,637060348416,1657334462,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_223745_00_011.insv,3
+2022-07-08/Camera01/VID_20220708_223745_10_011.insv,633507676160,1657334461,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_223745_10_011.insv,3
+2022-07-08/Camera01/VID_20220708_230859_00_012.insv,821020909056,1657336396,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_230859_00_012.insv,3
+2022-07-08/Camera01/VID_20220708_230859_10_012.insv,816043786240,1657336394,1,0,file,2022-07-08/Camera01,/Volumes/s8/gopro/2022-07-08/Camera01/VID_20220708_230859_10_012.insv,3
+2022-07-11/Camera01/VID_20220711_180246_00_001.insv,918514167296,1657577253,1,0,file,2022-07-11/Camera01,/Volumes/s8/gopro/2022-07-11/Camera01/VID_20220711_180246_00_001.insv,3
+2022-07-11/Camera01/VID_20220711_180246_10_001.insv,912680550400,1657577251,1,0,file,2022-07-11/Camera01,/Volumes/s8/gopro/2022-07-11/Camera01/VID_20220711_180246_10_001.insv,3
+2022-07-11/Camera01/VID_20220711_215446_00_002.insv,1058415914496,1657591216,1,0,file,2022-07-11/Camera01,/Volumes/s8/gopro/2022-07-11/Camera01/VID_20220711_215446_00_002.insv,3
+2022-07-11/Camera01/VID_20220711_215446_10_002.insv,1052266987520,1657591213,1,0,file,2022-07-11/Camera01,/Volumes/s8/gopro/2022-07-11/Camera01/VID_20220711_215446_10_002.insv,3
+2022-07-13/Camera01/VID_20220713_104821_00_003.insv,1361014849024,1657724124,1,0,file,2022-07-13/Camera01,/Volumes/s8/gopro/2022-07-13/Camera01/VID_20220713_104821_00_003.insv,3
+2022-07-13/Camera01/VID_20220713_104821_10_003.insv,1352914698240,1657724121,1,0,file,2022-07-13/Camera01,/Volumes/s8/gopro/2022-07-13/Camera01/VID_20220713_104821_10_003.insv,3
+2022-07-13/Camera01/VID_20220713_105636_00_004.insv,520266882560,1657724359,1,0,file,2022-07-13/Camera01,/Volumes/s8/gopro/2022-07-13/Camera01/VID_20220713_105636_00_004.insv,3
+2022-07-13/Camera01/VID_20220713_105636_10_004.insv,515396075520,1657724357,1,0,file,2022-07-13/Camera01,/Volumes/s8/gopro/2022-07-13/Camera01/VID_20220713_105636_10_004.insv,3
+2022-07-13/Camera01/VID_20220713_110920_00_005.insv,368374937600,1657725074,1,0,file,2022-07-13/Camera01,/Volumes/s8/gopro/2022-07-13/Camera01/VID_20220713_110920_00_005.insv,3
+2022-07-13/Camera01/VID_20220713_110920_10_005.insv,365072220160,1657725073,1,0,file,2022-07-13/Camera01,/Volumes/s8/gopro/2022-07-13/Camera01/VID_20220713_110920_10_005.insv,3
+2022-07-13/Camera01/VID_20220713_122140_00_006.insv,1049022098944,1657729628,1,0,file,2022-07-13/Camera01,/Volumes/s8/gopro/2022-07-13/Camera01/VID_20220713_122140_00_006.insv,3
+2022-07-13/Camera01/VID_20220713_122140_10_006.insv,1041529569280,1657729625,1,0,file,2022-07-13/Camera01,/Volumes/s8/gopro/2022-07-13/Camera01/VID_20220713_122140_10_006.insv,3
+2022-07-16/Camera01/VID_20220716_104258_00_007.insv,724321451520,1657982802,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_104258_00_007.insv,3
+2022-07-16/Camera01/VID_20220716_104258_10_007.insv,719407022080,1657982800,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_104258_10_007.insv,3
+2022-07-16/Camera01/VID_20220716_104747_00_008.insv,2223885807104,1657983562,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_104747_00_008.insv,3
+2022-07-16/Camera01/VID_20220716_104747_10_008.insv,2211908157440,1657983557,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_104747_10_008.insv,3
+2022-07-16/Camera01/VID_20220716_111910_00_009.insv,4403454770688,1657986121,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_111910_00_009.insv,3
+2022-07-16/Camera01/VID_20220716_111910_10_009.insv,4380866641920,1657986115,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_111910_10_009.insv,3
+2022-07-16/Camera01/VID_20220716_123233_00_010.insv,626609977856,1657989347,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_123233_00_010.insv,3
+2022-07-16/Camera01/VID_20220716_123233_10_010.insv,622770257920,1657989345,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_123233_10_010.insv,3
+2022-07-16/Camera01/VID_20220716_123944_00_011.insv,2083440417280,1657990235,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_123944_00_011.insv,3
+2022-07-16/Camera01/VID_20220716_123944_10_011.insv,2072321720320,1657990231,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_123944_10_011.insv,3
+2022-07-16/Camera01/VID_20220716_125954_00_012.insv,2126305893888,1657991456,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_125954_00_012.insv,3
+2022-07-16/Camera01/VID_20220716_125954_10_012.insv,2115271393280,1657991452,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_125954_10_012.insv,3
+2022-07-16/Camera01/VID_20220716_145517_00_013.insv,346619017216,1657997826,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_145517_00_013.insv,3
+2022-07-16/Camera01/VID_20220716_145517_10_013.insv,343597383680,1657997824,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_145517_10_013.insv,3
+2022-07-16/Camera01/VID_20220716_152135_00_014.insv,1770655477248,1657999845,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_152135_00_014.insv,3
+2022-07-16/Camera01/VID_20220716_152135_10_014.insv,1760936591360,1657999842,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_152135_10_014.insv,3
+2022-07-16/Camera01/VID_20220716_153700_00_015.insv,562330434048,1658000394,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_153700_00_015.insv,3
+2022-07-16/Camera01/VID_20220716_153700_10_015.insv,558345748480,1658000393,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_153700_10_015.insv,3
+2022-07-16/Camera01/VID_20220716_154334_00_016.insv,87943895552,1658000640,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_154334_00_016.insv,3
+2022-07-16/Camera01/VID_20220716_154334_10_016.insv,85899345920,1658000638,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_154334_10_016.insv,3
+2022-07-16/Camera01/VID_20220716_154533_00_017.insv,2234572258816,1658001428,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_154533_00_017.insv,3
+2022-07-16/Camera01/VID_20220716_154533_10_017.insv,2222645575680,1658001425,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/VID_20220716_154533_10_017.insv,3
+2022-07-16/Camera01/bike intros.jpg,892287488,1659808711,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/bike intros.jpg,3
+2022-07-16/Camera01/bkb 1.jpg,893082624,1659808717,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/bkb 1.jpg,3
+2022-07-16/Camera01/bkb 2.jpg,1049549824,1659808721,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/bkb 2.jpg,3
+2022-07-16/Camera01/bkb 3.jpg,1077505024,1659808726,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/bkb 3.jpg,3
+2022-07-16/Camera01/bkbp.jpg,1006085120,1659808728,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/bkbp.jpg,3
+2022-07-16/Camera01/boxes 2.jpg,920913920,1659808732,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/boxes 2.jpg,3
+2022-07-16/Camera01/boxes.jpg,977464320,1659808736,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/boxes.jpg,3
+2022-07-16/Camera01/break 1.jpg,805920256,1659808739,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/break 1.jpg,3
+2022-07-16/Camera01/break 2.jpg,941130240,1659808743,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/break 2.jpg,3
+2022-07-16/Camera01/break 3.jpg,743676416,1659808746,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/break 3.jpg,3
+2022-07-16/Camera01/break 4.jpg,713498624,1659808749,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/break 4.jpg,3
+2022-07-16/Camera01/cobbles 1.jpg,891941888,1659808753,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/cobbles 1.jpg,3
+2022-07-16/Camera01/cobbles 2.jpg,920261120,1659808757,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/cobbles 2.jpg,3
+2022-07-16/Camera01/elevator.jpg,890439680,1659808760,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/elevator.jpg,3
+2022-07-16/Camera01/irish 2.jpg,993678336,1659808764,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/irish 2.jpg,3
+2022-07-16/Camera01/irish.jpg,889795584,1659808767,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/irish.jpg,3
+2022-07-16/Camera01/no hands 1.jpg,849522176,1659808770,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/no hands 1.jpg,3
+2022-07-16/Camera01/no hands 2.jpg,818337792,1659808774,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/no hands 2.jpg,3
+2022-07-16/Camera01/ph.jpg,781526016,1659808777,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/ph.jpg,3
+2022-07-16/Camera01/stranger things.jpg,884158976,1659808781,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/stranger things.jpg,3
+2022-07-16/Camera01/tom stranger.jpg,796024832,1659808784,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/tom stranger.jpg,3
+2022-07-16/Camera01/tom.jpg,813741056,1659808788,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/tom.jpg,3
+2022-07-16/Camera01/trio 2.jpg,885504000,1659808791,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/trio 2.jpg,3
+2022-07-16/Camera01/trio.jpg,905051136,1659808794,1,0,file,2022-07-16/Camera01,/Volumes/s8/gopro/2022-07-16/Camera01/trio.jpg,3
+2022-07-28/Camera01/VID_20220728_155017_00_001.insv,3377556806144,1659038871,1,0,file,2022-07-28/Camera01,/Volumes/s8/gopro/2022-07-28/Camera01/VID_20220728_155017_00_001.insv,3
+2022-07-28/Camera01/VID_20220728_155017_10_001.insv,3360811909120,1659038866,1,0,file,2022-07-28/Camera01,/Volumes/s8/gopro/2022-07-28/Camera01/VID_20220728_155017_10_001.insv,3
+2022-07-28/Camera01/VID_20220728_163337_00_002.insv,2827501005312,1659041298,1,0,file,2022-07-28/Camera01,/Volumes/s8/gopro/2022-07-28/Camera01/VID_20220728_163337_00_002.insv,3
+2022-07-28/Camera01/VID_20220728_163337_10_002.insv,2813203578880,1659041294,1,0,file,2022-07-28/Camera01,/Volumes/s8/gopro/2022-07-28/Camera01/VID_20220728_163337_10_002.insv,3
+2022-07-28/Camera01/VID_20220728_184525_00_003.insv,2870735493632,1659049219,1,0,file,2022-07-28/Camera01,/Volumes/s8/gopro/2022-07-28/Camera01/VID_20220728_184525_00_003.insv,3
+2022-07-28/Camera01/VID_20220728_184525_10_003.insv,2856153251840,1659049215,1,0,file,2022-07-28/Camera01,/Volumes/s8/gopro/2022-07-28/Camera01/VID_20220728_184525_10_003.insv,3
+2022-07-28/Camera01/VID_20220728_192136_00_004.insv,3463735045632,1659051574,1,0,file,2022-07-28/Camera01,/Volumes/s8/gopro/2022-07-28/Camera01/VID_20220728_192136_00_004.insv,3
+2022-07-28/Camera01/VID_20220728_192136_10_004.insv,3435973836800,1659051569,1,0,file,2022-07-28/Camera01,/Volumes/s8/gopro/2022-07-28/Camera01/VID_20220728_192136_10_004.insv,3
+2022-07-29/Camera01/VID_20220729_163725_00_005.insv,3097373121024,1659128010,1,0,file,2022-07-29/Camera01,/Volumes/s8/gopro/2022-07-29/Camera01/VID_20220729_163725_00_005.insv,3
+2022-07-29/Camera01/VID_20220729_163725_10_005.insv,3081639034880,1659128006,1,0,file,2022-07-29/Camera01,/Volumes/s8/gopro/2022-07-29/Camera01/VID_20220729_163725_10_005.insv,3
+2022-07-29/Camera01/VID_20220729_195523_00_006.insv,2611707178496,1659139736,1,0,file,2022-07-29/Camera01,/Volumes/s8/gopro/2022-07-29/Camera01/VID_20220729_195523_00_006.insv,3
+2022-07-29/Camera01/VID_20220729_195523_10_006.insv,2598455214080,1659139732,1,0,file,2022-07-29/Camera01,/Volumes/s8/gopro/2022-07-29/Camera01/VID_20220729_195523_10_006.insv,3
+2022-07-30/Camera01/VID_20220730_140144_00_007.insv,789217345024,1659204351,1,0,file,2022-07-30/Camera01,/Volumes/s8/gopro/2022-07-30/Camera01/VID_20220730_140144_00_007.insv,3
+2022-07-30/Camera01/VID_20220730_140144_10_007.insv,783831531520,1659204348,1,0,file,2022-07-30/Camera01,/Volumes/s8/gopro/2022-07-30/Camera01/VID_20220730_140144_10_007.insv,3
+2022-07-30/Camera01/VID_20220730_161302_00_008.insv,573770046976,1659212161,1,0,file,2022-07-30/Camera01,/Volumes/s8/gopro/2022-07-30/Camera01/VID_20220730_161302_00_008.insv,3
+2022-07-30/Camera01/VID_20220730_161302_10_008.insv,569083166720,1659212159,1,0,file,2022-07-30/Camera01,/Volumes/s8/gopro/2022-07-30/Camera01/VID_20220730_161302_10_008.insv,3
+2022-07-31/Camera01/VID_20220731_110846_00_001.insv,3432064003584,1659281194,1,0,file,2022-07-31/Camera01,/Volumes/s8/gopro/2022-07-31/Camera01/VID_20220731_110846_00_001.insv,3
+2022-07-31/Camera01/VID_20220731_110846_10_001.insv,3414499000320,1659281189,1,0,file,2022-07-31/Camera01,/Volumes/s8/gopro/2022-07-31/Camera01/VID_20220731_110846_10_001.insv,3
+2022-07-31/Camera01/VID_20220731_115438_00_002.insv,3669544726016,1659284021,1,0,file,2022-07-31/Camera01,/Volumes/s8/gopro/2022-07-31/Camera01/VID_20220731_115438_00_002.insv,3
+2022-07-31/Camera01/VID_20220731_115438_10_002.insv,3650722201600,1659284015,1,0,file,2022-07-31/Camera01,/Volumes/s8/gopro/2022-07-31/Camera01/VID_20220731_115438_10_002.insv,3
+2022-07-31/Camera01/VID_20220731_135136_00_003.insv,4144600534528,1659291189,1,0,file,2022-07-31/Camera01,/Volumes/s8/gopro/2022-07-31/Camera01/VID_20220731_135136_00_003.insv,3
+2022-07-31/Camera01/VID_20220731_135136_10_003.insv,4123168604160,1659291183,1,0,file,2022-07-31/Camera01,/Volumes/s8/gopro/2022-07-31/Camera01/VID_20220731_135136_10_003.insv,3
+2022-07-31/Camera01/VID_20220731_144618_00_004.insv,3463988596224,1659294259,1,0,file,2022-07-31/Camera01,/Volumes/s8/gopro/2022-07-31/Camera01/VID_20220731_144618_00_004.insv,3
+2022-07-31/Camera01/VID_20220731_144618_10_004.insv,3446711255040,1659294254,1,0,file,2022-07-31/Camera01,/Volumes/s8/gopro/2022-07-31/Camera01/VID_20220731_144618_10_004.insv,3
+2022-08-01/Camera01/VID_20220801_174812_00_005.insv,2968043630080,1659391416,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_174812_00_005.insv,3
+2022-08-01/Camera01/VID_20220801_174812_10_005.insv,2952790016000,1659391411,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_174812_10_005.insv,3
+2022-08-01/Camera01/VID_20220801_180615_00_006.insv,184860359680,1659391632,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_180615_00_006.insv,3
+2022-08-01/Camera01/VID_20220801_180615_10_006.insv,182536110080,1659391630,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_180615_10_006.insv,3
+2022-08-01/Camera01/VID_20220801_181017_00_007.insv,5805156118016,1659393628,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_181017_00_007.insv,3
+2022-08-01/Camera01/VID_20220801_181017_10_007.insv,5776731013120,1659393620,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_181017_10_007.insv,3
+2022-08-01/Camera01/VID_20220801_184037_00_008.insv,1069289783808,1659393969,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_184037_00_008.insv,3
+2022-08-01/Camera01/VID_20220801_184037_10_008.insv,1063004405760,1659393967,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_184037_10_008.insv,3
+2022-08-01/Camera01/VID_20220801_185123_00_009.insv,5599707921920,1659396028,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_185123_00_009.insv,3
+2022-08-01/Camera01/VID_20220801_185123_10_009.insv,5572720066560,1659396021,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_185123_10_009.insv,3
+2022-08-01/Camera01/VID_20220801_195602_00_010.insv,5804618685952,1659399973,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_195602_00_010.insv,3
+2022-08-01/Camera01/VID_20220801_195602_10_010.insv,5776731013120,1659399965,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_195602_10_010.insv,3
+2022-08-01/Camera01/VID_20220801_202622_00_011.insv,561980882432,1659400157,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_202622_00_011.insv,3
+2022-08-01/Camera01/VID_20220801_202622_10_011.insv,558345748480,1659400155,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_202622_10_011.insv,3
+2022-08-01/Camera01/VID_20220801_203414_00_012.insv,3528713313792,1659401555,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_203414_00_012.insv,3
+2022-08-01/Camera01/VID_20220801_203414_10_012.insv,3511135764480,1659401550,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_203414_10_012.insv,3
+2022-08-01/Camera01/VID_20220801_211552_00_013.insv,842728943104,1659403213,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_211552_00_013.insv,3
+2022-08-01/Camera01/VID_20220801_211552_10_013.insv,837518622720,1659403210,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_211552_10_013.insv,3
+2022-08-01/Camera01/VID_20220801_212735_00_014.insv,1317435022848,1659404064,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_212735_00_014.insv,3
+2022-08-01/Camera01/VID_20220801_212735_10_014.insv,1309965025280,1659404062,1,0,file,2022-08-01/Camera01,/Volumes/s8/gopro/2022-08-01/Camera01/VID_20220801_212735_10_014.insv,3
+2022-08-04/Camera01/VID_20220804_151610_00_015.insv,2482140264960,1659641345,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_151610_00_015.insv,3
+2022-08-04/Camera01/VID_20220804_151610_10_015.insv,2469606195200,1659641341,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_151610_10_015.insv,3
+2022-08-04/Camera01/VID_20220804_153047_00_016.insv,5189742111232,1659643065,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_153047_00_016.insv,3
+2022-08-04/Camera01/VID_20220804_153047_10_016.insv,5164698173440,1659643059,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_153047_10_016.insv,3
+2022-08-04/Camera01/VID_20220804_163335_00_017.insv,5805099916800,1659647026,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_163335_00_017.insv,3
+2022-08-04/Camera01/VID_20220804_163335_10_017.insv,5776731013120,1659647019,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_163335_10_017.insv,3
+2022-08-04/Camera01/VID_20220804_170356_00_018.insv,476515147264,1659647182,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_170356_00_018.insv,3
+2022-08-04/Camera01/VID_20220804_170356_10_018.insv,472446402560,1659647180,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_170356_10_018.insv,3
+2022-08-04/Camera01/VID_20220804_172239_00_019.insv,292828047360,1659648248,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_172239_00_019.insv,3
+2022-08-04/Camera01/VID_20220804_172239_10_019.insv,289910292480,1659648247,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_172239_10_019.insv,3
+2022-08-04/Camera01/VID_20220804_194139_00_020.insv,3183129999872,1659657491,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_194139_00_020.insv,3
+2022-08-04/Camera01/VID_20220804_194139_10_020.insv,3167538380800,1659657487,1,0,file,2022-08-04/Camera01,/Volumes/s8/gopro/2022-08-04/Camera01/VID_20220804_194139_10_020.insv,3
+2022-08-05/Camera01/VID_20220805_154809_00_021.insv,1868292451840,1659729472,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_154809_00_021.insv,3
+2022-08-05/Camera01/VID_20220805_154809_10_021.insv,1857573355520,1659729469,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_154809_10_021.insv,3
+2022-08-05/Camera01/VID_20220805_161334_00_022.insv,4737419271680,1659731891,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_161334_00_022.insv,3
+2022-08-05/Camera01/VID_20220805_161334_10_022.insv,4713726607360,1659731885,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_161334_10_022.insv,3
+2022-08-05/Camera01/VID_20220805_170102_00_023.insv,5805118982656,1659735072,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_170102_00_023.insv,3
+2022-08-05/Camera01/VID_20220805_170102_10_023.insv,5776731013120,1659735065,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_170102_10_023.insv,3
+2022-08-05/Camera01/VID_20220805_173121_00_024.insv,1296014867968,1659735483,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_173121_00_024.insv,3
+2022-08-05/Camera01/VID_20220805_173121_10_024.insv,1288490188800,1659735481,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_173121_10_024.insv,3
+2022-08-05/Camera01/VID_20220805_174439_00_025.insv,163981416448,1659735929,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_174439_00_025.insv,3
+2022-08-05/Camera01/VID_20220805_174439_10_025.insv,161061273600,1659735928,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_174439_10_025.insv,3
+2022-08-05/Camera01/VID_20220805_191659_00_026.insv,2234491317760,1659742115,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_191659_00_026.insv,3
+2022-08-05/Camera01/VID_20220805_191659_10_026.insv,2222645575680,1659742112,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_191659_10_026.insv,3
+2022-08-05/Camera01/VID_20220805_194111_00_027.insv,2730633533952,1659743722,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_194111_00_027.insv,3
+2022-08-05/Camera01/VID_20220805_194111_10_027.insv,2716566814720,1659743718,1,0,file,2022-08-05/Camera01,/Volumes/s8/gopro/2022-08-05/Camera01/VID_20220805_194111_10_027.insv,3
+2022-08-07/Camera01/VID_20220807_110515_00_028.insv,3151537830400,1659885697,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_110515_00_028.insv,3
+2022-08-07/Camera01/VID_20220807_110515_10_028.insv,3135326126080,1659885692,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_110515_10_028.insv,3
+2022-08-07/Camera01/VID_20220807_113054_00_029.insv,540858280448,1659886423,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_113054_00_029.insv,3
+2022-08-07/Camera01/VID_20220807_113054_10_029.insv,536870912000,1659886421,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_113054_10_029.insv,3
+2022-08-07/Camera01/VID_20220807_114318_00_030.insv,821423442432,1659887255,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_114318_00_030.insv,3
+2022-08-07/Camera01/VID_20220807_114318_10_030.insv,816043786240,1659887253,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_114318_10_030.insv,3
+2022-08-07/Camera01/VID_20220807_130022_00_031.insv,45077599744,1659891636,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_130022_00_031.insv,3
+2022-08-07/Camera01/VID_20220807_130022_10_031.insv,42949672960,1659891635,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_130022_10_031.insv,3
+2022-08-07/Camera01/VID_20220807_130114_00_032.insv,131109067264,1659891714,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_130114_00_032.insv,3
+2022-08-07/Camera01/VID_20220807_130114_10_032.insv,128849018880,1659891713,1,0,file,2022-08-07/Camera01,/Volumes/s8/gopro/2022-08-07/Camera01/VID_20220807_130114_10_032.insv,3
+2022-08-09/Camera01/VID_20220809_162659_00_001.insv,2968047081984,1660077744,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_162659_00_001.insv,3
+2022-08-09/Camera01/VID_20220809_162659_10_001.insv,2952790016000,1660077740,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_162659_10_001.insv,3
+2022-08-09/Camera01/VID_20220809_165408_00_002.insv,1101594343936,1660078791,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_165408_00_002.insv,3
+2022-08-09/Camera01/VID_20220809_165408_10_002.insv,1095216660480,1660078789,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_165408_10_002.insv,3
+2022-08-09/Camera01/VID_20220809_171520_00_003.insv,2158826659328,1660080393,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_171520_00_003.insv,3
+2022-08-09/Camera01/VID_20220809_171520_10_003.insv,2147483648000,1660080390,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_171520_10_003.insv,3
+2022-08-09/Camera01/VID_20220809_191527_00_004.insv,2353046912512,1660087660,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_191527_00_004.insv,3
+2022-08-09/Camera01/VID_20220809_191527_10_004.insv,2340757176320,1660087656,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_191527_10_004.insv,3
+2022-08-09/Camera01/VID_20220809_194148_00_005.insv,2967740516864,1660089433,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_194148_00_005.insv,3
+2022-08-09/Camera01/VID_20220809_194148_10_005.insv,2952790016000,1660089429,1,0,file,2022-08-09/Camera01,/Volumes/s8/gopro/2022-08-09/Camera01/VID_20220809_194148_10_005.insv,3
+2022-08-14/Camera01/VID_20220814_133356_00_014.insv,1954153201152,1660499044,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_133356_00_014.insv,3
+2022-08-14/Camera01/VID_20220814_133356_10_014.insv,1943472701440,1660499040,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_133356_10_014.insv,3
+2022-08-14/Camera01/VID_20220814_133409_00_047.insv,1425278483968,1660498892,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_133409_00_047.insv,3
+2022-08-14/Camera01/VID_20220814_133409_10_047.insv,1417339207680,1660498890,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_133409_10_047.insv,3
+2022-08-14/Camera01/VID_20220814_135807_00_001.insv,2213414784512,1660500576,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_135807_00_001.insv,3
+2022-08-14/Camera01/VID_20220814_135807_10_001.insv,2201170739200,1660500571,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_135807_10_001.insv,3
+2022-08-14/Camera01/VID_20220814_140012_00_001.insv,1533329407488,1660504088,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_140012_00_001.insv,3
+2022-08-14/Camera01/VID_20220814_140012_10_001.insv,1524713390080,1660504085,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_140012_10_001.insv,3
+2022-08-14/Camera01/VID_20220814_142024_00_015.insv,1091215465984,1660501564,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_142024_00_015.insv,3
+2022-08-14/Camera01/VID_20220814_142024_10_015.insv,1084479242240,1660501562,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_142024_10_015.insv,3
+2022-08-14/Camera01/VID_20220814_143216_00_016.insv,411616102400,1660502064,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_143216_00_016.insv,3
+2022-08-14/Camera01/VID_20220814_143216_10_016.insv,408021893120,1660502063,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_143216_10_016.insv,3
+2022-08-14/Camera01/VID_20220814_143314_00_002.insv,5611253308928,1660503745,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_143314_00_002.insv,3
+2022-08-14/Camera01/VID_20220814_143314_10_002.insv,5583457484800,1660503738,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_143314_10_002.insv,3
+2022-08-14/Camera01/VID_20220814_150234_00_003.insv,2666142289408,1660504585,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_150234_00_003.insv,3
+2022-08-14/Camera01/VID_20220814_150234_10_003.insv,2652142305280,1660504581,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_150234_10_003.insv,3
+2022-08-14/Camera01/VID_20220814_181938_00_004.insv,5610885171712,1660517328,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_181938_00_004.insv,3
+2022-08-14/Camera01/VID_20220814_181938_10_004.insv,5583457484800,1660517321,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_181938_10_004.insv,3
+2022-08-14/Camera01/VID_20220814_184858_00_005.insv,5028072074752,1660518905,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_184858_00_005.insv,3
+2022-08-14/Camera01/VID_20220814_184858_10_005.insv,5003636899840,1660518899,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_184858_10_005.insv,3
+2022-08-14/Camera01/VID_20220814_191709_00_006.insv,540836205056,1660519199,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_191709_00_006.insv,3
+2022-08-14/Camera01/VID_20220814_191709_10_006.insv,536870912000,1660519196,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_191709_10_006.insv,3
+2022-08-14/Camera01/VID_20220814_200118_00_007.insv,3538849500672,1660522782,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_200118_00_007.insv,3
+2022-08-14/Camera01/VID_20220814_200118_10_007.insv,3521873182720,1660522777,1,0,file,2022-08-14/Camera01,/Volumes/s8/gopro/2022-08-14/Camera01/VID_20220814_200118_10_007.insv,3
+2022-09-16/Camera01/VID_20220916_163730_00_017.insv,4305219354112,1663361992,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_163730_00_017.insv,3
+2022-09-16/Camera01/VID_20220916_163730_10_017.insv,4284229877760,1663361987,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_163730_10_017.insv,3
+2022-09-16/Camera01/VID_20220916_170122_00_018.insv,2299317833216,1663362799,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_170122_00_018.insv,3
+2022-09-16/Camera01/VID_20220916_170122_10_018.insv,2287070085120,1663362795,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_170122_10_018.insv,3
+2022-09-16/Camera01/VID_20220916_171353_00_019.insv,454641562112,1663362973,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_171353_00_019.insv,3
+2022-09-16/Camera01/VID_20220916_171353_10_019.insv,450971566080,1663362971,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_171353_10_019.insv,3
+2022-09-16/Camera01/VID_20220916_171807_00_020.insv,131008105984,1663363129,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_171807_00_020.insv,3
+2022-09-16/Camera01/VID_20220916_171807_10_020.insv,128849018880,1663363128,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_171807_10_020.insv,3
+2022-09-16/Camera01/VID_20220916_183401_00_021.insv,87793448448,1663367665,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_183401_00_021.insv,3
+2022-09-16/Camera01/VID_20220916_183401_10_021.insv,85899345920,1663367665,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_183401_10_021.insv,3
+2022-09-16/Camera01/VID_20220916_183735_00_022.insv,4683429337600,1663369316,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_183735_00_022.insv,3
+2022-09-16/Camera01/VID_20220916_183735_10_022.insv,4660039516160,1663369310,1,0,file,2022-09-16/Camera01,/Volumes/s8/gopro/2022-09-16/Camera01/VID_20220916_183735_10_022.insv,3
+2022-09-18/Camera01/VID_20220918_172235_00_023.insv,800549776896,1663536403,1,0,file,2022-09-18/Camera01,/Volumes/s8/gopro/2022-09-18/Camera01/VID_20220918_172235_00_023.insv,3
+2022-09-18/Camera01/VID_20220918_172235_10_023.insv,794568949760,1663536401,1,0,file,2022-09-18/Camera01,/Volumes/s8/gopro/2022-09-18/Camera01/VID_20220918_172235_10_023.insv,3
+2022-09-18/Camera01/VID_20220918_172737_00_024.insv,1944015347200,1663537061,1,0,file,2022-09-18/Camera01,/Volumes/s8/gopro/2022-09-18/Camera01/VID_20220918_172737_00_024.insv,3
+2022-09-18/Camera01/VID_20220918_172737_10_024.insv,1932735283200,1663537058,1,0,file,2022-09-18/Camera01,/Volumes/s8/gopro/2022-09-18/Camera01/VID_20220918_172737_10_024.insv,3
+2022-09-18/Camera01/VID_20220918_180528_00_025.insv,3765856996864,1663539904,1,0,file,2022-09-18/Camera01,/Volumes/s8/gopro/2022-09-18/Camera01/VID_20220918_180528_00_025.insv,3
+2022-09-18/Camera01/VID_20220918_180528_10_025.insv,3747358965760,1663539899,1,0,file,2022-09-18/Camera01,/Volumes/s8/gopro/2022-09-18/Camera01/VID_20220918_180528_10_025.insv,3
+2022-09-19/Camera01/VID_20220919_161503_00_026.insv,2753292385792,1663619362,1,0,file,2022-09-19/Camera01,/Volumes/s8/gopro/2022-09-19/Camera01/VID_20220919_161503_00_026.insv,3
+2022-09-19/Camera01/VID_20220919_161503_10_026.insv,2738041651200,1663619358,1,0,file,2022-09-19/Camera01,/Volumes/s8/gopro/2022-09-19/Camera01/VID_20220919_161503_10_026.insv,3
+2022-09-19/Camera01/VID_20220919_170041_00_027.insv,2083226234368,1663621889,1,0,file,2022-09-19/Camera01,/Volumes/s8/gopro/2022-09-19/Camera01/VID_20220919_170041_00_027.insv,3
+2022-09-19/Camera01/VID_20220919_170041_10_027.insv,2072321720320,1663621885,1,0,file,2022-09-19/Camera01,/Volumes/s8/gopro/2022-09-19/Camera01/VID_20220919_170041_10_027.insv,3
+2022-09-20/Camera01/VID_20220920_160509_00_028.insv,4705416961536,1663705778,1,0,file,2022-09-20/Camera01,/Volumes/s8/gopro/2022-09-20/Camera01/VID_20220920_160509_00_028.insv,3
+2022-09-20/Camera01/VID_20220920_160509_10_028.insv,4681514352640,1663705769,1,0,file,2022-09-20/Camera01,/Volumes/s8/gopro/2022-09-20/Camera01/VID_20220920_160509_10_028.insv,3
+2022-09-20/Camera01/VID_20220920_175002_00_029.insv,1565715233280,1663711090,1,0,file,2022-09-20/Camera01,/Volumes/s8/gopro/2022-09-20/Camera01/VID_20220920_175002_00_029.insv,3
+2022-09-20/Camera01/VID_20220920_175002_10_029.insv,1556925644800,1663711087,1,0,file,2022-09-20/Camera01,/Volumes/s8/gopro/2022-09-20/Camera01/VID_20220920_175002_10_029.insv,3
+2022-09-20/Camera01/VID_20220920_180758_00_030.insv,2633337343488,1663712497,1,0,file,2022-09-20/Camera01,/Volumes/s8/gopro/2022-09-20/Camera01/VID_20220920_180758_00_030.insv,3
+2022-09-20/Camera01/VID_20220920_180758_10_030.insv,2619930050560,1663712493,1,0,file,2022-09-20/Camera01,/Volumes/s8/gopro/2022-09-20/Camera01/VID_20220920_180758_10_030.insv,3
+2022-09-24/Camera01/VID_20220924_170306_00_031.insv,1209505966592,1664053761,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_170306_00_031.insv,3
+2022-09-24/Camera01/VID_20220924_170306_10_031.insv,1202590842880,1664053758,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_170306_10_031.insv,3
+2022-09-24/Camera01/VID_20220924_173444_00_032.insv,2677223665152,1664056120,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_173444_00_032.insv,3
+2022-09-24/Camera01/VID_20220924_173444_10_032.insv,2662879723520,1664056116,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_173444_10_032.insv,3
+2022-09-24/Camera01/VID_20220924_174850_00_033.insv,1360910921216,1664056554,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_174850_00_033.insv,3
+2022-09-24/Camera01/VID_20220924_174850_10_033.insv,1352914698240,1664056551,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_174850_10_033.insv,3
+2022-09-24/Camera01/VID_20220924_180011_00_034.insv,1867776821760,1664057391,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_180011_00_034.insv,3
+2022-09-24/Camera01/VID_20220924_180011_10_034.insv,1857573355520,1664057388,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_180011_10_034.insv,3
+2022-09-24/Camera01/VID_20220924_181913_00_035.insv,519538429440,1664058114,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_181913_00_035.insv,3
+2022-09-24/Camera01/VID_20220924_181913_10_035.insv,515396075520,1664058112,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_181913_10_035.insv,3
+2022-09-24/Camera01/VID_20220924_183337_00_036.insv,1900383116800,1664059409,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_183337_00_036.insv,3
+2022-09-24/Camera01/VID_20220924_183337_10_036.insv,1889785610240,1664059406,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_183337_10_036.insv,3
+2022-09-24/Camera01/VID_20220924_185322_00_037.insv,897007685120,1664060282,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_185322_00_037.insv,3
+2022-09-24/Camera01/VID_20220924_185322_10_037.insv,891205713920,1664060280,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_185322_10_037.insv,3
+2022-09-24/Camera01/VID_20220924_190529_00_038.insv,98980878848,1664060760,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_190529_00_038.insv,3
+2022-09-24/Camera01/VID_20220924_190529_10_038.insv,96636764160,1664060758,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_190529_10_038.insv,3
+2022-09-24/Camera01/VID_20220924_190606_00_039.insv,1123805318656,1664061114,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_190606_00_039.insv,3
+2022-09-24/Camera01/VID_20220924_190606_10_039.insv,1116691496960,1664061112,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_190606_10_039.insv,3
+2022-09-24/Camera01/VID_20220924_191252_00_040.insv,724397902336,1664061396,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_191252_00_040.insv,3
+2022-09-24/Camera01/VID_20220924_191252_10_040.insv,719407022080,1664061394,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_191252_10_040.insv,3
+2022-09-24/Camera01/VID_20220924_191812_00_041.insv,1673750973952,1664062014,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_191812_00_041.insv,3
+2022-09-24/Camera01/VID_20220924_191812_10_041.insv,1664299827200,1664062011,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_191812_10_041.insv,3
+2022-09-24/Camera01/VID_20220924_193152_00_042.insv,174373547008,1664062366,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_193152_00_042.insv,3
+2022-09-24/Camera01/VID_20220924_193152_10_042.insv,171798691840,1664062364,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_193152_10_042.insv,3
+2022-09-24/Camera01/VID_20220924_193255_00_043.insv,745863654912,1664062607,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_193255_00_043.insv,3
+2022-09-24/Camera01/VID_20220924_193255_10_043.insv,740881858560,1664062604,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_193255_10_043.insv,3
+2022-09-24/Camera01/VID_20220924_194331_00_044.insv,508580445696,1664063170,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_194331_00_044.insv,3
+2022-09-24/Camera01/VID_20220924_194331_10_044.insv,504658657280,1664063168,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_194331_10_044.insv,3
+2022-09-24/Camera01/VID_20220924_195059_00_045.insv,23127815680,1664063466,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_195059_00_045.insv,3
+2022-09-24/Camera01/VID_20220924_195059_10_045.insv,21474836480,1664063466,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_195059_10_045.insv,3
+2022-09-24/Camera01/VID_20220924_195757_00_046.insv,659446533632,1664064084,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_195757_00_046.insv,3
+2022-09-24/Camera01/VID_20220924_195757_10_046.insv,654982512640,1664064082,1,0,file,2022-09-24/Camera01,/Volumes/s8/gopro/2022-09-24/Camera01/VID_20220924_195757_10_046.insv,3
+2022-11-06/Camera01/VID_20220823_042031_00_002.insv,1101724433920,1661246776,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_042031_00_002.insv,3
+2022-11-06/Camera01/VID_20220823_042031_10_002.insv,1095216660480,1661246773,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_042031_10_002.insv,3
+2022-11-06/Camera01/VID_20220823_050322_00_003.insv,5610712460800,1661250752,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_050322_00_003.insv,3
+2022-11-06/Camera01/VID_20220823_050322_10_003.insv,5583457484800,1661250745,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_050322_10_003.insv,3
+2022-11-06/Camera01/VID_20220823_053242_00_004.insv,1176877760000,1661251127,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_053242_00_004.insv,3
+2022-11-06/Camera01/VID_20220823_053242_10_004.insv,1170378588160,1661251125,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_053242_10_004.insv,3
+2022-11-06/Camera01/VID_20220823_054733_00_005.insv,821168880128,1661251910,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_054733_00_005.insv,3
+2022-11-06/Camera01/VID_20220823_054733_10_005.insv,816043786240,1661251908,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_054733_10_005.insv,3
+2022-11-06/Camera01/VID_20220823_055742_00_006.insv,5610591656448,1661254012,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_055742_00_006.insv,3
+2022-11-06/Camera01/VID_20220823_055742_10_006.insv,5583457484800,1661254005,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_055742_10_006.insv,3
+2022-11-06/Camera01/VID_20220823_062701_00_007.insv,2816934034944,1661254901,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_062701_00_007.insv,3
+2022-11-06/Camera01/VID_20220823_062701_10_007.insv,2802466160640,1661254897,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_062701_10_007.insv,3
+2022-11-06/Camera01/VID_20220823_064811_00_008.insv,66045991424,1661255310,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_064811_00_008.insv,3
+2022-11-06/Camera01/VID_20220823_064811_10_008.insv,64424509440,1661255308,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_064811_10_008.insv,3
+2022-11-06/Camera01/VID_20220823_064931_00_009.insv,2827584695808,1661256254,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_064931_00_009.insv,3
+2022-11-06/Camera01/VID_20220823_064931_10_009.insv,2813203578880,1661256249,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_064931_10_009.insv,3
+2022-11-06/Camera01/VID_20220823_071904_00_010.insv,5200925415936,1661258766,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_071904_00_010.insv,3
+2022-11-06/Camera01/VID_20220823_071904_10_010.insv,5175435591680,1661258759,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_071904_10_010.insv,3
+2022-11-06/Camera01/VID_20220823_104119_00_011.insv,109686639104,1661269312,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_104119_00_011.insv,3
+2022-11-06/Camera01/VID_20220823_104119_10_011.insv,107374182400,1661269311,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_104119_10_011.insv,3
+2022-11-06/Camera01/VID_20220823_104249_00_012.insv,174388848640,1661269422,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_104249_00_012.insv,3
+2022-11-06/Camera01/VID_20220823_104249_10_012.insv,171798691840,1661269421,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_104249_10_012.insv,3
+2022-11-06/Camera01/VID_20220823_104514_00_013.insv,88024128000,1661269539,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_104514_00_013.insv,3
+2022-11-06/Camera01/VID_20220823_104514_10_013.insv,85899345920,1661269537,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_104514_10_013.insv,3
+2022-11-06/Camera01/VID_20220823_104653_00_014.insv,98898864640,1661269644,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_104653_00_014.insv,3
+2022-11-06/Camera01/VID_20220823_104653_10_014.insv,96636764160,1661269643,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_104653_10_014.insv,3
+2022-11-06/Camera01/VID_20220823_110349_00_015.insv,1662735108608,1661271146,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_110349_00_015.insv,3
+2022-11-06/Camera01/VID_20220823_110349_10_015.insv,1653562408960,1661271143,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_110349_10_015.insv,3
+2022-11-06/Camera01/VID_20220823_113830_00_016.insv,3097263946240,1661273675,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_113830_00_016.insv,3
+2022-11-06/Camera01/VID_20220823_113830_10_016.insv,3081639034880,1661273671,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_113830_10_016.insv,3
+2022-11-06/Camera01/VID_20220823_120637_00_017.insv,541081340416,1661274563,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_120637_00_017.insv,3
+2022-11-06/Camera01/VID_20220823_120637_10_017.insv,536870912000,1661274562,1,0,file,2022-11-06/Camera01,/Volumes/s8/gopro/2022-11-06/Camera01/VID_20220823_120637_10_017.insv,3
+2022-11-12/Camera01/VID_20221112_095232_00_001.insv,939762502144,1668265046,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_095232_00_001.insv,3
+2022-11-12/Camera01/VID_20221112_095232_10_001.insv,934155386880,1668265044,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_095232_10_001.insv,3
+2022-11-12/Camera01/VID_20221112_101606_00_002.insv,142098647040,1668266209,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_101606_00_002.insv,3
+2022-11-12/Camera01/VID_20221112_101606_10_002.insv,139586437120,1668266207,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_101606_10_002.insv,3
+2022-11-12/Camera01/VID_20221112_101918_00_003.insv,87937874432,1668266386,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_101918_00_003.insv,3
+2022-11-12/Camera01/VID_20221112_101918_10_003.insv,85899345920,1668266385,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_101918_10_003.insv,3
+2022-11-12/Camera01/VID_20221112_102419_00_004.insv,5611088845312,1668268409,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_102419_00_004.insv,3
+2022-11-12/Camera01/VID_20221112_102419_10_004.insv,5583457484800,1668268402,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_102419_10_004.insv,3
+2022-11-12/Camera01/VID_20221112_105339_00_005.insv,3097895939584,1668269384,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_105339_00_005.insv,3
+2022-11-12/Camera01/VID_20221112_105339_10_005.insv,3081639034880,1668269380,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_105339_10_005.insv,3
+2022-11-12/Camera01/VID_20221112_111019_00_006.insv,2633880300032,1668270241,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_111019_00_006.insv,3
+2022-11-12/Camera01/VID_20221112_111019_10_006.insv,2619930050560,1668270237,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_111019_10_006.insv,3
+2022-11-12/Camera01/VID_20221112_112410_00_007.insv,3550868680192,1668271356,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_112410_00_007.insv,3
+2022-11-12/Camera01/VID_20221112_112410_10_007.insv,3532610600960,1668271351,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_112410_10_007.insv,3
+2022-11-12/Camera01/VID_20221112_121829_00_008.insv,5611235998208,1668275259,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_121829_00_008.insv,3
+2022-11-12/Camera01/VID_20221112_121829_10_008.insv,5583457484800,1668275252,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_121829_10_008.insv,3
+2022-11-12/Camera01/VID_20221112_124748_00_009.insv,1738452860416,1668275808,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_124748_00_009.insv,3
+2022-11-12/Camera01/VID_20221112_124748_10_009.insv,1728724336640,1668275805,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_124748_10_009.insv,3
+2022-11-12/Camera01/VID_20221112_125929_00_010.insv,573249191424,1668276147,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_125929_00_010.insv,3
+2022-11-12/Camera01/VID_20221112_125929_10_010.insv,569083166720,1668276145,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_125929_10_010.insv,3
+2022-11-12/Camera01/VID_20221112_140749_00_011.insv,692235922944,1668280284,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_140749_00_011.insv,3
+2022-11-12/Camera01/VID_20221112_140749_10_011.insv,687194767360,1668280282,1,0,file,2022-11-12/Camera01,/Volumes/s8/gopro/2022-11-12/Camera01/VID_20221112_140749_10_011.insv,3
+2022-11-12/rally/playlist.json,1565184,1668445311,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/playlist.json,3
+2022-11-12/rally/rally barkha.mp4,74100000256,1668443030,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally barkha.mp4,3
+2022-11-12/rally/rally barkha_iTT_English.itt,1908224,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally barkha_iTT_English.itt,3
+2022-11-12/rally/rally chris adair.mp4,75836652032,1668443100,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally chris adair.mp4,3
+2022-11-12/rally/rally chris adair_iTT_English.itt,1626112,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally chris adair_iTT_English.itt,3
+2022-11-12/rally/rally cohen.mp4,40698277888,1668443139,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally cohen.mp4,3
+2022-11-12/rally/rally cohen_iTT_English.itt,1289728,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally cohen_iTT_English.itt,3
+2022-11-12/rally/rally gilmore.mp4,58346470400,1668443200,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally gilmore.mp4,3
+2022-11-12/rally/rally gilmore_iTT_English.itt,1632256,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally gilmore_iTT_English.itt,3
+2022-11-12/rally/rally jimmy lee.mp4,32892428800,1668443232,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally jimmy lee.mp4,3
+2022-11-12/rally/rally jimmy lee_iTT_English.itt,1196544,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally jimmy lee_iTT_English.itt,3
+2022-11-12/rally/rally o'dea.mp4,76318438400,1668443308,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally o'dea.mp4,3
+2022-11-12/rally/rally o'dea_iTT_English.itt,1950208,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally o'dea_iTT_English.itt,3
+2022-11-12/rally/rally reichman.mp4,73245564416,1668443376,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally reichman.mp4,3
+2022-11-12/rally/rally reichman_iTT_English.itt,1868288,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally reichman_iTT_English.itt,3
+2022-11-12/rally/rally romano.mp4,13341136896,1668443393,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally romano.mp4,3
+2022-11-12/rally/rally romano_iTT_English.itt,934912,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally romano_iTT_English.itt,3
+2022-11-12/rally/rally saleh.mp4,65470090240,1668443458,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally saleh.mp4,3
+2022-11-12/rally/rally saleh_iTT_English.itt,1677824,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally saleh_iTT_English.itt,3
+2022-11-12/rally/rally solomon.mp4,106790708736,1668443555,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally solomon.mp4,3
+2022-11-12/rally/rally solomon_iTT_English.itt,2716160,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally solomon_iTT_English.itt,3
+2022-11-12/rally/rally tony borelli.mp4,81838673920,1668443612,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally tony borelli.mp4,3
+2022-11-12/rally/rally tony borelli_iTT_English.itt,1942528,1668442926,1,0,file,2022-11-12/rally,/Volumes/s8/gopro/2022-11-12/rally/rally tony borelli_iTT_English.itt,3
+2022-11-12/turnpiketrap-playlist_files/base.js,1084495360,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/base.js,3
+2022-11-12/turnpiketrap-playlist_files/cast_sender.js,27160064,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/cast_sender.js,3
+2022-11-12/turnpiketrap-playlist_files/channels4_profile(1).jpg,1226240,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/channels4_profile(1).jpg,3
+2022-11-12/turnpiketrap-playlist_files/channels4_profile(2).jpg,2612224,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/channels4_profile(2).jpg,3
+2022-11-12/turnpiketrap-playlist_files/channels4_profile(3).jpg,1617920,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/channels4_profile(3).jpg,3
+2022-11-12/turnpiketrap-playlist_files/channels4_profile(4).jpg,16112128,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/channels4_profile(4).jpg,3
+2022-11-12/turnpiketrap-playlist_files/channels4_profile.jpg,1816064,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/channels4_profile.jpg,3
+2022-11-12/turnpiketrap-playlist_files/css,4241408,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/css,3
+2022-11-12/turnpiketrap-playlist_files/css(1),1031168,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/css(1),3
+2022-11-12/turnpiketrap-playlist_files/css2,5558272,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/css2,3
+2022-11-12/turnpiketrap-playlist_files/custom-elements-es5-adapter.js,1013760,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/custom-elements-es5-adapter.js,3
+2022-11-12/turnpiketrap-playlist_files/desktop_polymer.js,5047652352,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/desktop_polymer.js,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(1).jpg,4199424,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(1).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(10).jpg,4325376,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(10).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(11).jpg,4662272,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(11).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(12).jpg,11023872,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(12).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(13).jpg,7072768,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(13).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(2).jpg,4204544,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(2).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(3).jpg,4326400,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(3).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(4).jpg,3633152,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(4).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(5).jpg,4076544,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(5).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(6).jpg,3718144,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(6).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(7).jpg,4291584,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(7).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(8).jpg,4057088,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(8).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault(9).jpg,4097024,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault(9).jpg,3
+2022-11-12/turnpiketrap-playlist_files/hqdefault.jpg,20472320,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/hqdefault.jpg,3
+2022-11-12/turnpiketrap-playlist_files/intersection-observer.min.js,2840064,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/intersection-observer.min.js,3
+2022-11-12/turnpiketrap-playlist_files/miniplayer.js,2872320,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/miniplayer.js,3
+2022-11-12/turnpiketrap-playlist_files/network.js,7076864,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/network.js,3
+2022-11-12/turnpiketrap-playlist_files/offline.js,62996992,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/offline.js,3
+2022-11-12/turnpiketrap-playlist_files/remote.js,62019584,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/remote.js,3
+2022-11-12/turnpiketrap-playlist_files/rs=AGKMywEHPjZFqSvb9Wn0iBENTvqFXh9j5g,27648000,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/rs=AGKMywEHPjZFqSvb9Wn0iBENTvqFXh9j5g,3
+2022-11-12/turnpiketrap-playlist_files/saved_resource.html,76288,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/saved_resource.html,3
+2022-11-12/turnpiketrap-playlist_files/scheduler.js,3721728,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/scheduler.js,3
+2022-11-12/turnpiketrap-playlist_files/spf.js,20372480,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/spf.js,3
+2022-11-12/turnpiketrap-playlist_files/unnamed(1).jpg,1523712,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/unnamed(1).jpg,3
+2022-11-12/turnpiketrap-playlist_files/unnamed(2).jpg,2297856,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/unnamed(2).jpg,3
+2022-11-12/turnpiketrap-playlist_files/unnamed(3).jpg,1739776,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/unnamed(3).jpg,3
+2022-11-12/turnpiketrap-playlist_files/unnamed(4).jpg,4056576,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/unnamed(4).jpg,3
+2022-11-12/turnpiketrap-playlist_files/unnamed(5).jpg,15226368,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/unnamed(5).jpg,3
+2022-11-12/turnpiketrap-playlist_files/unnamed(6).jpg,3177984,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/unnamed(6).jpg,3
+2022-11-12/turnpiketrap-playlist_files/unnamed.jpg,2850304,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/unnamed.jpg,3
+2022-11-12/turnpiketrap-playlist_files/web-animations-next-lite.min.js,25955840,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/web-animations-next-lite.min.js,3
+2022-11-12/turnpiketrap-playlist_files/webcomponents-sd.js,40026624,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/webcomponents-sd.js,3
+2022-11-12/turnpiketrap-playlist_files/www-i18n-constants.js,2197504,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/www-i18n-constants.js,3
+2022-11-12/turnpiketrap-playlist_files/www-main-desktop-watch-page-skeleton.css,2597376,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/www-main-desktop-watch-page-skeleton.css,3
+2022-11-12/turnpiketrap-playlist_files/www-onepick.css,430592,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/www-onepick.css,3
+2022-11-12/turnpiketrap-playlist_files/www-player.css,188265472,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/www-player.css,3
+2022-11-12/turnpiketrap-playlist_files/www-tampering.js,5125120,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/www-tampering.js,3
+2022-11-12/turnpiketrap-playlist_files/youtube_96in128dp.png,1165312,1668445097,1,0,file,2022-11-12/turnpiketrap-playlist_files,/Volumes/s8/gopro/2022-11-12/turnpiketrap-playlist_files/youtube_96in128dp.png,3
+2022-11-23/Camera01/VID_20221123_133539_00_001.insv,3679948930560,1669226088,1,0,file,2022-11-23/Camera01,/Volumes/s8/gopro/2022-11-23/Camera01/VID_20221123_133539_00_001.insv,3
+2022-11-23/Camera01/VID_20221123_133539_10_001.insv,3661459619840,1669226082,1,0,file,2022-11-23/Camera01,/Volumes/s8/gopro/2022-11-23/Camera01/VID_20221123_133539_10_001.insv,3
+2022-11-23/Camera01/VID_20221123_135535_00_002.insv,5610965712384,1669227886,1,0,file,2022-11-23/Camera01,/Volumes/s8/gopro/2022-11-23/Camera01/VID_20221123_135535_00_002.insv,3
+2022-11-23/Camera01/VID_20221123_135535_10_002.insv,5583457484800,1669227878,1,0,file,2022-11-23/Camera01,/Volumes/s8/gopro/2022-11-23/Camera01/VID_20221123_135535_10_002.insv,3
+2022-11-23/Camera01/VID_20221123_142455_00_003.insv,2504250356224,1669228675,1,0,file,2022-11-23/Camera01,/Volumes/s8/gopro/2022-11-23/Camera01/VID_20221123_142455_00_003.insv,3
+2022-11-23/Camera01/VID_20221123_142455_10_003.insv,2491081031680,1669228670,1,0,file,2022-11-23/Camera01,/Volumes/s8/gopro/2022-11-23/Camera01/VID_20221123_142455_10_003.insv,3
+2022-11-23/Camera01/VID_20221123_143851_00_004.insv,2310101805568,1669229450,1,0,file,2022-11-23/Camera01,/Volumes/s8/gopro/2022-11-23/Camera01/VID_20221123_143851_00_004.insv,3
+2022-11-23/Camera01/VID_20221123_143851_10_004.insv,2297807503360,1669229446,1,0,file,2022-11-23/Camera01,/Volumes/s8/gopro/2022-11-23/Camera01/VID_20221123_143851_10_004.insv,3
+2022-12-04/Camera01/VID_20221204_102817_00_005.insv,2644879501824,1670164921,1,0,file,2022-12-04/Camera01,/Volumes/s8/gopro/2022-12-04/Camera01/VID_20221204_102817_00_005.insv,3
+2022-12-04/Camera01/VID_20221204_102817_10_005.insv,2630667468800,1670164916,1,0,file,2022-12-04/Camera01,/Volumes/s8/gopro/2022-12-04/Camera01/VID_20221204_102817_10_005.insv,3
+2023-06-04/Camera01/.DS_Store,3147776,1689456343,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/.DS_Store,3
+2023-06-04/Camera01/4x,1392461990400,1689451866,4,3,dir,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/4x,3
+2023-06-04/Camera01/VID_20230604_072506_00_006.insv,940108892672,1685878199,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_072506_00_006.insv,3
+2023-06-04/Camera01/VID_20230604_072506_10_006.insv,934155386880,1685878198,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_072506_10_006.insv,3
+2023-06-04/Camera01/VID_20230604_110645_00_007.insv,5611014810112,1685892955,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_110645_00_007.insv,3
+2023-06-04/Camera01/VID_20230604_110645_10_007.insv,5583457484800,1685892948,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_110645_10_007.insv,3
+2023-06-04/Camera01/VID_20230604_113605_00_008.insv,4154747796992,1685894260,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_113605_00_008.insv,3
+2023-06-04/Camera01/VID_20230604_113605_10_008.insv,4133906022400,1685894254,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_113605_10_008.insv,3
+2023-06-04/Camera01/VID_20230604_120109_00_009.insv,2116019423744,1685895129,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_120109_00_009.insv,3
+2023-06-04/Camera01/VID_20230604_120109_10_009.insv,2104533975040,1685895125,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_120109_10_009.insv,3
+2023-06-04/Camera01/VID_20230604_121455_00_010.insv,4089970142720,1685896569,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_121455_00_010.insv,3
+2023-06-04/Camera01/VID_20230604_121455_10_010.insv,4069481512960,1685896563,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_121455_10_010.insv,3
+2023-06-04/Camera01/VID_20230604_123910_00_011.insv,1329211875840,1685897162,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_123910_00_011.insv,3
+2023-06-04/Camera01/VID_20230604_123910_10_011.insv,1320702443520,1685897159,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_123910_10_011.insv,3
+2023-06-04/Camera01/VID_20230604_130140_00_012.insv,5611656882688,1685899850,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_130140_00_012.insv,3
+2023-06-04/Camera01/VID_20230604_130140_10_012.insv,5583457484800,1685899843,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_130140_10_012.insv,3
+2023-06-04/Camera01/VID_20230604_133103_00_013.insv,2180510273024,1685900543,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_133103_00_013.insv,3
+2023-06-04/Camera01/VID_20230604_133103_10_013.insv,2168958484480,1685900539,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_133103_10_013.insv,3
+2023-06-04/Camera01/VID_20230604_134643_00_014.insv,5610881808896,1685902555,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_134643_00_014.insv,3
+2023-06-04/Camera01/VID_20230604_134643_10_014.insv,5583457484800,1685902546,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_134643_10_014.insv,3
+2023-06-04/Camera01/VID_20230604_141604_00_015.insv,4478317878784,1685903962,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_141604_00_015.insv,3
+2023-06-04/Camera01/VID_20230604_141604_10_015.insv,4456028569600,1685903956,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_141604_10_015.insv,3
+2023-06-04/Camera01/VID_20230604_173628_00_016.insv,1252998658560,1685914976,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_173628_00_016.insv,3
+2023-06-04/Camera01/VID_20230604_173628_10_016.insv,1245540515840,1685914974,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/VID_20230604_173628_10_016.insv,3
+2023-06-04/Camera01/brian 1.jpg,900545536,1686175576,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/brian 1.jpg,3
+2023-06-04/Camera01/brian 2.jpg,885381632,1686175595,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/brian 2.jpg,3
+2023-06-04/Camera01/rad wagon.jpg,861654016,1686175308,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/rad wagon.jpg,3
+2023-06-04/Camera01/st peters.jpg,915781120,1686171762,1,0,file,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/st peters.jpg,3
+2023-06-04/Camera01/v2,17049766849536,1689476207,10,9,dir,2023-06-04/Camera01,/Volumes/s8/gopro/2023-06-04/Camera01/v2,3
+2023-06-04/Mark Ward Tour drone/.DS_Store,4196352,1686180839,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/.DS_Store,3
+2023-06-04/Mark Ward Tour drone/DJI_0205-001.MOV,1924563532800,1686153856,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0205-001.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0206-003.MOV,1924830590464,1686153333,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0206-003.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0207.MOV,116533947392,1685880822,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0207.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0208.MOV,386438320640,1685880946,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0208.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0209.MOV,941882326016,1685882030,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0209.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0210-002.MOV,1924579083264,1686153962,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0210-002.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0211.MOV,211999747072,1685884698,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0211.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0212.MOV,689828683776,1685884812,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0212.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0214.MOV,780549038592,1685885862,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0214.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0216.MOV,306517724672,1685891720,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0216.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0217.MOV,524646337024,1685892116,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0217.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0218.MOV,244185380864,1685892478,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0218.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0219.MOV,361998817280,1685892656,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0219.MOV,3
+2023-06-04/Mark Ward Tour drone/DJI_0220.MOV,52175581696,1685892736,1,0,file,2023-06-04/Mark Ward Tour drone,/Volumes/s8/gopro/2023-06-04/Mark Ward Tour drone/DJI_0220.MOV,3
+2023-06-30/Camera01/.DS_Store,3147776,1702222423,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/.DS_Store,3
+2023-06-30/Camera01/VID_20230630_082209_00_001.insv,1750199173120,1688128272,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_082209_00_001.insv,3
+2023-06-30/Camera01/VID_20230630_082209_10_001.insv,1750199173120,1688128272,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_082209_10_001.insv,3
+2023-06-30/Camera01/VID_20230630_085125_00_002.insv,22727329280,1688129490,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_085125_00_002.insv,3
+2023-06-30/Camera01/VID_20230630_085125_10_002.insv,21474836480,1688129489,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_085125_10_002.insv,3
+2023-06-30/Camera01/VID_20230630_102354_00_003.insv,5610717374976,1688136785,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_102354_00_003.insv,3
+2023-06-30/Camera01/VID_20230630_102354_00_003_1min.mp4,393046487040,1702310968,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_102354_00_003_1min.mp4,3
+2023-06-30/Camera01/VID_20230630_102354_00_003_1min.mp4.bak,393046487040,1702310495,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_102354_00_003_1min.mp4.bak,3
+2023-06-30/Camera01/VID_20230630_102354_00_003_1min_tz.mp4,393046192640,1702228458,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_102354_00_003_1min_tz.mp4,3
+2023-06-30/Camera01/VID_20230630_102354_00_003_40s.mp4,10849660353024,1702676015,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_102354_00_003_40s.mp4,3
+2023-06-30/Camera01/VID_20230630_102354_10_003.insv,5583457484800,1688136777,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_102354_10_003.insv,3
+2023-06-30/Camera01/VID_20230630_105316_00_004.insv,13494331904,1688136800,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_105316_00_004.insv,3
+2023-06-30/Camera01/VID_20230630_105316_10_004.insv,10737418240,1688136799,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_105316_10_004.insv,3
+2023-06-30/Camera01/VID_20230630_110028_00_005.insv,3109550180864,1688138198,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_110028_00_005.insv,3
+2023-06-30/Camera01/VID_20230630_110028_10_005.insv,3092376453120,1688138194,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_110028_10_005.insv,3
+2023-06-30/Camera01/VID_20230630_111841_00_006.insv,5611722100224,1688140071,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_111841_00_006.insv,3
+2023-06-30/Camera01/VID_20230630_111841_10_006.insv,5583457484800,1688140064,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_111841_10_006.insv,3
+2023-06-30/Camera01/VID_20230630_114801_00_007.insv,2494172556800,1688140858,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_114801_00_007.insv,3
+2023-06-30/Camera01/VID_20230630_114801_10_007.insv,2480343613440,1688140854,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_114801_10_007.insv,3
+2023-06-30/Camera01/VID_20230630_121547_00_008.insv,2396623240704,1688142494,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_121547_00_008.insv,3
+2023-06-30/Camera01/VID_20230630_121547_10_008.insv,2383706849280,1688142490,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_121547_10_008.insv,3
+2023-06-30/Camera01/VID_20230630_123504_00_009.insv,5610979936768,1688144654,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_123504_00_009.insv,3
+2023-06-30/Camera01/VID_20230630_123504_10_009.insv,5583457484800,1688144648,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_123504_10_009.insv,3
+2023-06-30/Camera01/VID_20230630_130423_00_010.insv,2968055889408,1688145587,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_130423_00_010.insv,3
+2023-06-30/Camera01/VID_20230630_130423_10_010.insv,2952790016000,1688145583,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/VID_20230630_130423_10_010.insv,3
+2023-06-30/Camera01/iso-exifs.txt,423936,1702317056,1,0,file,2023-06-30/Camera01,/Volumes/s8/gopro/2023-06-30/Camera01/iso-exifs.txt,3
+2023-06-30/flats/VID_20230630_102354_00_003.mp4,2801448433152,1688419331,1,0,file,2023-06-30/flats,/Volumes/s8/gopro/2023-06-30/flats/VID_20230630_102354_00_003.mp4,3
+2023-06-30/flats/VID_20230630_110028_00_005.mp4,1552461424640,1688419534,1,0,file,2023-06-30/flats,/Volumes/s8/gopro/2023-06-30/flats/VID_20230630_110028_00_005.mp4,3
+2023-06-30/flats/VID_20230630_111841_00_006.mp4,2801660703232,1688437174,1,0,file,2023-06-30/flats,/Volumes/s8/gopro/2023-06-30/flats/VID_20230630_111841_00_006.mp4,3
+2023-06-30/flats/VID_20230630_114801_00_007.mp4,1244023269376,1688435768,1,0,file,2023-06-30/flats,/Volumes/s8/gopro/2023-06-30/flats/VID_20230630_114801_00_007.mp4,3
+2023-06-30/flats/VID_20230630_121547_00_008.mp4,1810411674112,1689373979,1,0,file,2023-06-30/flats,/Volumes/s8/gopro/2023-06-30/flats/VID_20230630_121547_00_008.mp4,3
+2023-06-30/flats/VID_20230630_123504_00_009.mp4,4250468718592,1689375202,1,0,file,2023-06-30/flats,/Volumes/s8/gopro/2023-06-30/flats/VID_20230630_123504_00_009.mp4,3
+2023-06-30/flats/VID_20230630_130423_00_010.mp4,2243461551616,1689374376,1,0,file,2023-06-30/flats,/Volumes/s8/gopro/2023-06-30/flats/VID_20230630_130423_00_010.mp4,3
+2023-07-03/Camera01/VID_20230703_085649_00_001.insv,5611513678336,1688390759,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_085649_00_001.insv,3
+2023-07-03/Camera01/VID_20230703_085649_10_001.insv,5583457484800,1688390752,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_085649_10_001.insv,3
+2023-07-03/Camera01/VID_20230703_092608_00_002.insv,1242471738880,1688391156,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_092608_00_002.insv,3
+2023-07-03/Camera01/VID_20230703_092608_10_002.insv,1234803097600,1688391154,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_092608_10_002.insv,3
+2023-07-03/Camera01/VID_20230703_093811_00_003.insv,5223012347392,1688393118,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_093811_00_003.insv,3
+2023-07-03/Camera01/VID_20230703_093811_10_003.insv,5196910428160,1688393112,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_093811_10_003.insv,3
+2023-07-03/Camera01/VID_20230703_101639_00_004.insv,4144557554176,1688395091,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_101639_00_004.insv,3
+2023-07-03/Camera01/VID_20230703_101639_10_004.insv,4123168604160,1688395086,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_101639_10_004.insv,3
+2023-07-03/Camera01/VID_20230703_111650_00_005.insv,5610995513856,1688399162,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_111650_00_005.insv,3
+2023-07-03/Camera01/VID_20230703_111650_10_005.insv,5583457484800,1688399153,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_111650_10_005.insv,3
+2023-07-03/Camera01/VID_20230703_114614_00_006.insv,1242250599936,1688399559,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_114614_00_006.insv,3
+2023-07-03/Camera01/VID_20230703_114614_10_006.insv,1234803097600,1688399557,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_114614_10_006.insv,3
+2023-07-03/Camera01/VID_20230703_115420_00_007.insv,2213819575808,1688400350,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_115420_00_007.insv,3
+2023-07-03/Camera01/VID_20230703_115420_10_007.insv,2201170739200,1688400346,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_115420_10_007.insv,3
+2023-07-03/Camera01/VID_20230703_133903_00_008.insv,5611121707520,1688407693,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_133903_00_008.insv,3
+2023-07-03/Camera01/VID_20230703_133903_10_008.insv,5583457484800,1688407686,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_133903_10_008.insv,3
+2023-07-03/Camera01/VID_20230703_140823_00_009.insv,78027909632,1688407724,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_140823_00_009.insv,3
+2023-07-03/Camera01/VID_20230703_140823_10_009.insv,75161927680,1688407723,1,0,file,2023-07-03/Camera01,/Volumes/s8/gopro/2023-07-03/Camera01/VID_20230703_140823_10_009.insv,3
+2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_202357904~2.mp4,14858314240,1703704906,1,0,file,2023-12-27/Columbus vs. Washington bike lanes,/Volumes/s8/gopro/2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_202357904~2.mp4,3
+2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_202846538~2.mp4,8928938496,1703704906,1,0,file,2023-12-27/Columbus vs. Washington bike lanes,/Volumes/s8/gopro/2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_202846538~2.mp4,3
+2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_202856335.mp4,23206373376,1703704906,1,0,file,2023-12-27/Columbus vs. Washington bike lanes,/Volumes/s8/gopro/2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_202856335.mp4,3
+2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_204701660~2.mp4,8302478848,1703704904,1,0,file,2023-12-27/Columbus vs. Washington bike lanes,/Volumes/s8/gopro/2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_204701660~2.mp4,3
+2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_204930107~2.mp4,20935178240,1703704904,1,0,file,2023-12-27/Columbus vs. Washington bike lanes,/Volumes/s8/gopro/2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_204930107~2.mp4,3
+2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_205055431.mp4,20412656128,1703704904,1,0,file,2023-12-27/Columbus vs. Washington bike lanes,/Volumes/s8/gopro/2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_205055431.mp4,3
+2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_205203572.mp4,23477398016,1703704906,1,0,file,2023-12-27/Columbus vs. Washington bike lanes,/Volumes/s8/gopro/2023-12-27/Columbus vs. Washington bike lanes/PXL_20231227_205203572.mp4,3
+2023-06-04/Camera01/4x/.DS_Store,3147776,1689446652,1,0,file,2023-06-04/Camera01/4x,/Volumes/s8/gopro/2023-06-04/Camera01/4x/.DS_Store,4
+2023-06-04/Camera01/4x/VID_20230604_110645_00_007 v0 timewarp 2.mp4,691734123520,1689451866,1,0,file,2023-06-04/Camera01/4x,/Volumes/s8/gopro/2023-06-04/Camera01/4x/VID_20230604_110645_00_007 v0 timewarp 2.mp4,4
+2023-06-04/Camera01/4x/VID_20230604_110645_00_007.mp4,700724632064,1689444624,1,0,file,2023-06-04/Camera01/4x,/Volumes/s8/gopro/2023-06-04/Camera01/4x/VID_20230604_110645_00_007.mp4,4
+2023-06-04/Camera01/v2/VID_20230604_110645_00_007.mp4,2802029425152,1689456212,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_110645_00_007.mp4,4
+2023-06-04/Camera01/v2/VID_20230604_113605_00_008.mp4,2073218812416,1689455585,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_113605_00_008.mp4,4
+2023-06-04/Camera01/v2/VID_20230604_130140_00_012(1).mp4,4250483159040,1689466817,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_130140_00_012(1).mp4,4
+2023-06-04/Camera01/v2/VID_20230604_130140_00_012.mp4,700690820096,1689464751,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_130140_00_012.mp4,4
+2023-06-04/Camera01/v2/VID_20230604_133103_00_013(1).mp4,1650583474176,1689465981,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_133103_00_013(1).mp4,4
+2023-06-04/Camera01/v2/VID_20230604_133103_00_013.mp4,272167500288,1689463943,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_133103_00_013.mp4,4
+2023-06-04/Camera01/v2/VID_20230604_134643_00_014(1).mp4,2801661196800,1689471160,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_134643_00_014(1).mp4,4
+2023-06-04/Camera01/v2/VID_20230604_134643_00_014.mp4,262187059200,1689469578,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_134643_00_014.mp4,4
+2023-06-04/Camera01/v2/VID_20230604_141604_00_015.mp4,2236745210880,1689476207,1,0,file,2023-06-04/Camera01/v2,/Volumes/s8/gopro/2023-06-04/Camera01/v2/VID_20230604_141604_00_015.mp4,4
