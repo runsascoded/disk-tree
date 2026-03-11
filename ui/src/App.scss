@@ -60,6 +60,12 @@ tr.root {
   &.indented {
     padding-left: 1.25rem;
   }
+
+  .reveal-icon {
+    cursor: pointer;
+    opacity: 0.7;
+    &:hover { opacity: 1; }
+  }
 }
 
 .col-path {

@@ -1555,6 +1555,28 @@ def file_preview():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/reveal', methods=['POST'])
+def reveal_path():
+    """Open a path in Finder.
+
+    Directories: opens the folder. Files: reveals (selects) in parent folder.
+
+    JSON body:
+        path: The absolute path to reveal
+    """
+    data = request.get_json() or {}
+    path = data.get('path')
+    if not path:
+        return jsonify({'error': 'path is required'}), 400
+    if not exists(path):
+        return jsonify({'error': f'Path not found: {path}'}), 404
+    if isdir(path):
+        subprocess.Popen(['open', path])
+    else:
+        subprocess.Popen(['open', '-R', path])
+    return jsonify({'ok': True})
+
+
 @app.route('/api/delete', methods=['POST'])
 def delete_path():
     """Delete a file or directory.
