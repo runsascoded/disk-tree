@@ -5,7 +5,7 @@ import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, Fa
 import { useAction } from 'use-kbd'
 import { LazyPlot as Plot } from './LazyPlot'
 import { useQuery } from '@tanstack/react-query'
-import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
+import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
 import type { Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
@@ -61,9 +61,10 @@ function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) 
   return (
     <div className="breadcrumbs">
       {routeType === 's3' && <Link to="/s3">s3://</Link>}
+      {routeType === 'file' && <Link to="/file/" className="breadcrumb-sep">/</Link>}
       {paths.map((path, idx) => (
         <span key={idx}>
-          {routeType === 'file' && <span className="breadcrumb-sep">/</span>}
+          {routeType === 'file' && idx > 0 && <span className="breadcrumb-sep">/</span>}
           {idx === paths.length - 1 ? (
             <span>{segments[idx]}</span>
           ) : (
@@ -428,7 +429,17 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                 />
               </td>
               <td className={`col-icon${indentPx ? ' indented' : ''}`}>
-                <RowIcon row={row} />
+                {routeType === 'file' ? (
+                  <span
+                    className="reveal-icon"
+                    title="Reveal in Finder"
+                    onClick={e => { e.stopPropagation(); revealPath(childUri) }}
+                  >
+                    <RowIcon row={row} />
+                  </span>
+                ) : (
+                  <RowIcon row={row} />
+                )}
               </td>
               <td className="col-path">
                 <Link to={`${prefix}/${collapsedPrefix ? collapsedPrefix + '/' : ''}${row.path}`} onClick={e => e.stopPropagation()}>
@@ -501,7 +512,7 @@ type TreemapNode = {
   isOther?: boolean
 }
 
-function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
+function Treemap({ root, rows, plotlySort = false, transpose = false, onToggleSort, onToggleTranspose }: { root: Row; rows: Row[]; plotlySort?: boolean; transpose?: boolean; onToggleSort?: () => void; onToggleTranspose?: () => void }) {
   // Build treemap data with "Other" placeholders for unaccounted space
   const data = useMemo(() => {
     const nodes: TreemapNode[] = []
@@ -555,7 +566,8 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
       depth2ByParent,
     })
 
-    // Add "Other" nodes for directories with unaccounted size
+    // Add placeholder nodes for directories with unaccounted size
+    // (from truncated rows or depth limits)
     // Check root
     const rootChildren = childrenByParent.get('.') || []
     const rootChildrenSize = rootChildren.reduce((sum, c) => sum + (c.size ?? 0), 0)
@@ -563,7 +575,7 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
     if (rootUnaccounted > 1_000_000) {
       nodes.push({
         id: './__other__',
-        label: 'other',
+        label: '…',
         parent: '.',
         size: rootUnaccounted,
         isOther: true,
@@ -571,19 +583,19 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
     }
 
     // Check each depth-1 directory (direct children of root) for unaccounted size
-    // Don't add "other" for depth-2 items since we don't show their children
+    // Don't add placeholders for depth-2 items since we don't show their children
     for (const row of rows) {
       if (row.kind !== 'dir') continue
       if (row.parent !== '.') continue  // Only depth-1 directories
       const children = childrenByParent.get(row.path) || []
       const childrenSize = children.reduce((sum, c) => sum + (c.size ?? 0), 0)
       const unaccounted = (row.size ?? 0) - childrenSize
-      // Show "other" if unaccounted space is >1MB (significant enough to display)
+      // Show placeholder if unaccounted space is >1MB (significant enough to display)
       if (unaccounted > 1_000_000) {
-        console.log(`[Treemap] Adding "other" for ${row.path}: ${(unaccounted / 1e6).toFixed(1)}MB unaccounted`)
+        console.log(`[Treemap] Adding placeholder for ${row.path}: ${(unaccounted / 1e6).toFixed(1)}MB unaccounted`)
         nodes.push({
           id: `${row.path}/__other__`,
-          label: 'other',
+          label: '…',
           parent: row.path,
           size: unaccounted,
           isOther: true,
@@ -591,26 +603,43 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
       }
     }
 
+    // Sort so real nodes are by size desc, "other" placeholders come last
+    // (within each parent group). With sort=false on the treemap, this controls
+    // the visual order: largest real items top-left, placeholders bottom-right.
+    nodes.sort((a, b) => {
+      // Root always first
+      if (a.id === '.') return -1
+      if (b.id === '.') return 1
+      // Group by parent
+      if (a.parent !== b.parent) return a.parent < b.parent ? -1 : 1
+      // "Other" placeholders sort last within their parent
+      if (a.isOther && !b.isOther) return 1
+      if (!a.isOther && b.isOther) return -1
+      // Real nodes: largest first
+      return b.size - a.size
+    })
+
     return nodes
   }, [root, rows])
 
-  // "Other" nodes are more visible gray with pattern-like appearance
-  // Use empty string for default color (Plotly interprets as auto-color)
-  const colors = data.map(n => n.isOther ? '#666666' : '')
+  // Placeholder ("…") nodes get dark gray; regular nodes use Plotly auto-colors.
+  const colors = data.map(n => n.isOther ? '#444444' : '')
 
-  return (
+  return (<>
     <Plot
+      key={`treemap-${transpose}-${plotlySort}`}
       data={[{
         type: 'treemap',
         branchvalues: 'total',
+        sort: plotlySort,
         ids: data.map(n => n.id),
         labels: data.map(n => n.label),
         parents: data.map(n => n.parent),
         values: data.map(n => n.size),
-        text: data.map(n => formatSize(n.size)),
+        text: data.map(n => n.isOther ? `<i>${formatSize(n.size)} not shown</i>` : formatSize(n.size)),
         texttemplate: '%{label}<br>%{text}',
         hovertemplate: '%{label}<br>%{text}<extra></extra>',
-        tiling: { pad: 1 },  // Reduce inner padding (default 3px)
+        tiling: { pad: 1, transpose },
         marker: {
           colors,
           line: { width: 1, color: 'rgba(255, 255, 255, 0.3)' },
@@ -626,6 +655,23 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
       }}
       style={{ width: '100%', height: '400px' }}
     />
+    {(onToggleSort || onToggleTranspose) && (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 2, opacity: 0.6, fontSize: 12 }}>
+        {onToggleTranspose && (
+          <label style={{ cursor: 'pointer', userSelect: 'none' }}>
+            <input type="checkbox" checked={transpose} onChange={onToggleTranspose} style={{ marginRight: 4 }} />
+            Transpose
+          </label>
+        )}
+        {onToggleSort && (
+          <label style={{ cursor: 'pointer', userSelect: 'none' }}>
+            <input type="checkbox" checked={plotlySort} onChange={onToggleSort} style={{ marginRight: 4 }} />
+            Plotly sort
+          </label>
+        )}
+      </div>
+    )}
+  </>
   )
 }
 
@@ -735,6 +781,8 @@ export function ScanDetails() {
   })
 
   const [treemapMaxRows, setTreemapMaxRows] = useState(DEFAULT_MAX_ROWS)
+  const [plotlySort, setPlotlySort] = useState(false)
+  const [transpose, setTranspose] = useState(false)
   const { data: details, isLoading, error: queryError, refetch } = useQuery({
     queryKey: ['scan-details', uri, selectedScanId, treemapMaxRows],
     queryFn: () => fetchScanDetails(uri, selectedScanId, 2, treemapMaxRows),
@@ -1393,7 +1441,7 @@ export function ScanDetails() {
       )}
       {rows.length > 0 && (
         <Box sx={{ mt: 2 }}>
-          <Treemap root={root} rows={rows} />
+          <Treemap root={root} rows={rows} plotlySort={plotlySort} transpose={transpose} onToggleSort={() => setPlotlySort(v => !v)} onToggleTranspose={() => setTranspose(v => !v)} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{rows.length} items</span>
             <label>
