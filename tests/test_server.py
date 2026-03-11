@@ -288,7 +288,8 @@ class TestFresherChildPatching:
         conn.commit()
         conn.close()
 
-        response = client.get('/api/scan?uri=/test/parent')
+        # Disable expand_single to test raw patching behavior
+        response = client.get('/api/scan?uri=/test/parent&expand_single=false')
         assert response.status_code == 200
         data = response.json
 
@@ -357,8 +358,8 @@ class TestAncestorScanRelativePaths:
         conn.commit()
         conn.close()
 
-        # View /root/a/b (deeply nested)
-        response = client.get('/api/scan?uri=/root/a/b')
+        # View /root/a/b (deeply nested), disable expand_single to test raw root selection
+        response = client.get('/api/scan?uri=/root/a/b&expand_single=false')
         assert response.status_code == 200
         data = response.json
 
@@ -644,10 +645,13 @@ class TestDeleteEndpoint:
         assert 'absolute' in response.json['error'].lower()
 
     def test_delete_nonexistent_path(self, test_client):
-        """Returns 404 for paths that don't exist."""
+        """Returns 200 for paths that don't exist (idempotent delete for cleaning stale entries)."""
         client, _, _ = test_client
         response = client.post('/api/delete', json={'path': '/nonexistent/path/12345'})
-        assert response.status_code == 404
+        # Delete is idempotent - returns 200 even for non-existent paths
+        # This allows cleaning up stale scan entries when files are deleted externally
+        assert response.status_code == 200
+        assert response.json.get('already_deleted') is True
 
     def test_delete_file_success(self, test_client):
         """Successfully deletes a file and returns stats."""
@@ -786,7 +790,8 @@ class TestDepthFiltering:
         conn.close()
 
         # Request should work - depth filtering is an implementation detail
-        response = client.get('/api/scan?uri=/test')
+        # Disable expand_single to test raw root without auto-expansion
+        response = client.get('/api/scan?uri=/test&expand_single=false')
         assert response.status_code == 200
         assert response.json['root']['size'] == 1000
         assert len(response.json['children']) == 1
