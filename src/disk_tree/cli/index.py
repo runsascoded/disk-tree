@@ -29,7 +29,7 @@ def index(
     from disk_tree.sqla.model import Scan
     db.create_all()
     url = url or getcwd()
-    url = url.rstrip('/')
+    url = url.rstrip('/') or '/'
     if measure_memory:
         from utz.mem import Tracker
         mem = Tracker()

@@ -169,10 +169,19 @@ def files_iter(
             except ValueError:
                 continue
             filepath = strs[3]
-            if not filepath.startswith(f'{path0}/') and filepath != path0:
+            if path0 == '/':
+                prefix = '/'
+            else:
+                prefix = f'{path0}/'
+            if not filepath.startswith(prefix) and filepath != path0:
                 continue
             uri = filepath
-            filepath = filepath[len(path0)+1:] if filepath != path0 else ''
+            if filepath == path0:
+                filepath = ''
+            elif path0 == '/':
+                filepath = filepath[1:]
+            else:
+                filepath = filepath[len(path0)+1:]
             yield o(
                 path=filepath,
                 size=size,
@@ -210,7 +219,7 @@ def index(
     progress_interval: float = 1.0,  # How often to call progress_callback (seconds)
     excludes: list[str] | None = None,  # Paths to exclude (default: CloudStorage)
 ) -> IndexResult:
-    path0 = path.rstrip('/')
+    path0 = path.rstrip('/') or '/'
     errors = ErrorCollector()
 
     # Track progress timing
