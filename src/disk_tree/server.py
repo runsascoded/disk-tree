@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 
 import pandas as pd
-from flask import Flask, jsonify, request, g, Response, send_from_directory
+from flask import Flask, jsonify, redirect, request, g, Response, send_from_directory, url_for
 from flask_cors import CORS
 
 from disk_tree.config import SQLITE_PATH
@@ -104,8 +104,15 @@ def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
 
     If rel_path maps to a chunked subtree, returns (chunk_blob_ref, rebased_path).
     Otherwise returns (blob_ref, rel_path) unchanged.
+
+    Note: Only hybrid backend uses chunked parquets. DuckDB/SQLite blob refs
+    (prefixed with 'ddb:' or 'sqlite:') don't have chunks.
     """
     if not rel_path or rel_path == '.':
+        return blob_ref, rel_path
+
+    # DuckDB and SQLite backends don't use chunking
+    if blob_ref.startswith('ddb:') or blob_ref.startswith('sqlite:'):
         return blob_ref, rel_path
 
     # Load the root parquet to check for child_scan_id
@@ -380,7 +387,7 @@ def list_s3_children(s3_uri: str) -> list[dict]:
 def get_scanned_paths(db) -> dict[str, dict]:
     """Get a mapping of scanned paths to their most recent scan info with denormalized stats."""
     cursor = db.execute('''
-        SELECT s.path, s.time, s.blob, s.size, s.n_children, s.n_desc
+        SELECT s.path, s.time, s.blob, s.size, s.n_children, s.n_desc, s.mtime
         FROM scan s
         INNER JOIN (
             SELECT path, MAX(time) as max_time
@@ -421,6 +428,7 @@ def get_scan():
 
     db = get_db()
     scan = None
+    candidate_scans = []
 
     # If scan_id provided, use that specific scan
     if scan_id:
@@ -454,9 +462,12 @@ def get_scan():
                 break
             test_path = parent
 
-        # Pick the most recent scan
+        # Sort candidates by recency (most recent first); we'll try them
+        # in order and fall back if one doesn't contain the requested URI
+        # (e.g. `/` on macOS won't contain `/Users` due to APFS firmlinks)
         if candidate_scans:
-            scan = max(candidate_scans, key=lambda s: s['time'])
+            candidate_scans.sort(key=lambda s: s['time'], reverse=True)
+            scan = candidate_scans[0]
 
     if not scan:
         # No ancestor scan - build from filesystem + any child scans
@@ -480,7 +491,7 @@ def get_scan():
                         if scan_info.get('size') is not None:
                             scan_data_by_name[immediate] = {
                                 'size': scan_info['size'] or 0,
-                                'mtime': 0,  # mtime not denormalized
+                                'mtime': scan_info.get('mtime') or 0,
                                 'n_children': scan_info.get('n_children') or 0,
                                 'n_desc': scan_info.get('n_desc') or 0,
                                 'scan_time': scan_info['time'],
@@ -568,7 +579,7 @@ def get_scan():
                         if scan_info.get('size') is not None:
                             scan_data_by_name[immediate] = {
                                 'size': scan_info['size'] or 0,
-                                'mtime': 0,  # mtime not denormalized
+                                'mtime': scan_info.get('mtime') or 0,
                                 'n_children': scan_info.get('n_children') or 0,
                                 'n_desc': scan_info.get('n_desc') or 0,
                                 'scan_time': scan_info['time'],
@@ -731,6 +742,14 @@ def get_scan():
         df['rel_parent'] = df.apply(make_relative_parent, axis=1)
     root_row = df[root_mask]
     if root_row.empty:
+        # URI not found in this scan — try next candidate (e.g. `/` scan
+        # on macOS won't contain `/Users` due to APFS firmlinks)
+        if candidate_scans:
+            failed_id = scan['id']
+            candidate_scans = [s for s in candidate_scans if s['id'] != failed_id]
+            if candidate_scans:
+                scan = candidate_scans[0]
+                return redirect(url_for('get_scan', uri=uri, scan_id=scan['id'], depth=depth, max_rows=max_rows, expand_single=expand_single))
         return jsonify({'error': 'URI not found in scan', 'uri': uri, 'scan_path': scan['path']}), 404
 
     root = root_row.iloc[0].to_dict()
@@ -933,7 +952,7 @@ def get_scan():
         if child_scan['size'] is not None:
             fresher_stats[child_scan['path']] = {
                 'size': child_scan['size'],
-                'mtime': None,  # mtime not denormalized, but not critical for patching
+                'mtime': child_scan['mtime'],
                 'n_desc': child_scan['n_desc'],
                 'n_children': child_scan['n_children'],
                 'scan_time': child_scan['time'],
