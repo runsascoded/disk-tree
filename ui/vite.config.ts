@@ -4,6 +4,7 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+
   server: {
     port: 5180,
     strictPort: true,  // Exit with error if port is already in use
@@ -13,5 +14,9 @@ export default defineConfig({
         changeOrigin: true,
       },
     },
+  },
+
+  optimizeDeps: {
+    include: ['plotly.js/dist/plotly'],
   },
 })
