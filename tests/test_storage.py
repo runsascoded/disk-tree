@@ -14,14 +14,18 @@ from disk_tree.storage.hybrid import HybridBackend
 
 @pytest.fixture
 def sample_df():
-    """Create a sample scan DataFrame."""
+    """Create a sample scan DataFrame.
+
+    n_desc = number of descendants (not including self)
+    Files have n_desc=0, directories count their descendants.
+    """
     return pd.DataFrame([
         {'path': '.', 'size': 1000, 'mtime': 1000.0, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 5, 'n_children': 2, 'depth': 0},
         {'path': 'foo', 'size': 400, 'mtime': 1001.0, 'kind': 'dir', 'parent': '.', 'uri': '/test/foo', 'n_desc': 2, 'n_children': 2, 'depth': 1},
-        {'path': 'bar', 'size': 600, 'mtime': 1002.0, 'kind': 'dir', 'parent': '.', 'uri': '/test/bar', 'n_desc': 2, 'n_children': 1, 'depth': 1},
-        {'path': 'foo/a.txt', 'size': 100, 'mtime': 1003.0, 'kind': 'file', 'parent': 'foo', 'uri': '/test/foo/a.txt', 'n_desc': 1, 'n_children': 0, 'depth': 2},
-        {'path': 'foo/b.txt', 'size': 300, 'mtime': 1004.0, 'kind': 'file', 'parent': 'foo', 'uri': '/test/foo/b.txt', 'n_desc': 1, 'n_children': 0, 'depth': 2},
-        {'path': 'bar/c.txt', 'size': 600, 'mtime': 1005.0, 'kind': 'file', 'parent': 'bar', 'uri': '/test/bar/c.txt', 'n_desc': 1, 'n_children': 0, 'depth': 2},
+        {'path': 'bar', 'size': 600, 'mtime': 1002.0, 'kind': 'dir', 'parent': '.', 'uri': '/test/bar', 'n_desc': 1, 'n_children': 1, 'depth': 1},
+        {'path': 'foo/a.txt', 'size': 100, 'mtime': 1003.0, 'kind': 'file', 'parent': 'foo', 'uri': '/test/foo/a.txt', 'n_desc': 0, 'n_children': 0, 'depth': 2},
+        {'path': 'foo/b.txt', 'size': 300, 'mtime': 1004.0, 'kind': 'file', 'parent': 'foo', 'uri': '/test/foo/b.txt', 'n_desc': 0, 'n_children': 0, 'depth': 2},
+        {'path': 'bar/c.txt', 'size': 600, 'mtime': 1005.0, 'kind': 'file', 'parent': 'bar', 'uri': '/test/bar/c.txt', 'n_desc': 0, 'n_children': 0, 'depth': 2},
     ])
 
 
@@ -251,9 +255,11 @@ class TestHybridBackend:
     def test_delete_in_chunked_subtree(self):
         """Deleting a path inside a chunked subtree should work."""
         with tempfile.TemporaryDirectory() as tmpdir:
+            # n_desc = number of descendants (not including self)
+            # files have n_desc=0, big has 50 descendants, root has 51 (big + 50 files)
             rows = [
-                {'path': '.', 'size': 1000, 'mtime': 1000.0, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 55, 'n_children': 1, 'depth': 0},
-                {'path': 'big', 'size': 1000, 'mtime': 1001.0, 'kind': 'dir', 'parent': '.', 'uri': '/test/big', 'n_desc': 54, 'n_children': 50, 'depth': 1},
+                {'path': '.', 'size': 1000, 'mtime': 1000.0, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 51, 'n_children': 1, 'depth': 0},
+                {'path': 'big', 'size': 1000, 'mtime': 1001.0, 'kind': 'dir', 'parent': '.', 'uri': '/test/big', 'n_desc': 50, 'n_children': 50, 'depth': 1},
             ]
             for i in range(50):
                 rows.append({
@@ -263,7 +269,7 @@ class TestHybridBackend:
                     'kind': 'file',
                     'parent': 'big',
                     'uri': f'/test/big/f{i}.txt',
-                    'n_desc': 1,
+                    'n_desc': 0,  # files have no descendants
                     'n_children': 0,
                     'depth': 2,
                 })
@@ -284,9 +290,9 @@ class TestHybridBackend:
             # Verify parent stats were updated
             big_stats = backend.get_path_stats(blob_ref, 'big')
             assert big_stats.size == 980  # 1000 - 20
-            assert big_stats.n_desc == 53  # 54 - 1
+            assert big_stats.n_desc == 49  # 50 - 1
 
             # Verify root was updated
             root_stats = backend.get_path_stats(blob_ref, '.')
             assert root_stats.size == 980
-            assert root_stats.n_desc == 54  # 55 - 1
+            assert root_stats.n_desc == 50  # 51 - 1

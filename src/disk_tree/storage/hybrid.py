@@ -205,7 +205,7 @@ class HybridBackend(StorageBackend):
             row = match.iloc[0]
             return PathStats(
                 size=int(row['size']) if pd.notna(row['size']) else 0,
-                n_desc=int(row.get('n_desc', 1) or 1),
+                n_desc=int(row.get('n_desc', 0) or 0),
                 n_children=int(row.get('n_children', 0) or 0),
                 mtime=float(row['mtime']) if pd.notna(row.get('mtime')) else None,
             )
@@ -262,14 +262,15 @@ class HybridBackend(StorageBackend):
                             # Deleting the entire chunked subtree
                             stats = PathStats(
                                 size=int(row['size']),
-                                n_desc=int(row.get('n_desc', 1)),
+                                n_desc=int(row.get('n_desc', 0)),
                                 n_children=int(row.get('n_children', 0)),
                             )
                             # Delete the chunk file
                             self.delete(child_blob_ref)
                             # Remove row from parent and update ancestors
                             df = df[df['path'] != chunk_root]
-                            self._update_ancestors(df, chunk_root, stats.size, stats.n_desc)
+                            # Add 1 because the deleted item itself counts as a descendant
+                            self._update_ancestors(df, chunk_root, stats.size, stats.n_desc + 1)
                             df.to_parquet(blob_ref, index=False)
                             self._cache.clear()
                             return stats
@@ -278,11 +279,12 @@ class HybridBackend(StorageBackend):
                             child_rel_path = rel_path[len(chunk_root) + 1:]
                             stats = self._delete_path_impl(child_blob_ref, child_rel_path)
                             if stats:
-                                # Update summary row in parent
+                                # Update summary row in parent (stats already has +1 applied from recursion)
+                                # But for the summary row itself, we subtract the raw n_desc + 1
                                 df.loc[df['path'] == chunk_root, 'size'] -= stats.size
-                                df.loc[df['path'] == chunk_root, 'n_desc'] -= stats.n_desc
-                                # Update root
-                                self._update_ancestors(df, chunk_root, stats.size, stats.n_desc)
+                                df.loc[df['path'] == chunk_root, 'n_desc'] -= (stats.n_desc + 1)
+                                # Update root ancestors
+                                self._update_ancestors(df, chunk_root, stats.size, stats.n_desc + 1)
                                 df.to_parquet(blob_ref, index=False)
                                 self._cache.clear()
                             return stats
@@ -295,7 +297,7 @@ class HybridBackend(StorageBackend):
         row = match.iloc[0]
         stats = PathStats(
             size=int(row['size']) if pd.notna(row['size']) else 0,
-            n_desc=int(row.get('n_desc', 1) or 1),
+            n_desc=int(row.get('n_desc', 0) or 0),
             n_children=int(row.get('n_children', 0) or 0),
         )
 
@@ -303,8 +305,8 @@ class HybridBackend(StorageBackend):
         deleted_mask = (df['path'] == rel_path) | df['path'].str.startswith(rel_path + '/')
         df = df[~deleted_mask].copy()
 
-        # Update ancestors
-        self._update_ancestors(df, rel_path, stats.size, stats.n_desc)
+        # Update ancestors - add 1 because the deleted item itself counts as a descendant
+        self._update_ancestors(df, rel_path, stats.size, stats.n_desc + 1)
 
         df.to_parquet(blob_ref, index=False)
         self._cache.clear()
