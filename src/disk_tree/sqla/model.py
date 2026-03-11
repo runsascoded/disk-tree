@@ -94,6 +94,7 @@ class Scan(Base):
     size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
     n_children: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
     n_desc: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    mtime: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
 
     @classmethod
     def create(
@@ -139,11 +140,13 @@ class Scan(Base):
         root_size = None
         root_n_children = None
         root_n_desc = None
+        root_mtime = None
         if not root_rows.empty:
             root = root_rows.iloc[0]
             root_size = int(root['size']) if pd.notna(root['size']) else None
             root_n_children = int(root['n_children']) if pd.notna(root.get('n_children')) else None
             root_n_desc = int(root['n_desc']) if pd.notna(root.get('n_desc')) else None
+            root_mtime = int(root['mtime']) if pd.notna(root.get('mtime')) else None
 
         # Save "scan" record with error info and denormalized stats
         error_paths_json = json.dumps(result.error_paths) if result.error_paths else None
@@ -156,6 +159,7 @@ class Scan(Base):
             size=root_size,
             n_children=root_n_children,
             n_desc=root_n_desc,
+            mtime=root_mtime,
         )
         db.session.add(scan)
         db.session.commit()
