@@ -61,3 +61,24 @@ export function formatNumber(n: number | null | undefined): string {
   if (n == null) return '-'
   return n.toLocaleString()
 }
+
+/**
+ * Format a timestamp as elapsed duration (e.g., "2m 13s", "1h 5m")
+ */
+export function elapsed(value: string | number | null | undefined): string {
+  if (value == null) return '-'
+  let ms: number
+  if (typeof value === 'string') {
+    ms = new Date(value).getTime()
+  } else {
+    ms = value < 1e11 ? value * 1000 : value
+  }
+  const seconds = Math.max(0, Math.floor((Date.now() - ms) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  if (minutes < 60) return `${minutes}m ${secs}s`
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${hours}h ${mins}m`
+}
