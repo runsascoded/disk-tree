@@ -1568,6 +1568,9 @@ def reveal_path():
     path = data.get('path')
     if not path:
         return jsonify({'error': 'path is required'}), 400
+    from disk_tree.backends import backend_for
+    if not backend_for(path).is_local:
+        return jsonify({'error': 'Reveal is only supported for local paths'}), 400
     if not exists(path):
         return jsonify({'error': f'Path not found: {path}'}), 404
     if isdir(path):
@@ -1590,30 +1593,28 @@ def delete_path():
     if not path:
         return jsonify({'error': 'Path is required'}), 400
 
-    # Security: only allow deleting within user's home directory or specific paths
-    # For now, require absolute paths
-    if not path.startswith('/'):
+    from disk_tree.backends import backend_for, url_parent
+    source = backend_for(path)
+
+    # Reject bare-relative local paths (URLs with schemes are OK)
+    if source.is_local and not path.startswith('/'):
         return jsonify({'error': 'Path must be absolute'}), 400
 
-    # Check if file/dir exists on disk
-    path_exists = isfile(path) or isdir(path)
+    path_exists = source.exists(path)
 
-    # Get file size (fast stat call); skip for directories
+    # Fast-path size stat for local files only; non-local skips this and
+    # falls back to scan-derived size below.
     deleted_size = None
-    if isfile(path):
+    if source.is_local and isfile(path):
         try:
             deleted_size = stat(path).st_size
         except (OSError, PermissionError):
             pass
 
-    # Perform the deletion if path exists
     if path_exists:
         try:
-            if isfile(path):
-                remove(path)
-            else:
-                shutil.rmtree(path)
-        except (OSError, PermissionError) as e:
+            source.delete(path)
+        except Exception as e:
             return jsonify({'error': f'Failed to delete: {e}'}), 500
 
     # Update the most recent scan that covers this path
@@ -1623,8 +1624,8 @@ def delete_path():
 
     # Find all scans covering this path, then pick the most recent
     candidate_scans = []
-    test_path = path
-    while test_path and test_path != '/':
+    test_path: str | None = path
+    while test_path:
         cursor = db.execute(
             'SELECT id, path, blob, time FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1',
             (test_path,)
@@ -1632,10 +1633,7 @@ def delete_path():
         row = cursor.fetchone()
         if row:
             candidate_scans.append(dict(row))
-        parent = dirname(test_path)
-        if parent == test_path:
-            break
-        test_path = parent
+        test_path = url_parent(test_path)
 
     # Pick the most recent scan
     covering_scan = max(candidate_scans, key=lambda s: s['time']) if candidate_scans else None

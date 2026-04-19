@@ -69,6 +69,26 @@ def parse_url(url: str) -> ParsedUrl:
     )
 
 
+def url_parent(url: str) -> str | None:
+    """Return the parent URL (one path segment up), or `None` if already at root."""
+    p = parse_url(url)
+    if p.scheme == 'file':
+        if p.path == '/':
+            return None
+        parent = p.path.rsplit('/', 1)[0] or '/'
+        return parent
+    # Scheme with host component
+    if p.path in ('', '/'):
+        return None
+    parent_path = p.path.rsplit('/', 1)[0] or '/'
+    userpart = f'{p.user}@' if p.user else ''
+    portpart = f':{p.port}' if p.port else ''
+    host_part = f'{userpart}{p.host}{portpart}'
+    if parent_path == '/':
+        return f'{p.scheme}://{host_part}/'
+    return f'{p.scheme}://{host_part}{parent_path}'
+
+
 def canonical(url: str) -> str:
     """Return the canonical form of `url` (what gets stored in the DB)."""
     p = parse_url(url)
