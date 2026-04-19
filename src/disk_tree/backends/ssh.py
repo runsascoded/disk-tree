@@ -60,11 +60,15 @@ class SshBackend(Backend):
     ) -> Iterator[dict]:
         ssh, remote_path, host_part = self._ssh_base(url)
 
-        # Try gfind first, fall back to find (Linux); error on BSD find.
+        # Non-interactive SSH often has a minimal PATH; include the usual
+        # Homebrew and linuxbrew bin dirs so gfind/find get picked up.
+        # Try gfind first, fall back to GNU find (Linux); error on BSD-only.
         remote_cmd = (
-            f"if command -v gfind >/dev/null 2>&1; then FIND=gfind; "
-            f"elif find --version 2>/dev/null | grep -q GNU; then FIND=find; "
-            f"else echo 'GNU find required on remote (install coreutils/findutils)' >&2; exit 127; fi; "
+            'export PATH="/opt/homebrew/bin:/usr/local/bin:'
+            '/home/linuxbrew/.linuxbrew/bin:$PATH"; '
+            'if command -v gfind >/dev/null 2>&1; then FIND=gfind; '
+            'elif find --version 2>/dev/null | grep -q GNU; then FIND=find; '
+            "else echo 'GNU find required on remote (install coreutils/findutils)' >&2; exit 127; fi; "
             f"$FIND {shlex.quote(remote_path)} -printf '%y %b %T@ %p\\0'"
         )
         cmd = [*ssh, remote_cmd]
