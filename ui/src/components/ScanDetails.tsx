@@ -9,13 +9,15 @@ import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deleteP
 import type { Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
-import { formatSize, formatCount, timeAgo } from '../utils/format'
+import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
 
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
 type SortDir = 'asc' | 'desc'
 type SortSpec = { key: SortKey; dir: SortDir }
 
 function ScanProgressBanner({ progress, currentUri }: { progress: ScanProgress[]; currentUri: string }) {
+  const [, setTick] = useState(0)
+
   // Find scans that are relevant to this path (exact match, ancestor, or descendant)
   const relevantScans = progress.filter(p => {
     const scanPath = p.path
@@ -28,6 +30,13 @@ function ScanProgressBanner({ progress, currentUri }: { progress: ScanProgress[]
     return false
   })
 
+  // Tick every second so elapsed times update live
+  useEffect(() => {
+    if (relevantScans.length === 0) return
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [relevantScans.length])
+
   if (relevantScans.length === 0) return null
 
   return (
@@ -39,17 +48,22 @@ function ScanProgressBanner({ progress, currentUri }: { progress: ScanProgress[]
           <span>{formatCount(scan.items_found)} items</span>
           {scan.items_per_sec && <span>({formatCount(Math.round(scan.items_per_sec))}/sec)</span>}
           {scan.error_count > 0 && <span style={{ color: '#ed6c02' }}>{scan.error_count} errors</span>}
+          <span>{elapsed(scan.started)}</span>
         </Box>
       ))}
     </Alert>
   )
 }
 
-type RouteType = 'file' | 's3'
+type RouteType = 'file' | 's3' | 'ssh'
 
 function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) {
-  const prefix = routeType === 's3' ? '/s3' : '/file'
-  const displayUri = routeType === 's3' ? uri.replace('s3://', '') : uri
+  const prefix = routeType === 's3' ? '/s3' : routeType === 'ssh' ? '/ssh' : '/file'
+  const displayUri = routeType === 's3'
+    ? uri.replace('s3://', '')
+    : routeType === 'ssh'
+      ? uri.replace('ssh://', '')
+      : uri
 
   const segments = displayUri.split('/').filter(Boolean)
   const paths = segments.reduce((acc, seg) => {
@@ -61,6 +75,7 @@ function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) 
   return (
     <div className="breadcrumbs">
       {routeType === 's3' && <Link to="/s3">s3://</Link>}
+      {routeType === 'ssh' && <span>ssh://</span>}
       {routeType === 'file' && <Link to="/file/" className="breadcrumb-sep">/</Link>}
       {paths.map((path, idx) => (
         <span key={idx}>
@@ -70,7 +85,7 @@ function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) 
           ) : (
             <Link to={`${prefix}/${path}`}>{segments[idx]}</Link>
           )}
-          {routeType === 's3' && idx < paths.length - 1 && <span className="breadcrumb-sep">/</span>}
+          {(routeType === 's3' || routeType === 'ssh') && idx < paths.length - 1 && <span className="breadcrumb-sep">/</span>}
         </span>
       ))}
     </div>
@@ -220,7 +235,9 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   // For root (/), prefix should be /file not /file/
   const prefix = routeType === 's3'
     ? `/s3/${uri.replace('s3://', '').replace(/\/$/, '')}`
-    : uri === '/' ? '/file' : `/file${uri}`
+    : routeType === 'ssh'
+      ? `/ssh/${uri.replace('ssh://', '').replace(/\/$/, '')}`
+      : uri === '/' ? '/file' : `/file${uri}`
   const allSelected = children.length > 0 && children.every(r => selectedPaths.has(r.uri))
   const someSelected = children.some(r => selectedPaths.has(r.uri))
 
@@ -763,12 +780,16 @@ function FilePreviewSection({ path }: { path: string }) {
 export function ScanDetails() {
   const params = useParams()
   const pathSegments = params['*'] || ''
-  const isS3 = window.location.pathname.startsWith('/s3')
-  const routeType: RouteType = isS3 ? 's3' : 'file'
+  const pathname = window.location.pathname
+  const isS3 = pathname.startsWith('/s3')
+  const isSsh = pathname.startsWith('/ssh')
+  const routeType: RouteType = isS3 ? 's3' : isSsh ? 'ssh' : 'file'
 
   const uri = isS3
     ? `s3://${pathSegments}`
-    : `/${pathSegments}`
+    : isSsh
+      ? `ssh://${pathSegments}`
+      : `/${pathSegments}`
 
   // Selected scan ID for time-travel (undefined = latest)
   const [selectedScanId, setSelectedScanId] = useState<number | undefined>(undefined)
@@ -1299,7 +1320,7 @@ export function ScanDetails() {
             return (
               <span key={idx}>
                 <span className="breadcrumb-sep">/</span>
-                <Link to={`${routeType === 's3' ? '/s3/' : '/file'}${fullPath}`}>
+                <Link to={`${routeType === 's3' ? '/s3/' : routeType === 'ssh' ? '/ssh/' : '/file'}${fullPath}`}>
                   {segment}
                 </Link>
               </span>

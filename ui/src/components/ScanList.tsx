@@ -18,11 +18,14 @@ import type { Scan, ScanJob, ScanProgress } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { DataTable } from './DataTable'
 import type { Column } from './DataTable'
-import { timeAgo, formatCount } from '../utils/format'
+import { elapsed, formatCount } from '../utils/format'
 
 function pathToRoute(path: string): string {
   if (path.startsWith('s3://')) {
     return `/s3/${path.slice(5)}`
+  }
+  if (path.startsWith('ssh://')) {
+    return `/ssh/${path.slice(6)}`
   }
   return `/file${path}`
 }
@@ -45,6 +48,15 @@ const scanColumns: Column<Scan>[] = [
 
 function LiveScanProgress({ progress }: { progress: ScanProgress[] }) {
   const activeScans = progress.filter(p => p.status === 'running')
+  const [, setTick] = useState(0)
+
+  // Tick every second so elapsed times update live
+  useEffect(() => {
+    if (activeScans.length === 0) return
+    const id = setInterval(() => setTick(t => t + 1), 1000)
+    return () => clearInterval(id)
+  }, [activeScans.length])
+
   if (activeScans.length === 0) return null
 
   return (
@@ -73,7 +85,7 @@ function LiveScanProgress({ progress }: { progress: ScanProgress[] }) {
               {scan.error_count > 0 && (
                 <span style={{ color: '#ed6c02' }}>{scan.error_count} errors</span>
               )}
-              <span>{timeAgo(scan.started)}</span>
+              <span>{elapsed(scan.started)}</span>
             </Box>
           </Box>
         ))}
@@ -110,10 +122,10 @@ function NewScanForm({ onStarted }: { onStarted: (job: ScanJob) => void }) {
       <Typography variant="subtitle2" sx={{ mb: 1 }}>Start New Scan</Typography>
       <form onSubmit={handleSubmit}>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-          <Tooltip title="Enter a local path (e.g., /Users/ryan) or S3 URI (e.g., s3://bucket/prefix)">
+          <Tooltip title="Local path (/Users/ryan), S3 URI (s3://bucket/prefix), or SSH (ssh://m1/Users/ryan or m1:/Users/ryan)">
             <TextField
               size="small"
-              placeholder="/path/to/scan or s3://bucket"
+              placeholder="/path or s3://bucket or ssh://host/path"
               value={path}
               onChange={e => setPath(e.target.value)}
               error={!!error}
