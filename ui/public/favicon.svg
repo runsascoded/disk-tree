@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Disk platter -->
+  <ellipse cx="16" cy="20" rx="14" ry="8" fill="#3a3f4b"/>
+  <ellipse cx="16" cy="18" rx="14" ry="8" fill="#4a5568"/>
+  <!-- Platter rings -->
+  <ellipse cx="16" cy="18" rx="10" ry="5.5" fill="none" stroke="#5a6577" stroke-width="0.5"/>
+  <ellipse cx="16" cy="18" rx="6" ry="3.5" fill="none" stroke="#5a6577" stroke-width="0.5"/>
+  <!-- Spindle -->
+  <circle cx="16" cy="18" r="1.5" fill="#2d3748"/>
+  <!-- Tree growing from disk -->
+  <!-- Trunk -->
+  <rect x="14.5" y="6" width="3" height="10" rx="1" fill="#805a3b"/>
+  <!-- Canopy layers -->
+  <circle cx="16" cy="6" r="5.5" fill="#38a169"/>
+  <circle cx="12.5" cy="7.5" r="3.5" fill="#48bb78"/>
+  <circle cx="19.5" cy="7.5" r="3.5" fill="#2f855a"/>
+  <circle cx="16" cy="4" r="3.5" fill="#48bb78"/>
+</svg>
