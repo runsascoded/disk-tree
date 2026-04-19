@@ -1,0 +1,83 @@
+"""URL parsing and normalization for scan sources.
+
+Supported inputs:
+- Bare path: `/Users/ryan`  → `file` scheme, absolute path
+- `file://` URL
+- `s3://bucket/prefix`
+- `ssh://[user@]host[:port]/abs-path` (canonical)
+- scp-shorthand `[user@]host:/abs-path` (normalized to `ssh://`)
+"""
+
+import re
+from dataclasses import dataclass
+from os.path import abspath, expanduser
+from urllib.parse import urlparse
+
+
+# scp shorthand: `[user@]host:/abs-path`. Require colon-slash to disambiguate
+# from local paths that happen to contain `:` (e.g. `foo:bar`).
+SCP_RE = re.compile(
+    r'^(?:(?P<user>[^@/:]+)@)?(?P<host>[A-Za-z0-9][A-Za-z0-9._-]*):(?P<path>/.*)$'
+)
+
+
+@dataclass(frozen=True)
+class ParsedUrl:
+    scheme: str
+    path: str
+    user: str | None = None
+    host: str | None = None
+    port: int | None = None
+    # Preserve any extra netloc bits (e.g. R2 account identifier)
+    raw: str = ''
+
+
+def parse_url(url: str) -> ParsedUrl:
+    if '://' not in url:
+        m = SCP_RE.match(url)
+        if m:
+            return ParsedUrl(
+                scheme='ssh',
+                user=m.group('user'),
+                host=m.group('host'),
+                path=m.group('path'),
+                raw=url,
+            )
+        # Bare local path
+        return ParsedUrl(
+            scheme='file',
+            path=abspath(expanduser(url)),
+            raw=url,
+        )
+
+    parsed = urlparse(url)
+    if parsed.scheme in ('s3', 'r2', 'gcs', 'az'):
+        # Object-storage URLs: netloc is the bucket; path keeps the key prefix.
+        return ParsedUrl(
+            scheme=parsed.scheme,
+            host=parsed.netloc,
+            path=parsed.path,
+            raw=url,
+        )
+    return ParsedUrl(
+        scheme=parsed.scheme,
+        user=parsed.username,
+        host=parsed.hostname,
+        port=parsed.port,
+        path=parsed.path,
+        raw=url,
+    )
+
+
+def canonical(url: str) -> str:
+    """Return the canonical form of `url` (what gets stored in the DB)."""
+    p = parse_url(url)
+    if p.scheme == 'file':
+        return p.path.rstrip('/') or '/'
+    if p.scheme == 'ssh':
+        userpart = f'{p.user}@' if p.user else ''
+        portpart = f':{p.port}' if p.port else ''
+        return f'ssh://{userpart}{p.host}{portpart}{p.path}'.rstrip('/') or f'ssh://{p.host}/'
+    if p.scheme in ('s3', 'r2', 'gcs', 'az'):
+        return f'{p.scheme}://{p.host}{p.path}'.rstrip('/')
+    return url
