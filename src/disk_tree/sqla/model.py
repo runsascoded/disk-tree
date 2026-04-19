@@ -34,7 +34,8 @@ class ScanProgress(Base):
         from .db import db
         import os
 
-        path = os.path.abspath(path).rstrip('/') if not path.startswith('s3://') else path.rstrip('/')
+        from disk_tree.backends import canonical
+        path = canonical(path)
         # Remove any existing progress for this path
         db.session.query(cls).filter_by(path=path).delete()
         progress = cls(
@@ -106,9 +107,8 @@ class Scan(Base):
     ) -> tuple['Scan', pd.DataFrame]:
         from .db import db
 
-        if not path.startswith('s3://'):
-            path = os.path.abspath(path)
-        path = path.rstrip('/') or '/'
+        from disk_tree.backends import canonical
+        path = canonical(path)
         now = datetime.now().astimezone()
 
         # Set up progress tracking

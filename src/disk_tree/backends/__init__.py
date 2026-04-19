@@ -1,7 +1,7 @@
 from .base import Backend, ErrorCollector, ProgressCallback
 from .local import LocalBackend
 from .s3 import S3Backend
-from .url import ParsedUrl, canonical, parse_url
+from .url import ParsedUrl, canonical, parse_url, url_parent
 
 
 def backend_for(url: str) -> Backend:
@@ -26,4 +26,5 @@ __all__ = [
     'backend_for',
     'canonical',
     'parse_url',
+    'url_parent',
 ]
