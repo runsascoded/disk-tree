@@ -6,7 +6,8 @@ export default defineConfig({
   plugins: [react()],
 
   server: {
-    port: 5180,
+    // sha1('disk-tree') % 6000 + 4000
+    port: 7788,
     strictPort: true,  // Exit with error if port is already in use
     proxy: {
       '/api': {
