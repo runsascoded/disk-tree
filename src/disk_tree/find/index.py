@@ -1,3 +1,4 @@
+from array import array
 from dataclasses import dataclass, field
 from os.path import dirname
 import time as time_module
@@ -35,7 +36,15 @@ def index(
     items_count = 0
     start_time = last_progress_time
 
-    def collect_with_progress():
+    # Accumulate columns in parallel lists (much cheaper than 7M dict objects).
+    path_l: list[str] = []
+    size_l = array('q')  # signed int64
+    mtime_l = array('q')
+    kind_l: list[str] = []
+    parent_l: list[str | None] = []
+    uri_l: list[str] = []
+
+    def collect():
         nonlocal last_progress_time, items_count
         kwargs = dict(errors=errors, excludes=excludes, sudo=sudo)
         for e in backend.list(path0, **kwargs):
@@ -46,20 +55,23 @@ def index(
                 items_per_sec = items_count / elapsed if elapsed > 0 else None
                 progress_callback(items_count, items_per_sec, errors.count)
                 last_progress_time = now
-            yield dict(**e, n_desc=1, n_children=0)
+            path_l.append(e['path'])
+            size_l.append(e['size'])
+            mtime_l.append(e['mtime'])
+            kind_l.append(e['kind'])
+            parent_l.append(e['parent'])
+            uri_l.append(e['uri'])
 
     with time("files_iter"):
-        paths = list(collect_with_progress())
+        collect()
 
     if progress_callback:
         elapsed = time_module.time() - start_time
         items_per_sec = items_count / elapsed if elapsed > 0 else None
         progress_callback(items_count, items_per_sec, errors.count)
 
-    df = pd.DataFrame(paths)
-
     # Handle empty bucket/directory: return early with just a root row
-    if df.empty:
+    if not path_l:
         df = pd.DataFrame([{
             'path': '.',
             'size': 0,
@@ -76,6 +88,20 @@ def index(
             error_count=errors.count,
             error_paths=errors.paths,
         )
+
+    df = pd.DataFrame({
+        'path': path_l,
+        'size': size_l,
+        'mtime': mtime_l,
+        'kind': kind_l,
+        'parent': parent_l,
+        'uri': uri_l,
+    })
+    # Free the per-column lists now that the DataFrame owns the data — peak memory
+    # otherwise has both representations resident through the aggregation passes.
+    del path_l, size_l, mtime_l, kind_l, parent_l, uri_l
+    df['n_desc'] = 1
+    df['n_children'] = 0
 
     files = df[df.kind == 'file']
     dirs0 = df[df.kind == 'dir']
