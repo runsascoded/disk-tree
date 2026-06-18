@@ -1,7 +1,7 @@
 import os
 import time
 from os import makedirs, remove
-from os.path import exists, join
+from os.path import exists, isabs, join
 from uuid import uuid4
 
 import pandas as pd
@@ -36,14 +36,18 @@ class ParquetBackend(StorageBackend):
     def supports_updates(self) -> bool:
         return False
 
+    def _resolve(self, blob_ref: str) -> str:
+        # Legacy absolute paths are honored; new refs are basenames.
+        return blob_ref if isabs(blob_ref) else join(self.scans_dir, blob_ref)
+
     def save(self, df: pd.DataFrame, scan_path: str) -> str:
-        """Save DataFrame to a new parquet file."""
-        blob_id = str(uuid4())
-        blob_path = join(self.scans_dir, f'{blob_id}.parquet')
+        """Save DataFrame to a new parquet file. Returns basename ref."""
+        blob_ref = f'{uuid4()}.parquet'
+        blob_path = join(self.scans_dir, blob_ref)
         if exists(blob_path):
             raise RuntimeError(f"Blob path already exists: {blob_path}")
         df.to_parquet(blob_path, index=False)
-        return blob_path
+        return blob_ref
 
     def load(
         self,
@@ -66,23 +70,24 @@ class ParquetBackend(StorageBackend):
             if now - cached_time < CACHE_TTL:
                 return cached_df
 
+        blob_path = self._resolve(blob_ref)
         df = None
         if max_depth is not None or min_depth is not None:
             # Check if parquet has 'depth' column for predicate pushdown
             try:
-                schema = pq.read_schema(blob_ref)
+                schema = pq.read_schema(blob_path)
                 if 'depth' in schema.names:
                     filters = []
                     if max_depth is not None:
                         filters.append(('depth', '<=', max_depth))
                     if min_depth is not None:
                         filters.append(('depth', '>=', min_depth))
-                    df = pd.read_parquet(blob_ref, filters=filters)
+                    df = pd.read_parquet(blob_path, filters=filters)
             except Exception:
                 pass  # Fall back to full load
 
         if df is None:
-            df = pd.read_parquet(blob_ref)
+            df = pd.read_parquet(blob_path)
 
         # Update cache (simple LRU)
         if len(_cache) >= CACHE_MAX_SIZE:
@@ -109,8 +114,9 @@ class ParquetBackend(StorageBackend):
 
     def delete(self, blob_ref: str) -> None:
         """Delete the parquet file."""
-        if exists(blob_ref):
-            remove(blob_ref)
+        blob_path = self._resolve(blob_ref)
+        if exists(blob_path):
+            remove(blob_path)
         # Clear from cache
         keys_to_remove = [k for k in _cache if k.startswith(blob_ref)]
         for k in keys_to_remove:

@@ -1,6 +1,6 @@
 """Migration commands for disk-tree database."""
 from os import makedirs, rename
-from os.path import basename, isfile, join
+from os.path import basename, isabs, isfile, join
 
 import pandas as pd
 from click import command, option
@@ -251,3 +251,91 @@ def migrate_hybrid(dry_run: bool):
     else:
         err(f"Migration complete: {migrated} migrated ({chunked} chunked), {skipped} skipped, {errors} errors")
         err(f"Originals backed up to: {backup_dir}")
+
+
+@cli.command('migrate-blobs')
+@option('-n', '--dry-run', is_flag=True, help="Show what would be done without making changes")
+def migrate_blobs(dry_run: bool):
+    """Convert absolute parquet blob refs to basenames (relative to SCANS_DIR).
+
+    Rewrites:
+    - scan.blob column in SQLite
+    - child_scan_id column inside hybrid parquet files
+    """
+    import sqlite3
+
+    if not isfile(DB_PATH):
+        err(f"Database not found: {DB_PATH}")
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id, blob FROM scan")
+    rows = cursor.fetchall()
+    db_updated = 0
+    db_skipped = 0
+    for row in rows:
+        blob = row['blob']
+        if not isabs(blob):
+            db_skipped += 1
+            continue
+        new_blob = basename(blob)
+        if dry_run:
+            err(f"  scan.id={row['id']}: {blob} -> {new_blob}")
+        else:
+            cursor.execute("UPDATE scan SET blob = ? WHERE id = ?", (new_blob, row['id']))
+        db_updated += 1
+    if not dry_run:
+        conn.commit()
+    err(f"SQLite scan rows: {db_updated} updated, {db_skipped} already relative")
+
+    # Rewrite child_scan_id inside each parquet
+    cursor.execute("SELECT id, blob FROM scan")
+    rows = cursor.fetchall()
+    counts = {'updated': 0, 'skipped': 0, 'errors': 0}
+    for row in rows:
+        blob = row['blob']
+        blob_path = blob if isabs(blob) else join(SCANS_DIR, blob)
+        _normalize_parquet_chunks(blob_path, dry_run, counts)
+
+    conn.close()
+    err(f"Parquet files: {counts['updated']} rewritten, {counts['skipped']} unchanged, {counts['errors']} errors")
+
+
+def _normalize_parquet_chunks(blob_path: str, dry_run: bool, counts: dict) -> None:
+    """Rewrite child_scan_id column to basenames; recurse into referenced chunks."""
+    if not isfile(blob_path):
+        err(f"  Parquet not found: {blob_path}")
+        counts['errors'] += 1
+        return
+    try:
+        df = pd.read_parquet(blob_path)
+    except Exception as e:
+        err(f"  Error reading {blob_path}: {e}")
+        counts['errors'] += 1
+        return
+
+    if 'child_scan_id' not in df.columns:
+        counts['skipped'] += 1
+        return
+
+    refs = df['child_scan_id'].dropna()
+    abs_refs = refs[refs.apply(isabs)]
+    if abs_refs.empty:
+        counts['skipped'] += 1
+    else:
+        if dry_run:
+            err(f"  Would rewrite {len(abs_refs)} refs in {basename(blob_path)}")
+        else:
+            df['child_scan_id'] = df['child_scan_id'].apply(
+                lambda v: basename(v) if isinstance(v, str) and isabs(v) else v
+            )
+            df.to_parquet(blob_path, index=False)
+        counts['updated'] += 1
+
+    # Recurse into chunk parquets (resolve via basename in case still abs-on-disk)
+    for child_ref in df['child_scan_id'].dropna():
+        child_path = child_ref if isabs(child_ref) else join(SCANS_DIR, basename(child_ref))
+        _normalize_parquet_chunks(child_path, dry_run, counts)
