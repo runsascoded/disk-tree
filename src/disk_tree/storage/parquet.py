@@ -8,7 +8,7 @@ import pandas as pd
 import pyarrow.parquet as pq
 
 from .base import StorageBackend, PathStats
-from ..config import SCANS_DIR
+from .. import config as _config
 
 
 # LRU cache for parquet DataFrames
@@ -25,7 +25,8 @@ class ParquetBackend(StorageBackend):
     """
 
     def __init__(self, scans_dir: str | None = None):
-        self.scans_dir = scans_dir or SCANS_DIR
+        # Resolve via the config module so tests can monkeypatch SCANS_DIR at runtime.
+        self.scans_dir = scans_dir or _config.SCANS_DIR
         makedirs(self.scans_dir, exist_ok=True)
 
     @property
