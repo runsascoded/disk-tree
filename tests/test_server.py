@@ -39,7 +39,8 @@ def test_client(test_db_dir, monkeypatch):
             error_paths TEXT,
             size INTEGER,
             n_children INTEGER,
-            n_desc INTEGER
+            n_desc INTEGER,
+            mtime INTEGER
         )
     ''')
     conn.execute('CREATE INDEX ix_scan_path_time ON scan(path, time)')

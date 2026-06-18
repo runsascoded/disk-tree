@@ -13,7 +13,8 @@ import pandas as pd
 from flask import Flask, jsonify, redirect, request, g, Response, send_from_directory, url_for
 from flask_cors import CORS
 
-from disk_tree.config import SCANS_DIR, SQLITE_PATH
+from disk_tree import config as _config
+from disk_tree.config import SQLITE_PATH
 from disk_tree.storage import get_backend
 
 
@@ -21,10 +22,11 @@ def resolve_blob(blob_ref: str) -> str:
     """Resolve a parquet blob ref to its absolute path.
 
     Honors legacy absolute refs and ignores DuckDB/SQLite opaque refs.
+    Reads SCANS_DIR via the config module so tests can monkeypatch it.
     """
     if not blob_ref or blob_ref.startswith(('ddb:', 'sqlite:')):
         return blob_ref
-    return blob_ref if isabs(blob_ref) else join(SCANS_DIR, blob_ref)
+    return blob_ref if isabs(blob_ref) else join(_config.SCANS_DIR, blob_ref)
 
 app = Flask(__name__)
 CORS(app)

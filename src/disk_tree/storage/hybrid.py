@@ -15,7 +15,8 @@ from uuid import uuid4
 import pandas as pd
 
 from .base import StorageBackend, PathStats
-from ..config import ROOT_DIR, SCANS_DIR
+from .. import config as _config
+from ..config import ROOT_DIR
 
 # Subtrees with >= this many descendants get chunked into separate parquets
 CHUNK_THRESHOLD = 100_000
@@ -29,7 +30,8 @@ class HybridBackend(StorageBackend):
     """
 
     def __init__(self, scans_dir: str | None = None, chunk_threshold: int = CHUNK_THRESHOLD):
-        self.scans_dir = scans_dir or SCANS_DIR
+        # Resolve via the config module so tests can monkeypatch SCANS_DIR at runtime.
+        self.scans_dir = scans_dir or _config.SCANS_DIR
         self.chunk_threshold = chunk_threshold
         makedirs(self.scans_dir, exist_ok=True)
         # Cache for loaded dataframes

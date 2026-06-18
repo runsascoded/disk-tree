@@ -85,7 +85,11 @@ def url_parent(url: str) -> str | None:
     portpart = f':{p.port}' if p.port else ''
     host_part = f'{userpart}{p.host}{portpart}'
     if parent_path == '/':
-        return f'{p.scheme}://{host_part}/'
+        # Strip the trailing slash so the bucket root matches what `canonical()`
+        # stores (e.g. `s3://bucket`, not `s3://bucket/`). For `ssh://` and
+        # `file://` the canonical form keeps a leading `/` on the path, so the
+        # parent of the host root collapses to plain `<scheme>://<host>`.
+        return f'{p.scheme}://{host_part}'
     return f'{p.scheme}://{host_part}{parent_path}'
 
 
