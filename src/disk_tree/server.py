@@ -53,9 +53,15 @@ def init_db():
                 error_paths TEXT,
                 size INTEGER,
                 n_children INTEGER,
-                n_desc INTEGER
+                n_desc INTEGER,
+                mtime INTEGER
             )
         ''')
+        # Best-effort migration: pre-existing DBs may be missing the mtime column.
+        try:
+            conn.execute('ALTER TABLE scan ADD COLUMN mtime INTEGER')
+        except sqlite3.OperationalError:
+            pass  # column already exists
         conn.execute('''
             CREATE INDEX IF NOT EXISTS ix_scan_path_time ON scan (path, time)
         ''')
