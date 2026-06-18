@@ -1,6 +1,6 @@
 import json
 from os import listdir, makedirs, remove, stat
-from os.path import abspath, dirname, exists, isdir, isfile, join
+from os.path import abspath, dirname, exists, isabs, isdir, isfile, join
 import shutil
 import sqlite3
 import subprocess
@@ -13,8 +13,18 @@ import pandas as pd
 from flask import Flask, jsonify, redirect, request, g, Response, send_from_directory, url_for
 from flask_cors import CORS
 
-from disk_tree.config import SQLITE_PATH
+from disk_tree.config import SCANS_DIR, SQLITE_PATH
 from disk_tree.storage import get_backend
+
+
+def resolve_blob(blob_ref: str) -> str:
+    """Resolve a parquet blob ref to its absolute path.
+
+    Honors legacy absolute refs and ignores DuckDB/SQLite opaque refs.
+    """
+    if not blob_ref or blob_ref.startswith(('ddb:', 'sqlite:')):
+        return blob_ref
+    return blob_ref if isabs(blob_ref) else join(SCANS_DIR, blob_ref)
 
 app = Flask(__name__)
 CORS(app)
@@ -116,7 +126,7 @@ def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
         return blob_ref, rel_path
 
     # Load the root parquet to check for child_scan_id
-    df = pd.read_parquet(blob_ref)
+    df = pd.read_parquet(resolve_blob(blob_ref))
     if 'child_scan_id' not in df.columns:
         return blob_ref, rel_path
 
@@ -130,7 +140,7 @@ def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
             if pd.notna(row.get('child_scan_id')):
                 # This ancestor is chunked - resolve to the chunk
                 chunk_ref = row['child_scan_id']
-                if exists(chunk_ref):
+                if exists(resolve_blob(chunk_ref)):
                     # Rebase the remaining path relative to chunk root
                     remaining = '/'.join(parts[i+1:]) if i + 1 < len(parts) else '.'
                     # Recursively resolve in case of nested chunks
@@ -421,8 +431,8 @@ def get_scan():
         uri = '/'
 
     # Find the best matching scan (exact match or ancestor)
-    if uri.startswith('s3://'):
-        search_path = uri
+    if '://' in uri:
+        search_path = uri  # s3://, ssh://, etc.
     else:
         search_path = uri if uri.startswith('/') else f'/{uri}'
 
@@ -443,6 +453,7 @@ def get_scan():
     else:
         # Find the most recent scan covering this path (exact or ancestor)
         # Collect all candidate scans, then pick the freshest
+        from disk_tree.backends import url_parent
         candidate_scans = []
         test_path = search_path
         while test_path:
@@ -453,12 +464,8 @@ def get_scan():
             row = cursor.fetchone()
             if row:
                 candidate_scans.append(dict(row))
-            # Go up one directory
-            if test_path == '/' or test_path == 's3://':
-                break
-            parent = dirname(test_path)
-            # Avoid infinite loop: if dirname didn't change, we're at root
-            if parent == test_path:
+            parent = url_parent(test_path)
+            if parent is None or parent == test_path:
                 break
             test_path = parent
 
@@ -809,9 +816,9 @@ def get_scan():
         child_scan_dfs = []
         for _, row in direct_children_df.iterrows():
             child_scan = row.get('child_scan_id')
-            if pd.notna(child_scan) and exists(child_scan):
+            if pd.notna(child_scan) and exists(resolve_blob(child_scan)):
                 try:
-                    child_df = pd.read_parquet(child_scan)
+                    child_df = pd.read_parquet(resolve_blob(child_scan))
                     # Only load direct children (depth=1) from child scans
                     # These become depth=2 in the parent context
                     child_df = child_df[child_df['depth'] == 1]
@@ -1688,7 +1695,7 @@ def delete_path():
                                 df.loc[mask, 'n_children'] = df.loc[mask, 'n_children'] - 1
 
                     # Rewrite parquet (this is the expensive part)
-                    df.to_parquet(blob_ref, index=False)
+                    df.to_parquet(resolve_blob(blob_ref), index=False)
 
                     # Update denormalized stats in SQLite scan metadata
                     root_row = df[df['path'] == '.']

@@ -65,8 +65,11 @@ def index(
     if scan.error_count:
         summary += f", {scan.error_count} permission errors"
     print(summary)
-    stat = os.stat(scan.blob)
-    print(f"Scan cached path: {scan.blob} ({iec(stat.st_size)})")
+    from os.path import isabs, join
+    from disk_tree.config import SCANS_DIR
+    blob_path = scan.blob if isabs(scan.blob) else join(SCANS_DIR, scan.blob)
+    stat = os.stat(blob_path)
+    print(f"Scan cached path: {blob_path} ({iec(stat.st_size)})")
     if scan.error_count:
         import json
         error_paths = json.loads(scan.error_paths) if scan.error_paths else []
