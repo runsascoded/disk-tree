@@ -103,9 +103,11 @@ def index(
     df['n_desc'] = 1
     df['n_children'] = 0
 
-    files = df[df.kind == 'file']
     dirs0 = df[df.kind == 'dir']
-    cur = df
+    # Aggregation only needs these 5 columns. Slicing here keeps the per-iter
+    # `.copy()` below 5-column-wide instead of dragging `kind` / `uri` /
+    # `n_children` along (the per-row Python-string overhead dominates).
+    cur = df[['path', 'parent', 'size', 'mtime', 'n_desc']]
     dir_dfs = [dirs0]
     level = 0
     while True:
@@ -132,6 +134,9 @@ def index(
             level += 1
 
     with time("index-agg-dirs"):
+        # Materialize the files slice only now (deferred to free RAM during
+        # the agg loop; the loop doesn't need file rows in their wide form).
+        files = df[df.kind == 'file']
         dirs = pd.concat(dir_dfs)
         if dirs.empty:
             dirs = pd.DataFrame([{

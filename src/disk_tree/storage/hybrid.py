@@ -52,54 +52,107 @@ class HybridBackend(StorageBackend):
 
         Returns blob_ref for the root/summary parquet.
         Creates additional chunk parquets as needed.
-        """
-        df = df.copy()
 
-        # Ensure required columns exist
+        For a ~7M-row home-dir scan, the full df is ~3 GiB; the prior implementation
+        kept three copies coexisting (main df + extracted subtree + rebased subtree)
+        plus the pyarrow Table inside `to_parquet`, which drove the peak above 8 GiB.
+        We now (1) skip the upfront full-df copy, (2) extract+rebase each subtree
+        into a single new df instead of two, and (3) drop the subtree references
+        before the next iteration so its memory can be reclaimed.
+        """
+        import gc
+        import pyarrow as pa
+
+        # Ensure required column exists. Mutate in place to avoid copying the
+        # entire 7M-row df just to add one column of Nones.
         if 'child_scan_id' not in df.columns:
             df['child_scan_id'] = None
 
-        # Find subtrees that need chunking (depth-1 dirs with n_desc >= threshold)
-        # Only chunk at depth 1 to avoid explosion of tiny chunks
+        # Find subtrees that need chunking (depth-1 dirs with n_desc >= threshold).
+        # Only chunk at depth 1 to avoid explosion of tiny chunks.
         depth1_dirs = df[(df['depth'] == 1) & (df['kind'] == 'dir')]
         large_subtrees = depth1_dirs[depth1_dirs['n_desc'] >= self.chunk_threshold]
 
-        chunk_refs = {}  # path -> (blob_ref, scan_id placeholder)
+        chunk_refs = {}  # path -> blob_ref
 
         for _, row in large_subtrees.iterrows():
             subtree_path = row['path']
+            subtree_prefix = subtree_path + '/'
 
-            # Extract subtree rows
-            subtree_mask = (df['path'] == subtree_path) | df['path'].str.startswith(subtree_path + '/')
-            subtree_df = df[subtree_mask].copy()
+            descendant_mask = df['path'].str.startswith(subtree_prefix)
+            subtree_mask = (df['path'] == subtree_path) | descendant_mask
+            if subtree_mask.sum() <= 1:
+                continue
 
-            if len(subtree_df) <= 1:
-                continue  # Nothing to chunk
+            # Build the rebased chunk df, convert to an Arrow table, then drop
+            # the pandas frame BEFORE writing — keeps only Arrow buffers (not
+            # also Python string objects) resident during disk I/O.
+            subtree_df = self._extract_and_rebase(df, subtree_mask, subtree_path)
+            table = pa.Table.from_pandas(subtree_df, preserve_index=False)
+            del subtree_df
+            chunk_refs[subtree_path] = self._save_parquet_arrow(table)
+            del table
 
-            # Rebase paths relative to subtree root
-            subtree_df = self._rebase_paths(subtree_df, subtree_path)
-
-            # Recursively save the subtree (may create its own chunks)
-            chunk_blob_ref = self._save_parquet(subtree_df)
-            chunk_refs[subtree_path] = chunk_blob_ref
-
-            # Remove subtree rows from main df (keep only the summary row)
-            descendant_mask = df['path'].str.startswith(subtree_path + '/')
+            # Drop the descendants now; only the summary row stays in df.
             df = df[~descendant_mask]
+            gc.collect()
 
-        # Update child_scan_id references in summary rows
+        # Stamp child_scan_id refs into the surviving summary rows.
         for subtree_path, chunk_blob_ref in chunk_refs.items():
             df.loc[df['path'] == subtree_path, 'child_scan_id'] = chunk_blob_ref
 
-        # Save the root/summary parquet
-        root_blob_ref = self._save_parquet(df)
-        return root_blob_ref
+        # Same drop-pandas-before-write trick for the root summary parquet.
+        table = pa.Table.from_pandas(df, preserve_index=False)
+        del df
+        return self._save_parquet_arrow(table)
+
+    def _extract_and_rebase(self, df: pd.DataFrame, mask: pd.Series, root_path: str) -> pd.DataFrame:
+        """Materialize the masked subset with paths/parents/depth rebased to `root_path`.
+
+        Returns a fresh DataFrame; the source `df` is not mutated.
+        """
+        prefix = root_path + '/'
+        plen = len(prefix)
+
+        def rebase_path(p):
+            if p == root_path:
+                return '.'
+            if p.startswith(prefix):
+                return p[plen:]
+            return p
+
+        def rebase_parent(p):
+            if p == root_path:
+                return '.'
+            if p.startswith(prefix):
+                return p[plen:]
+            if not p or p == '.':
+                return ''
+            return p
+
+        new_paths = df.loc[mask, 'path'].map(rebase_path)
+        new_parents = df.loc[mask, 'parent'].map(rebase_parent)
+        new_depths = new_paths.map(lambda p: 0 if p == '.' else p.count('/') + 1)
+        # `assign` returns a new df sharing untouched column data with the source
+        # while replacing path/parent/depth with our rebased versions.
+        return df.loc[mask].assign(path=new_paths, parent=new_parents, depth=new_depths)
 
     def _save_parquet(self, df: pd.DataFrame) -> str:
         """Save a single parquet file, return basename blob_ref."""
         blob_ref = f'{uuid4()}.parquet'
         blob_path = join(self.scans_dir, blob_ref)
         df.to_parquet(blob_path, index=False)
+        return blob_ref
+
+    def _save_parquet_arrow(self, table: 'pa.Table') -> str:
+        """Write an already-constructed Arrow table; caller is expected to have
+        dropped the source DataFrame so peak memory holds Arrow buffers only.
+        """
+        import pyarrow.parquet as pq
+
+        blob_ref = f'{uuid4()}.parquet'
+        blob_path = join(self.scans_dir, blob_ref)
+        pq.write_table(table, blob_path)
         return blob_ref
 
     def _rebase_paths(self, df: pd.DataFrame, root_path: str) -> pd.DataFrame:
