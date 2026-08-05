@@ -19,23 +19,14 @@ import { useScanProgress } from '../hooks/useScanProgress'
 import { DataTable } from './DataTable'
 import type { Column } from './DataTable'
 import { elapsed, formatCount } from '../utils/format'
-
-function pathToRoute(path: string): string {
-  if (path.startsWith('s3://')) {
-    return `/s3/${path.slice(5)}`
-  }
-  if (path.startsWith('ssh://')) {
-    return `/ssh/${path.slice(6)}`
-  }
-  return `/file${path}`
-}
+import { uriToPath } from '../schemes'
 
 const scanColumns: Column<Scan>[] = [
   {
     key: 'path',
     label: 'Path',
     render: scan => (
-      <Link to={pathToRoute(scan.path)}>
+      <Link to={uriToPath(scan.path)}>
         <code>{scan.path}</code>
       </Link>
     ),
@@ -122,10 +113,10 @@ function NewScanForm({ onStarted }: { onStarted: (job: ScanJob) => void }) {
       <Typography variant="subtitle2" sx={{ mb: 1 }}>Start New Scan</Typography>
       <form onSubmit={handleSubmit}>
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-start' }}>
-          <Tooltip title="Local path (/Users/ryan), S3 URI (s3://bucket/prefix), or SSH (ssh://m1/Users/ryan or m1:/Users/ryan)">
+          <Tooltip title="Local path (/Users/ryan), S3/GCS/R2 URI (s3://bucket/prefix, gcs://bucket/prefix, r2://bucket/prefix), or SSH (ssh://m1/Users/ryan or m1:/Users/ryan). Live scanning is currently implemented for local, s3, and ssh; gcs/r2 URIs are only reachable via imported scans (see `disk-tree import`).">
             <TextField
               size="small"
-              placeholder="/path or s3://bucket or ssh://host/path"
+              placeholder="/path or s3://bucket or gcs://bucket or ssh://host/path"
               value={path}
               onChange={e => setPath(e.target.value)}
               error={!!error}

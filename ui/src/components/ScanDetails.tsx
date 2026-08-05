@@ -10,6 +10,15 @@ import type { Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
+import {
+  childLinkPrefix,
+  detectRouteType,
+  isSchemeRoot,
+  segmentsToUri,
+  supportsDelete,
+  uriToPath,
+  type RouteType,
+} from '../schemes'
 
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
 type SortDir = 'asc' | 'desc'
@@ -55,15 +64,10 @@ function ScanProgressBanner({ progress, currentUri }: { progress: ScanProgress[]
   )
 }
 
-type RouteType = 'file' | 's3' | 'ssh'
-
 function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) {
-  const prefix = routeType === 's3' ? '/s3' : routeType === 'ssh' ? '/ssh' : '/file'
-  const displayUri = routeType === 's3'
-    ? uri.replace('s3://', '')
-    : routeType === 'ssh'
-      ? uri.replace('ssh://', '')
-      : uri
+  const isFile = routeType === 'file'
+  const prefix = isFile ? '/file' : `/${routeType}`
+  const displayUri = isFile ? uri : uri.replace(`${routeType}://`, '')
 
   const segments = displayUri.split('/').filter(Boolean)
   const paths = segments.reduce((acc, seg) => {
@@ -74,18 +78,23 @@ function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) 
 
   return (
     <div className="breadcrumbs">
-      {routeType === 's3' && <Link to="/s3">s3://</Link>}
-      {routeType === 'ssh' && <span>ssh://</span>}
-      {routeType === 'file' && <Link to="/file/" className="breadcrumb-sep">/</Link>}
+      {!isFile && (
+        // Only s3 has a bucket-list landing page (/s3); other schemes
+        // just show the scheme prefix as text.
+        routeType === 's3'
+          ? <Link to="/s3">s3://</Link>
+          : <span>{routeType}://</span>
+      )}
+      {isFile && <Link to="/file/" className="breadcrumb-sep">/</Link>}
       {paths.map((path, idx) => (
         <span key={idx}>
-          {routeType === 'file' && idx > 0 && <span className="breadcrumb-sep">/</span>}
+          {isFile && idx > 0 && <span className="breadcrumb-sep">/</span>}
           {idx === paths.length - 1 ? (
             <span>{segments[idx]}</span>
           ) : (
             <Link to={`${prefix}/${path}`}>{segments[idx]}</Link>
           )}
-          {(routeType === 's3' || routeType === 'ssh') && idx < paths.length - 1 && <span className="breadcrumb-sep">/</span>}
+          {!isFile && idx < paths.length - 1 && <span className="breadcrumb-sep">/</span>}
         </span>
       ))}
     </div>
@@ -233,11 +242,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
 
   // Build prefix for child links, avoiding double slashes
   // For root (/), prefix should be /file not /file/
-  const prefix = routeType === 's3'
-    ? `/s3/${uri.replace('s3://', '').replace(/\/$/, '')}`
-    : routeType === 'ssh'
-      ? `/ssh/${uri.replace('ssh://', '').replace(/\/$/, '')}`
-      : uri === '/' ? '/file' : `/file${uri}`
+  const prefix = childLinkPrefix(uri)
   const allSelected = children.length > 0 && children.every(r => selectedPaths.has(r.uri))
   const someSelected = children.some(r => selectedPaths.has(r.uri))
 
@@ -282,7 +287,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           <SortableHeader className="col-numeric" label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
           <SortableHeader className="col-numeric" label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
           <th className="col-action"></th>
-          {routeType !== 's3' && <th className="col-action"></th>}
+          {supportsDelete(routeType) && <th className="col-action"></th>}
         </tr>
       </thead>
       <tbody>
@@ -321,14 +326,14 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               </span>
             </Tooltip>
             <Tooltip title="Compare scans">
-              <Link to={`/compare${routeType === 's3' ? '/s3/' + uri.slice(5) : '/file' + uri}`}>
+              <Link to={`/compare${uriToPath(uri)}`}>
                 <Button size="small" sx={{ minWidth: 0, padding: '2px 4px' }}>
                   <FaExchangeAlt size={12} />
                 </Button>
               </Link>
             </Tooltip>
           </td>
-          {routeType !== 's3' && <td className="col-action"></td>}
+          {supportsDelete(routeType) && <td className="col-action"></td>}
         </tr>
         {/* Render collapsed/expanded parent rows (auto-expanded single-child dirs) */}
         {collapsedRows && collapsedRows.map((collapsedRow, depth) => {
@@ -383,7 +388,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   </span>
                 </Tooltip>
               </td>
-              {routeType !== 's3' && (
+              {supportsDelete(routeType) && (
                 <td className="col-action">
                   <Tooltip title="Delete directory">
                     <span>
@@ -497,7 +502,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   </Tooltip>
                 )}
               </td>
-              {routeType !== 's3' && (
+              {supportsDelete(routeType) && (
                 <td className="col-action" onClick={e => e.stopPropagation()}>
                   <Tooltip title={`Delete ${row.kind === 'dir' ? 'directory' : 'file'}`}>
                     <span>
@@ -781,15 +786,8 @@ export function ScanDetails() {
   const params = useParams()
   const pathSegments = params['*'] || ''
   const pathname = window.location.pathname
-  const isS3 = pathname.startsWith('/s3')
-  const isSsh = pathname.startsWith('/ssh')
-  const routeType: RouteType = isS3 ? 's3' : isSsh ? 'ssh' : 'file'
-
-  const uri = isS3
-    ? `s3://${pathSegments}`
-    : isSsh
-      ? `ssh://${pathSegments}`
-      : `/${pathSegments}`
+  const routeType: RouteType = detectRouteType(pathname)
+  const uri = segmentsToUri(routeType, pathSegments)
 
   // Selected scan ID for time-travel (undefined = latest)
   const [selectedScanId, setSelectedScanId] = useState<number | undefined>(undefined)
@@ -836,7 +834,7 @@ export function ScanDetails() {
   // Record visit to recent paths
   const { recordVisit } = useRecentPaths()
   useEffect(() => {
-    if (uri && uri !== '/' && uri !== 's3://') {
+    if (uri && !isSchemeRoot(uri)) {
       recordVisit(uri, 'tree')
     }
   }, [uri, recordVisit])
@@ -1320,7 +1318,7 @@ export function ScanDetails() {
             return (
               <span key={idx}>
                 <span className="breadcrumb-sep">/</span>
-                <Link to={`${routeType === 's3' ? '/s3/' : routeType === 'ssh' ? '/ssh/' : '/file'}${fullPath}`}>
+                <Link to={uriToPath(fullPath)}>
                   {segment}
                 </Link>
               </span>
@@ -1380,7 +1378,7 @@ export function ScanDetails() {
                 </Button>
               </Tooltip>
             )}
-            {routeType !== 's3' && (
+            {supportsDelete(routeType) && (
               <Tooltip title={`Delete ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}`}>
                 <Button
                   size="small"

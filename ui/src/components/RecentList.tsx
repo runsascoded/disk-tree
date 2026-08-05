@@ -5,13 +5,15 @@ import { useRecentPaths } from '../hooks/useRecentPaths'
 import type { RecentPath, ViewType } from '../hooks/useRecentPaths'
 import { DataTable } from './DataTable'
 import type { Column } from './DataTable'
+import { URI_SCHEMES, uriToPath } from '../schemes'
 
 function uriToRoute(uri: string, viewType: ViewType): string {
-  const isS3 = uri.startsWith('s3://')
-  if (viewType === 'compare') {
-    return isS3 ? `/compare/s3/${uri.slice(5)}` : `/compare/file${uri}`
-  }
-  return isS3 ? `/s3/${uri.slice(5)}` : `/file${uri}`
+  const base = uriToPath(uri)
+  return viewType === 'compare' ? `/compare${base}` : base
+}
+
+function isCloudUri(uri: string): boolean {
+  return URI_SCHEMES.some(s => uri.startsWith(`${s}://`))
 }
 
 const recentColumns: Column<RecentPath>[] = [
@@ -19,8 +21,8 @@ const recentColumns: Column<RecentPath>[] = [
     key: 'source',
     label: '',
     type: 'icon',
-    render: item => item.uri.startsWith('s3://') ? (
-      <FaCloud style={{ color: '#ff9800', verticalAlign: 'middle' }} title="S3" />
+    render: item => isCloudUri(item.uri) ? (
+      <FaCloud style={{ color: '#ff9800', verticalAlign: 'middle' }} title="Cloud" />
     ) : (
       <FaFolder style={{ color: '#4caf50', verticalAlign: 'middle' }} title="Local" />
     ),

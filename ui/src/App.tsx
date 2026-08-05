@@ -34,6 +34,8 @@ function App() {
               <Route path="/file/*" element={<ScanDetails />} />
               <Route path="/s3" element={<S3BucketList />} />
               <Route path="/s3/*" element={<ScanDetails />} />
+              <Route path="/gcs/*" element={<ScanDetails />} />
+              <Route path="/r2/*" element={<ScanDetails />} />
               <Route path="/ssh/*" element={<ScanDetails />} />
               <Route path="/recent" element={<RecentList />} />
               <Route path="/compare/*" element={<CompareView />} />

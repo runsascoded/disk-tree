@@ -486,7 +486,7 @@ def get_scan():
 
     if not scan:
         # No ancestor scan - build from filesystem + any child scans
-        if not search_path.startswith('s3://'):
+        if '://' not in search_path:
             # Local path - list filesystem and merge with scan data
             fs_children = list_fs_children(search_path)
 

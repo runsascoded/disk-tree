@@ -18,6 +18,7 @@ import type { CompareResult, CompareRow, ScanHistoryItem } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo } from '../utils/format'
+import { comparePathToUri, isSchemeRoot, uriToPath, type RouteType } from '../schemes'
 
 type SortColumn = 'size_old' | 'size_new' | 'size_delta' | 'desc_old' | 'desc_new' | 'desc_delta'
 type SortDirection = 'asc' | 'desc'
@@ -94,22 +95,23 @@ function CompareBreadcrumbs({
   scan2: number | ''
 }) {
   // Split path into segments
-  const isS3 = routeType === 's3'
+  const isFile = routeType === 'file'
+  const scheme = routeType // 's3' | 'gcs' | 'r2' | 'ssh' (file handled by isFile)
   let segments: { name: string; path: string }[] = []
 
-  if (isS3) {
-    // s3://bucket/path/to/dir
-    const withoutScheme = uri.slice(5) // remove 's3://'
-    const parts = withoutScheme.split('/').filter(Boolean)
-    let currentPath = 's3:/'
+  if (isFile) {
+    // /Users/ryan/Library/...
+    const parts = uri.split('/').filter(Boolean)
+    let currentPath = ''
     for (const part of parts) {
       currentPath += '/' + part
       segments.push({ name: part, path: currentPath })
     }
   } else {
-    // /Users/ryan/Library/...
-    const parts = uri.split('/').filter(Boolean)
-    let currentPath = ''
+    // <scheme>://bucket/path/to/dir
+    const withoutScheme = uri.slice(scheme.length + 3) // strip '<scheme>://'
+    const parts = withoutScheme.split('/').filter(Boolean)
+    let currentPath = `${scheme}:/`
     for (const part of parts) {
       currentPath += '/' + part
       segments.push({ name: part, path: currentPath })
@@ -121,12 +123,10 @@ function CompareBreadcrumbs({
       variant="body2"
       sx={{ mb: 3, fontFamily: 'monospace', display: 'flex', flexWrap: 'wrap', alignItems: 'center' }}
     >
-      {!isS3 && <span style={{ color: '#8b949e' }}>/</span>}
-      {isS3 && <span style={{ color: '#8b949e' }}>s3://</span>}
+      {isFile && <span style={{ color: '#8b949e' }}>/</span>}
+      {!isFile && <span style={{ color: '#8b949e' }}>{scheme}://</span>}
       {segments.map((seg, i) => {
-        const basePath = isS3
-          ? `/compare/s3/${seg.path.slice(5)}`
-          : `/compare/file${seg.path}`
+        const basePath = `/compare${uriToPath(seg.path)}`
         const params = new URLSearchParams()
         if (scan1 !== '') params.set('scan1', String(scan1))
         if (scan2 !== '') params.set('scan2', String(scan2))
@@ -172,8 +172,6 @@ function CompareBreadcrumbs({
     </Typography>
   )
 }
-
-type RouteType = 'file' | 's3'
 
 // Sortable column header component
 function SortHeader({
@@ -292,7 +290,6 @@ function ParentSummaryRow({
 
 function CompareTable({
   result,
-  routeType,
   onScan,
   isScanning,
   getProgress,
@@ -300,7 +297,6 @@ function CompareTable({
   scan2,
 }: {
   result: CompareResult
-  routeType: RouteType
   onScan: (path: string) => void
   isScanning: (path: string) => boolean
   getProgress: (path: string) => { items_found?: number } | undefined
@@ -382,7 +378,6 @@ function CompareTable({
             row={row}
             maxSizeDelta={maxSizeDelta}
             maxDescDelta={maxDescDelta}
-            routeType={routeType}
             parentUri={result.uri}
             onScan={onScan}
             isScanning={isScanning}
@@ -407,7 +402,6 @@ function CompareRowComponent({
   row,
   maxSizeDelta,
   maxDescDelta,
-  routeType,
   onScan,
   isScanning,
   getProgress: _getProgress,
@@ -417,7 +411,6 @@ function CompareRowComponent({
   row: CompareRow
   maxSizeDelta: number
   maxDescDelta: number
-  routeType: RouteType
   parentUri: string
   onScan: (path: string) => void
   isScanning: (path: string) => boolean
@@ -435,9 +428,7 @@ function CompareRowComponent({
 
   // Build link URL for drilling into subdirectory (preserving scan params)
   const childUri = row.uri
-  const basePath = routeType === 's3'
-    ? `/compare/s3/${childUri.slice(5)}`
-    : `/compare/file${childUri}`
+  const basePath = `/compare${uriToPath(childUri)}`
   const params = new URLSearchParams()
   if (scan1 !== '') params.set('scan1', String(scan1))
   if (scan2 !== '') params.set('scan2', String(scan2))
@@ -586,19 +577,10 @@ export function CompareView() {
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // Extract URI and routeType from path: /compare/file/Users/ryan/... or /compare/s3/bucket/...
+  // Extract URI and routeType from path: /compare/file/Users/ryan/…, /compare/s3/bucket/…,
+  // /compare/gcs/bucket/…, /compare/r2/bucket/…, /compare/ssh/host/…
   const pathAfterCompare = location.pathname.replace(/^\/compare/, '') || '/'
-  let uri: string
-  let routeType: RouteType = 'file'
-  if (pathAfterCompare.startsWith('/file')) {
-    uri = decodeURIComponent(pathAfterCompare.replace(/^\/file/, '') || '/')
-    routeType = 'file'
-  } else if (pathAfterCompare.startsWith('/s3/')) {
-    uri = 's3:/' + decodeURIComponent(pathAfterCompare.slice(3))
-    routeType = 's3'
-  } else {
-    uri = decodeURIComponent(pathAfterCompare || '/')
-  }
+  const { uri, routeType } = comparePathToUri(pathAfterCompare)
 
   // Get scan selections from URL params
   const urlScan1 = searchParams.get('scan1')
@@ -655,7 +637,7 @@ export function CompareView() {
   // Record visit to recent paths
   const { recordVisit } = useRecentPaths()
   useEffect(() => {
-    if (uri && uri !== '/' && uri !== 's3://') {
+    if (uri && !isSchemeRoot(uri)) {
       recordVisit(uri, 'compare')
     }
   }, [uri, recordVisit])
@@ -885,7 +867,7 @@ export function CompareView() {
                 <Tooltip title="View directory tree">
                   <Button
                     component={Link}
-                    to={`${routeType === 's3' ? `/s3/${uri.slice(5)}` : `/file${uri}`}${scan2 !== '' ? `?scan_id=${scan2}` : ''}`}
+                    to={`${uriToPath(uri)}${scan2 !== '' ? `?scan_id=${scan2}` : ''}`}
                     variant="outlined"
                     size="small"
                     startIcon={<FaList />}
@@ -934,7 +916,7 @@ export function CompareView() {
                 <Tooltip title="View directory tree">
                   <Button
                     component={Link}
-                    to={`${routeType === 's3' ? `/s3/${uri.slice(5)}` : `/file${uri}`}${scan2 !== '' ? `?scan_id=${scan2}` : ''}`}
+                    to={`${uriToPath(uri)}${scan2 !== '' ? `?scan_id=${scan2}` : ''}`}
                     variant="outlined"
                     size="small"
                     startIcon={<FaList />}
@@ -989,7 +971,6 @@ export function CompareView() {
               <Paper sx={{ overflow: 'auto' }}>
                 <CompareTable
                   result={result}
-                  routeType={routeType}
                   onScan={handleStartScan}
                   isScanning={isScanning}
                   getProgress={getProgress}
