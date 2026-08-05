@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 import io
 import json
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
@@ -318,15 +319,76 @@ def test_cli_bulk_list_rejects_local_path():
     assert 'requires a cloud URI' in r.stderr
 
 
-def test_cli_bulk_list_s3_not_implemented():
-    """S3 lister is a follow-up; the CLI should say so, not crash silently."""
+def test_cli_bulk_list_r2_requires_endpoint():
+    """r2:// without --endpoint-url fails cleanly (R2 has no default endpoint)."""
     import os, subprocess, sys
 
     r = subprocess.run(
         [sys.executable, '-m', 'disk_tree.cli.main', 'bulk-list',
-         '-o', '/tmp/should-not-be-used', 's3://some-bucket'],
+         '-o', '/tmp/should-not-be-used', 'r2://some-bucket'],
         capture_output=True, text=True, check=False, env={**os.environ},
     )
     assert r.returncode != 0
-    # NotImplementedError bubbles to stderr
-    assert "isn't wired yet" in r.stderr
+    assert 'requires --endpoint-url' in r.stderr
+
+
+def test_s3_lister_boundary_inclusive_start(tmp_path: Path):
+    """S3's StartAfter is exclusive; the lister HEADs the boundary key so an
+    inclusive start (as produced by split_hot_prefixes) yields it."""
+    from unittest.mock import MagicMock
+
+    from disk_tree.find.bulk_s3 import S3BulkLister
+
+    # Two objects at keys 'k1' and 'k2'; StartAfter='k1' would otherwise skip k1.
+    fake_client = MagicMock()
+    fake_client.head_object.return_value = {
+        'ContentLength': 100,
+        'LastModified': dt.datetime(2026, 8, 5, tzinfo=dt.timezone.utc),
+        'StorageClass': 'STANDARD',
+    }
+    fake_paginator = MagicMock()
+    fake_paginator.paginate.return_value = iter([
+        {'Contents': [
+            {'Key': 'k2', 'Size': 200,
+             'LastModified': dt.datetime(2026, 8, 5, tzinfo=dt.timezone.utc),
+             'StorageClass': 'STANDARD'},
+        ]},
+    ])
+    fake_client.get_paginator.return_value = fake_paginator
+    lister = S3BulkLister()
+    object.__setattr__(lister, '_local', threading.local())
+    lister._local.client = fake_client  # type: ignore[attr-defined]
+
+    rows = list(lister.stream_prefix('b1', 'p/', start='k1', end=None))
+    assert [r.name for r in rows] == ['k1', 'k2']
+    assert [r.size for r in rows] == [100, 200]
+    # Called HEAD on the boundary key exactly once.
+    fake_client.head_object.assert_called_once_with(Bucket='b1', Key='k1')
+    # Paginator got StartAfter='k1'
+    call_kwargs = fake_paginator.paginate.call_args.kwargs
+    assert call_kwargs['StartAfter'] == 'k1'
+
+
+def test_s3_lister_end_exclusive(tmp_path: Path):
+    """`end` bounds the stream (exclusive) so range-shards don't overlap."""
+    from unittest.mock import MagicMock
+
+    from disk_tree.find.bulk_s3 import S3BulkLister
+
+    fake_client = MagicMock()
+    fake_paginator = MagicMock()
+    fake_paginator.paginate.return_value = iter([
+        {'Contents': [
+            {'Key': 'a', 'Size': 1, 'LastModified': None, 'StorageClass': 'STANDARD'},
+            {'Key': 'b', 'Size': 2, 'LastModified': None, 'StorageClass': 'STANDARD'},
+            {'Key': 'c', 'Size': 3, 'LastModified': None, 'StorageClass': 'STANDARD'},
+            {'Key': 'd', 'Size': 4, 'LastModified': None, 'StorageClass': 'STANDARD'},
+        ]},
+    ])
+    fake_client.get_paginator.return_value = fake_paginator
+    lister = S3BulkLister()
+    object.__setattr__(lister, '_local', threading.local())
+    lister._local.client = fake_client  # type: ignore[attr-defined]
+
+    rows = list(lister.stream_prefix('b1', '', start=None, end='c'))  # a, b only
+    assert [r.name for r in rows] == ['a', 'b']

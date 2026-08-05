@@ -20,17 +20,21 @@ from disk_tree.cli.base import cli
 
 
 @cli.command('bulk-list')
+@option('-E', '--endpoint-url', default=None, help='S3-compatible endpoint URL (required for r2://; also usable for MinIO / non-AWS S3)')
 @option('-o', '--out', 'out_dir', required=True, help='Output dir for listing shards (local path or fsspec URL such as `gs://...`)')
 @option('-p', '--prefix', default=None, help='Restrict listing to this bucket-relative prefix')
 @option('-P', '--procs', default=6, help='Worker processes (default 6). Marin measured 32 vCPU / 24 procs / 10 threads as the sweet spot for GCS.')
+@option('-r', '--region', default=None, help='AWS region name (S3 backend only)')
 @option('-w', '--threads', default=8, help='Threads per worker (default 8)')
 @option('-W', '--weights-from', default=None, help='Glob to a prior listing parquet used to bin-pack + range-split hot prefixes')
 @option('-x', '--exists', type=Choice(['error', 'clear', 'reuse']), default='error', help='Behavior when --out already has shards: error/clear/reuse')
 @argument('uri')
 def bulk_list_cmd(
+    endpoint_url: str | None,
     out_dir: str,
     prefix: str | None,
     procs: int,
+    region: str | None,
     threads: int,
     weights_from: str | None,
     exists: str,
@@ -40,22 +44,30 @@ def bulk_list_cmd(
     from disk_tree.backends.url import parse_url
 
     parsed = parse_url(uri)
+    eff_prefix = prefix if prefix is not None else (parsed.path.strip('/') or None)
     if parsed.scheme == 'gcs':
         from disk_tree.find.bulk_gcs import list_gcs_bucket_to_parquet
         total = list_gcs_bucket_to_parquet(
             bucket=parsed.host,
             out_dir=out_dir,
             procs=procs, threads=threads,
-            prefix=prefix if prefix is not None else parsed.path.strip('/') or None,
+            prefix=eff_prefix,
             exists=exists, weights_from=weights_from,
         )
     elif parsed.scheme in ('s3', 'r2'):
-        # A.2 continued — the S3-compatible bulk lister lives in a follow-up
-        # commit (marin only uses GCS today, so this ships first and s3/r2
-        # can pin against the interface once the port lands).
-        raise NotImplementedError(
-            f"bulk-list for scheme={parsed.scheme!r} isn't wired yet;"
-            " GCS is the first backend (see disk_tree.find.bulk_gcs).")
+        if parsed.scheme == 'r2' and not endpoint_url:
+            raise ValueError("r2:// requires --endpoint-url (Cloudflare R2's S3-compatible endpoint)")
+        from disk_tree.find.bulk_s3 import list_s3_bucket_to_parquet
+        total = list_s3_bucket_to_parquet(
+            bucket=parsed.host,
+            out_dir=out_dir,
+            procs=procs, threads=threads,
+            prefix=eff_prefix,
+            exists=exists, weights_from=weights_from,
+            endpoint_url=endpoint_url,
+            region_name=region,
+            scheme=parsed.scheme,
+        )
     else:
         raise ValueError(f"bulk-list requires a cloud URI (gcs://, s3://, r2://); got {uri!r}")
 
