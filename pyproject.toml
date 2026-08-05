@@ -32,6 +32,30 @@ dev = [
 mem = [
     "memray",
 ]
+# Sharded bulk listers for cloud object stores. Split by scheme so users pay
+# only for the SDK they use; `bulk` pulls all three for convenience.
+gcs = [
+    "fsspec",
+    "gcsfs",
+    "google-cloud-storage",
+]
+s3 = [
+    "boto3",
+    "fsspec",
+    "s3fs",
+]
+r2 = [
+    "boto3",
+    "fsspec",
+    "s3fs",
+]
+bulk = [
+    "boto3",
+    "fsspec",
+    "gcsfs",
+    "google-cloud-storage",
+    "s3fs",
+]
 
 [project.scripts]
 disk-tree = "disk_tree.cli.main:cli"

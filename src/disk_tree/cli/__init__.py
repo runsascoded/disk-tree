@@ -1,2 +1,2 @@
 from .base import cli
-from . import diff, import_listing, index, migrate, scans, series
+from . import bulk_list, diff, import_listing, index, migrate, scans, series
