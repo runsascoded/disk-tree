@@ -21,6 +21,88 @@ class IndexResult:
     error_paths: list[str] = field(default_factory=list)
 
 
+def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
+    """Bottom-up aggregation: leaf (+ optional dir) rows → canonical layer-2 frame.
+
+    Input columns: `path, size, mtime, kind, parent, uri` (`kind` in {'file','dir'}).
+    Walk backends emit both files and dirs; listing imports emit files only —
+    the missing dir rows get synthesized by the group-by cascade below. Output
+    adds `n_desc`, `n_children`, `depth`; sorted breadth-first for parquet
+    row-group pruning.
+    """
+    df = rows
+    df['n_desc'] = 1
+    df['n_children'] = 0
+
+    dirs0 = df[df.kind == 'dir']
+    # Aggregation only needs these 5 columns. Slicing here keeps the per-iter
+    # `.copy()` below 5-column-wide instead of dragging `kind` / `uri` /
+    # `n_children` along (the per-row Python-string overhead dominates).
+    cur = df[['path', 'parent', 'size', 'mtime', 'n_desc']]
+    dir_dfs = [dirs0]
+    level = 0
+    while True:
+        with time(f"index-agg-{level}"):
+            cur = cur[cur.path != ''].copy()
+            if cur.empty:
+                break
+            cur['path'] = cur['parent']
+            grouped = cur.groupby('path')
+            sizes = grouped['size'].sum()
+            n_children = grouped.size() if level == 0 else 0
+            mtimes = grouped['mtime'].max()
+            n_desc = grouped['n_desc'].sum()
+            dirs = pd.DataFrame({
+                'path': sizes.index,
+                'size': sizes,
+                'mtime': mtimes,
+                'n_desc': n_desc,
+                'n_children': n_children,
+            }).reset_index(drop=True)
+            dirs['parent'] = dirs.path.apply(dirname)
+            dir_dfs.append(dirs)
+            cur = dirs
+            level += 1
+
+    with time("index-agg-dirs"):
+        # Materialize the files slice only now (deferred to free RAM during
+        # the agg loop; the loop doesn't need file rows in their wide form).
+        files = df[df.kind == 'file']
+        dirs = pd.concat(dir_dfs)
+        if dirs.empty:
+            dirs = pd.DataFrame([{
+                'path': '.',
+                'size': 0,
+                'mtime': 0,
+                'n_desc': 0,
+                'n_children': 0,
+                'kind': 'dir',
+                'parent': '',
+                'uri': scan_root,
+            }])
+        else:
+            grouped = dirs.groupby('path')
+            sizes = grouped['size'].sum()
+            dirs = pd.DataFrame({
+                'path': sizes.index,
+                'size': sizes,
+                'mtime': grouped['mtime'].max(),
+                'n_desc': grouped['n_desc'].sum(),
+                'n_children': grouped['n_children'].sum(),
+                'kind': 'dir',
+            }).reset_index(drop=True)
+            dirs['parent'] = dirs.path.apply(dirname)
+            dirs.loc[dirs.parent == '', 'parent'] = '.'
+            dirs.loc[dirs.path == '', ['path', 'parent']] = ['.', '']
+            dirs['uri'] = dirs.path.apply(lambda p: scan_root if p == '.' else f'{scan_root}/{p}')
+        out = pd.concat([dirs, files], ignore_index=True)
+        # Add depth column for efficient parquet filtering
+        # '.' = 0, 'foo' = 1, 'foo/bar' = 2, etc.
+        out['depth'] = out['path'].apply(lambda p: 0 if p == '.' else p.count('/') + 1)
+        # Sort by depth first (breadth-first order) for efficient parquet row group filtering
+        return out.sort_values(['depth', 'path']).reset_index(drop=True)
+
+
 def index(
     path: str,
     sudo: bool = False,
@@ -100,78 +182,8 @@ def index(
     # Free the per-column lists now that the DataFrame owns the data — peak memory
     # otherwise has both representations resident through the aggregation passes.
     del path_l, size_l, mtime_l, kind_l, parent_l, uri_l
-    df['n_desc'] = 1
-    df['n_children'] = 0
-
-    dirs0 = df[df.kind == 'dir']
-    # Aggregation only needs these 5 columns. Slicing here keeps the per-iter
-    # `.copy()` below 5-column-wide instead of dragging `kind` / `uri` /
-    # `n_children` along (the per-row Python-string overhead dominates).
-    cur = df[['path', 'parent', 'size', 'mtime', 'n_desc']]
-    dir_dfs = [dirs0]
-    level = 0
-    while True:
-        with time(f"index-agg-{level}"):
-            cur = cur[cur.path != ''].copy()
-            if cur.empty:
-                break
-            cur['path'] = cur['parent']
-            grouped = cur.groupby('path')
-            sizes = grouped['size'].sum()
-            n_children = grouped.size() if level == 0 else 0
-            mtimes = grouped['mtime'].max()
-            n_desc = grouped['n_desc'].sum()
-            dirs = pd.DataFrame({
-                'path': sizes.index,
-                'size': sizes,
-                'mtime': mtimes,
-                'n_desc': n_desc,
-                'n_children': n_children,
-            }).reset_index(drop=True)
-            dirs['parent'] = dirs.path.apply(dirname)
-            dir_dfs.append(dirs)
-            cur = dirs
-            level += 1
-
-    with time("index-agg-dirs"):
-        # Materialize the files slice only now (deferred to free RAM during
-        # the agg loop; the loop doesn't need file rows in their wide form).
-        files = df[df.kind == 'file']
-        dirs = pd.concat(dir_dfs)
-        if dirs.empty:
-            dirs = pd.DataFrame([{
-                'path': '.',
-                'size': 0,
-                'mtime': 0,
-                'n_desc': 0,
-                'n_children': 0,
-                'kind': 'dir',
-                'parent': '',
-                'uri': path0,
-            }])
-        else:
-            grouped = dirs.groupby('path')
-            sizes = grouped['size'].sum()
-            dirs = pd.DataFrame({
-                'path': sizes.index,
-                'size': sizes,
-                'mtime': grouped['mtime'].max(),
-                'n_desc': grouped['n_desc'].sum(),
-                'n_children': grouped['n_children'].sum(),
-                'kind': 'dir',
-            }).reset_index(drop=True)
-            dirs['parent'] = dirs.path.apply(dirname)
-            dirs.loc[dirs.parent == '', 'parent'] = '.'
-            dirs.loc[dirs.path == '', ['path', 'parent']] = ['.', '']
-            dirs['uri'] = dirs.path.apply(lambda p: path0 if p == '.' else f'{path0}/{p}')
-        df = pd.concat([dirs, files], ignore_index=True)
-        # Add depth column for efficient parquet filtering
-        # '.' = 0, 'foo' = 1, 'foo/bar' = 2, etc.
-        df['depth'] = df['path'].apply(lambda p: 0 if p == '.' else p.count('/') + 1)
-        # Sort by depth first (breadth-first order) for efficient parquet row group filtering
-        df = df.sort_values(['depth', 'path']).reset_index(drop=True)
-        return IndexResult(
-            df=df,
-            error_count=errors.count,
-            error_paths=errors.paths,
-        )
+    return IndexResult(
+        df=aggregate(df, scan_root=path0),
+        error_count=errors.count,
+        error_paths=errors.paths,
+    )
