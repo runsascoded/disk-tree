@@ -41,8 +41,10 @@ def test_import_listing_shape(tmp_path: Path):
     # but the important invariant is per-row)
     got = {r['path']: (r['size'], r['kind'], r['parent'], r['uri'], r['n_desc'], r['n_children'], r['depth'])
            for _, r in df.iterrows()}
+    # n_desc for dirs includes self (matches walk-backend semantics: gfind emits
+    # `path='' kind='dir'` for the scan root, so root/sub/sub/deep all count self).
     assert got == {
-        '.':               (1000, 'dir',  '',         'gcs://b1',                6, 2, 0),
+        '.':               (1000, 'dir',  '',         'gcs://b1',                7, 2, 0),
         'a.txt':           (100,  'file', '',         'gcs://b1/a.txt',          1, 0, 1),
         'sub':             (900,  'dir',  '.',        'gcs://b1/sub',            5, 3, 1),
         'sub/b.txt':       (200,  'file', 'sub',      'gcs://b1/sub/b.txt',      1, 0, 2),
@@ -61,7 +63,7 @@ def test_import_listing_bucket_filter(tmp_path: Path):
     df = import_listing((listing,), bucket='b1', scheme='gcs').df
     assert sorted(df['path'].tolist()) == ['.', 'x.txt']
     root = df[df.path == '.'].iloc[0]
-    assert root['size'] == 10 and root['n_desc'] == 1
+    assert root['size'] == 10 and root['n_desc'] == 2  # self (dir) + 1 file
 
 
 def test_import_listing_missing_bucket_raises(tmp_path: Path):
@@ -215,4 +217,5 @@ def test_import_cli_creates_scan(tmp_path: Path):
     conn = sqlite3.connect(root / 'disk-tree.db')
     rows = conn.execute("SELECT path, size, n_children, n_desc FROM scan").fetchall()
     conn.close()
-    assert rows == [('gcs://b1', 300, 2, 3)]
+    # size=300 (100 + 200), n_children=2 (a.txt + sub dir), n_desc=4 (self + a.txt + sub + b.txt)
+    assert rows == [('gcs://b1', 300, 2, 4)]

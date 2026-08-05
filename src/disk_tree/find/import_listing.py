@@ -63,7 +63,9 @@ def import_listing(
     # would leave `n_children` under-counted (it counts input rows per parent,
     # so missing sub-dir rows means the sub-dir wouldn't count toward its
     # parent's direct-child tally).
-    dir_paths = set()
+    # Include '' (scan root) so root's n_desc includes-self, matching walk
+    # backends (gfind emits `path='' kind='dir'` for the scan root).
+    dir_paths = {''}
     for p in files['parent']:
         while p and p not in dir_paths:
             dir_paths.add(p)
