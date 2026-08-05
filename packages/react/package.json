@@ -17,6 +17,7 @@
     "*.css"
   ],
   "scripts": {
+    "build": "pnpm run typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b --noEmit"
