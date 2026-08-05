@@ -89,3 +89,46 @@ def test_unrecognized_schema_raises(tmp_path: Path):
     con = duckdb.connect()
     with pytest.raises(ValueError, match="unrecognized listing schema"):
         prepare_listing(con, (str(path),))
+
+
+# --- S3 Inventory schema ---
+
+@pytest.fixture
+def s3_inventory(tmp_path: Path) -> str:
+    """S3 Inventory parquet report with delete markers + old versions to drop."""
+    path = tmp_path / "s3-inv.parquet"
+    pd.DataFrame({
+        "Bucket": ["mybkt", "mybkt", "mybkt", "mybkt"],
+        "Key": ["docs/a.pdf", "cold/b.tar", "gone.txt", "old-version.txt"],
+        "Size": [1024, 2048, 512, 999],
+        "LastModifiedDate": [TS2, TS2, TS2, TS1],
+        "StorageClass": ["STANDARD", "GLACIER", "STANDARD", "STANDARD_IA"],
+        "IsDeleteMarker": [False, False, True, False],  # gone.txt is a delete marker
+        "IsLatest": [True, True, True, False],           # old-version.txt is not latest
+    }).to_parquet(path)
+    return str(path)
+
+
+def test_s3_inventory_normalization(s3_inventory: str):
+    """S3 Inventory: rename columns, map storage class, drop delete markers + old versions."""
+    con = duckdb.connect()
+    assert rows(con, prepare_listing(con, (s3_inventory,))) == [
+        ("mybkt", "cold/b.tar",  2048, int(TS2.timestamp()), 4),   # GLACIER → 4
+        ("mybkt", "docs/a.pdf",  1024, int(TS2.timestamp()), 1),   # STANDARD → 1
+    ]  # gone.txt (delete marker) and old-version.txt (non-latest) both dropped
+
+
+def test_s3_inventory_minimal_columns(tmp_path: Path):
+    """S3 Inventory with only the required Bucket/Key/Size (no LastModifiedDate/StorageClass)."""
+    path = tmp_path / "minimal.parquet"
+    pd.DataFrame({
+        "Bucket": ["b1"],
+        "Key": ["a.txt"],
+        "Size": [100],
+    }).to_parquet(path)
+    con = duckdb.connect()
+    # created falls back to NULL → epoch(NULL)::BIGINT → NULL, coerced to 0 by our test coercion
+    r = con.execute(
+        f"SELECT bucket, name, size_bytes, storage_class_id FROM {prepare_listing(con, (str(path),))}"
+    ).fetchall()
+    assert r == [("b1", "a.txt", 100, 0)]

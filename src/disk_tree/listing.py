@@ -29,6 +29,24 @@ if TYPE_CHECKING:
 
 SII_CLASS_IDS = {"STANDARD": 1, "NEARLINE": 2, "COLDLINE": 3, "ARCHIVE": 4}
 
+# S3 storage classes → same 4-bucket "hot/warm/cool/cold" tiering as GCS SII.
+# STANDARD-family and IntelligentTiering top tier → 1 (hot).
+# STANDARD_IA / ONEZONE_IA / IntelligentTiering middle tiers → 2 (warm).
+# GLACIER_IR / GLACIER_INSTANT_RETRIEVAL / IntelligentTiering archive tier → 3 (cool).
+# GLACIER / DEEP_ARCHIVE → 4 (cold).
+S3_CLASS_IDS = {
+    "STANDARD": 1,
+    "REDUCED_REDUNDANCY": 1,
+    "INTELLIGENT_TIERING": 1,
+    "OUTPOSTS": 1,
+    "STANDARD_IA": 2,
+    "ONEZONE_IA": 2,
+    "GLACIER_IR": 3,
+    "GLACIER_INSTANT_RETRIEVAL": 3,
+    "GLACIER": 4,
+    "DEEP_ARCHIVE": 4,
+}
+
 
 def _normalized_select(con: "duckdb.DuckDBPyConnection", glob: str) -> str:
     cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{glob}') LIMIT 0").fetchall()}
@@ -43,6 +61,26 @@ def _normalized_select(con: "duckdb.DuckDBPyConnection", glob: str) -> str:
             "SELECT bucket, name, size::BIGINT AS size_bytes, timeCreated AS created,"
             f" CASE storageClass {case} ELSE 0 END AS storage_class_id"
             f" FROM read_parquet('{glob}'){drop}"
+        )
+    if {"Bucket", "Key", "Size"} <= cols:
+        # S3 Inventory report (parquet). Column availability depends on the inventory
+        # config; only Bucket/Key/Size are guaranteed. Filter delete markers and
+        # non-latest versions if those columns are present.
+        last_mod = "LastModifiedDate AS created" if "LastModifiedDate" in cols else "NULL::TIMESTAMPTZ AS created"
+        if "StorageClass" in cols:
+            case = " ".join(f"WHEN '{k}' THEN {v}" for k, v in S3_CLASS_IDS.items())
+            cls = f"CASE StorageClass {case} ELSE 0 END AS storage_class_id"
+        else:
+            cls = "0 AS storage_class_id"
+        filters = []
+        if "IsDeleteMarker" in cols:
+            filters.append("(IsDeleteMarker IS NULL OR IsDeleteMarker = FALSE)")
+        if "IsLatest" in cols:
+            filters.append("(IsLatest IS NULL OR IsLatest = TRUE)")
+        where = f" WHERE {' AND '.join(filters)}" if filters else ""
+        return (
+            f"SELECT Bucket AS bucket, Key AS name, Size::BIGINT AS size_bytes, {last_mod}, {cls}"
+            f" FROM read_parquet('{glob}'){where}"
         )
     raise ValueError(f"unrecognized listing schema for {glob}: {sorted(cols)}")
 
