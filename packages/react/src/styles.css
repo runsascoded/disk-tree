@@ -1,0 +1,24 @@
+/* Minimal defaults for @disk-tree/react widgets. All values are CSS custom
+ * properties so consumers can theme without ejecting.
+ */
+
+.dt-treemap {
+  --dt-treemap-container-bg: #202024;
+  --dt-treemap-ink: #d0d0d8;
+  --dt-treemap-folded: #4a4a52;
+  --dt-treemap-folded-ink: #d0d0d8;
+  --dt-treemap-tip-bg: #1a1a1e;
+  --dt-treemap-tip-ink: #e6e6ea;
+  --dt-treemap-tip-border: #333;
+  color: var(--dt-treemap-ink);
+  font-family: system-ui, sans-serif;
+}
+
+.dt-treemap-bar a {
+  color: inherit;
+}
+
+.dt-treemap-cell:focus {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: -2px;
+}

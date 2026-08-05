@@ -1,0 +1,7 @@
+export { Treemap } from './Treemap'
+export type { CellDims, CellStyle, TreemapProps } from './Treemap'
+export { foldSmall, squarify } from './squarify'
+export type { Rect } from './squarify'
+export { useHoverPin } from './useHoverPin'
+export type { HoverPin, HoverPinOpts } from './useHoverPin'
+export { divergingColor, divergingInk } from './colors'

@@ -3,7 +3,8 @@ import { Link, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import { useAction } from 'use-kbd'
-import { LazyPlot as Plot } from './LazyPlot'
+import { Treemap as DTTreemap } from '@disk-tree/react'
+import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
 import type { Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
@@ -526,174 +527,96 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   )
 }
 
-type TreemapNode = {
-  id: string
+/**
+ * Hierarchical shape fed to `<DTTreemap>`. Built from `rows` (flat, parented
+ * by relative path) so the widget can walk it via `getChildren`.
+ * A synthetic `…` child is inserted per parent whose direct children's sizes
+ * don't sum to its own — that "unaccounted" area is what the row-limit or
+ * depth-limit dropped, and it deserves visible surface, not silent absorption.
+ */
+interface DTNode {
+  path: string
   label: string
-  parent: string
   size: number
-  isOther?: boolean
+  children?: DTNode[]
+  /** True for synthetic "…" placeholders — kept clickless. */
+  isPlaceholder?: boolean
 }
 
-function Treemap({ root, rows, plotlySort = false, transpose = false, onToggleSort, onToggleTranspose }: { root: Row; rows: Row[]; plotlySort?: boolean; transpose?: boolean; onToggleSort?: () => void; onToggleTranspose?: () => void }) {
-  // Build treemap data with "Other" placeholders for unaccounted space
-  const data = useMemo(() => {
-    const nodes: TreemapNode[] = []
-
-    // Add root
-    nodes.push({
-      id: '.',
-      label: root.path.split('/').pop() || '.',
-      parent: '',
-      size: root.size ?? 0,
-    })
-
-    // Add all rows
-    for (const row of rows) {
-      nodes.push({
-        id: row.path,
-        label: row.path.split('/').pop() || row.path,
-        parent: row.parent || '.',
-        size: row.size ?? 0,
-      })
-    }
-
-    // Group rows by parent to calculate "other" sizes
+function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
+  const tree = useMemo(() => {
     const childrenByParent = new Map<string, Row[]>()
     for (const row of rows) {
       const parent = row.parent || '.'
-      if (!childrenByParent.has(parent)) {
-        childrenByParent.set(parent, [])
+      let arr = childrenByParent.get(parent)
+      if (!arr) {
+        arr = []
+        childrenByParent.set(parent, arr)
       }
-      childrenByParent.get(parent)!.push(row)
+      arr.push(row)
     }
 
-    // Debug logging
-    const depth1 = childrenByParent.get('.') || []
-    const depth2ByParent = depth1.filter(r => r.kind === 'dir').map(r => {
-      const children = childrenByParent.get(r.path) || []
-      const childrenSize = children.reduce((s, c) => s + (c.size ?? 0), 0)
-      const unaccounted = (r.size ?? 0) - childrenSize
-      return {
+    const build = (parentPath: string, parentSize: number | null): DTNode[] => {
+      const kids = childrenByParent.get(parentPath) ?? []
+      const nodes: DTNode[] = kids.map(r => ({
         path: r.path,
-        children: children.length,
-        size: r.size,
-        childrenSize,
-        unaccounted,
-        unaccountedMB: (unaccounted / 1e6).toFixed(1),
-      }
-    })
-    console.log('[Treemap]', {
-      totalRows: rows.length,
-      depth1Count: depth1.length,
-      depth2ByParent,
-    })
-
-    // Add placeholder nodes for directories with unaccounted size
-    // (from truncated rows or depth limits)
-    // Check root
-    const rootChildren = childrenByParent.get('.') || []
-    const rootChildrenSize = rootChildren.reduce((sum, c) => sum + (c.size ?? 0), 0)
-    const rootUnaccounted = (root.size ?? 0) - rootChildrenSize
-    if (rootUnaccounted > 1_000_000) {
-      nodes.push({
-        id: './__other__',
-        label: '…',
-        parent: '.',
-        size: rootUnaccounted,
-        isOther: true,
-      })
-    }
-
-    // Check each depth-1 directory (direct children of root) for unaccounted size
-    // Don't add placeholders for depth-2 items since we don't show their children
-    for (const row of rows) {
-      if (row.kind !== 'dir') continue
-      if (row.parent !== '.') continue  // Only depth-1 directories
-      const children = childrenByParent.get(row.path) || []
-      const childrenSize = children.reduce((sum, c) => sum + (c.size ?? 0), 0)
-      const unaccounted = (row.size ?? 0) - childrenSize
-      // Show placeholder if unaccounted space is >1MB (significant enough to display)
-      if (unaccounted > 1_000_000) {
-        console.log(`[Treemap] Adding placeholder for ${row.path}: ${(unaccounted / 1e6).toFixed(1)}MB unaccounted`)
+        label: r.path.split('/').pop() || r.path,
+        size: r.size ?? 0,
+        children: r.kind === 'dir' ? build(r.path, r.size ?? 0) : undefined,
+      }))
+      // Add "…" placeholder for unaccounted area (dropped rows / depth limits).
+      const shown = nodes.reduce((s, n) => s + n.size, 0)
+      const unaccounted = (parentSize ?? 0) - shown
+      if (parentSize != null && unaccounted > 1_000_000) {
         nodes.push({
-          id: `${row.path}/__other__`,
+          path: `${parentPath}/__other__`,
           label: '…',
-          parent: row.path,
           size: unaccounted,
-          isOther: true,
+          isPlaceholder: true,
         })
       }
+      nodes.sort((a, b) => {
+        if (a.isPlaceholder && !b.isPlaceholder) return 1
+        if (!a.isPlaceholder && b.isPlaceholder) return -1
+        return b.size - a.size
+      })
+      return nodes
     }
 
-    // Sort so real nodes are by size desc, "other" placeholders come last
-    // (within each parent group). With sort=false on the treemap, this controls
-    // the visual order: largest real items top-left, placeholders bottom-right.
-    nodes.sort((a, b) => {
-      // Root always first
-      if (a.id === '.') return -1
-      if (b.id === '.') return 1
-      // Group by parent
-      if (a.parent !== b.parent) return a.parent < b.parent ? -1 : 1
-      // "Other" placeholders sort last within their parent
-      if (a.isOther && !b.isOther) return 1
-      if (!a.isOther && b.isOther) return -1
-      // Real nodes: largest first
-      return b.size - a.size
-    })
-
-    return nodes
+    return {
+      path: '.',
+      label: root.path.split('/').pop() || '.',
+      size: root.size ?? 0,
+      children: build('.', root.size ?? null),
+    } satisfies DTNode
   }, [root, rows])
 
-  // Placeholder ("…") nodes get dark gray; regular nodes use Plotly auto-colors.
-  const colors = data.map(n => n.isOther ? '#444444' : '')
-
-  return (<>
-    <Plot
-      key={`treemap-${transpose}-${plotlySort}`}
-      data={[{
-        type: 'treemap',
-        branchvalues: 'total',
-        sort: plotlySort,
-        ids: data.map(n => n.id),
-        labels: data.map(n => n.label),
-        parents: data.map(n => n.parent),
-        values: data.map(n => n.size),
-        text: data.map(n => n.isOther ? `<i>${formatSize(n.size)} not shown</i>` : formatSize(n.size)),
-        texttemplate: '%{label}<br>%{text}',
-        hovertemplate: '%{label}<br>%{text}<extra></extra>',
-        tiling: { pad: 1, transpose },
-        marker: {
-          colors,
-          line: { width: 1, color: 'rgba(255, 255, 255, 0.3)' },
-        },
-      } as Plotly.Data]}
-      layout={{
-        margin: { t: 10, r: 10, b: 10, l: 10 },
-        paper_bgcolor: 'transparent',
-      }}
-      config={{
-        displayModeBar: false,
-        responsive: true,
-      }}
-      style={{ width: '100%', height: '400px' }}
-    />
-    {(onToggleSort || onToggleTranspose) && (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 2, opacity: 0.6, fontSize: 12 }}>
-        {onToggleTranspose && (
-          <label style={{ cursor: 'pointer', userSelect: 'none' }}>
-            <input type="checkbox" checked={transpose} onChange={onToggleTranspose} style={{ marginRight: 4 }} />
-            Transpose
-          </label>
+  return (
+    <Box sx={{ height: 400 }}>
+      <DTTreemap<DTNode>
+        root={tree}
+        getSize={n => n.size}
+        getChildren={n => n.children}
+        getLabel={n => n.label}
+        formatSize={formatSize}
+        colorForCell={n =>
+          // Only override the synthetic "…" placeholders; the widget's
+          // default categorical palette handles real nodes.
+          n.isPlaceholder ? { bg: '#4a4a52', ink: '#d0d0d8' } : null
+        }
+        renderTooltip={n => (
+          <>
+            <div style={{ fontWeight: 500 }}>{n.label}</div>
+            <div style={{ opacity: 0.75, fontSize: '0.85em' }}>{formatSize(n.size)}</div>
+            {n.isPlaceholder && (
+              <div style={{ opacity: 0.6, fontSize: '0.75em', marginTop: 2 }}>
+                unaccounted (dropped by row-limit or depth-limit)
+              </div>
+            )}
+          </>
         )}
-        {onToggleSort && (
-          <label style={{ cursor: 'pointer', userSelect: 'none' }}>
-            <input type="checkbox" checked={plotlySort} onChange={onToggleSort} style={{ marginRight: 4 }} />
-            Plotly sort
-          </label>
-        )}
-      </div>
-    )}
-  </>
+      />
+    </Box>
   )
 }
 
@@ -800,8 +723,6 @@ export function ScanDetails() {
   })
 
   const [treemapMaxRows, setTreemapMaxRows] = useState(DEFAULT_MAX_ROWS)
-  const [plotlySort, setPlotlySort] = useState(false)
-  const [transpose, setTranspose] = useState(false)
   const { data: details, isLoading, error: queryError, refetch } = useQuery({
     queryKey: ['scan-details', uri, selectedScanId, treemapMaxRows],
     queryFn: () => fetchScanDetails(uri, selectedScanId, 2, treemapMaxRows),
@@ -1460,7 +1381,7 @@ export function ScanDetails() {
       )}
       {rows.length > 0 && (
         <Box sx={{ mt: 2 }}>
-          <Treemap root={root} rows={rows} plotlySort={plotlySort} transpose={transpose} onToggleSort={() => setPlotlySort(v => !v)} onToggleTranspose={() => setTranspose(v => !v)} />
+          <Treemap root={root} rows={rows} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{rows.length} items</span>
             <label>

@@ -2,51 +2,46 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Box, Button, Checkbox, CircularProgress, Paper, TextField, Tooltip, Typography } from '@mui/material'
 import { FaCloud, FaFolder, FaPlay, FaSync } from 'react-icons/fa'
-import { LazyPlot as Plot } from './LazyPlot'
+import { Treemap as DTTreemap } from '@disk-tree/react'
+import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
 import { fetchS3Buckets, startScan, fetchScanStatus } from '../api'
 import type { S3Bucket, ScanJob } from '../api'
 import { timeAgo, formatSize } from '../utils/format'
 
-function BucketsTreemap({ buckets }: { buckets: S3Bucket[] }) {
-  // Only show buckets that have been scanned (have size data)
-  const scannedBuckets = buckets.filter(b => b.size != null && b.size > 0)
+/** Bucket-list treemap: a synthetic "S3" root whose children are the scanned buckets. */
+interface BucketNode {
+  name: string
+  size: number
+  children?: BucketNode[]
+}
 
-  if (scannedBuckets.length === 0) {
-    return null
+function BucketsTreemap({ buckets }: { buckets: S3Bucket[] }) {
+  const scannedBuckets = buckets.filter(b => b.size != null && b.size > 0)
+  if (scannedBuckets.length === 0) return null
+
+  const root: BucketNode = {
+    name: 'S3',
+    size: scannedBuckets.reduce((sum, b) => sum + (b.size ?? 0), 0),
+    children: scannedBuckets.map(b => ({ name: b.name, size: b.size ?? 0 })),
   }
 
-  // Build treemap data: all buckets are children of a virtual root
-  const totalSize = scannedBuckets.reduce((sum, b) => sum + (b.size ?? 0), 0)
-  const ids = ['s3://', ...scannedBuckets.map(b => b.name)]
-  const labels = ['S3', ...scannedBuckets.map(b => b.name)]
-  const parents = ['', ...scannedBuckets.map(() => 's3://')]
-  const values = [totalSize, ...scannedBuckets.map(b => b.size ?? 0)]
-  const text = [formatSize(totalSize), ...scannedBuckets.map(b => formatSize(b.size))]
-
   return (
-    <Plot
-      data={[{
-        type: 'treemap',
-        branchvalues: 'total',
-        ids,
-        labels,
-        parents,
-        values,
-        text,
-        texttemplate: '%{label}<br>%{text}',
-        hovertemplate: '%{label}<br>%{value} bytes<br>%{text}',
-      }]}
-      layout={{
-        margin: { t: 10, r: 10, b: 10, l: 10 },
-        paper_bgcolor: 'transparent',
-      }}
-      config={{
-        displayModeBar: false,
-        responsive: true,
-      }}
-      style={{ width: '100%', height: '400px' }}
-    />
+    <Box sx={{ height: 400 }}>
+      <DTTreemap<BucketNode>
+        root={root}
+        getSize={n => n.size}
+        getChildren={n => n.children}
+        getLabel={n => n.name}
+        formatSize={formatSize}
+        renderTooltip={n => (
+          <>
+            <div style={{ fontWeight: 500 }}>{n.name}</div>
+            <div style={{ opacity: 0.75, fontSize: '0.85em' }}>{formatSize(n.size)}</div>
+          </>
+        )}
+      />
+    </Box>
   )
 }
 

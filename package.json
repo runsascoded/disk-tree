@@ -1,0 +1,18 @@
+{
+  "name": "disk-tree-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Workspace root for disk-tree — hosts the Python package alongside the `ui/` app and `@disk-tree/react` widget library.",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "clean": "pnpm -r clean"
+  },
+  "packageManager": "pnpm@10.19.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "puppeteer",
+      "esbuild"
+    ]
+  }
+}
