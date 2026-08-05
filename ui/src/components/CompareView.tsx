@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
   Button,
@@ -13,6 +13,8 @@ import {
   Typography,
 } from '@mui/material'
 import { FaArrowRight, FaFolder, FaFile, FaSortUp, FaSortDown, FaSync, FaList } from 'react-icons/fa'
+import { Treemap as DTTreemap, divergingColor, divergingInk } from '@disk-tree/react'
+import '@disk-tree/react/styles.css'
 import { compareScans, fetchScanHistory, startScan } from '../api'
 import type { CompareResult, CompareRow, ScanHistoryItem } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
@@ -26,6 +28,132 @@ type SortDirection = 'asc' | 'desc'
 function formatDelta(bytes: number): string {
   const sign = bytes >= 0 ? '+' : ''
   return sign + formatSize(Math.abs(bytes)).replace(' ', '')
+}
+
+/**
+ * Δ-recolor treemap: one cell per compare row, sized by |Δbytes|, colored by
+ * signed Δbytes on a diverging red-grew / green-shrank scale. Unchanged rows
+ * are dropped (no delta = no signal). Clicking a directory drills into
+ * `/compare/<scheme>/<subpath>` so the exploration matches the deep-link
+ * scheme.
+ */
+interface CompareTMNode {
+  key: string
+  label: string
+  /** what the widget sizes by — `|size_delta|` */
+  weight: number
+  /** signed delta for coloring */
+  delta: number
+  status: CompareRow['status']
+  size_old: number
+  size_new: number
+  n_desc_delta: number
+  kind: CompareRow['kind']
+  uri: string
+}
+
+function CompareTreemap({
+  result,
+  onDrill,
+}: {
+  result: CompareResult
+  onDrill: (uri: string) => void
+}) {
+  const { root, maxAbsDelta } = useMemo(() => {
+    const cells: CompareTMNode[] = result.rows
+      .filter(r => r.status !== 'unchanged' && r.size_delta !== 0)
+      .map(r => ({
+        key: r.uri,
+        label: r.path,
+        weight: Math.abs(r.size_delta) || 1,
+        delta: r.size_delta,
+        status: r.status,
+        size_old: r.size_old ?? r.size ?? 0,
+        size_new: r.status === 'removed' ? 0 : r.size ?? 0,
+        n_desc_delta: r.n_desc_delta ?? 0,
+        kind: r.kind,
+        uri: r.uri,
+      }))
+    const totalWeight = cells.reduce((s, c) => s + c.weight, 0)
+    const maxAbs = cells.reduce((m, c) => Math.max(m, Math.abs(c.delta)), 0)
+    // Root aggregates its cells so the widget's crumbs line reads correctly.
+    const root: CompareTMNode & { children: CompareTMNode[] } = {
+      key: result.uri,
+      label: result.uri,
+      weight: totalWeight,
+      delta: result.summary.total_delta,
+      status: 'changed',
+      size_old: result.scan1.size ?? 0,
+      size_new: result.scan2.size ?? 0,
+      n_desc_delta: (result.scan2.n_desc ?? 0) - (result.scan1.n_desc ?? 0),
+      kind: 'dir',
+      uri: result.uri,
+      children: cells,
+    }
+    return { root, maxAbsDelta: maxAbs }
+  }, [result])
+
+  if (root.children.length === 0) {
+    return (
+      <Paper sx={{ p: 3, textAlign: 'center' }}>
+        <Typography color="text.secondary" variant="body2">
+          No size deltas to plot — every row is unchanged.
+        </Typography>
+      </Paper>
+    )
+  }
+
+  return (
+    <Paper sx={{ p: 0, mb: 3, overflow: 'hidden' }}>
+      <Box sx={{ height: 340 }}>
+        <DTTreemap<CompareTMNode & { children?: CompareTMNode[] }>
+          root={root}
+          getSize={n => n.weight}
+          getChildren={n => (n as { children?: CompareTMNode[] }).children}
+          getLabel={n => n.label}
+          // Displayed inline with the label — the raw |Δ| magnitude. Sign is
+          // encoded by the cell color; exact old/new/Δ lives in the tooltip.
+          formatSize={formatSize}
+          colorForCell={n => {
+            const t = maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta
+            return { bg: divergingColor(t), ink: divergingInk(t) }
+          }}
+          renderTooltip={n => (
+            <>
+              <div style={{ fontWeight: 500 }}>{n.label}</div>
+              <div style={{ opacity: 0.75, fontSize: '0.85em' }}>
+                {formatSize(n.size_old)} → {formatSize(n.size_new)}
+                {' '}({formatDelta(n.delta)})
+              </div>
+              {n.n_desc_delta !== 0 && (
+                <div style={{ opacity: 0.6, fontSize: '0.8em' }}>
+                  Δcount: {n.n_desc_delta > 0 ? '+' : ''}{formatCount(n.n_desc_delta)}
+                </div>
+              )}
+              <div style={{ opacity: 0.5, fontSize: '0.75em', marginTop: 2 }}>
+                {n.status}
+                {n.kind === 'dir' && ' · click to drill into /compare'}
+              </div>
+            </>
+          )}
+          renderLegend={() => (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', opacity: 0.85 }}>
+              <span style={{ display: 'inline-block', width: 12, height: 12, background: divergingColor(-1), borderRadius: 2 }} />
+              shrank
+              <span style={{ display: 'inline-block', width: 12, height: 12, background: divergingColor(1), borderRadius: 2 }} />
+              grew
+            </span>
+          )}
+          onCellClick={(n) => {
+            if (n.kind !== 'dir') return false // let the widget pin the tooltip
+            // Drill into the sub-compare view — reuses Item E's scheme routing.
+            onDrill(n.uri)
+            return true
+          }}
+        />
+      </Box>
+    </Paper>
+  )
 }
 
 function formatDateTime(dateStr: string): string {
@@ -575,6 +703,7 @@ function Summary({ result }: { result: CompareResult }) {
 
 export function CompareView() {
   const location = useLocation()
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Extract URI and routeType from path: /compare/file/Users/ryan/…, /compare/s3/bucket/…,
@@ -968,6 +1097,18 @@ export function CompareView() {
           {result && !loading && (
             <>
               <Summary result={result} />
+              <CompareTreemap
+                result={result}
+                onDrill={childUri => {
+                  // Preserve scan1/scan2 query params on drill so the sub-view
+                  // shows the same snapshot pair.
+                  const q = new URLSearchParams()
+                  if (scan1 !== '') q.set('scan1', String(scan1))
+                  if (scan2 !== '') q.set('scan2', String(scan2))
+                  const suffix = q.toString() ? `?${q}` : ''
+                  navigate(`/compare${uriToPath(childUri)}${suffix}`)
+                }}
+              />
               <Paper sx={{ overflow: 'auto' }}>
                 <CompareTable
                   result={result}
