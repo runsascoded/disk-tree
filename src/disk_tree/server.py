@@ -1170,8 +1170,10 @@ def compare_scans():
         df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth)
 
         if scan_path == uri:
-            # Direct match - children have parent='.'
-            children = df[df['parent'] == '.'].copy()
+            # Direct match: dirs at root have parent='.', but root-level files retain
+            # parent='' from the walk (see find/index.py). Matches the pattern used
+            # by /api/scan and /api/scans/progress (server.py:695/725/787).
+            children = df[(df['parent'] == '.') | ((df['parent'] == '') & (df['path'] != '.'))].copy()
             children['rel_path'] = children['path']
         else:
             # URI is subdir of scan - filter to children of the relative path
