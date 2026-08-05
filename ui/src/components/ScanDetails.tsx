@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import { useAction } from 'use-kbd'
-import { Treemap as DTTreemap } from '@disk-tree/react'
+import { BytesOverTime, Treemap as DTTreemap } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
@@ -1378,6 +1378,19 @@ export function ScanDetails() {
             <option value={250}>250</option>
           </select>
         </div>
+      )}
+      {scanHistory && scanHistory.length > 1 && (
+        <Box sx={{ mt: 2, height: 180, border: '1px solid rgba(255,255,255,0.08)', borderRadius: 1, padding: '4px 8px' }}>
+          <Box sx={{ fontSize: '0.75rem', opacity: 0.7, mb: 0.5 }}>
+            Size over time · {scanHistory.length} scans
+          </Box>
+          <Box sx={{ height: 'calc(100% - 20px)' }}>
+            <BytesOverTime
+              points={scanHistory.map(h => ({ time: h.time, bytes: h.size ?? null }))}
+              formatBytes={formatSize}
+            />
+          </Box>
+        </Box>
       )}
       {rows.length > 0 && (
         <Box sx={{ mt: 2 }}>
