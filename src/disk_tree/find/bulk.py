@@ -284,7 +284,11 @@ def entries_to_frame(
             "bucket": bucket,
             "name": list(names),
             "size_bytes": [int(s) for s in sizes],
-            "created": pd.to_datetime(list(created), utc=True),
+            # format='ISO8601': GCS mixes timestamp precisions (whole-second
+            # `…T00:44:00Z` next to microsecond `…T19:41:35.383000Z`); without
+            # it pandas ≥2 locks onto the first row's format and raises on the
+            # other, killing the worker mid-listing.
+            "created": pd.to_datetime(list(created), utc=True, format='ISO8601'),
             "storage_class_id": [SII_CLASS_IDS.get(c or "", 0) for c in classes],
         }
     )

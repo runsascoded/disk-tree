@@ -392,3 +392,20 @@ def test_s3_lister_end_exclusive(tmp_path: Path):
 
     rows = list(lister.stream_prefix('b1', '', start=None, end='c'))  # a, b only
     assert [r.name for r in rows] == ['a', 'b']
+
+
+def test_entries_to_frame_mixed_timestamp_precision():
+    """GCS emits whole-second and microsecond ISO timestamps in one listing;
+    pandas >=2 must not lock onto the first row's format (ISO8601 mode)."""
+    from disk_tree.find.bulk import entries_to_frame
+
+    rows = [
+        ("a/x.bin", 4, "2026-02-23T19:41:35.383000Z", "STANDARD"),
+        ("a/y.bin", 8, "2026-02-24T00:44:00Z", "NEARLINE"),
+    ]
+    df = entries_to_frame("bkt", rows)
+    assert [str(t) for t in df["created"]] == [
+        "2026-02-23 19:41:35.383000+00:00",
+        "2026-02-24 00:44:00+00:00",
+    ]
+    assert df["size_bytes"].tolist() == [4, 8]
