@@ -59,7 +59,14 @@ def series_cmd(ancestors: bool, no_human: bool, limit: int | None, uri: str):
     hdr = f"{'id':>5}  {'time':{w_time}}  {'path':{w_path}}  {'size':>10}  {'n_desc':>10}  {'n_children':>10}"
     print(hdr)
     print('-' * len(hdr))
+    # NB: we use `.format()` here instead of nested-quote f-strings — PEP 701
+    # relaxations (same-quote nesting inside f-strings) landed in Python 3.12,
+    # and this project supports 3.11.
+    def _fmt_count(v):
+        return f'{v:,}' if v is not None else '—'
     for r in display:
-        print(f"{r['id']:>5}  {r['time']:{w_time}}  {r['path']:{w_path}}  {sz(r['size']):>10}  {(f'{r['n_desc']:,}' if r['n_desc'] is not None else '—'):>10}  {(f'{r['n_children']:,}' if r['n_children'] is not None else '—'):>10}")
+        rid, rtime, rpath, rsize = r['id'], r['time'], r['path'], sz(r['size'])
+        rdesc, rkids = _fmt_count(r['n_desc']), _fmt_count(r['n_children'])
+        print(f"{rid:>5}  {rtime:{w_time}}  {rpath:{w_path}}  {rsize:>10}  {rdesc:>10}  {rkids:>10}")
     if limit and len(rows) > limit:
         print(f"(… {len(rows) - limit} older scans)")
