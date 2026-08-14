@@ -45,8 +45,13 @@ export interface TreemapProps<T> {
    * (or `undefined`) to defer to the default categorical palette for that
    * cell — useful for callers that only want to override a subset of cells
    * (e.g. only synthetic "…" placeholders).
+   *
+   * `ctx` carries render-time facts the data alone can't know: the cell's
+   * on-screen dims and whether it renders nested child tiles (`hasKids`) —
+   * containers usually want a neutral bg so the nested tiles carry the data
+   * colors, and leaf-only treatments (hatch, highlight-dim) key off it.
    */
-  colorForCell?: (n: T, path: T[], depth: number) => CellStyle | null | undefined
+  colorForCell?: (n: T, path: T[], depth: number, ctx: CellCtx) => CellStyle | null | undefined
   /** Optional extra content rendered inside the cell after the label. */
   renderCellExtra?: (n: T, path: T[], dims: CellDims) => ReactNode
   /** Tooltip body; return null to suppress the tooltip. */
@@ -55,6 +60,13 @@ export interface TreemapProps<T> {
   renderRollup?: (n: T, path: T[]) => ReactNode
   /** Right side of the breadcrumbs bar. */
   renderLegend?: (n: T, path: T[]) => ReactNode
+  /**
+   * Replaces the default `— <size>` suffix after the breadcrumbs (e.g. to
+   * add object counts / $-estimates). Return null to render no suffix.
+   */
+  renderCrumbSuffix?: (n: T, path: T[]) => ReactNode
+  /** Row rendered below the map (e.g. a usage-hint footer). */
+  renderFooter?: (n: T, path: T[]) => ReactNode
   /**
    * Right side of the cell size line — e.g. "$1.2/mo". Rendered inline with
    * the size when the cell is big enough to fit a subtitle.
@@ -73,8 +85,19 @@ export interface TreemapProps<T> {
    * "…" tile. Pass `null` to disable folding.
    */
   minCellArea?: number | null
+  /**
+   * Build the folded stand-in as a *first-class* `T` (label, aggregated
+   * size, and whatever the consumer's tooltip/colors need). When given, the
+   * folded tile gets normal label/tooltip/click treatment; when omitted, a
+   * synthetic gray `(+n)` tile with no tooltip is used.
+   */
+  mergeSmall?: (small: T[]) => T
   /** Show the fullscreen toggle button. Default: true. */
   fullscreen?: boolean
+  /** Render the breadcrumbs/legend bar. Default: true. */
+  chrome?: boolean
+  /** Render in-cell labels. Default: true. (`false` + `chrome={false}` ≈ a redacted/og render.) */
+  showLabels?: boolean
   /** Extra className on the outer wrapper. */
   className?: string
   /** Style overrides on the map area. */
@@ -95,6 +118,12 @@ export interface CellStyle {
 export interface CellDims {
   w: number
   h: number
+}
+
+/** Render-time context passed to `colorForCell`. */
+export interface CellCtx extends CellDims {
+  /** Whether this cell renders nested child tiles at the current size. */
+  hasKids: boolean
 }
 
 const DEFAULT_SLOTS = [
@@ -145,11 +174,16 @@ export function Treemap<T>({
   renderTooltip,
   renderRollup,
   renderLegend,
+  renderCrumbSuffix,
+  renderFooter,
   renderCellSubtitle,
   onCellClick,
   onPathChange,
   minCellArea = 16,
+  mergeSmall,
   fullscreen = true,
+  chrome = true,
+  showLabels = true,
   className,
   mapStyle,
 }: TreemapProps<T>) {
@@ -212,33 +246,39 @@ export function Treemap<T>({
     [getId, getLabel],
   )
 
-  // Foldable children of the currently-viewed node.
-  const children = useMemo(() => {
-    const raw = (getChildren(node) ?? []).slice()
-    if (minCellArea == null) return raw
-    return foldSmall<T | FoldedNode<T>>(
-      raw as (T | FoldedNode<T>)[],
-      size.w,
-      size.h,
-      getSize as (it: T | FoldedNode<T>) => number,
-      small => {
-        // Flatten any nested folds so `.count` is accurate.
-        const flat: T[] = []
-        let sum = 0
-        for (const s of small) {
-          if (isFolded(s)) {
-            flat.push(...s.children)
-            sum += s.size
-          } else {
-            flat.push(s)
-            sum += getSize(s)
+  // Fold small items at any level: consumer `mergeSmall` builds a first-class
+  // T stand-in; the default builds a synthetic FoldedNode.
+  const fold = useCallback(
+    (raw: (T | FoldedNode<T>)[], w: number, h: number): (T | FoldedNode<T>)[] => {
+      if (minCellArea == null) return raw
+      const sz = (it: T | FoldedNode<T>) => (isFolded(it) ? it.size : getSize(it))
+      const merge = mergeSmall
+        ? (small: (T | FoldedNode<T>)[]) => mergeSmall(small as T[])
+        : (small: (T | FoldedNode<T>)[]): FoldedNode<T> => {
+            // Flatten any nested folds so `.count` is accurate.
+            const flat: T[] = []
+            let sum = 0
+            for (const s of small) {
+              if (isFolded(s)) {
+                flat.push(...s.children)
+                sum += s.size
+              } else {
+                flat.push(s)
+                sum += getSize(s)
+              }
+            }
+            return { __folded: true, count: flat.length, size: sum, children: flat }
           }
-        }
-        return { __folded: true, count: flat.length, size: sum, children: flat }
-      },
-      minCellArea,
-    ) as (T | FoldedNode<T>)[]
-  }, [node, size, getChildren, getSize, minCellArea])
+      return foldSmall<T | FoldedNode<T>>(raw, w, h, sz, merge, minCellArea)
+    },
+    [getSize, minCellArea, mergeSmall],
+  )
+
+  // Foldable children of the currently-viewed node.
+  const children = useMemo(
+    () => fold((getChildren(node) ?? []).slice(), size.w, size.h),
+    [node, size, getChildren, fold],
+  )
 
   const rects = useMemo(
     () =>
@@ -260,11 +300,15 @@ export function Treemap<T>({
     const kidSize = folded ? kid.size : getSize(kid)
     const kidLabel = folded ? `(+${kid.count})` : getLabel(kid)
     const kidChildren = folded ? undefined : getChildren(kid)
-    const showLbl = r.w > 36 && r.h > 13
+    const showLbl = showLabels && r.w > 36 && r.h > 13
     const kw = r.w - 6
     const kh = r.h - (showLbl ? 23 : 6)
     const kids = kidChildren && kidChildren.length > 0 && r.w > 90 && r.h > 44
-      ? squarify<T>(kidChildren.slice(), 0, 0, kw, kh, getSize)
+      ? squarify<T | FoldedNode<T>>(
+          fold(kidChildren.slice(), kw, kh),
+          0, 0, kw, kh,
+          n => (isFolded(n) ? n.size : getSize(n)),
+        )
       : []
 
     // Cell color falls through: consumer override → default categorical.
@@ -273,7 +317,9 @@ export function Treemap<T>({
     // if the result is nullish. This lets a caller style only the cells it
     // cares about (e.g. synthetic placeholders) and inherit defaults for
     // the rest.
-    const explicit = folded ? null : colorForCell?.(kid, kidPath, depth)
+    const explicit = folded
+      ? null
+      : colorForCell?.(kid, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 })
     let style: CellStyle
     if (explicit) {
       style = explicit
@@ -317,7 +363,7 @@ export function Treemap<T>({
     return (
       <div
         key={cellKey}
-        className={'dt-treemap-cell' + (kidChildren && kidChildren.length ? ' branch' : '')}
+        className={'dt-treemap-cell' + (kidChildren && kidChildren.length ? ' branch' : '') + (dust ? ' dust' : '')}
         style={{
           position: 'absolute',
           left: r.x,
@@ -334,11 +380,13 @@ export function Treemap<T>({
           cursor: kidChildren && kidChildren.length ? 'pointer' : 'default',
         }}
         tabIndex={folded ? -1 : 0}
-        onMouseMove={showTip}
-        onMouseLeave={() => {
-          pin.hover(null)
-          setTip(null)
-        }}
+        // Leaf cells hover their whole body; branch cells hover only their
+        // title-bar label (below) — so sweeping across a branch's children
+        // never dips into the parent's tooltip through the inter-child gaps.
+        // Clearing lives on the `.dt-treemap-map` container, not per-cell, so
+        // child→child is smooth (the tip persists across the gap instead of
+        // blinking off).
+        onMouseMove={kids.length > 0 ? undefined : showTip}
         onClick={onClick}
         onKeyDown={e => e.key === 'Enter' && onClick(e as unknown as React.MouseEvent)}
       >
@@ -346,14 +394,19 @@ export function Treemap<T>({
           <div
             className={'dt-treemap-lbl' + (r.w < 64 ? ' sm' : '')}
             style={{
-              padding: '2px 4px',
-              fontSize: r.w < 64 ? '0.72rem' : '0.85rem',
+              padding: 'var(--dt-treemap-lbl-pad, 2px 4px)',
+              fontSize: r.w < 64
+                ? 'var(--dt-treemap-lbl-fs-sm, 0.72rem)'
+                : 'var(--dt-treemap-lbl-fs, 0.85rem)',
               lineHeight: 1.2,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
-              pointerEvents: 'none',
+              // branch title bar is the parent's own hover target (leaf labels
+              // stay pointer-events:none so the body handles them)
+              pointerEvents: kids.length > 0 ? 'auto' : 'none',
             }}
+            onMouseMove={kids.length > 0 ? showTip : undefined}
           >
             {kidLabel}
             {r.w > 90 && (
@@ -374,7 +427,7 @@ export function Treemap<T>({
           >
             {kids
               .filter(s => s.w >= 3 && s.h >= 3)
-              .map(s => cell(s.it, [...kidPath, s.it], s, depth + 1))}
+              .map(s => cell(s.it, isFolded(s.it) ? kidPath : [...kidPath, s.it as T], s, depth + 1))}
           </div>
         )}
       </div>
@@ -406,11 +459,12 @@ export function Treemap<T>({
       ref={wrapRef}
       style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}
     >
-      <div
+      {chrome && <div
         className="dt-treemap-bar"
         style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 6px', minHeight: 22 }}
       >
         <nav
+          className="dt-treemap-crumbs"
           aria-label="Path"
           style={{ display: 'flex', gap: 3, alignItems: 'center', flexWrap: 'wrap', flex: 1, minWidth: 0 }}
         >
@@ -432,7 +486,7 @@ export function Treemap<T>({
             </span>
           ))}
           <span style={{ opacity: 0.6, marginLeft: 6 }}>
-            — {formatSize(getSize(node))}
+            {renderCrumbSuffix ? renderCrumbSuffix(node, path) : <>— {formatSize(getSize(node))}</>}
           </span>
         </nav>
         {renderLegend && <div className="dt-treemap-legend">{renderLegend(node, path)}</div>}
@@ -446,17 +500,28 @@ export function Treemap<T>({
             ⛶
           </button>
         )}
-      </div>
-      {renderRollup && <div className="dt-treemap-rollup">{renderRollup(node, path)}</div>}
+      </div>}
+      {(() => {
+        const r = renderRollup?.(node, path)
+        return r ? <div className="dt-treemap-rollup">{r}</div> : null
+      })()}
       <div
         className="dt-treemap-map"
         ref={mapRef}
         role="application"
         aria-label="Treemap"
         style={{ position: 'relative', flex: 1, minHeight: 0, ...mapStyle }}
+        onMouseLeave={() => {
+          pin.hover(null)
+          setTip(null)
+        }}
       >
         {rects.filter(r => r.w >= 3 && r.h >= 3).map(r => cell(r.it, isFolded(r.it) ? path : [...path, r.it as T], r, 0))}
       </div>
+      {(() => {
+        const f = renderFooter?.(node, path)
+        return f ? <div className="dt-treemap-footer">{f}</div> : null
+      })()}
       {tipContent && tipToShow && (
         <div
           ref={tipRef}

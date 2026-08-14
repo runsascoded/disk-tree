@@ -1,5 +1,5 @@
 export { Treemap } from './Treemap'
-export type { CellDims, CellStyle, TreemapProps } from './Treemap'
+export type { CellCtx, CellDims, CellStyle, TreemapProps } from './Treemap'
 export { foldSmall, squarify } from './squarify'
 export type { Rect } from './squarify'
 export { useHoverPin } from './useHoverPin'
