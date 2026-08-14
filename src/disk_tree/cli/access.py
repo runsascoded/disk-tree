@@ -33,6 +33,10 @@ def access_import_cmd(out_parquet: str, store: str, memory_limit: str, temp_dir:
 
     con = duckdb.connect()
     con.execute(f"SET memory_limit = '{memory_limit}'")
+    # Log rows carry no meaningful order (agg sorts downstream); preserving
+    # insertion order makes the parquet writer buffer whole row groups in RAM
+    # and OOMs on multi-10GB imports.
+    con.execute("SET preserve_insertion_order = false")
     if temp_dir:
         con.execute(f"SET temp_directory = '{temp_dir}'")
 
@@ -55,6 +59,10 @@ def access_agg_cmd(out_parquet: str, memory_limit: str, temp_dir: str | None, ra
 
     con = duckdb.connect()
     con.execute(f"SET memory_limit = '{memory_limit}'")
+    # Log rows carry no meaningful order (agg sorts downstream); preserving
+    # insertion order makes the parquet writer buffer whole row groups in RAM
+    # and OOMs on multi-10GB imports.
+    con.execute("SET preserve_insertion_order = false")
     if temp_dir:
         con.execute(f"SET temp_directory = '{temp_dir}'")
 
