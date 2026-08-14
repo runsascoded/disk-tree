@@ -28,6 +28,8 @@ def access():
 @argument('input_glob')
 def access_import_cmd(out_parquet: str, store: str, memory_limit: str, temp_dir: str | None, input_glob: str):
     """Parse raw provider logs at INPUT_GLOB → canonical layer-1a parquet at --out."""
+    import os
+
     import duckdb
     from disk_tree.access.parsers import parser_for
 
@@ -42,8 +44,13 @@ def access_import_cmd(out_parquet: str, store: str, memory_limit: str, temp_dir:
 
     parse = parser_for(store)
     rel = parse(input_glob, store=store, con=con)
-    rel.write_parquet(out_parquet)
-    n = con.execute(f"SELECT COUNT(*) FROM read_parquet('{out_parquet}')").fetchone()[0]
+    # Atomic write: a killed process must not leave a valid-looking partial
+    # parquet ([ -s ] passes, agg dies on "no magic bytes"). Write to a temp
+    # name, rename only after the footer verifies.
+    tmp_out = out_parquet + '.tmp'
+    rel.write_parquet(tmp_out)
+    n = con.execute(f"SELECT COUNT(*) FROM read_parquet('{tmp_out}')").fetchone()[0]
+    os.replace(tmp_out, out_parquet)
     err(f"wrote {n:,} canonical access rows → {out_parquet}")
 
 
