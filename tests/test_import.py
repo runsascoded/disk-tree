@@ -39,18 +39,20 @@ def test_import_listing_shape(tmp_path: Path):
 
     # by-path dict for order-insensitive assertion (aggregation ordering is well-defined
     # but the important invariant is per-row)
-    got = {r['path']: (r['size'], r['kind'], r['parent'], r['uri'], r['n_desc'], r['n_children'], r['depth'])
+    got = {r['path']: (r['size'], r['kind'], r['parent'], r['uri'], r['n_desc'], r['n_files'], r['n_children'], r['depth'])
            for _, r in df.iterrows()}
-    # n_desc for dirs includes self (matches walk-backend semantics: gfind emits
-    # `path='' kind='dir'` for the scan root, so root/sub/sub/deep all count self).
+    # n_desc for dirs includes self + all descendant dirs (walk-backend semantics:
+    # gfind emits `path='' kind='dir'` for the scan root, so root/sub/sub/deep all
+    # count self). `n_files` is objects-only, i.e. the count consumers expect from
+    # an S3/GCS bucket.
     assert got == {
-        '.':               (1000, 'dir',  '',         'gcs://b1',                7, 2, 0),
-        'a.txt':           (100,  'file', '',         'gcs://b1/a.txt',          1, 0, 1),
-        'sub':             (900,  'dir',  '.',        'gcs://b1/sub',            5, 3, 1),
-        'sub/b.txt':       (200,  'file', 'sub',      'gcs://b1/sub/b.txt',      1, 0, 2),
-        'sub/c.txt':       (300,  'file', 'sub',      'gcs://b1/sub/c.txt',      1, 0, 2),
-        'sub/deep':        (400,  'dir',  'sub',      'gcs://b1/sub/deep',       2, 1, 2),
-        'sub/deep/d.txt':  (400,  'file', 'sub/deep', 'gcs://b1/sub/deep/d.txt', 1, 0, 3),
+        '.':               (1000, 'dir',  '',         'gcs://b1',                7, 4, 2, 0),
+        'a.txt':           (100,  'file', '',         'gcs://b1/a.txt',          1, 1, 0, 1),
+        'sub':             (900,  'dir',  '.',        'gcs://b1/sub',            5, 3, 3, 1),
+        'sub/b.txt':       (200,  'file', 'sub',      'gcs://b1/sub/b.txt',      1, 1, 0, 2),
+        'sub/c.txt':       (300,  'file', 'sub',      'gcs://b1/sub/c.txt',      1, 1, 0, 2),
+        'sub/deep':        (400,  'dir',  'sub',      'gcs://b1/sub/deep',       2, 1, 1, 2),
+        'sub/deep/d.txt':  (400,  'file', 'sub/deep', 'gcs://b1/sub/deep/d.txt', 1, 1, 0, 3),
     }
 
 
@@ -81,6 +83,41 @@ def test_list_buckets_distinct(tmp_path: Path):
         {'bucket': 'b1', 'name': 'z', 'size_bytes': 3, 'created': TS_A, 'storage_class_id': 1},
     ])
     assert list_buckets((listing,)) == ['b1', 'b2']
+
+
+def test_import_listing_collapses_double_slashes(tmp_path: Path):
+    """Keys with empty path components (`a//b`) must stay in their real
+    subtree — not get hoisted to the tree root by trailing-slash-borked
+    parent-walking (real marin regression:
+    `tokenized/finemath_3_plus-a26b0f//.artifact.json` moved bytes across
+    top-level subtrees; see specs/import-a2a-findings.md item 2)."""
+    listing = write_listing(tmp_path / "l.parquet", [
+        {'bucket': 'b1', 'name': 'tokenized/a.txt',      'size_bytes': 100, 'created': TS_A, 'storage_class_id': 1},
+        {'bucket': 'b1', 'name': 'tokenized/sub//x.txt', 'size_bytes':   4, 'created': TS_A, 'storage_class_id': 1},
+        {'bucket': 'b1', 'name': 'other/b.txt',          'size_bytes':  50, 'created': TS_A, 'storage_class_id': 1},
+    ])
+    df = import_listing((listing,), bucket='b1', scheme='gcs').df
+
+    # Root sum unchanged (bytes-conserving).
+    root = df[df.path == '.'].iloc[0]
+    assert int(root['size']) == 154
+
+    # The `//` file's bytes stay inside the `tokenized` subtree.
+    tok = df[df.path == 'tokenized'].iloc[0]
+    assert int(tok['size']) == 104  # 100 + 4
+
+    # `other` is unaffected.
+    other = df[df.path == 'other'].iloc[0]
+    assert int(other['size']) == 50
+
+    # File row uses the canonicalized (single-slash) path — no `//` survives.
+    assert 'tokenized/sub//x.txt' not in df.path.tolist()
+    assert 'tokenized/sub/x.txt' in df.path.tolist()
+
+    # And a `tokenized/sub` dir row exists (properly synthesized, not orphaned).
+    sub = df[df.path == 'tokenized/sub'].iloc[0]
+    assert int(sub['size']) == 4
+    assert sub['parent'] == 'tokenized'
 
 
 # ---------- End-to-end: two imports → /api/compare shows the delta ----------

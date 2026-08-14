@@ -14,6 +14,7 @@ aggregation path (spec item B).
 
 from __future__ import annotations
 
+import re
 from os.path import dirname
 from typing import TYPE_CHECKING
 
@@ -24,6 +25,23 @@ from .index import aggregate, IndexResult
 
 if TYPE_CHECKING:
     import duckdb
+
+
+# Collapse consecutive slashes in an object key so `a//b` reads as `a/b`.
+# Rationale: some object stores accept keys with empty path components (real
+# marin example: `tokenized/finemath_3_plus-a26b0f//.artifact.json`).
+# `os.path.dirname` treats `a/b/` (trailing slash) as its own thing (parent
+# `a/b`), which then breaks parent-walking (the trailing-slash dir gets no
+# further ancestor, so it hops to the tree root instead of nesting under its
+# real prefix). Collapsing at ingest matches user intent, keeps the tree
+# subtree-preserving, and lets every downstream regex stay simple.
+_SLASHES = re.compile(r'/+')
+
+
+def _canonicalize(name: str) -> str:
+    """`a//b` → `a/b`; strip trailing slashes. Leading slashes stay (unusual)."""
+    n = _SLASHES.sub('/', name)
+    return n.rstrip('/')
 
 
 def import_listing(
@@ -49,7 +67,9 @@ def import_listing(
     if df.empty:
         raise ValueError(f"no rows for bucket {bucket!r} in listings {listings}")
     scan_root = f'{scheme}://{bucket}'
-    names = df['name'].astype(str)
+    # Collapse `//` empty-component keys here so the parent-walking downstream
+    # never sees a trailing-slash path.
+    names = df['name'].astype(str).map(_canonicalize)
     files = pd.DataFrame({
         'path': names,
         'size': df['size_bytes'].fillna(0).astype('int64'),

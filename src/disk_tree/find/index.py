@@ -33,12 +33,16 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
     df = rows
     df['n_desc'] = 1
     df['n_children'] = 0
+    # `n_files` = objects-only count, distinct from `n_desc` which also counts
+    # every synthesized dir row. Consumers coming from S3/GCS think in
+    # "objects" — `n_files` gives them that; `n_desc` stays the mechanism.
+    df['n_files'] = (df.kind == 'file').astype('int64')
 
     dirs0 = df[df.kind == 'dir']
-    # Aggregation only needs these 5 columns. Slicing here keeps the per-iter
-    # `.copy()` below 5-column-wide instead of dragging `kind` / `uri` /
+    # Aggregation only needs these 6 columns. Slicing here keeps the per-iter
+    # `.copy()` below 6-column-wide instead of dragging `kind` / `uri` /
     # `n_children` along (the per-row Python-string overhead dominates).
-    cur = df[['path', 'parent', 'size', 'mtime', 'n_desc']]
+    cur = df[['path', 'parent', 'size', 'mtime', 'n_desc', 'n_files']]
     dir_dfs = [dirs0]
     level = 0
     while True:
@@ -52,11 +56,13 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
             n_children = grouped.size() if level == 0 else 0
             mtimes = grouped['mtime'].max()
             n_desc = grouped['n_desc'].sum()
+            n_files = grouped['n_files'].sum()
             dirs = pd.DataFrame({
                 'path': sizes.index,
                 'size': sizes,
                 'mtime': mtimes,
                 'n_desc': n_desc,
+                'n_files': n_files,
                 'n_children': n_children,
             }).reset_index(drop=True)
             dirs['parent'] = dirs.path.apply(dirname)
@@ -75,6 +81,7 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
                 'size': 0,
                 'mtime': 0,
                 'n_desc': 0,
+                'n_files': 0,
                 'n_children': 0,
                 'kind': 'dir',
                 'parent': '',
@@ -88,6 +95,7 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
                 'size': sizes,
                 'mtime': grouped['mtime'].max(),
                 'n_desc': grouped['n_desc'].sum(),
+                'n_files': grouped['n_files'].sum(),
                 'n_children': grouped['n_children'].sum(),
                 'kind': 'dir',
             }).reset_index(drop=True)

@@ -24,8 +24,8 @@ from disk_tree.listing import prepare_listing
 
 
 TS = dt.datetime(2026, 7, 28, tzinfo=dt.timezone.utc)
-NUMERIC = ['size', 'mtime', 'n_desc', 'n_children', 'depth']
-COLS = ['path', 'size', 'mtime', 'kind', 'parent', 'uri', *['n_desc', 'n_children', 'depth']]
+NUMERIC = ['size', 'mtime', 'n_desc', 'n_files', 'n_children', 'depth']
+COLS = ['path', 'size', 'mtime', 'kind', 'parent', 'uri', 'n_desc', 'n_files', 'n_children', 'depth']
 
 
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
@@ -111,6 +111,7 @@ def test_out_of_core_matches_import_listing(listing_parquet, tmp_path: Path):
     root = got_ref[got_ref['path'] == '.'].iloc[0]
     assert stats['root_size'] == int(root['size'])
     assert stats['root_n_desc'] == int(root['n_desc'])
+    assert stats['root_n_files'] == int(root['n_files'])
     assert stats['root_n_children'] == int(root['n_children'])
     assert stats['rows'] == len(got_ref)
     assert stats['files'] == 5
@@ -124,6 +125,46 @@ def test_out_of_core_missing_bucket_raises(listing_parquet, tmp_path: Path):
             bucket='nope', scheme='gcs',
             out_parquet=str(tmp_path / 'out.parquet'), con=con,
         )
+
+
+def test_out_of_core_collapses_double_slashes(tmp_path: Path):
+    """DuckDB parity for the `//` fix (see test_import.test_import_listing_collapses_double_slashes).
+    Real marin regression: `regexp_extract` fails to match trailing-`/` paths →
+    the intermediate dir gets parent='' → its bytes hop to the tree root."""
+    listing = tmp_path / 'l.parquet'
+    pd.DataFrame({
+        'bucket': ['b1'] * 3,
+        'name': ['tokenized/a.txt', 'tokenized/sub//x.txt', 'other/b.txt'],
+        'size_bytes': [100, 4, 50],
+        'created': [TS] * 3,
+        'storage_class_id': [1] * 3,
+    }).to_parquet(listing)
+    con = duckdb.connect()
+    stats = aggregate_listing_to_parquet(
+        prepare_listing(con, (str(listing),)),
+        bucket='b1', scheme='gcs',
+        out_parquet=str(tmp_path / 'out.parquet'), con=con,
+    )
+    df = pd.read_parquet(tmp_path / 'out.parquet')
+
+    # Bytes conserved.
+    assert stats['root_size'] == 154
+
+    # `//` file's bytes stay in tokenized (not hoisted to root).
+    tok = df[df.path == 'tokenized'].iloc[0]
+    assert int(tok['size']) == 104
+
+    other = df[df.path == 'other'].iloc[0]
+    assert int(other['size']) == 50
+
+    # Canonical single-slash path in the output.
+    assert 'tokenized/sub//x.txt' not in df.path.tolist()
+    assert 'tokenized/sub/x.txt' in df.path.tolist()
+
+    # And a proper `tokenized/sub` dir row (parent = tokenized, not empty).
+    sub = df[df.path == 'tokenized/sub'].iloc[0]
+    assert int(sub['size']) == 4
+    assert sub['parent'] == 'tokenized'
 
 
 # ---------- Scale smoke: 50k rows through the OOC path, tight memory cap ----------

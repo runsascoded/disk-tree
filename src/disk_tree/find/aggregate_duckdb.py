@@ -65,10 +65,11 @@ def _aggregate_shared(
 
     parent_of_path = _PARENT_EXPR.format(col='path')
 
-    # dirs0 = walk-emitted / synthesized dir rows; each contributes n_desc=1 at its own path.
+    # dirs0 = walk-emitted / synthesized dir rows; each contributes n_desc=1
+    # and n_files=0 (dirs don't count as files) at its own path.
     con.execute("""
         CREATE OR REPLACE TABLE dirs0 AS
-        SELECT path, size, mtime, 1::BIGINT AS n_desc
+        SELECT path, size, mtime, 1::BIGINT AS n_desc, 0::BIGINT AS n_files
         FROM inputs
         WHERE kind = 'dir'
     """)
@@ -84,11 +85,15 @@ def _aggregate_shared(
         GROUP BY parent
     """)
 
-    # `cur` seed: all input rows with n_desc=1. Loop group-by-parent to synthesize
-    # each subsequent level's dir rows (bottom-up). Stop when nothing left to promote.
+    # `cur` seed: all input rows with n_desc=1; n_files=1 for files, 0 for dirs.
+    # Loop group-by-parent to synthesize each subsequent level's dir rows
+    # (bottom-up). Stop when nothing left to promote.
     con.execute("""
         CREATE OR REPLACE TABLE level_cur AS
-        SELECT path, size, mtime, 1::BIGINT AS n_desc FROM inputs
+        SELECT path, size, mtime,
+               1::BIGINT AS n_desc,
+               CASE WHEN kind = 'file' THEN 1 ELSE 0 END::BIGINT AS n_files
+        FROM inputs
     """)
     level_tables: list[str] = []
     level = 0
@@ -99,7 +104,8 @@ def _aggregate_shared(
             SELECT {parent_of_path} AS path,
                    SUM(size)::BIGINT AS size,
                    MAX(mtime)::BIGINT AS mtime,
-                   SUM(n_desc)::BIGINT AS n_desc
+                   SUM(n_desc)::BIGINT AS n_desc,
+                   SUM(n_files)::BIGINT AS n_files
             FROM level_cur
             WHERE path != ''
             GROUP BY 1
@@ -115,18 +121,18 @@ def _aggregate_shared(
     # Union all dir levels + dirs0, group by path, attach n_children.
     if level_tables:
         levels_union = " UNION ALL ".join(
-            f"SELECT path, size, mtime, n_desc FROM {t}" for t in level_tables
+            f"SELECT path, size, mtime, n_desc, n_files FROM {t}" for t in level_tables
         )
         con.execute(f"""
             CREATE OR REPLACE TABLE dirs_all AS
-            SELECT path, size, mtime, n_desc FROM dirs0
+            SELECT path, size, mtime, n_desc, n_files FROM dirs0
             UNION ALL
             {levels_union}
         """)
     else:
         con.execute("""
             CREATE OR REPLACE TABLE dirs_all AS
-            SELECT path, size, mtime, n_desc FROM dirs0
+            SELECT path, size, mtime, n_desc, n_files FROM dirs0
         """)
 
     parent_of_agg = _PARENT_EXPR.format(col='d.path')
@@ -136,6 +142,7 @@ def _aggregate_shared(
             SUM(d.size)::BIGINT AS size,
             MAX(d.mtime)::BIGINT AS mtime,
             SUM(d.n_desc)::BIGINT AS n_desc,
+            SUM(d.n_files)::BIGINT AS n_files,
             COALESCE(MAX(nc.n_children), 0)::BIGINT AS n_children,
             'dir' AS kind,
             {parent_of_agg} AS parent
@@ -147,13 +154,13 @@ def _aggregate_shared(
 
     if dirs_agg.empty:
         # Single-file corner case: no dir rows anywhere. Manufacture the root
-        # stub in the same shape as pandas `aggregate()` does at find/index.py:76-90.
+        # stub in the same shape as pandas `aggregate()` does at find/index.py.
         dirs_agg = pd.DataFrame([{
-            'path': '.', 'size': 0, 'mtime': 0, 'n_desc': 0, 'n_children': 0,
+            'path': '.', 'size': 0, 'mtime': 0, 'n_desc': 0, 'n_files': 0, 'n_children': 0,
             'kind': 'dir', 'parent': '', 'uri': scan_root,
         }])
     else:
-        # Pandas final normalization (find/index.py:164-166):
+        # Pandas final normalization (find/index.py):
         # - dir rows with parent='' get parent='.' (except the root itself)
         # - the root dir has path='.', parent=''
         # - uri = scan_root for root, else f'{scan_root}/{path}'
@@ -162,10 +169,11 @@ def _aggregate_shared(
         dirs_agg.loc[root_mask, ['path', 'parent']] = ['.', '']
         dirs_agg['uri'] = dirs_agg['path'].apply(lambda p: scan_root if p == '.' else f'{scan_root}/{p}')
 
-    # Files: pulled from inputs with n_desc=1, n_children=0 (per pandas)
+    # Files: n_desc=1 (self), n_files=1 (self is a file), n_children=0.
     files = con.execute("""
         SELECT path, size, mtime, 'file'::VARCHAR AS kind, parent, uri,
                1::BIGINT AS n_desc,
+               1::BIGINT AS n_files,
                0::BIGINT AS n_children
         FROM inputs
         WHERE kind = 'file'
@@ -228,22 +236,36 @@ def aggregate_listing_to_parquet(
         con.execute(f"SET temp_directory = '{temp_dir}'")
 
     scan_root = f'{scheme}://{bucket}'
-    parent_of_name = _PARENT_EXPR.format(col='name')
+    # Collapse consecutive slashes + strip trailing slashes so `a//b` reads as
+    # `a/b`. Keys with empty path components exist in real listings (marin's
+    # 2026-08-14 west4 scan has `tokenized/…//.artifact.json`); leaving the
+    # trailing slash on the intermediate dir breaks the parent-of regex below
+    # (regexp_extract fails to match a trailing-`/` string → returns '' → the
+    # dir gets hoisted to the tree root, moving bytes across subtrees).
+    canonical_name = "rtrim(regexp_replace(name, '/+', '/', 'g'), '/')"
+    parent_of_name = _PARENT_EXPR.format(col='canonical')
 
     # Build the `inputs` table without a pandas roundtrip: files first, then
     # synthesized dir rows for every unique ancestor path.
     con.execute(f"""
         DROP TABLE IF EXISTS inputs;
         CREATE TABLE inputs AS
+        WITH canon AS (
+            SELECT
+                {canonical_name} AS canonical,
+                size_bytes,
+                created
+            FROM {listing_sql}
+            WHERE bucket = '{bucket}'
+        )
         SELECT
-            name AS path,
+            canonical AS path,
             size_bytes::BIGINT AS size,
             COALESCE(epoch(created), 0)::BIGINT AS mtime,
             'file'::VARCHAR AS kind,
             {parent_of_name} AS parent,
-            ('{scan_root}/' || name)::VARCHAR AS uri
-        FROM {listing_sql}
-        WHERE bucket = '{bucket}'
+            ('{scan_root}/' || canonical)::VARCHAR AS uri
+        FROM canon
     """)
 
     n_files = con.execute("SELECT COUNT(*) FROM inputs").fetchone()[0]
@@ -282,6 +304,7 @@ def aggregate_listing_to_parquet(
         'files': int(n_files),
         'root_size': int(root['size']) if root is not None else 0,
         'root_n_desc': int(root['n_desc']) if root is not None else 0,
+        'root_n_files': int(root['n_files']) if root is not None else 0,
         'root_n_children': int(root['n_children']) if root is not None else 0,
         'root_mtime': int(root['mtime']) if root is not None else 0,
     }
