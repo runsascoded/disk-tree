@@ -81,6 +81,91 @@ def test_parity_pandas_vs_duckdb(rows):
     pd.testing.assert_frame_equal(got_pandas, got_duckdb)
 
 
+# ---------- Standing cross-engine identity check (mgu's ask post-a2a) ----------
+#
+# The two engines' contract is byte-identical layer-2 output. mgu's 2026-08-14
+# west4 a2a caught TWO drifts (`n_desc` semantics, `//` path components) that
+# looked like production-vs-DT disagreements but actually would have surfaced
+# as engine-vs-engine drift with the right fixture. This fixture is that
+# fixture — every edge pattern that showed up in real listings, checked in so
+# regressions get caught in CI, not on the next 588M-row a2a.
+#
+# When adding a new edge case: add it here first. If both engines still agree,
+# ship. If they disagree, treat as a bug in whichever one drifted from spec.
+
+_IDENTITY_LISTING = [
+    # Normal case: nested files with siblings
+    ('data/train/a.txt', 1024),
+    ('data/train/b.txt', 2048),
+    ('data/val/c.txt',   512),
+    ('data/test/d.bin',  8192),
+    # Sibling top-level dirs
+    ('logs/2026-01-01.log', 4096),
+    ('logs/2026-01-02.log', 4096),
+    # Root-level file (parent = '')
+    ('README.md', 300),
+    ('LICENSE',   100),
+    # Deep single-child chain
+    ('deep/very/nested/leaf.txt', 42),
+    # `//` empty-component path — real marin regression
+    # (tokenized/finemath_3_plus-a26b0f//.artifact.json in production)
+    ('tokenized/finemath//artifact.json', 4),
+    ('tokenized/starcoder//artifact.json', 4),
+    ('tokenized/normal/regular.txt', 1000),
+    # Unicode paths (bucket keys can be arbitrary UTF-8)
+    ('café/résumé.pdf', 500),
+    ('日本語/データ.csv', 700),
+    # Files with dots and no extension
+    ('.hidden', 10),
+    ('.git/config', 20),
+    # Big single dir with many children (nudges the fold + groupby edges)
+    *[(f'many/f{i:03d}.dat', i) for i in range(20)],
+    # Zero-size file (real: placeholder objects)
+    ('placeholder/marker', 0),
+    # Single-file top-level dir (leaf-like)
+    ('single/only.txt', 999),
+]
+
+
+def test_cross_engine_identity_on_real_edge_cases(tmp_path: Path):
+    """Real-world edge patterns must produce byte-identical output from both
+    engines. Standing identity check — any drift here is a bug."""
+    listing = tmp_path / 'identity-listing.parquet'
+    pd.DataFrame({
+        'bucket': ['b1'] * len(_IDENTITY_LISTING),
+        'name': [n for n, _ in _IDENTITY_LISTING],
+        'size_bytes': [s for _, s in _IDENTITY_LISTING],
+        'created': [TS] * len(_IDENTITY_LISTING),
+        'storage_class_id': [1] * len(_IDENTITY_LISTING),
+    }).to_parquet(listing)
+
+    # Pandas engine: import_listing (in-memory).
+    got_pandas = _normalize(import_listing((str(listing),), bucket='b1', scheme='gcs').df)
+
+    # DuckDB engine: aggregate_listing_to_parquet (out-of-core).
+    con = duckdb.connect()
+    out = str(tmp_path / 'ooc.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (str(listing),)),
+        bucket='b1', scheme='gcs', out_parquet=out, con=con,
+    )
+    got_duckdb = _normalize(pd.read_parquet(out))
+
+    pd.testing.assert_frame_equal(got_pandas, got_duckdb)
+
+    # Additional invariants that would be silently masked by identity alone:
+    root_p = got_pandas[got_pandas.path == '.'].iloc[0]
+    total_size = sum(s for _, s in _IDENTITY_LISTING)
+    assert int(root_p['size']) == total_size, \
+        f"root size drift: got {int(root_p['size'])}, expected {total_size}"
+    assert int(root_p['n_files']) == len(_IDENTITY_LISTING), \
+        f"root n_files drift: got {int(root_p['n_files'])}, expected {len(_IDENTITY_LISTING)}"
+    # `//` file's bytes stay in `tokenized` (regression-locked)
+    tok = got_pandas[got_pandas.path == 'tokenized'].iloc[0]
+    assert int(tok['size']) == 1008  # 4 + 4 + 1000
+    assert int(tok['n_files']) == 3
+
+
 # ---------- True out-of-core path (parquet → parquet) matches import_listing ----------
 
 @pytest.fixture

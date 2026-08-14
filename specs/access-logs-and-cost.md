@@ -81,9 +81,21 @@ served by manual CSV downloads.
 
 ## Status
 
-- [ ] GCS usage-log parser (+ `s_request_id` dedupe, `_storage_` bonus table)
-- [ ] `dt access import` / `agg` / `top`
-- [ ] layer-2a parent-synthesis reuse (share SQL with `aggregate_listing_to_parquet`)
+- [x] GCS usage-log parser (+ `s_request_id` dedupe, `_storage_` bonus table)
+      — `disk_tree/access/parsers/gcs.py`; 3 fixture tests
+- [x] `dt access import` / `agg` / `top` — `disk_tree/cli/access.py`
+- [x] layer-2a parent-synthesis reuse — `disk_tree/access/aggregate.py`
+      copies the `_PARENT_EXPR` shape from `find/aggregate_duckdb.py`
+      (deliberate copy vs. import to keep the access module decoupled from
+      the find module's SQL internals; if the parent-of policy ever needs
+      to change, both files change together)
 - [ ] widgets: ops accessors documented for `<Treemap>`/`<TimeSeries>` (likely zero code)
-- [ ] S3/CloudTrail parser stubs; R2 Logpush note
+- [x] S3/CloudTrail parser stubs; R2 Logpush note — `parsers/{s3,r2}.py` raise
+      `NotImplementedError` with pinned interfaces + provider-format doc
+- [ ] Real-data smoke against GCS-delivered CSVs (waiting on delivery — mgu owns)
 - [ ] `dt cost` plane (deferred)
+
+Post-landing (2026-08-14): all core scaffolding + GCS parser + fixture tests
+in `6181b1c`+. Once marin's usage-log CSVs land, `disk-tree access import
+gs://marin-usage-logs/usage/<bucket>/* -o /tmp/canonical.parquet` should
+Just Work; anything that doesn't is a real-data-driven follow-up.
