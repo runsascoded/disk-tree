@@ -64,12 +64,15 @@ def parse(input_glob: str, store: str = 'gcs', con: "duckdb.DuckDBPyConnection |
     # Canonical projection + normalization. Path derived from cs_object
     # (already the object key); bucket from cs_bucket. `cs_operation` beats
     # `cs_method` for the normalized op (matches schema.normalize_op).
+    # Dedupe via DISTINCT ON over the *narrow* canonical projection, not a
+    # window over SELECT * — row_number() OVER (PARTITION BY s_request_id)
+    # materializes every raw column (incl. fat unused strings like cs_uri /
+    # cs_referer) for the whole input and is DuckDB's worst-spilling operator;
+    # it OOM'd on a real 40M-request hour. DISTINCT ON is hash-aggregate
+    # (first()) semantics: same arbitrary-winner-per-request-id result,
+    # ~4x narrower rows, spills gracefully.
     return con.sql(f"""
-        WITH deduped AS (
-            SELECT * FROM _gcs_usage_raw
-            QUALIFY row_number() OVER (PARTITION BY s_request_id) = 1
-        )
-        SELECT
+        SELECT DISTINCT ON (s_request_id)
             to_timestamp(time_micros / 1e6) AS ts,
             '{store}'::VARCHAR AS store,
             cs_bucket::VARCHAR AS bucket,
@@ -82,7 +85,7 @@ def parse(input_glob: str, store: str = 'gcs', con: "duckdb.DuckDBPyConnection |
             COALESCE(c_ip, '')::VARCHAR AS requester,
             COALESCE(cs_user_agent, '')::VARCHAR AS user_agent,
             s_request_id::VARCHAR AS request_id
-        FROM deduped
+        FROM _gcs_usage_raw
         WHERE cs_bucket IS NOT NULL
     """)
 
