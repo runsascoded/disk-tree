@@ -30,11 +30,19 @@ from __future__ import annotations
 
 import heapq
 import re
+import sys
+from datetime import datetime
 from glob import glob as _glob
 from operator import itemgetter
 from typing import Iterator
 
 _SLASHES = re.compile(r'/+')
+
+
+def _stage(msg: str) -> None:
+    """Timestamped stderr progress line (same shape as aggregate_duckdb's) —
+    long runs need a last-known-stage for post-mortems and phase timing."""
+    print(f"[agg {datetime.now().isoformat(timespec='seconds')}] {msg}", file=sys.stderr, flush=True)
 
 # Safety valve: dirty keys are collected in RAM. If a listing is mostly dirty
 # keys something is pathological — the pre-scan diversion isn't the right tool.
@@ -111,8 +119,9 @@ def _scan_names(
     Runs: `bulk-list` bin-packs multiple non-contiguous key ranges into each
     shard (weight balancing), so a shard is *piecewise* sorted — a
     concatenation of internally-sorted runs. Each run becomes its own k-way
-    merge source downstream. Ordinals are bucket-filtered row indices,
-    matching `_shard_rows`' accounting."""
+    merge source downstream. Ordinals are *raw* (unfiltered) row indices —
+    that's what lets `_shard_rows` map them onto row-group boundaries and
+    skip non-intersecting row groups entirely."""
     import numpy as np
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
@@ -123,26 +132,31 @@ def _scan_names(
     total_runs = 0
     for shard in shards:
         pf = pq.ParquetFile(shard)
-        ord0 = 0
+        raw0 = 0
         prev_last: str | None = None
         starts: list[int] = []
         for batch in pf.iter_batches(columns=['bucket', 'name', *pivot_sums]):
-            mask = pc.equal(batch.column('bucket'), bucket)
+            nb = batch.num_rows
+            mask = pc.fill_null(pc.equal(batch.column('bucket'), bucket), False)
             names = batch.column('name').filter(mask)
             n = len(names)
             if n == 0:
+                raw0 += nb
                 continue
             n_rows += n
+            # Raw (batch-relative) indices of this bucket's rows — run-start
+            # ordinals must be raw so the reader can row-group-skip.
+            raw_idx = np.nonzero(mask.to_numpy(zero_copy_only=False))[0]
             if not starts:
-                starts.append(0)
-            if prev_last is not None and names[0].as_py() < prev_last:
-                starts.append(ord0)
+                starts.append(raw0 + int(raw_idx[0]))
+            elif prev_last is not None and names[0].as_py() < prev_last:
+                starts.append(raw0 + int(raw_idx[0]))
             if n > 1:
                 ge = pc.greater_equal(names.slice(1), names.slice(0, n - 1))
                 for idx in np.nonzero(~ge.to_numpy(zero_copy_only=False))[0]:
-                    starts.append(ord0 + int(idx) + 1)
+                    starts.append(raw0 + int(raw_idx[int(idx) + 1]))
             prev_last = names[n - 1].as_py()
-            ord0 += n
+            raw0 += nb
             if pc.any(_dirty_mask(names)).as_py():
                 dirty_shards.add(shard)
             for i, col in enumerate(pivot_sums):
@@ -204,9 +218,12 @@ def _shard_rows(
     stop: int | None = None,
 ) -> Iterator[tuple]:
     """Clean rows of one sorted run of a shard as (name, size, mtime,
-    *pivot_values). `[start, stop)` are bucket-filtered row ordinals from
-    `_scan_names`' run detection; the slice is verified sorted as it goes
-    (a violation means the two passes disagreed — a bug, not bad input)."""
+    *pivot_values). `[start, stop)` are *raw* row ordinals from
+    `_scan_names`' run detection — raw so the read can skip every row group
+    that doesn't intersect the run (bin-packed shards hold many runs; without
+    the skip each run source re-reads the shard from row 0, ~R×/2 read
+    amplification). The slice is verified sorted as it goes (a violation
+    means the two passes disagreed — a bug, not bad input)."""
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
     pf = pq.ParquetFile(shard)
@@ -214,23 +231,36 @@ def _shard_rows(
     has_created = 'created' in pf.schema_arrow.names
     if has_created:
         cols.append('created')
-    prev: str | None = None
+    # Row-group skip: read only groups intersecting [start, stop).
+    md = pf.metadata
+    rgs: list[int] = []
+    off = 0
     ord0 = 0
-    for batch in pf.iter_batches(columns=cols):
-        mask = pc.equal(batch.column('bucket'), bucket)
-        names_arr = batch.column('name').filter(mask)
-        n = len(names_arr)
-        if n == 0:
-            continue
+    for i in range(md.num_row_groups):
+        n_rg = md.row_group(i).num_rows
+        if off + n_rg > start and (stop is None or off < stop):
+            if not rgs:
+                ord0 = off
+            rgs.append(i)
+        off += n_rg
+    if not rgs:
+        return
+    prev: str | None = None
+    for batch in pf.iter_batches(columns=cols, row_groups=rgs):
+        nb = batch.num_rows
         lo = max(start - ord0, 0)
-        hi = n if stop is None else min(stop - ord0, n)
-        ord0 += n
+        hi = nb if stop is None else min(stop - ord0, nb)
+        ord0 += nb
         if lo >= hi:
-            if stop is not None and ord0 > stop:
+            if stop is not None and ord0 >= stop:
                 break
             continue
-        names_sl = names_arr.slice(lo, hi - lo)
+        sl = batch.slice(lo, hi - lo)
+        mask = pc.fill_null(pc.equal(sl.column('bucket'), bucket), False)
+        names_sl = sl.column('name').filter(mask)
         m = len(names_sl)
+        if m == 0:
+            continue
         # Sortedness within the run: vectorized within the batch slice, plus
         # the batch boundary.
         first = names_sl[0].as_py()
@@ -247,12 +277,12 @@ def _shard_rows(
         names = names_sl.filter(clean).to_pylist()
         if not names:
             continue
-        sizes = pc.fill_null(batch.column('size_bytes'), 0).filter(mask).slice(lo, hi - lo).filter(clean).to_pylist()
+        sizes = pc.fill_null(sl.column('size_bytes'), 0).filter(mask).filter(clean).to_pylist()
         if has_created:
-            mtimes = _epoch_seconds(batch.column('created')).filter(mask).slice(lo, hi - lo).filter(clean).to_pylist()
+            mtimes = _epoch_seconds(sl.column('created')).filter(mask).filter(clean).to_pylist()
         else:
             mtimes = [0] * len(names)
-        pivots = [batch.column(c).filter(mask).slice(lo, hi - lo).filter(clean).to_pylist() for c in pivot_sums]
+        pivots = [sl.column(c).filter(mask).filter(clean).to_pylist() for c in pivot_sums]
         yield from zip(names, map(int, sizes), map(int, mtimes), *pivots)
 
 
@@ -353,14 +383,21 @@ def aggregate_stream(
                 f"shard {bad[0]!r} lacks required columns {sorted(required)} — "
                 f"the stream engine only reads raw/bulk-list listings; use `-e duckdb`"
             )
+        _stage(f"pass-1 names scan: {len(shards)} shard(s) in {listing_glob!r}")
         n_rows, dirty_shards, distinct, runs = _scan_names(shards, bucket, pivot_sums)
         if n_rows > 0:
             chosen = shards
             break
     if chosen is None:
         raise ValueError(f"no rows for bucket {bucket!r}")
+    _stage(
+        f"pass-1 done: {n_rows:,} rows, {sum(map(len, runs.values())):,} run(s) "
+        f"across {len(runs)} shard(s), {len(dirty_shards)} dirty shard(s)"
+    )
 
     dirty = _collect_dirty(sorted(dirty_shards), bucket, pivot_sums) if dirty_shards else []
+    if dirty_shards:
+        _stage(f"collected {len(dirty):,} dirty row(s)")
 
     # Pivot layout: value → index into each _Acc's flat `pivot` vector; column
     # names in (CLI col order) × (sorted value order), matching the other engines.
@@ -384,6 +421,7 @@ def aggregate_stream(
         for a, b in zip(bounds, bounds[1:]):
             sources.append(_shard_rows(s, bucket, pivot_sums, start=a, stop=b))
     merged = heapq.merge(*sources, dirty, key=itemgetter(0))
+    _stage(f"merge+stream: {len(sources)} source(s)")
 
     fd, tmp_parquet = tempfile.mkstemp(suffix='.parquet', dir=os.path.dirname(out_parquet) or None)
     os.close(fd)
@@ -449,6 +487,8 @@ def aggregate_stream(
                     file_pivot[idx] = size
             top.mt_wsum += mtime * size
             n_files_total += 1
+            if n_files_total % 10_000_000 == 0:
+                _stage(f"  …{n_files_total:,} files streamed")
             writer.write((
                 name, size, mtime, 'file', parent, f'{scan_root}/{name}',
                 1, 1, 0, name.count('/') + 1,
@@ -474,6 +514,7 @@ def aggregate_stream(
             'root_mtime': root.mtime,
         }
         writer.close()
+        _stage(f"streamed {writer.n_rows:,} rows ({n_files_total:,} files); final sort")
 
         # ---- final bounded sort: restore the (depth, path) contract ----
         import duckdb as _duckdb
@@ -502,6 +543,7 @@ def aggregate_stream(
                 ORDER BY depth, path, kind
             ) TO '{out_parquet}' (FORMAT PARQUET)
         """)
+        _stage("final sort done")
     finally:
         if os.path.exists(tmp_parquet):
             os.remove(tmp_parquet)

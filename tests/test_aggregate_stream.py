@@ -194,6 +194,47 @@ def test_piecewise_sorted_shard(tmp_path: Path):
     assert stats['files'] == 5
 
 
+def test_interleaved_buckets_multi_run_row_groups(tmp_path: Path):
+    """Locks the raw-ordinal contract behind row-group skipping: run-start
+    ordinals are *raw* (unfiltered) row indices, so a shard interleaving two
+    buckets makes raw ≠ bucket-filtered ordinals (a filtered-ordinal reader
+    would slice the wrong rows), and `row_group_size=2` forces the reader to
+    actually map ordinals onto row-group boundaries and skip non-intersecting
+    groups."""
+    rows = [
+        ('b2', 'zz/1', 9),
+        ('b1', 'z/a.txt', 1),
+        ('b1', 'z/b.txt', 2),
+        ('b2', 'aa/1', 9),
+        ('b2', 'ab/2', 9),
+        ('b1', 'a/x.txt', 3),
+        ('b1', 'a/y.txt', 4),
+        ('b2', 'q/1', 9),
+        ('b1', 'm.txt', 5),
+        ('b1', 'n.txt', 6),
+    ]
+    listing = str(tmp_path / 'l.parquet')
+    pd.DataFrame({
+        'bucket': [b for b, _, _ in rows],
+        'name': [n for _, n, _ in rows],
+        'size_bytes': [s for _, _, s in rows],
+        'created': [TS] * len(rows),
+        'storage_class_id': [1] * len(rows),
+    }).to_parquet(listing, row_group_size=2)
+
+    for bucket, n_files in [('b1', 6), ('b2', 4)]:
+        got_stream, stats = _stream((listing,), tmp_path, bucket=bucket)
+        con = duckdb.connect()
+        ooc = str(tmp_path / f'ooc-{bucket}.parquet')
+        aggregate_listing_to_parquet(
+            prepare_listing(con, (listing,)),
+            bucket=bucket, scheme='gcs', out_parquet=ooc, con=con,
+        )
+        got_duckdb = _normalize(pd.read_parquet(ooc))
+        pd.testing.assert_frame_equal(got_stream, got_duckdb)
+        assert stats['files'] == n_files
+
+
 def test_essentially_unsorted_raises(tmp_path: Path, monkeypatch):
     """The run-count guard: input whose runs explode (≈ every row its own run)
     gets the clear duckdb hint instead of a degenerate 1-row-per-source merge."""
