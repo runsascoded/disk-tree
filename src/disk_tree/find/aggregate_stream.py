@@ -111,30 +111,34 @@ def _scan_names(
     shards: list[str],
     bucket: str,
     pivot_sums: tuple[str, ...] = (),
-) -> tuple[int, set[str], list[list], dict[str, list[int]]]:
+) -> tuple[int, set[str], list[list], dict[str, tuple[list[int], list[str], list[str]]]]:
     """Pass 1: names scan. Returns (total rows for bucket, shards with dirty
-    keys, sorted distinct non-null values per pivot column, sorted-run start
-    ordinals per shard).
+    keys, sorted distinct non-null values per pivot column, per-shard runs as
+    parallel lists (start ordinals, first keys, last keys)).
 
     Runs: `bulk-list` bin-packs multiple non-contiguous key ranges into each
     shard (weight balancing), so a shard is *piecewise* sorted — a
-    concatenation of internally-sorted runs. Each run becomes its own k-way
-    merge source downstream. Ordinals are *raw* (unfiltered) row indices —
-    that's what lets `_shard_rows` map them onto row-group boundaries and
-    skip non-intersecting row groups entirely."""
+    concatenation of internally-sorted runs. Each run becomes its own merge
+    source downstream. Ordinals are *raw* (unfiltered) row indices — that's
+    what lets `_shard_rows` map them onto row-group boundaries and skip
+    non-intersecting row groups entirely. First/last keys let the merge
+    detect globally disjoint runs (the bulk-list common case: ranges split
+    from one sorted keyspace) and degrade the k-way heap to concatenation."""
     import numpy as np
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
     n_rows = 0
     dirty_shards: set[str] = set()
     distinct: list[set] = [set() for _ in pivot_sums]
-    runs: dict[str, list[int]] = {}
+    runs: dict[str, tuple[list[int], list[str], list[str]]] = {}
     total_runs = 0
     for shard in shards:
         pf = pq.ParquetFile(shard)
         raw0 = 0
         prev_last: str | None = None
         starts: list[int] = []
+        firsts: list[str] = []
+        lasts: list[str] = []
         for batch in pf.iter_batches(columns=['bucket', 'name', *pivot_sums]):
             nb = batch.num_rows
             mask = pc.fill_null(pc.equal(batch.column('bucket'), bucket), False)
@@ -147,14 +151,23 @@ def _scan_names(
             # Raw (batch-relative) indices of this bucket's rows — run-start
             # ordinals must be raw so the reader can row-group-skip.
             raw_idx = np.nonzero(mask.to_numpy(zero_copy_only=False))[0]
+            first_name = names[0].as_py()
             if not starts:
                 starts.append(raw0 + int(raw_idx[0]))
-            elif prev_last is not None and names[0].as_py() < prev_last:
+                firsts.append(first_name)
+            elif prev_last is not None and first_name < prev_last:
+                lasts.append(prev_last)
                 starts.append(raw0 + int(raw_idx[0]))
+                firsts.append(first_name)
             if n > 1:
                 ge = pc.greater_equal(names.slice(1), names.slice(0, n - 1))
-                for idx in np.nonzero(~ge.to_numpy(zero_copy_only=False))[0]:
-                    starts.append(raw0 + int(raw_idx[int(idx) + 1]))
+                desc = np.nonzero(~ge.to_numpy(zero_copy_only=False))[0]
+                if len(desc):
+                    names_py = names.to_pylist()
+                    for idx in desc:
+                        lasts.append(names_py[int(idx)])
+                        starts.append(raw0 + int(raw_idx[int(idx) + 1]))
+                        firsts.append(names_py[int(idx) + 1])
             prev_last = names[n - 1].as_py()
             raw0 += nb
             if pc.any(_dirty_mask(names)).as_py():
@@ -163,7 +176,8 @@ def _scan_names(
                 vals = pc.unique(pc.drop_null(batch.column(col).filter(mask)))
                 distinct[i].update(vals.to_pylist())
         if starts:
-            runs[shard] = starts
+            lasts.append(prev_last)
+            runs[shard] = (starts, firsts, lasts)
             total_runs += len(starts)
         if total_runs > _MAX_RUNS:
             raise ValueError(
@@ -288,10 +302,11 @@ def _shard_rows(
 
 class _Acc:
     """Running accumulators for one open dir on the stack."""
-    __slots__ = ('path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'pivot', 'mt_wsum')
+    __slots__ = ('path', 'pfx', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'pivot', 'mt_wsum')
 
     def __init__(self, path: str, n_pivot: int):
         self.path = path
+        self.pfx = f'{path}/'  # hoisted: subtree-membership startswith runs per input row
         self.size = 0
         self.mtime = 0
         self.n_desc = 1  # self — matches the other engines' dir-row seeding
@@ -412,16 +427,33 @@ def aggregate_stream(
 
     scan_root = f'{scheme}://{bucket}'
     # One merge source per sorted run (bin-packed shards are piecewise sorted).
-    sources = []
+    # bulk-list runs are ranges split from one sorted keyspace, so in the
+    # common case they're globally disjoint: ordered by first key, the merge
+    # degrades to concatenation — O(1)/row instead of O(log n_runs) string
+    # compares in the heap. Any overlap (or a dirty side-stream) falls back.
+    run_infos: list[tuple[str, str, str, int, int | None]] = []
     for s in chosen:
-        starts = runs.get(s)
-        if not starts:
+        entry = runs.get(s)
+        if not entry:
             continue
-        bounds: list[int | None] = [*starts, None]
-        for a, b in zip(bounds, bounds[1:]):
-            sources.append(_shard_rows(s, bucket, pivot_sums, start=a, stop=b))
-    merged = heapq.merge(*sources, dirty, key=itemgetter(0))
-    _stage(f"merge+stream: {len(sources)} source(s)")
+        starts, firsts, lasts = entry
+        bounds: list[int | None] = [*starts[1:], None]
+        for start, stop, first, last in zip(starts, bounds, firsts, lasts):
+            run_infos.append((first, last, s, start, stop))
+    run_infos.sort()
+    sources = [
+        _shard_rows(s, bucket, pivot_sums, start=a, stop=b)
+        for _, _, s, a, b in run_infos
+    ]
+    disjoint = not dirty and all(
+        run_infos[i][0] > run_infos[i - 1][1] for i in range(1, len(run_infos))
+    )
+    if disjoint:
+        from itertools import chain
+        merged = chain.from_iterable(sources)
+    else:
+        merged = heapq.merge(*sources, dirty, key=itemgetter(0))
+    _stage(f"merge+stream: {len(sources)} source(s) ({'disjoint, concatenating' if disjoint else 'heap merge'})")
 
     fd, tmp_parquet = tempfile.mkstemp(suffix='.parquet', dir=os.path.dirname(out_parquet) or None)
     os.close(fd)
@@ -457,11 +489,15 @@ def aggregate_stream(
                 *dir_extras(acc),
             ))
 
+        # Single-pivot-column fast path (the common CLI shape, e.g. just
+        # `-p storage_class_id`): skip the per-row zip over pivot_maps.
+        pmap0 = pivot_maps[0] if len(pivot_maps) == 1 else None
+
         for name, size, mtime, *pvals in merged:
             parent = _parent_of(name)
             # Pop everything the new row's parent chain has left behind.
             top = stack[-1]
-            while not (top.path == '' or parent == top.path or parent.startswith(top.path + '/')):
+            while not (top.path == '' or parent == top.path or parent.startswith(top.pfx)):
                 pop_emit()
                 top = stack[-1]
             # Push the dirs between the surviving top and the row's parent.
@@ -479,12 +515,22 @@ def aggregate_stream(
             top.n_desc += 1
             top.n_files += 1
             top.n_children += 1
-            file_pivot = [0] * n_pivot
-            for pmap, v in zip(pivot_maps, pvals):
-                if v is not None:
-                    idx = pmap[v]
-                    top.pivot[idx] += size
-                    file_pivot[idx] = size
+            if n_pivot:
+                file_pivot = [0] * n_pivot
+                if pmap0 is not None:
+                    v = pvals[0]
+                    if v is not None:
+                        idx = pmap0[v]
+                        top.pivot[idx] += size
+                        file_pivot[idx] = size
+                else:
+                    for pmap, v in zip(pivot_maps, pvals):
+                        if v is not None:
+                            idx = pmap[v]
+                            top.pivot[idx] += size
+                            file_pivot[idx] = size
+            else:
+                file_pivot = ()
             top.mt_wsum += mtime * size
             n_files_total += 1
             if n_files_total % 10_000_000 == 0:
