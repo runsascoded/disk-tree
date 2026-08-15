@@ -49,19 +49,25 @@ def import_listing(
     bucket: str,
     scheme: str = 'gcs',
     con: "duckdb.DuckDBPyConnection | None" = None,
+    pivot_sums: tuple[str, ...] = (),
+    mean_mtime: bool = False,
 ) -> IndexResult:
     """Read `bucket`'s rows from `listings` and aggregate to a canonical scan.
 
     `listings` is a tuple of parquet globs; multiple sources are merged with
     earlier-source-wins-per-bucket semantics (see :func:`prepare_listing`).
     `scheme` sets the URI prefix (e.g. ``gcs`` → ``gcs://<bucket>/<name>``).
+    `pivot_sums` / `mean_mtime` are the opt-in aggregation extensions
+    (see :mod:`disk_tree.find.agg_ext`).
     """
     import duckdb as _duckdb
+    from .agg_ext import MT_WSUM, check_pivot_values, pivot_col
     if con is None:
         con = _duckdb.connect()
     src = prepare_listing(con, listings)
+    extra_sel = ''.join(f', {c}' for c in pivot_sums)
     df = con.execute(
-        f"SELECT name, size_bytes, epoch(created)::BIGINT AS created FROM {src} WHERE bucket = ? ORDER BY name",
+        f"SELECT name, size_bytes, epoch(created)::BIGINT AS created{extra_sel} FROM {src} WHERE bucket = ? ORDER BY name",
         [bucket],
     ).df()
     if df.empty:
@@ -78,6 +84,20 @@ def import_listing(
         'parent': names.apply(dirname),
         'uri': [f'{scan_root}/{n}' for n in names],
     })
+    sum_cols: list[str] = []
+    for col in pivot_sums:
+        vals = check_pivot_values(col, sorted(pd.unique(df[col].dropna())))
+        for v in vals:
+            name = pivot_col(col, v)
+            files[name] = files['size'].where(df[col] == v, 0)
+            sum_cols.append(name)
+    if mean_mtime:
+        # Exact Σ mtime·size partials — Python bigints in an object column
+        # (int64 would overflow at PB·epoch scale; see agg_ext module doc).
+        files[MT_WSUM] = pd.Series(
+            [int(m) * int(s) for m, s in zip(files['mtime'], files['size'])],
+            dtype=object,
+        )
     # Synthesize dir rows for every unique parent path in the listing — walk
     # backends emit these inline (see backends/s3.py:84-92), and their absence
     # would leave `n_children` under-counted (it counts input rows per parent,
@@ -98,9 +118,15 @@ def import_listing(
         'kind': 'dir',
         'parent': [dirname(p) for p in dir_names],
         'uri': [f'{scan_root}/{p}' for p in dir_names],
+        **{c: 0 for c in sum_cols},
+        **({MT_WSUM: 0} if mean_mtime else {}),
     })
     rows = pd.concat([files, dirs], ignore_index=True)
-    return IndexResult(df=aggregate(rows, scan_root=scan_root), error_count=0, error_paths=[])
+    return IndexResult(
+        df=aggregate(rows, scan_root=scan_root, sum_cols=tuple(sum_cols), mean_mtime=mean_mtime),
+        error_count=0,
+        error_paths=[],
+    )
 
 
 def list_buckets(listings: tuple[str, ...], con: "duckdb.DuckDBPyConnection | None" = None) -> list[str]:

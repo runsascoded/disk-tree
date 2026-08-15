@@ -67,11 +67,11 @@ def _expand_shards(listing_glob: str) -> list[str]:
     return files
 
 
-def _check_schema(shard: str) -> bool:
-    """True if the shard has the raw listing schema (bucket, name, size_bytes)."""
+def _check_schema(shard: str, required: frozenset[str]) -> bool:
+    """True if the shard carries all `required` columns."""
     import pyarrow.parquet as pq
     names = set(pq.ParquetFile(shard).schema_arrow.names)
-    return {'bucket', 'name', 'size_bytes'} <= names
+    return required <= names
 
 
 def _epoch_seconds(arr):
@@ -94,15 +94,21 @@ def _dirty_mask(names):
     return pc.or_(pc.match_substring(names, '//'), pc.ends_with(names, pattern='/'))
 
 
-def _scan_names(shards: list[str], bucket: str) -> tuple[int, set[str]]:
-    """Pass 1: names-only scan. Returns (total rows for bucket, shards with dirty keys)."""
+def _scan_names(
+    shards: list[str],
+    bucket: str,
+    pivot_sums: tuple[str, ...] = (),
+) -> tuple[int, set[str], list[list]]:
+    """Pass 1: names scan. Returns (total rows for bucket, shards with dirty
+    keys, sorted distinct non-null values per pivot column)."""
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
     n_rows = 0
     dirty_shards: set[str] = set()
+    distinct: list[set] = [set() for _ in pivot_sums]
     for shard in shards:
         pf = pq.ParquetFile(shard)
-        for batch in pf.iter_batches(columns=['bucket', 'name']):
+        for batch in pf.iter_batches(columns=['bucket', 'name', *pivot_sums]):
             mask = pc.equal(batch.column('bucket'), bucket)
             names = batch.column('name').filter(mask)
             if len(names) == 0:
@@ -110,18 +116,25 @@ def _scan_names(shards: list[str], bucket: str) -> tuple[int, set[str]]:
             n_rows += len(names)
             if pc.any(_dirty_mask(names)).as_py():
                 dirty_shards.add(shard)
-    return n_rows, dirty_shards
+            for i, col in enumerate(pivot_sums):
+                vals = pc.unique(pc.drop_null(batch.column(col).filter(mask)))
+                distinct[i].update(vals.to_pylist())
+    return n_rows, dirty_shards, [sorted(s) for s in distinct]
 
 
-def _collect_dirty(dirty_shards: list[str], bucket: str) -> list[tuple[str, int, int]]:
+def _collect_dirty(
+    dirty_shards: list[str],
+    bucket: str,
+    pivot_sums: tuple[str, ...] = (),
+) -> list[tuple]:
     """Pass 1b: re-read only the shards flagged dirty, extracting the dirty
-    rows as (canonical_name, size, mtime), sorted by canonical name."""
+    rows as (canonical_name, size, mtime, *pivot_values), sorted by canonical name."""
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
-    out: list[tuple[str, int, int]] = []
+    out: list[tuple] = []
     for shard in dirty_shards:
         pf = pq.ParquetFile(shard)
-        cols = ['bucket', 'name', 'size_bytes']
+        cols = ['bucket', 'name', 'size_bytes', *pivot_sums]
         has_created = 'created' in pf.schema_arrow.names
         if has_created:
             cols.append('created')
@@ -135,7 +148,8 @@ def _collect_dirty(dirty_shards: list[str], bucket: str) -> list[tuple[str, int,
                 mtimes = _epoch_seconds(batch.column('created')).filter(mask).to_pylist()
             else:
                 mtimes = [0] * len(names)
-            out.extend(zip(map(_canonicalize, names), map(int, sizes), map(int, mtimes)))
+            pivots = [batch.column(c).filter(mask).to_pylist() for c in pivot_sums]
+            out.extend(zip(map(_canonicalize, names), map(int, sizes), map(int, mtimes), *pivots))
             if len(out) > _DIRTY_MAX:
                 raise ValueError(
                     f"more than {_DIRTY_MAX:,} `//`/trailing-slash keys in listing — "
@@ -145,13 +159,17 @@ def _collect_dirty(dirty_shards: list[str], bucket: str) -> list[tuple[str, int,
     return out
 
 
-def _shard_rows(shard: str, bucket: str) -> Iterator[tuple[str, int, int]]:
-    """Clean rows of one shard as (name, size, mtime), verifying the shard is
-    sorted by raw key as it goes."""
+def _shard_rows(
+    shard: str,
+    bucket: str,
+    pivot_sums: tuple[str, ...] = (),
+) -> Iterator[tuple]:
+    """Clean rows of one shard as (name, size, mtime, *pivot_values),
+    verifying the shard is sorted by raw key as it goes."""
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
     pf = pq.ParquetFile(shard)
-    cols = ['bucket', 'name', 'size_bytes']
+    cols = ['bucket', 'name', 'size_bytes', *pivot_sums]
     has_created = 'created' in pf.schema_arrow.names
     if has_created:
         cols.append('created')
@@ -187,33 +205,41 @@ def _shard_rows(shard: str, bucket: str) -> Iterator[tuple[str, int, int]]:
             mtimes = _epoch_seconds(batch.column('created')).filter(mask).filter(clean).to_pylist()
         else:
             mtimes = [0] * len(names)
-        yield from zip(names, map(int, sizes), map(int, mtimes))
+        pivots = [batch.column(c).filter(mask).filter(clean).to_pylist() for c in pivot_sums]
+        yield from zip(names, map(int, sizes), map(int, mtimes), *pivots)
 
 
 class _Acc:
     """Running accumulators for one open dir on the stack."""
-    __slots__ = ('path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children')
+    __slots__ = ('path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'pivot', 'mt_wsum')
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, n_pivot: int):
         self.path = path
         self.size = 0
         self.mtime = 0
         self.n_desc = 1  # self — matches the other engines' dir-row seeding
         self.n_files = 0
         self.n_children = 0
+        self.pivot = [0] * n_pivot
+        self.mt_wsum = 0  # exact Σ mtime·size — Python bigint, no overflow
 
 
 class _Writer:
     """Buffered parquet writer for pre-output rows (files + dirs, unsorted)."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, cols: list[str], mean_mtime: bool):
         import pyarrow as pa
-        self._schema = pa.schema([
-            ('path', pa.string()), ('size', pa.int64()), ('mtime', pa.int64()),
-            ('kind', pa.string()), ('parent', pa.string()), ('uri', pa.string()),
-            ('n_desc', pa.int64()), ('n_files', pa.int64()), ('n_children', pa.int64()),
-            ('depth', pa.int64()),
-        ])
+        from .agg_ext import MTIME_MEAN
+        fields = []
+        for c in cols:
+            if c in ('path', 'kind', 'parent', 'uri'):
+                fields.append((c, pa.string()))
+            elif c == MTIME_MEAN:
+                fields.append((c, pa.float64()))
+            else:
+                fields.append((c, pa.int64()))
+        self._cols = cols
+        self._schema = pa.schema(fields)
         import pyarrow.parquet as pq
         self._writer = pq.ParquetWriter(path, self._schema)
         self._rows: list[tuple] = []
@@ -230,7 +256,7 @@ class _Writer:
             return
         import pyarrow as pa
         cols = list(zip(*self._rows))
-        self._writer.write_table(pa.table(dict(zip(_COLS, cols)), schema=self._schema))
+        self._writer.write_table(pa.table(dict(zip(self._cols, cols)), schema=self._schema))
         self._rows.clear()
 
     def close(self) -> None:
@@ -246,6 +272,8 @@ def aggregate_stream(
     con: "object | None" = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
+    pivot_sums: tuple[str, ...] = (),
+    mean_mtime: bool = False,
 ) -> dict:
     """Streaming rollup: sorted listing shards → canonical layer-2 parquet.
 
@@ -255,44 +283,67 @@ def aggregate_stream(
     containing any rows for `bucket` is used). Requires the raw listing
     schema (``bucket, name, size_bytes[, created]``) with shards each sorted
     by key — bulk-list output satisfies both; for anything else, `-e duckdb`.
+    `pivot_sums` / `mean_mtime` are the opt-in aggregation extensions — all
+    monoid sums, so they stream identically (see :mod:`disk_tree.find.agg_ext`).
     """
     import os
     import tempfile
+    from .agg_ext import MTIME_MEAN, check_pivot_values, mean_of, pivot_col
+
+    required = frozenset({'bucket', 'name', 'size_bytes', *pivot_sums})
 
     # ---- resolve which listing source serves this bucket (earlier wins) ----
     chosen: list[str] | None = None
     dirty_shards: set[str] = set()
+    distinct: list[list] = []
     for listing_glob in listings:
         shards = _expand_shards(listing_glob)
-        bad = [s for s in shards if not _check_schema(s)]
+        bad = [s for s in shards if not _check_schema(s, required)]
         if bad:
             raise ValueError(
-                f"shard {bad[0]!r} lacks the raw listing schema (bucket, name, size_bytes) — "
+                f"shard {bad[0]!r} lacks required columns {sorted(required)} — "
                 f"the stream engine only reads raw/bulk-list listings; use `-e duckdb`"
             )
-        n_rows, dirty_shards = _scan_names(shards, bucket)
+        n_rows, dirty_shards, distinct = _scan_names(shards, bucket, pivot_sums)
         if n_rows > 0:
             chosen = shards
             break
     if chosen is None:
         raise ValueError(f"no rows for bucket {bucket!r}")
 
-    dirty = _collect_dirty(sorted(dirty_shards), bucket) if dirty_shards else []
+    dirty = _collect_dirty(sorted(dirty_shards), bucket, pivot_sums) if dirty_shards else []
+
+    # Pivot layout: value → index into each _Acc's flat `pivot` vector; column
+    # names in (CLI col order) × (sorted value order), matching the other engines.
+    pivot_names: list[str] = []
+    pivot_maps: list[dict] = []
+    for col, vals in zip(pivot_sums, distinct):
+        check_pivot_values(col, vals)
+        pivot_maps.append({v: len(pivot_names) + i for i, v in enumerate(vals)})
+        pivot_names.extend(pivot_col(col, v) for v in vals)
+    n_pivot = len(pivot_names)
+    out_cols = [*_COLS, *pivot_names, *([MTIME_MEAN] if mean_mtime else [])]
 
     scan_root = f'{scheme}://{bucket}'
     merged = heapq.merge(
-        *(_shard_rows(s, bucket) for s in chosen),
+        *(_shard_rows(s, bucket, pivot_sums) for s in chosen),
         dirty,
         key=itemgetter(0),
     )
 
     fd, tmp_parquet = tempfile.mkstemp(suffix='.parquet', dir=os.path.dirname(out_parquet) or None)
     os.close(fd)
-    writer = _Writer(tmp_parquet)
+    writer = _Writer(tmp_parquet, out_cols, mean_mtime)
     n_files_total = 0
     root_stats: dict = {}
     try:
-        stack: list[_Acc] = [_Acc('')]
+        stack: list[_Acc] = [_Acc('', n_pivot)]
+
+        def dir_extras(acc: _Acc) -> tuple:
+            return (
+                *acc.pivot,
+                *([mean_of(acc.mt_wsum, acc.size)] if mean_mtime else []),
+            )
 
         def pop_emit() -> None:
             acc = stack.pop()
@@ -301,6 +352,9 @@ def aggregate_stream(
             parent_acc.mtime = max(parent_acc.mtime, acc.mtime)
             parent_acc.n_desc += acc.n_desc
             parent_acc.n_files += acc.n_files
+            for i, v in enumerate(acc.pivot):
+                parent_acc.pivot[i] += v
+            parent_acc.mt_wsum += acc.mt_wsum
             raw_parent = _parent_of(acc.path)
             writer.write((
                 acc.path, acc.size, acc.mtime, 'dir',
@@ -308,9 +362,10 @@ def aggregate_stream(
                 f'{scan_root}/{acc.path}',
                 acc.n_desc, acc.n_files, acc.n_children,
                 acc.path.count('/') + 1,
+                *dir_extras(acc),
             ))
 
-        for name, size, mtime in merged:
+        for name, size, mtime, *pvals in merged:
             parent = _parent_of(name)
             # Pop everything the new row's parent chain has left behind.
             top = stack[-1]
@@ -324,7 +379,7 @@ def aggregate_stream(
                 for comp in rel.split('/'):
                     base = comp if base == '' else f'{base}/{comp}'
                     top.n_children += 1  # new dir is a direct child of current top
-                    top = _Acc(base)
+                    top = _Acc(base, n_pivot)
                     stack.append(top)
             # Fold the file into its parent (subtree totals propagate on pop).
             top.size += size
@@ -332,10 +387,19 @@ def aggregate_stream(
             top.n_desc += 1
             top.n_files += 1
             top.n_children += 1
+            file_pivot = [0] * n_pivot
+            for pmap, v in zip(pivot_maps, pvals):
+                if v is not None:
+                    idx = pmap[v]
+                    top.pivot[idx] += size
+                    file_pivot[idx] = size
+            top.mt_wsum += mtime * size
             n_files_total += 1
             writer.write((
                 name, size, mtime, 'file', parent, f'{scan_root}/{name}',
                 1, 1, 0, name.count('/') + 1,
+                *file_pivot,
+                *([float(mtime)] if mean_mtime else []),
             ))
 
         # EOF: close out the stack; the root emits last with its path/parent
@@ -346,6 +410,7 @@ def aggregate_stream(
         writer.write((
             '.', root.size, root.mtime, 'dir', '', scan_root,
             root.n_desc, root.n_files, root.n_children, 0,
+            *dir_extras(root),
         ))
         root_stats = {
             'root_size': root.size,
@@ -365,7 +430,7 @@ def aggregate_stream(
             _con.execute(f"SET temp_directory = '{temp_dir}'")
         _con.execute(f"""
             COPY (
-                SELECT {', '.join(_COLS)}
+                SELECT {', '.join(out_cols)}
                 FROM read_parquet('{tmp_parquet}')
                 -- kind tiebreaker: when a key is both a file and a dir name,
                 -- the other engines emit the dir row first (stable sort over

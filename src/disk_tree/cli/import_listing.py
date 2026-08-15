@@ -29,6 +29,8 @@ from disk_tree.cli.base import cli
 @option('-l', '--listing', 'listings', required=True, multiple=True, help='Listing parquet glob(s) — raw / SII / S3-Inventory; repeatable, earlier sources win per bucket')
 @option('-b', '--bucket', 'buckets', multiple=True, help='Bucket to import as one scan; repeatable. Default: every distinct bucket in the listings')
 @option('-M', '--memory-limit', default='8GB', help='DuckDB memory cap (duckdb engine only). Excess spills to `--temp-dir`.')
+@option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendant files) per path')
+@option('-p', '--pivot-sum', 'pivot_sums', multiple=True, help='Emit per-value byte-sum columns `sum_<col>_<v>` for this layer-1 column (e.g. storage_class_id); repeatable')
 @option('-s', '--scheme', default='gcs', help='URI scheme for the scan root (gcs / s3 / r2)')
 @option('-T', '--temp-dir', default=None, help='DuckDB spill directory (duckdb engine only). Default: system tmp.')
 @option('-t', '--time', 'time_str', default=None, help='Snapshot time (ISO 8601) recorded on each Scan; default: now')
@@ -37,6 +39,8 @@ def import_cmd(
     listings: tuple[str, ...],
     buckets: tuple[str, ...],
     memory_limit: str,
+    mean_mtime: bool,
+    pivot_sums: tuple[str, ...],
     scheme: str,
     temp_dir: str | None,
     time_str: str | None,
@@ -67,7 +71,10 @@ def import_cmd(
 
         if engine == 'pandas':
             from disk_tree.find.import_listing import import_listing
-            df = import_listing(listings, bucket=bucket, scheme=scheme, con=con).df
+            df = import_listing(
+                listings, bucket=bucket, scheme=scheme, con=con,
+                pivot_sums=pivot_sums, mean_mtime=mean_mtime,
+            ).df
             blob_ref = storage.save(df, scan_path)
             root_size = _root_stat(df, 'size')
             root_n_children = _root_stat(df, 'n_children')
@@ -87,12 +94,14 @@ def import_cmd(
                     stats = aggregate_listing_to_parquet(
                         src, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
                         con=con, memory_limit=memory_limit, temp_dir=temp_dir,
+                        pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                     )
                 else:  # stream
                     from disk_tree.find.aggregate_stream import aggregate_stream
                     stats = aggregate_stream(
                         listings, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
                         con=con, memory_limit=memory_limit, temp_dir=temp_dir,
+                        pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                     )
                 # Storage backend expects a DataFrame today — a follow-up wire could avoid
                 # this round-trip. For 588M-row scale this materialization is the last

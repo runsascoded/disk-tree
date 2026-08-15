@@ -21,7 +21,12 @@ class IndexResult:
     error_paths: list[str] = field(default_factory=list)
 
 
-def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
+def aggregate(
+    rows: pd.DataFrame,
+    scan_root: str,
+    sum_cols: tuple[str, ...] = (),
+    mean_mtime: bool = False,
+) -> pd.DataFrame:
     """Bottom-up aggregation: leaf (+ optional dir) rows → canonical layer-2 frame.
 
     Input columns: `path, size, mtime, kind, parent, uri` (`kind` in {'file','dir'}).
@@ -29,7 +34,16 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
     the missing dir rows get synthesized by the group-by cascade below. Output
     adds `n_desc`, `n_children`, `depth`; sorted breadth-first for parquet
     row-group pruning.
+
+    `sum_cols` are extra monoid columns already present in `rows` (per-file
+    contributions; 0 on dir rows) summed through the cascade unchanged —
+    e.g. `--pivot-sum` per-class byte columns. With `mean_mtime`, `rows` must
+    also carry `mt_wsum` (exact-int Σ mtime·size contributions, object dtype
+    to dodge int64 overflow); it cascades like a sum_col and converts to the
+    `mtime_mean` output column at the end (see find/agg_ext.py).
     """
+    from .agg_ext import MT_WSUM, MTIME_MEAN, mean_of
+    cascade_cols = [*sum_cols, *([MT_WSUM] if mean_mtime else [])]
     df = rows
     df['n_desc'] = 1
     df['n_children'] = 0
@@ -42,7 +56,7 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
     # Aggregation only needs these 6 columns. Slicing here keeps the per-iter
     # `.copy()` below 6-column-wide instead of dragging `kind` / `uri` /
     # `n_children` along (the per-row Python-string overhead dominates).
-    cur = df[['path', 'parent', 'size', 'mtime', 'n_desc', 'n_files']]
+    cur = df[['path', 'parent', 'size', 'mtime', 'n_desc', 'n_files', *cascade_cols]]
     dir_dfs = [dirs0]
     level = 0
     while True:
@@ -64,6 +78,7 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
                 'n_desc': n_desc,
                 'n_files': n_files,
                 'n_children': n_children,
+                **{c: grouped[c].sum() for c in cascade_cols},
             }).reset_index(drop=True)
             dirs['parent'] = dirs.path.apply(dirname)
             dir_dfs.append(dirs)
@@ -86,6 +101,7 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
                 'kind': 'dir',
                 'parent': '',
                 'uri': scan_root,
+                **{c: 0 for c in cascade_cols},
             }])
         else:
             grouped = dirs.groupby('path')
@@ -98,6 +114,7 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
                 'n_files': grouped['n_files'].sum(),
                 'n_children': grouped['n_children'].sum(),
                 'kind': 'dir',
+                **{c: grouped[c].sum() for c in cascade_cols},
             }).reset_index(drop=True)
             dirs['parent'] = dirs.path.apply(dirname)
             dirs.loc[dirs.parent == '', 'parent'] = '.'
@@ -107,6 +124,14 @@ def aggregate(rows: pd.DataFrame, scan_root: str) -> pd.DataFrame:
         # Add depth column for efficient parquet filtering
         # '.' = 0, 'foo' = 1, 'foo/bar' = 2, etc.
         out['depth'] = out['path'].apply(lambda p: 0 if p == '.' else p.count('/') + 1)
+        if mean_mtime:
+            # Files carry their own mtime; dirs divide the exact partial sums
+            # (the single blessed double division — see agg_ext.mean_of).
+            out[MTIME_MEAN] = [
+                float(m) if k == 'file' else mean_of(w, s)
+                for k, m, w, s in zip(out['kind'], out['mtime'], out[MT_WSUM], out['size'])
+            ]
+            out = out.drop(columns=[MT_WSUM])
         # Sort by depth first (breadth-first order) for efficient parquet row group filtering
         return out.sort_values(['depth', 'path']).reset_index(drop=True)
 

@@ -82,6 +82,15 @@ agg join). Belongs in `dt access top` / report tooling, and trends across dated 
 
 ## Status
 
-- [ ] `--pivot-sum <col>` (both engines + cardinality guard + tests)
-- [ ] `--mean-mtime` (both engines + tests)
+- [x] `--pivot-sum <col>` (all 3 engines incl. new `-e stream` + cardinality guard + tests)
+- [x] `--mean-mtime` (all 3 engines + tests)
+      — exactness note (implementation, 2026-08-15): `Σ mtime·size` overflows
+      int64 (~1.7e21 at PB scale) and float summation is order-dependent, so
+      every engine carries the partial as an exact integer (Python bigints /
+      DuckDB HUGEINT) through the cascade and does one `double(wsum) /
+      double(size)` division at the end — byte-identical `mtime_mean` across
+      engines (`find/agg_ext.py`; locked by
+      `test_mean_mtime_exact_at_scale_boundary`)
+- [x] 3-engine identity + hand-computed exact-values tests
+      (`tests/test_agg_extensions.py`); no-flags output byte-unchanged
 - [ ] a2a extension vs marin production `cb`/`d` (marin session runs this)

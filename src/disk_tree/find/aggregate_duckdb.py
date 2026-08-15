@@ -60,16 +60,34 @@ def _register_inputs(con: "duckdb.DuckDBPyConnection", inputs: pd.DataFrame) -> 
 def _aggregate_shared(
     con: "duckdb.DuckDBPyConnection",
     scan_root: str,
+    sum_cols: tuple[str, ...] = (),
+    mean_mtime: bool = False,
 ) -> pd.DataFrame:
-    """The core SQL cascade. Assumes an `inputs` table with the schema above."""
+    """The core SQL cascade. Assumes an `inputs` table with the schema above.
+
+    `sum_cols` are extra monoid columns on `inputs` (per-file contributions;
+    0 on dir rows) summed through the cascade unchanged. With `mean_mtime`,
+    `inputs` must carry `mt_wsum` (HUGEINT Σ mtime·size partials — exact, no
+    float-summation order sensitivity); the final select divides it into the
+    `mtime_mean` output column (see find/agg_ext.py).
+    """
+    from .agg_ext import MT_WSUM, MTIME_MEAN
+    cascade_cols = [*sum_cols, *([MT_WSUM] if mean_mtime else [])]
+    extra_sel = ''.join(f', {c}' for c in cascade_cols)
+    # SUM(BIGINT) widens to HUGEINT in DuckDB — cast the pivot sums back down
+    # (they're bounded by total size); mt_wsum genuinely needs the width.
+    extra_sum = ''.join(
+        f", SUM({c})::{'HUGEINT' if c == MT_WSUM else 'BIGINT'} AS {c}"
+        for c in cascade_cols
+    )
 
     parent_of_path = _PARENT_EXPR.format(col='path')
 
     # dirs0 = walk-emitted / synthesized dir rows; each contributes n_desc=1
     # and n_files=0 (dirs don't count as files) at its own path.
-    con.execute("""
+    con.execute(f"""
         CREATE OR REPLACE TABLE dirs0 AS
-        SELECT path, size, mtime, 1::BIGINT AS n_desc, 0::BIGINT AS n_files
+        SELECT path, size, mtime, 1::BIGINT AS n_desc, 0::BIGINT AS n_files{extra_sel}
         FROM inputs
         WHERE kind = 'dir'
     """)
@@ -88,11 +106,11 @@ def _aggregate_shared(
     # `cur` seed: all input rows with n_desc=1; n_files=1 for files, 0 for dirs.
     # Loop group-by-parent to synthesize each subsequent level's dir rows
     # (bottom-up). Stop when nothing left to promote.
-    con.execute("""
+    con.execute(f"""
         CREATE OR REPLACE TABLE level_cur AS
         SELECT path, size, mtime,
                1::BIGINT AS n_desc,
-               CASE WHEN kind = 'file' THEN 1 ELSE 0 END::BIGINT AS n_files
+               CASE WHEN kind = 'file' THEN 1 ELSE 0 END::BIGINT AS n_files{extra_sel}
         FROM inputs
     """)
     level_tables: list[str] = []
@@ -105,7 +123,7 @@ def _aggregate_shared(
                    SUM(size)::BIGINT AS size,
                    MAX(mtime)::BIGINT AS mtime,
                    SUM(n_desc)::BIGINT AS n_desc,
-                   SUM(n_files)::BIGINT AS n_files
+                   SUM(n_files)::BIGINT AS n_files{extra_sum}
             FROM level_cur
             WHERE path != ''
             GROUP BY 1
@@ -119,21 +137,32 @@ def _aggregate_shared(
         level += 1
 
     # Union all dir levels + dirs0, group by path, attach n_children.
+    base_cols = f"path, size, mtime, n_desc, n_files{extra_sel}"
     if level_tables:
         levels_union = " UNION ALL ".join(
-            f"SELECT path, size, mtime, n_desc, n_files FROM {t}" for t in level_tables
+            f"SELECT {base_cols} FROM {t}" for t in level_tables
         )
         con.execute(f"""
             CREATE OR REPLACE TABLE dirs_all AS
-            SELECT path, size, mtime, n_desc, n_files FROM dirs0
+            SELECT {base_cols} FROM dirs0
             UNION ALL
             {levels_union}
         """)
     else:
-        con.execute("""
+        con.execute(f"""
             CREATE OR REPLACE TABLE dirs_all AS
-            SELECT path, size, mtime, n_desc, n_files FROM dirs0
+            SELECT {base_cols} FROM dirs0
         """)
+
+    # Pivot sums come straight through; mt_wsum divides into mtime_mean here,
+    # inside SQL — HUGEINT would lose exactness crossing into pandas.
+    extra_out = ''.join(f', SUM(d.{c})::BIGINT AS {c}' for c in sum_cols)
+    if mean_mtime:
+        extra_out += (
+            f", CASE WHEN SUM(d.size) > 0"
+            f" THEN SUM(d.{MT_WSUM})::DOUBLE / SUM(d.size)::DOUBLE"
+            f" END AS {MTIME_MEAN}"
+        )
 
     parent_of_agg = _PARENT_EXPR.format(col='d.path')
     dirs_agg = con.execute(f"""
@@ -145,7 +174,7 @@ def _aggregate_shared(
             SUM(d.n_files)::BIGINT AS n_files,
             COALESCE(MAX(nc.n_children), 0)::BIGINT AS n_children,
             'dir' AS kind,
-            {parent_of_agg} AS parent
+            {parent_of_agg} AS parent{extra_out}
         FROM dirs_all d
         LEFT JOIN n_children_tbl nc ON d.path = nc.path
         GROUP BY d.path
@@ -158,6 +187,8 @@ def _aggregate_shared(
         dirs_agg = pd.DataFrame([{
             'path': '.', 'size': 0, 'mtime': 0, 'n_desc': 0, 'n_files': 0, 'n_children': 0,
             'kind': 'dir', 'parent': '', 'uri': scan_root,
+            **{c: 0 for c in sum_cols},
+            **({MTIME_MEAN: None} if mean_mtime else {}),
         }])
     else:
         # Pandas final normalization (find/index.py):
@@ -170,11 +201,16 @@ def _aggregate_shared(
         dirs_agg['uri'] = dirs_agg['path'].apply(lambda p: scan_root if p == '.' else f'{scan_root}/{p}')
 
     # Files: n_desc=1 (self), n_files=1 (self is a file), n_children=0.
-    files = con.execute("""
+    # Extension columns: pivot sums are the file's own contribution (already
+    # on `inputs`); mtime_mean is the file's own mtime.
+    file_extra = ''.join(f', {c}' for c in sum_cols)
+    if mean_mtime:
+        file_extra += f', mtime::DOUBLE AS {MTIME_MEAN}'
+    files = con.execute(f"""
         SELECT path, size, mtime, 'file'::VARCHAR AS kind, parent, uri,
                1::BIGINT AS n_desc,
                1::BIGINT AS n_files,
-               0::BIGINT AS n_children
+               0::BIGINT AS n_children{file_extra}
         FROM inputs
         WHERE kind = 'file'
     """).df()
@@ -209,6 +245,16 @@ def aggregate_duckdb(
     return _aggregate_shared(con, scan_root)
 
 
+def _sql_lit(v) -> str:
+    """Literal for a pivot value discovered in the data (int or string enum)."""
+    if isinstance(v, bool) or not isinstance(v, (int, str)):
+        raise ValueError(f"unsupported pivot value type {type(v).__name__}: {v!r}")
+    if isinstance(v, int):
+        return str(v)
+    escaped = v.replace("'", "''")
+    return f"'{escaped}'"
+
+
 def aggregate_listing_to_parquet(
     listing_sql: str,
     bucket: str,
@@ -217,6 +263,8 @@ def aggregate_listing_to_parquet(
     con: "duckdb.DuckDBPyConnection | None" = None,
     memory_limit: str = '8GB',
     temp_dir: str | None = None,
+    pivot_sums: tuple[str, ...] = (),
+    mean_mtime: bool = False,
 ) -> dict:
     """Out-of-core: layer-1 listing (via `listing_sql`) → layer-2 parquet on disk.
 
@@ -245,6 +293,30 @@ def aggregate_listing_to_parquet(
     canonical_name = "rtrim(regexp_replace(name, '/+', '/', 'g'), '/')"
     parent_of_name = _PARENT_EXPR.format(col='canonical')
 
+    # Extension columns (see find/agg_ext.py): per-pivot-value byte sums as
+    # file-level contributions, plus the exact HUGEINT Σ mtime·size partial.
+    from .agg_ext import MT_WSUM, check_pivot_values, pivot_col
+    sum_cols: list[str] = []
+    extra_file_cols = ''
+    for col in pivot_sums:
+        vals = check_pivot_values(col, [
+            r[0] for r in con.execute(
+                f"SELECT DISTINCT {col} FROM {listing_sql} "
+                f"WHERE bucket = '{bucket}' AND {col} IS NOT NULL ORDER BY 1"
+            ).fetchall()
+        ])
+        for v in vals:
+            name = pivot_col(col, v)
+            extra_file_cols += (
+                f", CASE WHEN {col} = {_sql_lit(v)} THEN size_bytes ELSE 0 END::BIGINT AS {name}"
+            )
+            sum_cols.append(name)
+    if mean_mtime:
+        extra_file_cols += (
+            f", (COALESCE(epoch(created), 0)::BIGINT::HUGEINT * size_bytes::HUGEINT) AS {MT_WSUM}"
+        )
+    pivot_pass = ''.join(f', {col}' for col in pivot_sums)
+
     # Build the `inputs` table without a pandas roundtrip: files first, then
     # synthesized dir rows for every unique ancestor path.
     con.execute(f"""
@@ -254,7 +326,7 @@ def aggregate_listing_to_parquet(
             SELECT
                 {canonical_name} AS canonical,
                 size_bytes,
-                created
+                created{pivot_pass}
             FROM {listing_sql}
             WHERE bucket = '{bucket}'
         )
@@ -264,7 +336,7 @@ def aggregate_listing_to_parquet(
             COALESCE(epoch(created), 0)::BIGINT AS mtime,
             'file'::VARCHAR AS kind,
             {parent_of_name} AS parent,
-            ('{scan_root}/' || canonical)::VARCHAR AS uri
+            ('{scan_root}/' || canonical)::VARCHAR AS uri{extra_file_cols}
         FROM canon
     """)
 
@@ -283,6 +355,9 @@ def aggregate_listing_to_parquet(
         )
         SELECT DISTINCT p AS path FROM anc
     """)
+    extra_dir_cols = ''.join(f', 0::BIGINT AS {c}' for c in sum_cols)
+    if mean_mtime:
+        extra_dir_cols += f', 0::HUGEINT AS {MT_WSUM}'
     con.execute(f"""
         INSERT INTO inputs
         SELECT
@@ -291,11 +366,11 @@ def aggregate_listing_to_parquet(
             0::BIGINT AS mtime,
             'dir'::VARCHAR AS kind,
             {_PARENT_EXPR.format(col='path')} AS parent,
-            CASE WHEN path = '' THEN '{scan_root}' ELSE '{scan_root}/' || path END AS uri
+            CASE WHEN path = '' THEN '{scan_root}' ELSE '{scan_root}/' || path END AS uri{extra_dir_cols}
         FROM dir_paths
     """)
 
-    df = _aggregate_shared(con, scan_root)
+    df = _aggregate_shared(con, scan_root, sum_cols=tuple(sum_cols), mean_mtime=mean_mtime)
     df.to_parquet(out_parquet, index=False)
 
     root = df[df['path'] == '.'].iloc[0] if not df[df['path'] == '.'].empty else None

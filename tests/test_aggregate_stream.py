@@ -157,7 +157,7 @@ def test_non_raw_schema_raises(tmp_path: Path):
         'timeCreated': [TS],
         'storageClass': ['STANDARD'],
     }).to_parquet(listing)
-    with pytest.raises(ValueError, match=r"raw listing schema.*use `-e duckdb`"):
+    with pytest.raises(ValueError, match=r"lacks required columns.*use `-e duckdb`"):
         aggregate_stream((str(listing),), bucket='b1', scheme='gcs', out_parquet=str(tmp_path / 'out.parquet'))
 
 
