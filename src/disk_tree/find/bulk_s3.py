@@ -118,6 +118,48 @@ class S3BulkLister:
                     storage_class=obj.get("StorageClass"),
                 )
 
+    def stream_pages(
+        self,
+        bucket: str,
+        prefix: Optional[str],
+        start: Optional[str],
+        end_hint: Optional[str],
+    ) -> "Iterable[list[BlobRow]]":
+        """Page-granular variant for adaptive listing (bulk_adaptive.PagedLister).
+
+        S3 has no server-side end cursor, so ``end_hint`` is ignored — the
+        adaptive worker enforces its (possibly shrunken) end client-side.
+        Inclusive-start compensation mirrors :meth:`stream_prefix`.
+        """
+        client = self._client()
+
+        def _row(key: str, size, lm, storage_class) -> BlobRow:
+            created = lm.isoformat().replace("+00:00", "Z") if lm else None
+            return BlobRow(name=key, size=int(size or 0), created=created, storage_class=storage_class)
+
+        if start is not None:
+            try:
+                head = client.head_object(Bucket=bucket, Key=start)
+            except client.exceptions.ClientError as e:
+                if e.response.get("Error", {}).get("Code") in ("404", "NoSuchKey"):
+                    head = None
+                else:
+                    raise
+            if head is not None:
+                yield [_row(start, head.get("ContentLength"), head.get("LastModified"), head.get("StorageClass"))]
+
+        paginator = client.get_paginator("list_objects_v2")
+        kw: dict = {"Bucket": bucket}
+        if prefix:
+            kw["Prefix"] = prefix
+        if start is not None:
+            kw["StartAfter"] = start
+        for page in paginator.paginate(**kw):
+            yield [
+                _row(o["Key"], o.get("Size"), o.get("LastModified"), o.get("StorageClass"))
+                for o in page.get("Contents", []) or []
+            ]
+
     def discover_prefixes(self, fs: "fsspec.AbstractFileSystem", root: str):
         return generic_discover(fs, root)
 

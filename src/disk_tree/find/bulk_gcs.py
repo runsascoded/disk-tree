@@ -68,6 +68,47 @@ class GcsBulkLister:
                 storage_class=blob.storage_class,
             )
 
+    def stream_pages(
+        self,
+        bucket: str,
+        prefix: Optional[str],
+        start: Optional[str],
+        end_hint: Optional[str],
+    ) -> "Iterable[list[BlobRow]]":
+        """Page-granular variant for adaptive listing (bulk_adaptive.PagedLister).
+
+        ``end_hint`` maps to GCS's native (server-side) ``end_offset``; the
+        adaptive worker still enforces its dynamically-shrunken end
+        client-side, so passing the take-time end here is purely an
+        optimization. ``start_offset`` is inclusive — no compensation needed.
+        """
+        from google.cloud import storage
+
+        local = getattr(self, "_local", None)
+        if local is None:
+            object.__setattr__(self, "_local", threading.local())
+            local = self._local
+        client = getattr(local, "client", None)
+        if client is None:
+            client = local.client = storage.Client()
+        it = client.list_blobs(
+            bucket, prefix=prefix or None, fields=BLOB_FIELDS,
+            start_offset=start, end_offset=end_hint,
+        )
+        for page in it.pages:
+            rows = []
+            for blob in page:
+                created = None
+                if blob.time_created is not None:
+                    created = blob.time_created.isoformat().replace("+00:00", "Z")
+                rows.append(BlobRow(
+                    name=blob.name,
+                    size=int(blob.size or 0),
+                    created=created,
+                    storage_class=blob.storage_class,
+                ))
+            yield rows
+
     def discover_prefixes(self, fs: "fsspec.AbstractFileSystem", root: str):
         # GCS uses fsspec (gcsfs) semantics; the generic walk already handles
         # its self-dir placeholder quirk (that's what motivated the quirk in

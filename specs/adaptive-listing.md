@@ -46,3 +46,38 @@ RTT is the other factor in the floor. Laptop→DC ≈ 60ms; VM-in-the-same-DC �
 - Re-list `marin-us-east-02a` (92.7M objects) from a laptop in ≤15 min with 32 workers and **no** `-W` input (vs hours today); byte/count totals match the 2026-08-14 baseline listing modulo churn.
 - GCS: re-list a large marin bucket with no weights; verify identical rows vs the weighted-shard path (order-insensitive).
 - `_SUCCESS.json` boundaries from run 1 accepted as warm start by run 2; run 2 splits ≤10% as often.
+
+## Status (implemented 2026-08-15)
+
+- [x] Engine — `find/bulk_adaptive.py`; `bulk-list -a/--adaptive` (+ `--warm-from`) in the CLI.
+      Architecture note: no coordinator — workers **self-donate**: a worker ≥2 pages into its
+      range that sees idle peers (shared counter) bisects its own remaining range and enqueues
+      the upper half. Donation gate re-arms per split (else one worker floods the queue with
+      slivers). Termination via an `outstanding`-ranges counter (decremented in a `finally`,
+      so a range dying mid-stream can't hang the fleet).
+- [x] Page-level primitive `stream_pages` on GCS + S3/R2 listers (GCS `end_offset` passed as
+      a server-side hint; dynamic post-split ends enforced client-side everywhere). S3's
+      exclusive `StartAfter` gets the HEAD-compensation so `[start, end)` stays inclusive-start.
+- [x] Split-point selection — two findings the spec's "byte-wise interpolation" glossed over:
+      1. **Unbounded ranges**: first-divergence bisection of `[last, ∞)` under any generic cap
+         splits at position 0 and lands past the entire keyspace when keys share a hot prefix
+         (78%-`datakit/` case!) — recipient gets an empty range and the hot mass stays serial.
+         Fix (`open_split`): bisect at the position where the range's *observed* keys
+         (first-seen vs latest) diverge, capped by the character class there (digits→'9',
+         lowercase→'z'). Self-corrects as `first`/`last` evolve.
+      2. **Bounded ranges** with adjacent bounds descend into `a`'s branch — descent positions
+         also need class caps or the midpoint goes astral (empty recipient). All-'9' tails
+         degrade to a valid tiny sliver rather than None.
+- [x] `_SUCCESS.json` records final `[start, end, rows]` ranges; `--warm-from` seeds the next
+      run (`load_warm_ranges`).
+- [x] Shards are piecewise-sorted (ranges interleave) — consumed by `import -e stream`'s
+      run-splitting merge (`d09c5fb`); locked by `test_stream_import_over_adaptive_shards`.
+- [x] Tests (24, `tests/test_bulk_adaptive.py`) against an in-memory `FakeLister`
+      (`find/bulk_fake.py`, also the executable PagedLister spec): exact multiset identity
+      across uniform/skewed/unicode/placeholder key sets, real-multiprocessing smoke, warm
+      start, prefix mode, reuse short-circuit, midpoint/open_split units. Simulated-RTT
+      saturation: 2.7s → 1.15s at 100-page toy scale (ramp/endgame-dominated; saturated
+      midgame dominates at 92k-page real scale).
+- [ ] Real-data acceptance (CW 92.7M no-weights ≤15 min; GCS parity run; warm-start
+      split-count check) — mgu owns
+- [ ] In-DC placement doctrine (part 2 of the spec) — operational, no code
