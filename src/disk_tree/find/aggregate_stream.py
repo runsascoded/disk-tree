@@ -480,9 +480,19 @@ def aggregate_stream(
             _con.execute(f"SET memory_limit = '{memory_limit}'")
         if temp_dir:
             _con.execute(f"SET temp_directory = '{temp_dir}'")
+        # Canonical column order (matches the pandas concat / duckdb tail:
+        # extras between `parent` and `uri`) — the pre-output's internal order
+        # is a writer convenience; the published layer-2 must be column-order
+        # identical across engines so file-level diffs and positional set ops
+        # (EXCEPT) work.
+        canonical_cols = [
+            'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
+            *pivot_names, *([MTIME_MEAN] if mean_mtime else []),
+            'uri', 'depth',
+        ]
         _con.execute(f"""
             COPY (
-                SELECT {', '.join(out_cols)}
+                SELECT {', '.join(canonical_cols)}
                 FROM read_parquet('{tmp_parquet}')
                 -- kind tiebreaker: when a key is both a file and a dir name,
                 -- the other engines emit the dir row first (stable sort over

@@ -65,6 +65,15 @@ def test_three_engine_identity(tmp_path: Path):
     pd.testing.assert_frame_equal(got_pandas, got_duckdb)
     pd.testing.assert_frame_equal(got_pandas, got_stream)
 
+    # Column ORDER is contractual too (file-level diffs, positional set ops
+    # like EXCEPT) — `_normalize` reindexes to COLS, hiding order skew, so
+    # lock the raw parquet column lists explicitly. Caught on the CW 92.7M
+    # acceptance: stream emitted (path,size,mtime,kind,parent,uri,n_*,depth).
+    assert list(pd.read_parquet(str(tmp_path / 'stream-out.parquet')).columns) == \
+        list(pd.read_parquet(ooc).columns) == [
+        'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent', 'uri', 'depth',
+    ]
+
     root = got_stream[got_stream.path == '.'].iloc[0]
     assert stats['root_size'] == int(root['size'])
     assert stats['root_n_desc'] == int(root['n_desc'])
