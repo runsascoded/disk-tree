@@ -49,7 +49,6 @@ def import_cmd(
     import duckdb
     from disk_tree.find.import_listing import list_buckets
     from disk_tree.sqla.db import init
-    from disk_tree.sqla.model import Scan
     from disk_tree.storage import get_backend
 
     db = init()
@@ -67,58 +66,97 @@ def import_cmd(
     storage = get_backend()
     for bucket in buckets:
         err(f"importing {bucket} (engine={engine})…")
-        scan_path = f'{scheme}://{bucket}'
+        import_bucket(
+            db=db, storage=storage, con=con,
+            engine=engine, listings=listings, bucket=bucket, scheme=scheme,
+            snap_time=snap_time, memory_limit=memory_limit, temp_dir=temp_dir,
+            pivot_sums=pivot_sums, mean_mtime=mean_mtime,
+        )
 
-        if engine == 'pandas':
-            from disk_tree.find.import_listing import import_listing
-            df = import_listing(
-                listings, bucket=bucket, scheme=scheme, con=con,
-                pivot_sums=pivot_sums, mean_mtime=mean_mtime,
-            ).df
+
+def import_bucket(
+    db,
+    storage,
+    con,
+    engine: str,
+    listings: tuple[str, ...],
+    bucket: str,
+    scheme: str,
+    snap_time: datetime,
+    memory_limit: str = '8GB',
+    temp_dir: str | None = None,
+    pivot_sums: tuple[str, ...] = (),
+    mean_mtime: bool = False,
+    replace=None,
+):
+    """Aggregate one bucket's listing → blob + Scan row.
+
+    `replace`: an existing Scan row to update in place (same path+time)
+    instead of inserting a new one — used by `disk-tree pull --force`.
+    Returns the Scan.
+    """
+    from disk_tree.sqla.model import Scan
+
+    scan_path = f'{scheme}://{bucket}'
+
+    if engine == 'pandas':
+        from disk_tree.find.import_listing import import_listing
+        df = import_listing(
+            listings, bucket=bucket, scheme=scheme, con=con,
+            pivot_sums=pivot_sums, mean_mtime=mean_mtime,
+        ).df
+        blob_ref = storage.save(df, scan_path)
+        root_size = _root_stat(df, 'size')
+        root_n_children = _root_stat(df, 'n_children')
+        root_n_desc = _root_stat(df, 'n_desc')
+        root_mtime = _root_stat(df, 'mtime')
+        n_rows = len(df)
+    else:
+        # Aggregate straight to a parquet in a temp location, then have the storage
+        # backend adopt it — mirrors what a `save-from-file` API would do if we had one.
+        with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as fh:
+            out_parquet = fh.name
+        try:
+            if engine == 'duckdb':
+                from disk_tree.find.aggregate_duckdb import aggregate_listing_to_parquet
+                from disk_tree.listing import prepare_listing
+                src = prepare_listing(con, listings)
+                stats = aggregate_listing_to_parquet(
+                    src, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
+                    con=con, memory_limit=memory_limit, temp_dir=temp_dir,
+                    pivot_sums=pivot_sums, mean_mtime=mean_mtime,
+                )
+            else:  # stream
+                from disk_tree.find.aggregate_stream import aggregate_stream
+                stats = aggregate_stream(
+                    listings, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
+                    con=con, memory_limit=memory_limit, temp_dir=temp_dir,
+                    pivot_sums=pivot_sums, mean_mtime=mean_mtime,
+                )
+            # Storage backend expects a DataFrame today — a follow-up wire could avoid
+            # this round-trip. For 588M-row scale this materialization is the last
+            # in-memory step before disk; if it's a problem we'll chunk it in the
+            # save path (see storage/hybrid.py's chunking pattern).
+            import pandas as pd
+            df = pd.read_parquet(out_parquet)
             blob_ref = storage.save(df, scan_path)
-            root_size = _root_stat(df, 'size')
-            root_n_children = _root_stat(df, 'n_children')
-            root_n_desc = _root_stat(df, 'n_desc')
-            root_mtime = _root_stat(df, 'mtime')
-            n_rows = len(df)
-        else:
-            # Aggregate straight to a parquet in a temp location, then have the storage
-            # backend adopt it — mirrors what a `save-from-file` API would do if we had one.
-            with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as fh:
-                out_parquet = fh.name
-            try:
-                if engine == 'duckdb':
-                    from disk_tree.find.aggregate_duckdb import aggregate_listing_to_parquet
-                    from disk_tree.listing import prepare_listing
-                    src = prepare_listing(con, listings)
-                    stats = aggregate_listing_to_parquet(
-                        src, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
-                        con=con, memory_limit=memory_limit, temp_dir=temp_dir,
-                        pivot_sums=pivot_sums, mean_mtime=mean_mtime,
-                    )
-                else:  # stream
-                    from disk_tree.find.aggregate_stream import aggregate_stream
-                    stats = aggregate_stream(
-                        listings, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
-                        con=con, memory_limit=memory_limit, temp_dir=temp_dir,
-                        pivot_sums=pivot_sums, mean_mtime=mean_mtime,
-                    )
-                # Storage backend expects a DataFrame today — a follow-up wire could avoid
-                # this round-trip. For 588M-row scale this materialization is the last
-                # in-memory step before disk; if it's a problem we'll chunk it in the
-                # save path (see storage/hybrid.py's chunking pattern).
-                import pandas as pd
-                df = pd.read_parquet(out_parquet)
-                blob_ref = storage.save(df, scan_path)
-                root_size = stats['root_size']
-                root_n_children = stats['root_n_children']
-                root_n_desc = stats['root_n_desc']
-                root_mtime = stats['root_mtime']
-                n_rows = stats['rows']
-            finally:
-                if os.path.exists(out_parquet):
-                    os.remove(out_parquet)
+            root_size = stats['root_size']
+            root_n_children = stats['root_n_children']
+            root_n_desc = stats['root_n_desc']
+            root_mtime = stats['root_mtime']
+            n_rows = stats['rows']
+        finally:
+            if os.path.exists(out_parquet):
+                os.remove(out_parquet)
 
+    if replace is not None:
+        scan = replace
+        scan.blob = blob_ref
+        scan.size = root_size
+        scan.n_children = root_n_children
+        scan.n_desc = root_n_desc
+        scan.mtime = root_mtime
+    else:
         scan = Scan(
             path=scan_path,
             time=snap_time,
@@ -131,8 +169,9 @@ def import_cmd(
             mtime=root_mtime,
         )
         db.session.add(scan)
-        db.session.commit()
-        err(f"  {scan_path}: {n_rows:,} rows @ {snap_time.isoformat()} → {blob_ref}")
+    db.session.commit()
+    err(f"  {scan_path}: {n_rows:,} rows @ {snap_time.isoformat()} → {blob_ref}")
+    return scan
 
 
 def _root_stat(df, col: str) -> int | None:

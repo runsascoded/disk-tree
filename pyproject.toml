@@ -19,6 +19,7 @@ dependencies = [
     "plotly",
     "pyarrow",
     "python-dateutil",
+    "pyyaml>=6.0.3",
     "sqlalchemy",
     "tqdm",
     "utz",

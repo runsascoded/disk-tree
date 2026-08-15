@@ -60,6 +60,11 @@ disk-tree index [URL]     # Scan directory or s3:// bucket
 
 disk-tree scans           # List cached scans (JSON)
 
+disk-tree fetch [BUCKET…] # Bulk-list configured buckets → dated raw-listing shards
+disk-tree pull [BUCKET…]  # fetch + import as dated scans
+disk-tree sync            # pull all configured buckets (cron entrypoint)
+                          # Config: ~/.config/disk-tree/buckets.yml (see specs/personal-sync.md)
+
 disk-tree migrate         # Backfill SQLite stats from parquet files
 disk-tree migrate-depth   # Add depth column to existing parquets
 
