@@ -133,13 +133,11 @@ def import_bucket(
                     con=con, memory_limit=memory_limit, temp_dir=temp_dir,
                     pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                 )
-            # Storage backend expects a DataFrame today — a follow-up wire could avoid
-            # this round-trip. For 588M-row scale this materialization is the last
-            # in-memory step before disk; if it's a problem we'll chunk it in the
-            # save path (see storage/hybrid.py's chunking pattern).
-            import pandas as pd
-            df = pd.read_parquet(out_parquet)
-            blob_ref = storage.save(df, scan_path)
+            # Hand the file itself to the storage backend — reading a
+            # 92.7M-object bucket's layer-2 (185M rows) back into pandas
+            # here OOM-killed a 64GB node after the aggregation had
+            # already succeeded.
+            blob_ref = storage.adopt_parquet(out_parquet, scan_path)
             root_size = stats['root_size']
             root_n_children = stats['root_n_children']
             root_n_desc = stats['root_n_desc']

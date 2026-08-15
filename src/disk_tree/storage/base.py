@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from os.path import exists, join
+from shutil import move
+from uuid import uuid4
 
 import pandas as pd
 
@@ -44,6 +47,25 @@ class StorageBackend(ABC):
             A blob reference string (file path, table name, etc.) to store in Scan.blob
         """
         pass
+
+    def adopt_parquet(self, parquet_path: str, scan_path: str) -> str:
+        """Adopt an already-written canonical layer-2 parquet as a scan blob,
+        without reading it into memory (a 185M-row layer-2 doesn't fit in RAM
+        as a DataFrame — the `import -e duckdb` path writes parquet directly
+        and hands the file over here).
+
+        Default implementation covers file-backed backends (anything with a
+        `scans_dir`); table-backed backends must override or don't support it.
+        """
+        scans_dir = getattr(self, 'scans_dir', None)
+        if scans_dir is None:
+            raise NotImplementedError(f"{self.name} backend cannot adopt parquet files")
+        blob_ref = f'{uuid4()}.parquet'
+        blob_path = join(scans_dir, blob_ref)
+        if exists(blob_path):
+            raise RuntimeError(f"Blob path already exists: {blob_path}")
+        move(parquet_path, blob_path)
+        return blob_ref
 
     @abstractmethod
     def load(
