@@ -81,8 +81,9 @@ class S3BulkLister:
 
         # Compensate for S3's exclusive StartAfter: HEAD `start` and yield it
         # first if present. Reservoir-quantile boundaries are real names, so
-        # this typically hits.
-        if start is not None:
+        # this typically hits. `''` (keyspace origin) is not a real key — S3
+        # keys have min length 1 — so it needs neither HEAD nor StartAfter.
+        if start:
             try:
                 head = client.head_object(Bucket=bucket, Key=start)
             except client.exceptions.ClientError as e:
@@ -102,7 +103,7 @@ class S3BulkLister:
 
         paginator = client.get_paginator("list_objects_v2")
         kw: dict = {"Bucket": bucket, "Prefix": prefix}
-        if start is not None:
+        if start:
             kw["StartAfter"] = start
         for page in paginator.paginate(**kw):
             for obj in page.get("Contents", []) or []:
@@ -137,7 +138,8 @@ class S3BulkLister:
             created = lm.isoformat().replace("+00:00", "Z") if lm else None
             return BlobRow(name=key, size=int(size or 0), created=created, storage_class=storage_class)
 
-        if start is not None:
+        # `''` (keyspace origin) is not a real key — no HEAD, no StartAfter.
+        if start:
             try:
                 head = client.head_object(Bucket=bucket, Key=start)
             except client.exceptions.ClientError as e:
@@ -152,7 +154,7 @@ class S3BulkLister:
         kw: dict = {"Bucket": bucket}
         if prefix:
             kw["Prefix"] = prefix
-        if start is not None:
+        if start:
             kw["StartAfter"] = start
         for page in paginator.paginate(**kw):
             yield [
