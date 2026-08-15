@@ -1,13 +1,16 @@
 """`disk-tree import` — ingest pre-made object listings.
 
-Two aggregation engines:
+Three aggregation engines:
 
 - `--engine pandas` (default) — fine for laptop-scale inputs or subsampled
   cloud listings; the whole layer-1 frame + intermediates live in RAM.
 - `--engine duckdb` — out-of-core, spills to `--temp-dir` under
-  `--memory-limit`. The multi-PB path (spec Item B).
+  `--memory-limit`. Handles unsorted / mixed-schema listings.
+- `--engine stream` — O(depth) streaming rollup over sorted raw listings
+  (bulk-list output); KBs of working state, one bounded final sort. The
+  100M+-row path (spec: streaming-aggregation.md).
 
-Both produce byte-identical canonical layer-2 output.
+All produce byte-identical canonical layer-2 output.
 """
 
 import os
@@ -22,7 +25,7 @@ from disk_tree.cli.base import cli
 
 
 @cli.command('import')
-@option('-e', '--engine', type=Choice(['pandas', 'duckdb']), default='pandas', help='Aggregation engine: `pandas` (in-memory; small) or `duckdb` (out-of-core; big)')
+@option('-e', '--engine', type=Choice(['pandas', 'duckdb', 'stream']), default='pandas', help='Aggregation engine: `pandas` (in-memory; small), `duckdb` (out-of-core; big), or `stream` (O(depth) over sorted listings; biggest)')
 @option('-l', '--listing', 'listings', required=True, multiple=True, help='Listing parquet glob(s) — raw / SII / S3-Inventory; repeatable, earlier sources win per bucket')
 @option('-b', '--bucket', 'buckets', multiple=True, help='Bucket to import as one scan; repeatable. Default: every distinct bucket in the listings')
 @option('-M', '--memory-limit', default='8GB', help='DuckDB memory cap (duckdb engine only). Excess spills to `--temp-dir`.')
@@ -72,18 +75,25 @@ def import_cmd(
             root_mtime = _root_stat(df, 'mtime')
             n_rows = len(df)
         else:
-            from disk_tree.find.aggregate_duckdb import aggregate_listing_to_parquet
-            from disk_tree.listing import prepare_listing
-            src = prepare_listing(con, listings)
             # Aggregate straight to a parquet in a temp location, then have the storage
             # backend adopt it — mirrors what a `save-from-file` API would do if we had one.
             with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as fh:
                 out_parquet = fh.name
             try:
-                stats = aggregate_listing_to_parquet(
-                    src, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
-                    con=con, memory_limit=memory_limit, temp_dir=temp_dir,
-                )
+                if engine == 'duckdb':
+                    from disk_tree.find.aggregate_duckdb import aggregate_listing_to_parquet
+                    from disk_tree.listing import prepare_listing
+                    src = prepare_listing(con, listings)
+                    stats = aggregate_listing_to_parquet(
+                        src, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
+                        con=con, memory_limit=memory_limit, temp_dir=temp_dir,
+                    )
+                else:  # stream
+                    from disk_tree.find.aggregate_stream import aggregate_stream
+                    stats = aggregate_stream(
+                        listings, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
+                        con=con, memory_limit=memory_limit, temp_dir=temp_dir,
+                    )
                 # Storage backend expects a DataFrame today — a follow-up wire could avoid
                 # this round-trip. For 588M-row scale this materialization is the last
                 # in-memory step before disk; if it's a problem we'll chunk it in the

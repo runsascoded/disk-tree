@@ -73,6 +73,14 @@ Deliberately thin: parse + normalize + store; reconciliation/policy (gross-vs-ne
 discounts, rebill markups) is consumer logic. Ship after plane 1; the marin need today is
 served by manual CSV downloads.
 
+## Compute placement (consumer note, learned 2026-08-14)
+
+Bulk log processing must run **in the provider's cloud** (for marin: a GCE VM or the GCP
+Batch job itself, us-central1). Volumes are ~10 GB/hr of CSV fleet-wide (~72 GB for the
+first 7 delivered hours) — cross-cloud egress (e.g. to an AWS node) costs ~$0.12/GB and adds
+WAN latency; the one-time AWS `mgu` smoke was fine but is not the pattern. This differs from
+the *listing* plane, whose API-call traffic is negligible-egress and ran fine from AWS.
+
 ## Non-goals
 
 - Real-time streaming (hourly/daily batch is the regime)
