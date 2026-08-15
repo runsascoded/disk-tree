@@ -235,6 +235,30 @@ def test_interleaved_buckets_multi_run_row_groups(tmp_path: Path):
         assert stats['files'] == n_files
 
 
+def test_lazy_merge_bounds_open_sources(tmp_path: Path):
+    """`heapq.merge` primed every run source up front — at fleet scale
+    (thousands of bin-packed runs) that's EMFILE plus a row-group read buffer
+    per run. The lazy merge opens a source only when the merge horizon reaches
+    its first key and drops it at exhaustion, bounding concurrently-open
+    sources by the runs' range-overlap depth. Here: 4 runs across 2 shards,
+    pairwise overlapping with depth 2 → high-water must be 2, not 4."""
+    a = [(f'{i:03d}.txt', i + 1) for i in [*range(20, 30, 2), *range(0, 10, 2)]]
+    b = [(f'{i:03d}.txt', i + 1) for i in [*range(21, 31, 2), *range(1, 11, 2)]]
+    la = _write_listing(tmp_path / 'a.parquet', a, sort=False)
+    lb = _write_listing(tmp_path / 'b.parquet', b, sort=False)
+
+    got_stream, stats = _stream((f'{tmp_path}/[ab].parquet',), tmp_path)
+    assert stats['max_open_sources'] == 2
+
+    con = duckdb.connect()
+    ooc = str(tmp_path / 'ooc.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (f'{tmp_path}/[ab].parquet',)),
+        bucket='b1', scheme='gcs', out_parquet=ooc, con=con,
+    )
+    pd.testing.assert_frame_equal(got_stream, _normalize(pd.read_parquet(ooc)))
+
+
 def test_essentially_unsorted_raises(tmp_path: Path, monkeypatch):
     """The run-count guard: input whose runs explode (≈ every row its own run)
     gets the clear duckdb hint instead of a degenerate 1-row-per-source merge."""

@@ -28,7 +28,6 @@ source, so the stack only ever sees globally canonical-sorted rows.
 
 from __future__ import annotations
 
-import heapq
 import re
 import sys
 from datetime import datetime
@@ -105,6 +104,48 @@ def _dirty_mask(names):
 
 
 _MAX_RUNS = 100_000
+
+
+def _merge_runs(run_srcs: list[tuple[str, Iterator[tuple]]], hw: dict):
+    """K-way merge of sorted sources, opening each only when the merge horizon
+    reaches its first key (known from pass-1) and dropping it at exhaustion.
+
+    `run_srcs` is [(first_key, row_iter)] sorted by first_key. Sources are
+    generators that open their parquet reader on first pull — so concurrently
+    open files / read buffers stay O(max range overlap), not O(total runs).
+    `heapq.merge` by contrast primes every source up front: a fleet-scale
+    bin-packed listing (thousands of runs) blows EMFILE and holds a row-group
+    buffer per run (observed: 6 parallel imports all dead at `Too many open
+    files`, ~20GB RSS each within minutes).
+
+    `hw['max_open']` records the concurrently-open high-water mark.
+    """
+    from heapq import heappush, heappop
+    h: list[tuple[str, int, tuple, Iterator[tuple]]] = []
+    seq = 0
+    i = 0
+    n = len(run_srcs)
+    n_open = 0
+    while i < n or h:
+        # Open every pending source whose range may contain the next key.
+        while i < n and (not h or run_srcs[i][0] <= h[0][0]):
+            src = run_srcs[i][1]
+            i += 1
+            row = next(src, None)
+            if row is not None:
+                heappush(h, (row[0], seq, row, src))
+                seq += 1
+                n_open += 1
+                if n_open > hw['max_open']:
+                    hw['max_open'] = n_open
+        _, _, row, src = heappop(h)
+        yield row
+        nxt = next(src, None)
+        if nxt is None:
+            n_open -= 1
+        else:
+            heappush(h, (nxt[0], seq, nxt, src))
+            seq += 1
 
 
 def _scan_names(
@@ -451,12 +492,17 @@ def aggregate_stream(
     disjoint = not dirty and all(
         run_infos[i][0] > run_infos[i - 1][1] for i in range(1, len(run_infos))
     )
+    hw = {'max_open': 0}
     if disjoint:
         from itertools import chain
         merged = chain.from_iterable(sources)
     else:
-        merged = heapq.merge(*sources, dirty, key=itemgetter(0))
-    _stage(f"merge+stream: {len(sources)} source(s) ({'disjoint, concatenating' if disjoint else 'heap merge'})")
+        run_srcs = [(info[0], src) for info, src in zip(run_infos, sources)]
+        if dirty:
+            run_srcs.append((dirty[0][0], iter(dirty)))
+            run_srcs.sort(key=itemgetter(0))
+        merged = _merge_runs(run_srcs, hw)
+    _stage(f"merge+stream: {len(sources)} source(s) ({'disjoint, concatenating' if disjoint else 'lazy-open merge'})")
 
     fd, tmp_parquet = tempfile.mkstemp(suffix='.parquet', dir=os.path.dirname(out_parquet) or None)
     os.close(fd)
@@ -563,7 +609,10 @@ def aggregate_stream(
             'root_mtime': root.mtime,
         }
         writer.close()
-        _stage(f"streamed {writer.n_rows:,} rows ({n_files_total:,} files); final sort")
+        _stage(
+            f"streamed {writer.n_rows:,} rows ({n_files_total:,} files, "
+            f"max {hw['max_open']} source(s) open); final sort"
+        )
 
         # ---- final bounded sort: restore the (depth, path) contract ----
         import duckdb as _duckdb
@@ -600,5 +649,6 @@ def aggregate_stream(
     return {
         'rows': writer.n_rows,
         'files': n_files_total,
+        'max_open_sources': hw['max_open'],
         **root_stats,
     }
