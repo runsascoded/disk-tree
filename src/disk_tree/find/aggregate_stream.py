@@ -94,32 +94,67 @@ def _dirty_mask(names):
     return pc.or_(pc.match_substring(names, '//'), pc.ends_with(names, pattern='/'))
 
 
+_MAX_RUNS = 100_000
+
+
 def _scan_names(
     shards: list[str],
     bucket: str,
     pivot_sums: tuple[str, ...] = (),
-) -> tuple[int, set[str], list[list]]:
+) -> tuple[int, set[str], list[list], dict[str, list[int]]]:
     """Pass 1: names scan. Returns (total rows for bucket, shards with dirty
-    keys, sorted distinct non-null values per pivot column)."""
+    keys, sorted distinct non-null values per pivot column, sorted-run start
+    ordinals per shard).
+
+    Runs: `bulk-list` bin-packs multiple non-contiguous key ranges into each
+    shard (weight balancing), so a shard is *piecewise* sorted — a
+    concatenation of internally-sorted runs. Each run becomes its own k-way
+    merge source downstream. Ordinals are bucket-filtered row indices,
+    matching `_shard_rows`' accounting."""
+    import numpy as np
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
     n_rows = 0
     dirty_shards: set[str] = set()
     distinct: list[set] = [set() for _ in pivot_sums]
+    runs: dict[str, list[int]] = {}
+    total_runs = 0
     for shard in shards:
         pf = pq.ParquetFile(shard)
+        ord0 = 0
+        prev_last: str | None = None
+        starts: list[int] = []
         for batch in pf.iter_batches(columns=['bucket', 'name', *pivot_sums]):
             mask = pc.equal(batch.column('bucket'), bucket)
             names = batch.column('name').filter(mask)
-            if len(names) == 0:
+            n = len(names)
+            if n == 0:
                 continue
-            n_rows += len(names)
+            n_rows += n
+            if not starts:
+                starts.append(0)
+            if prev_last is not None and names[0].as_py() < prev_last:
+                starts.append(ord0)
+            if n > 1:
+                ge = pc.greater_equal(names.slice(1), names.slice(0, n - 1))
+                for idx in np.nonzero(~ge.to_numpy(zero_copy_only=False))[0]:
+                    starts.append(ord0 + int(idx) + 1)
+            prev_last = names[n - 1].as_py()
+            ord0 += n
             if pc.any(_dirty_mask(names)).as_py():
                 dirty_shards.add(shard)
             for i, col in enumerate(pivot_sums):
                 vals = pc.unique(pc.drop_null(batch.column(col).filter(mask)))
                 distinct[i].update(vals.to_pylist())
-    return n_rows, dirty_shards, [sorted(s) for s in distinct]
+        if starts:
+            runs[shard] = starts
+            total_runs += len(starts)
+        if total_runs > _MAX_RUNS:
+            raise ValueError(
+                f"more than {_MAX_RUNS:,} sorted runs across listing shards — "
+                f"input is essentially unsorted; use `-e duckdb`"
+            )
+    return n_rows, dirty_shards, [sorted(s) for s in distinct], runs
 
 
 def _collect_dirty(
@@ -163,9 +198,13 @@ def _shard_rows(
     shard: str,
     bucket: str,
     pivot_sums: tuple[str, ...] = (),
+    start: int = 0,
+    stop: int | None = None,
 ) -> Iterator[tuple]:
-    """Clean rows of one shard as (name, size, mtime, *pivot_values),
-    verifying the shard is sorted by raw key as it goes."""
+    """Clean rows of one sorted run of a shard as (name, size, mtime,
+    *pivot_values). `[start, stop)` are bucket-filtered row ordinals from
+    `_scan_names`' run detection; the slice is verified sorted as it goes
+    (a violation means the two passes disagreed — a bug, not bad input)."""
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
     pf = pq.ParquetFile(shard)
@@ -174,38 +213,44 @@ def _shard_rows(
     if has_created:
         cols.append('created')
     prev: str | None = None
+    ord0 = 0
     for batch in pf.iter_batches(columns=cols):
         mask = pc.equal(batch.column('bucket'), bucket)
         names_arr = batch.column('name').filter(mask)
         n = len(names_arr)
         if n == 0:
             continue
-        # Sortedness: vectorized within the batch, plus the batch boundary.
-        if n > 1 and not pc.all(
-            pc.greater_equal(names_arr.slice(1), names_arr.slice(0, n - 1))
-        ).as_py():
-            raise ValueError(
-                f"listing shard {shard!r} is not sorted by key — "
-                f"the stream engine requires sorted shards; use `-e duckdb`"
+        lo = max(start - ord0, 0)
+        hi = n if stop is None else min(stop - ord0, n)
+        ord0 += n
+        if lo >= hi:
+            if stop is not None and ord0 > stop:
+                break
+            continue
+        names_sl = names_arr.slice(lo, hi - lo)
+        m = len(names_sl)
+        # Sortedness within the run: vectorized within the batch slice, plus
+        # the batch boundary.
+        first = names_sl[0].as_py()
+        if (m > 1 and not pc.all(
+            pc.greater_equal(names_sl.slice(1), names_sl.slice(0, m - 1))
+        ).as_py()) or (prev is not None and first < prev):
+            raise RuntimeError(
+                f"run [{start}, {stop}) of shard {shard!r} not sorted — "
+                f"run detection and row reader disagree (bug)"
             )
-        first = names_arr[0].as_py()
-        if prev is not None and first < prev:
-            raise ValueError(
-                f"listing shard {shard!r} is not sorted by key — "
-                f"the stream engine requires sorted shards; use `-e duckdb`"
-            )
-        prev = names_arr[n - 1].as_py()
+        prev = names_sl[m - 1].as_py()
 
-        clean = pc.invert(_dirty_mask(names_arr))
-        names = names_arr.filter(clean).to_pylist()
+        clean = pc.invert(_dirty_mask(names_sl))
+        names = names_sl.filter(clean).to_pylist()
         if not names:
             continue
-        sizes = pc.fill_null(batch.column('size_bytes'), 0).filter(mask).filter(clean).to_pylist()
+        sizes = pc.fill_null(batch.column('size_bytes'), 0).filter(mask).slice(lo, hi - lo).filter(clean).to_pylist()
         if has_created:
-            mtimes = _epoch_seconds(batch.column('created')).filter(mask).filter(clean).to_pylist()
+            mtimes = _epoch_seconds(batch.column('created')).filter(mask).slice(lo, hi - lo).filter(clean).to_pylist()
         else:
             mtimes = [0] * len(names)
-        pivots = [batch.column(c).filter(mask).filter(clean).to_pylist() for c in pivot_sums]
+        pivots = [batch.column(c).filter(mask).slice(lo, hi - lo).filter(clean).to_pylist() for c in pivot_sums]
         yield from zip(names, map(int, sizes), map(int, mtimes), *pivots)
 
 
@@ -281,8 +326,9 @@ def aggregate_stream(
     :func:`disk_tree.find.aggregate_duckdb.aggregate_listing_to_parquet`.
     `listings` are parquet globs in earlier-source-wins order (the first glob
     containing any rows for `bucket` is used). Requires the raw listing
-    schema (``bucket, name, size_bytes[, created]``) with shards each sorted
-    by key — bulk-list output satisfies both; for anything else, `-e duckdb`.
+    schema (``bucket, name, size_bytes[, created]``) with shards *piecewise*
+    sorted by key (bulk-list bin-packs sorted ranges into shards; each run
+    becomes a merge source) — for anything else, `-e duckdb`.
     `pivot_sums` / `mean_mtime` are the opt-in aggregation extensions — all
     monoid sums, so they stream identically (see :mod:`disk_tree.find.agg_ext`).
     """
@@ -296,6 +342,7 @@ def aggregate_stream(
     chosen: list[str] | None = None
     dirty_shards: set[str] = set()
     distinct: list[list] = []
+    runs: dict[str, list[int]] = {}
     for listing_glob in listings:
         shards = _expand_shards(listing_glob)
         bad = [s for s in shards if not _check_schema(s, required)]
@@ -304,7 +351,7 @@ def aggregate_stream(
                 f"shard {bad[0]!r} lacks required columns {sorted(required)} — "
                 f"the stream engine only reads raw/bulk-list listings; use `-e duckdb`"
             )
-        n_rows, dirty_shards, distinct = _scan_names(shards, bucket, pivot_sums)
+        n_rows, dirty_shards, distinct, runs = _scan_names(shards, bucket, pivot_sums)
         if n_rows > 0:
             chosen = shards
             break
@@ -325,11 +372,16 @@ def aggregate_stream(
     out_cols = [*_COLS, *pivot_names, *([MTIME_MEAN] if mean_mtime else [])]
 
     scan_root = f'{scheme}://{bucket}'
-    merged = heapq.merge(
-        *(_shard_rows(s, bucket, pivot_sums) for s in chosen),
-        dirty,
-        key=itemgetter(0),
-    )
+    # One merge source per sorted run (bin-packed shards are piecewise sorted).
+    sources = []
+    for s in chosen:
+        starts = runs.get(s)
+        if not starts:
+            continue
+        bounds: list[int | None] = [*starts, None]
+        for a, b in zip(bounds, bounds[1:]):
+            sources.append(_shard_rows(s, bucket, pivot_sums, start=a, stop=b))
+    merged = heapq.merge(*sources, dirty, key=itemgetter(0))
 
     fd, tmp_parquet = tempfile.mkstemp(suffix='.parquet', dir=os.path.dirname(out_parquet) or None)
     os.close(fd)

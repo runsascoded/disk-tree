@@ -131,13 +131,38 @@ def test_interleaved_shards(tmp_path: Path):
 
 # ---------- Error paths ----------
 
-def test_unsorted_shard_raises(tmp_path: Path):
+def test_piecewise_sorted_shard(tmp_path: Path):
+    """bulk-list bin-packs multiple sorted key ranges into one shard, so shards
+    are piecewise sorted: each maximal sorted run becomes its own merge source.
+    An out-of-order shard must aggregate identically to the duckdb engine."""
+    rows = [('z/a.txt', 1), ('z/b.txt', 2), ('a/x.txt', 3), ('a/y.txt', 4), ('m.txt', 5)]
+    listing = _write_listing(tmp_path / 'l.parquet', rows, sort=False)
+
+    got_stream, stats = _stream((listing,), tmp_path)
+
+    con = duckdb.connect()
+    ooc = str(tmp_path / 'ooc.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (listing,)),
+        bucket='b1', scheme='gcs', out_parquet=ooc, con=con,
+    )
+    got_duckdb = _normalize(pd.read_parquet(ooc))
+
+    pd.testing.assert_frame_equal(got_stream, got_duckdb)
+    assert stats['files'] == 5
+
+
+def test_essentially_unsorted_raises(tmp_path: Path, monkeypatch):
+    """The run-count guard: input whose runs explode (≈ every row its own run)
+    gets the clear duckdb hint instead of a degenerate 1-row-per-source merge."""
+    import disk_tree.find.aggregate_stream as mod
+    monkeypatch.setattr(mod, '_MAX_RUNS', 2)
     listing = _write_listing(
         tmp_path / 'l.parquet',
-        [('z.txt', 1), ('a.txt', 2)],  # deliberately out of order
+        [('z.txt', 1), ('y.txt', 2), ('x.txt', 3), ('w.txt', 4)],  # strictly descending
         sort=False,
     )
-    with pytest.raises(ValueError, match=r"not sorted by key.*use `-e duckdb`"):
+    with pytest.raises(ValueError, match=r"sorted runs across listing shards.*use `-e duckdb`"):
         aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=str(tmp_path / 'out.parquet'))
 
 
