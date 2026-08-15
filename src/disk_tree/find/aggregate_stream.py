@@ -406,7 +406,7 @@ def aggregate_stream(
     if chosen is None:
         raise ValueError(f"no rows for bucket {bucket!r}")
     _stage(
-        f"pass-1 done: {n_rows:,} rows, {sum(map(len, runs.values())):,} run(s) "
+        f"pass-1 done: {n_rows:,} rows, {sum(len(starts) for starts, _, _ in runs.values()):,} run(s) "
         f"across {len(runs)} shard(s), {len(dirty_shards)} dirty shard(s)"
     )
 
@@ -427,10 +427,13 @@ def aggregate_stream(
 
     scan_root = f'{scheme}://{bucket}'
     # One merge source per sorted run (bin-packed shards are piecewise sorted).
-    # bulk-list runs are ranges split from one sorted keyspace, so in the
-    # common case they're globally disjoint: ordered by first key, the merge
-    # degrades to concatenation — O(1)/row instead of O(log n_runs) string
-    # compares in the heap. Any overlap (or a dirty side-stream) falls back.
+    # When runs are globally disjoint, ordered by first key the merge degrades
+    # to concatenation — O(1)/row instead of O(log n_runs) string compares in
+    # the heap. Caveat: consecutive in-order ranges within a shard coalesce
+    # into one detected run with key *gaps* inside, and other shards' ranges
+    # land in those gaps — so multi-shard bulk-list listings usually take the
+    # heap fallback; the chain engages for single-run inputs (one shard, or
+    # pre-merged listings). Any overlap or a dirty side-stream falls back.
     run_infos: list[tuple[str, str, str, int, int | None]] = []
     for s in chosen:
         entry = runs.get(s)
