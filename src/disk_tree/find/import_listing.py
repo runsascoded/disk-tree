@@ -67,7 +67,7 @@ def import_listing(
     src = prepare_listing(con, listings)
     extra_sel = ''.join(f', {c}' for c in pivot_sums)
     df = con.execute(
-        f"SELECT name, size_bytes, epoch(created)::BIGINT AS created{extra_sel} FROM {src} WHERE bucket = ? ORDER BY name",
+        f"SELECT name, size_bytes, floor(epoch(created))::BIGINT AS created{extra_sel} FROM {src} WHERE bucket = ? ORDER BY name",
         [bucket],
     ).df()
     if df.empty:

@@ -344,7 +344,7 @@ def aggregate_listing_to_parquet(
             sum_cols.append(name)
     if mean_mtime:
         extra_file_cols += (
-            f", (COALESCE(epoch(created), 0)::BIGINT::HUGEINT * size_bytes::HUGEINT) AS {MT_WSUM}"
+            f", (COALESCE(floor(epoch(created)), 0)::BIGINT::HUGEINT * size_bytes::HUGEINT) AS {MT_WSUM}"
         )
     pivot_pass = ''.join(f', {col}' for col in pivot_sums)
 
@@ -364,7 +364,10 @@ def aggregate_listing_to_parquet(
         SELECT
             canonical AS path,
             size_bytes::BIGINT AS size,
-            COALESCE(epoch(created), 0)::BIGINT AS mtime,
+            -- floor, not ::BIGINT (which rounds): epoch-seconds truncate by
+            -- convention, and the stream engine's pyarrow int-division floors —
+            -- rounding here skewed ~50% of real (sub-second) timestamps +1s
+            COALESCE(floor(epoch(created)), 0)::BIGINT AS mtime,
             'file'::VARCHAR AS kind,
             {parent_of_name} AS parent{extra_file_cols}
         FROM canon

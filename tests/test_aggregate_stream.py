@@ -140,6 +140,39 @@ def test_interleaved_shards(tmp_path: Path):
 
 # ---------- Error paths ----------
 
+def test_fractional_second_timestamps(tmp_path: Path):
+    """Sub-second `created` values must TRUNCATE to epoch seconds in every
+    engine. Bare `epoch(ts)::BIGINT` in DuckDB *rounds* — on the CW 92.7M
+    acceptance run that skewed ~50% of mtimes +1s vs the stream engine
+    (fractional parts ≥ .5). Whole-second fixtures can't see this."""
+    ts_frac = dt.datetime(2026, 7, 28, 12, 0, 0, 700_000, tzinfo=dt.timezone.utc)  # .7s
+    listing = tmp_path / 'l.parquet'
+    pd.DataFrame({
+        'bucket': ['b1', 'b1'],
+        'name': ['a.txt', 'sub/b.txt'],
+        'size_bytes': [100, 200],
+        'created': [ts_frac, ts_frac],
+        'storage_class_id': [1, 1],
+    }).to_parquet(listing)
+    expect = int(ts_frac.timestamp())  # floor: …00, not …01
+
+    got_pandas = _normalize(import_listing((str(listing),), bucket='b1', scheme='gcs').df)
+
+    con = duckdb.connect()
+    ooc = str(tmp_path / 'ooc.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (str(listing),)),
+        bucket='b1', scheme='gcs', out_parquet=ooc, con=con,
+    )
+    got_duckdb = _normalize(pd.read_parquet(ooc))
+
+    got_stream, _ = _stream((str(listing),), tmp_path)
+
+    assert sorted(got_stream[got_stream.kind == 'file'].mtime.tolist()) == [expect, expect]
+    pd.testing.assert_frame_equal(got_pandas, got_duckdb)
+    pd.testing.assert_frame_equal(got_pandas, got_stream)
+
+
 def test_piecewise_sorted_shard(tmp_path: Path):
     """bulk-list bin-packs multiple sorted key ranges into one shard, so shards
     are piecewise sorted: each maximal sorted run becomes its own merge source.

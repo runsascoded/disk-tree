@@ -75,9 +75,11 @@ def _check_schema(shard: str, required: frozenset[str]) -> bool:
 
 
 def _epoch_seconds(arr):
-    """Timestamp array → int64 epoch seconds, nulls → 0 (parity with
-    `COALESCE(epoch(created), 0)` in the DuckDB engine; sub-second listings
-    truncate rather than round — fixture timestamps are whole seconds)."""
+    """Timestamp array → int64 epoch seconds, nulls → 0. Sub-second values
+    TRUNCATE (floor) — the canonical epoch-seconds semantic; the duckdb and
+    pandas engines use `floor(epoch(created))::BIGINT` to match (bare
+    `::BIGINT` rounds, which skewed ~50% of real sub-second timestamps +1s
+    — caught by the CW 92.7M cross-engine hashsum)."""
     import pyarrow as pa
     import pyarrow.compute as pc
     t = arr.type
