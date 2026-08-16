@@ -28,7 +28,16 @@ export function sumTbYears(
   return (sizeBytes / TB) * ((nowSec - mtimeMeanSec) / SEC_PER_YEAR)
 }
 
-/** `0.123 TB·yr` — sig-fig formatting (Number() strips trailing zeros / exponent artifacts). */
+const SCORE_UNITS = ['B·yr', 'KB·yr', 'MB·yr', 'GB·yr', 'TB·yr', 'PB·yr']
+
+/**
+ * Format a TB·years score, stepping the *byte* half of the unit so real
+ * values stay readable: `1.5 TB·yr`, `123 GB·yr`, `10 MB·yr`. (Fixed TB·yr
+ * would render most directory-level scores as `1e-5 TB·yr`.)
+ */
 export function formatTbYears(v: number, sigFigs = 3): string {
-  return `${Number(v.toPrecision(sigFigs))} TB·yr`
+  if (!(v > 0)) return '0 TB·yr'
+  const byteYears = v * TB
+  const e = Math.max(0, Math.min(SCORE_UNITS.length - 1, Math.floor(Math.log10(byteYears) / 3)))
+  return `${Number((byteYears / 1000 ** e).toPrecision(sigFigs))} ${SCORE_UNITS[e]}`
 }

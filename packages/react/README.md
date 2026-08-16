@@ -10,6 +10,7 @@ Ships:
 |---|---|
 | [`<Treemap>`](#treemap) | Squarified layout, drill-on-click, pin-on-leaf tooltip, keyboard nav, fold-small "…" tiles, fullscreen, slot-based coloring/tooltip/legend/rollup. |
 | [`<TimeSeries>`](#timeseries) / [`<BytesOverTime>`](#timeseries) | Multi-series line/area chart with hover-follow crosshair. ~330 LOC total, zero deps. |
+| [`<StalenessScatter>`](#stalenessscatter) | Log-log age-vs-bytes "triage frontier": marker area ∝ a count channel, exact iso-sum-TB·year diagonals, hover/pin tooltip, click-to-drill. |
 | [`useHoverPin`](#usehoverpin) | Headless hover+pin state (single pin, touch-safe, outside-click / Esc clear). |
 | `squarify` / `foldSmall` | Pure layout primitives if you want to render the cells yourself. |
 | `divergingColor` / `divergingInk` | Red/green diverging scale for Δ views. |
@@ -114,6 +115,38 @@ import { BytesOverTime } from '@disk-tree/react'
   formatBytes={n => `${n.toLocaleString()} B`}
 />
 ```
+
+## `<StalenessScatter>`
+
+One marker per node: x = age, y = bytes, both log — so **iso-score
+diagonals are exact straight lines**, because on (years, TB) axes the
+product `x·y` *is* the sum-TB·years score (`sumTbYears`). Upper-right of
+a labeled diagonal is the delete-candidate frontier.
+
+```tsx
+import { StalenessScatter } from '@disk-tree/react'
+
+const now = Date.now() / 1000
+
+<StalenessScatter<Row>
+  nodes={children}
+  getAge={r => (r.mtime_mean == null ? null : now - r.mtime_mean)}  // seconds
+  getSize={r => r.size}                                            // bytes
+  getLabel={r => r.path}
+  getWeight={r => r.n_desc}      // marker *area* ∝ this (uniform if omitted)
+  onNodeClick={r => navigate(pathFor(r))}
+  // Optional: getColor, formatSize, formatAge, formatScore, renderTooltip,
+  // isoLines={false}, xLabel/yLabel, height.
+/>
+```
+
+Nodes lacking a positive age *and* size can't sit on log axes; they're
+counted in a footer note rather than silently dropped. Sizes default to
+SI (1 TB = 1e12 B) so the axis agrees with the score's units.
+
+The layout math is exported separately if you want to render your own
+marks: `logDomain`, `logPos`, `logTicks`, `isoScoreSegment`,
+`isoScoresForData`, `decadesBetween`, `radiusFor`.
 
 ## `useHoverPin`
 

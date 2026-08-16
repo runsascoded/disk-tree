@@ -6,6 +6,22 @@
 import type { CellStyle } from './Treemap'
 
 /**
+ * The 8-slot categorical palette every widget defaults to. Shared so a node
+ * colored slot-3 in the treemap is the same hue as its marker in the
+ * scatter — cross-widget hue identity is the whole point of a fixed palette.
+ */
+export const DEFAULT_PALETTE = [
+  'hsl(210 70% 55%)',
+  'hsl(30 80% 55%)',
+  'hsl(160 55% 45%)',
+  'hsl(350 65% 55%)',
+  'hsl(280 55% 55%)',
+  'hsl(50 75% 55%)',
+  'hsl(180 50% 45%)',
+  'hsl(120 45% 50%)',
+]
+
+/**
  * Diverging red-negative / green-positive scale for delta coloring
  * (`Δbytes`, `Δcount`). Returns an rgb-triple string, always at max
  * saturation to keep signs unambiguous; the *intensity* comes from

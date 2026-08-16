@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import { DEFAULT_PALETTE } from './colors'
 import { foldSmall, squarify } from './squarify'
 import { useHoverPin } from './useHoverPin'
 
@@ -134,16 +135,7 @@ export interface CellCtx extends CellDims {
   hasKids: boolean
 }
 
-const DEFAULT_SLOTS = [
-  'hsl(210 70% 55%)',
-  'hsl(30 80% 55%)',
-  'hsl(160 55% 45%)',
-  'hsl(350 65% 55%)',
-  'hsl(280 55% 55%)',
-  'hsl(50 75% 55%)',
-  'hsl(180 50% 45%)',
-  'hsl(120 45% 50%)',
-]
+const DEFAULT_SLOTS = DEFAULT_PALETTE
 
 const defaultFormat = (n: number) => n.toLocaleString('en-US')
 

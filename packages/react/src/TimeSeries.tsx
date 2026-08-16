@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import { DEFAULT_PALETTE } from './colors'
 
 /**
  * DIY SVG line/area chart. No Plotly, no recharts, no d3 — the whole widget
@@ -48,16 +49,7 @@ export interface TimeSeriesProps<T> {
   height?: number | string
 }
 
-const DEFAULT_COLORS = [
-  'hsl(210 70% 55%)',
-  'hsl(30 80% 55%)',
-  'hsl(160 55% 45%)',
-  'hsl(350 65% 55%)',
-  'hsl(280 55% 55%)',
-  'hsl(50 75% 55%)',
-  'hsl(180 50% 45%)',
-  'hsl(120 45% 50%)',
-]
+const DEFAULT_COLORS = DEFAULT_PALETTE
 
 const PAD = { top: 12, right: 16, bottom: 24, left: 56 }
 

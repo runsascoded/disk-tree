@@ -35,14 +35,28 @@ describe('sumTbYears', () => {
 
 describe('formatTbYears', () => {
   it('3 sig-figs by default, trailing zeros stripped', () => {
-    expect(formatTbYears(0.123456)).toBe('0.123 TB·yr')
     expect(formatTbYears(123.456)).toBe('123 TB·yr')
     expect(formatTbYears(1.5)).toBe('1.5 TB·yr')
     expect(formatTbYears(0)).toBe('0 TB·yr')
   })
 
+  it('steps the byte unit down so small scores stay readable', () => {
+    expect(formatTbYears(0.123456)).toBe('123 GB·yr')
+    expect(formatTbYears(1e-5)).toBe('10 MB·yr')
+    expect(formatTbYears(1e-9)).toBe('1 KB·yr')
+    expect(formatTbYears(1e-12)).toBe('1 B·yr')
+  })
+
+  it('clamps at PB·yr for huge scores rather than inventing a unit', () => {
+    expect(formatTbYears(1e6)).toBe('1000 PB·yr')
+  })
+
   it('respects the sigFigs override', () => {
-    expect(formatTbYears(0.123456, 5)).toBe('0.12346 TB·yr')
-    expect(formatTbYears(987654, 2)).toBe('990000 TB·yr')
+    expect(formatTbYears(0.123456, 5)).toBe('123.46 GB·yr')
+    expect(formatTbYears(987, 2)).toBe('990 TB·yr')
+  })
+
+  it('non-positive scores render as a plain zero', () => {
+    expect(formatTbYears(-1)).toBe('0 TB·yr')
   })
 })

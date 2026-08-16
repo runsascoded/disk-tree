@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import { useAction } from 'use-kbd'
-import { age01, ageDomain, ageFade, BytesOverTime, Treemap as DTTreemap } from '@disk-tree/react'
+import { age01, ageDomain, ageFade, BytesOverTime, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
@@ -22,6 +22,9 @@ import {
 } from '../schemes'
 
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
+
+/** Which visualization the panel under the table renders. */
+type Viz = 'treemap' | 'scatter'
 type SortDir = 'asc' | 'desc'
 type SortSpec = { key: SortKey; dir: SortDir }
 
@@ -647,6 +650,62 @@ function Treemap({ root, rows, ageLens }: { root: Row; rows: Row[]; ageLens: boo
   )
 }
 
+/**
+ * Staleness scatter over the drill level's direct children: x = age, y =
+ * bytes, marker area ∝ descendant count, log-log with exact iso-sum-TB·year
+ * diagonals. Upper-right of a diagonal is the delete-candidate frontier.
+ *
+ * Sizes here are SI (1 TB = 1e12 B) rather than the table's IEC GiB/TiB, so
+ * the axis agrees with the TB·years score the diagonals are denominated in.
+ */
+function StalenessPanel({
+  nodes,
+  uri,
+  collapsedRows,
+}: {
+  nodes: Row[]
+  uri: string
+  collapsedRows?: CollapsedRow[] | null
+}) {
+  const navigate = useNavigate()
+  const prefix = childLinkPrefix(uri)
+  const collapsedPrefix = collapsedRows?.length
+    ? collapsedRows[collapsedRows.length - 1].original_path
+    : ''
+  const now = Date.now() / 1000
+  return (
+    <Box sx={{ height: 400 }}>
+      <StalenessScatter<Row>
+        nodes={nodes}
+        getAge={r => {
+          const t = r.mtime_mean ?? r.mtime
+          return t == null ? null : now - t
+        }}
+        getSize={r => r.size}
+        getLabel={r => r.path}
+        getWeight={r => r.n_desc}
+        onNodeClick={r => {
+          if (r.kind === 'dir') {
+            navigate(`${prefix}/${collapsedPrefix ? collapsedPrefix + '/' : ''}${r.path}`)
+          }
+        }}
+        renderTooltip={r => (
+          <>
+            <div style={{ fontWeight: 500 }}>{r.path}</div>
+            <div style={{ opacity: 0.75, fontSize: '0.85em' }}>
+              {formatSize(r.size)} · {formatCount(r.n_desc)} items
+            </div>
+            <div style={{ opacity: 0.6, fontSize: '0.75em' }}>
+              {r.mtime_mean != null ? 'mean mtime ' : 'modified '}
+              {timeAgo(r.mtime_mean ?? r.mtime)}
+            </div>
+          </>
+        )}
+      />
+    </Box>
+  )
+}
+
 function FilePreviewSection({ path }: { path: string }) {
   const { data: preview, isLoading, error } = useQuery({
     queryKey: ['file-preview', path],
@@ -751,6 +810,7 @@ export function ScanDetails() {
 
   const [treemapMaxRows, setTreemapMaxRows] = useState(DEFAULT_MAX_ROWS)
   const [ageLens, setAgeLens] = useState(false)
+  const [viz, setViz] = useState<Viz>('treemap')
   const { data: details, isLoading, error: queryError, refetch } = useQuery({
     queryKey: ['scan-details', uri, selectedScanId, treemapMaxRows],
     queryFn: () => fetchScanDetails(uri, selectedScanId, 2, treemapMaxRows),
@@ -1422,20 +1482,31 @@ export function ScanDetails() {
       )}
       {rows.length > 0 && (
         <Box sx={{ mt: 2 }}>
-          <Treemap root={root} rows={rows} ageLens={ageLens} />
+          {viz === 'treemap'
+            ? <Treemap root={root} rows={rows} ageLens={ageLens} />
+            : <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
-            <span>{rows.length} items</span>
-            <Tooltip title="Fade cells by age (size-weighted mean mtime when the scan has it, else newest descendant) — older fades toward the background">
-              <label style={{ cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={ageLens}
-                  onChange={e => setAgeLens(e.target.checked)}
-                  style={{ marginRight: 4, verticalAlign: 'middle' }}
-                />
-                Age lens
-              </label>
-            </Tooltip>
+            <span>{viz === 'treemap' ? `${rows.length} items` : `${filteredChildren.length} children`}</span>
+            <label>
+              View:
+              <select value={viz} onChange={e => setViz(e.target.value as Viz)} style={{ marginLeft: 4 }}>
+                <option value="treemap">Treemap</option>
+                <option value="scatter">Staleness</option>
+              </select>
+            </label>
+            {viz === 'treemap' && (
+              <Tooltip title="Fade cells by age (size-weighted mean mtime when the scan has it, else newest descendant) — older fades toward the background">
+                <label style={{ cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={ageLens}
+                    onChange={e => setAgeLens(e.target.checked)}
+                    style={{ marginRight: 4, verticalAlign: 'middle' }}
+                  />
+                  Age lens
+                </label>
+              </Tooltip>
+            )}
             <label>
               Max:
               <select

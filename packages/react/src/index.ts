@@ -4,8 +4,20 @@ export { foldSmall, squarify } from './squarify'
 export type { Rect } from './squarify'
 export { useHoverPin } from './useHoverPin'
 export type { HoverPin, HoverPinOpts } from './useHoverPin'
-export { age01, ageDomain, ageFade, divergingColor, divergingInk } from './colors'
+export { age01, ageDomain, ageFade, DEFAULT_PALETTE, divergingColor, divergingInk } from './colors'
 export type { AgeFadeOpts } from './colors'
 export { formatTbYears, SEC_PER_YEAR, sumTbYears, TB } from './stats'
+export { StalenessScatter } from './StalenessScatter'
+export type { StalenessScatterProps } from './StalenessScatter'
+export {
+  decadesBetween,
+  isoScoreDecades,
+  isoScoreSegment,
+  isoScoresForData,
+  logDomain,
+  logPos,
+  logTicks,
+  radiusFor,
+} from './scatter'
 export { BytesOverTime, TimeSeries } from './TimeSeries'
 export type { Series, TimeSeriesProps } from './TimeSeries'
