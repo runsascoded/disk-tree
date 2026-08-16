@@ -298,6 +298,31 @@ def test_finalize_failure_preserves_parts_and_resumes(tmp_path: Path, capsys, mo
     assert stats['rows'] == 5
 
 
+def test_finalize_jobs_byte_identical(tmp_path: Path):
+    """Parallel finalize (depth-fanned workers + parent re-batching) must
+    produce byte-identical output to the serial path — including unsorted
+    parts (prefix-sibling inversions), which take the run-merge path."""
+    rows = [
+        ('store-backup/old.bin', 10),
+        ('store-backup/deep/x.bin', 11),
+        ('store/a.bin', 12),
+        ('store/deep/y.bin', 13),
+        ('store2-backup/z.bin', 14),
+        ('store2/w.bin', 15),
+        ('a.txt', 1),
+        ('sub/b.txt', 2),
+        ('sub/deep/c.txt', 3),
+        ('sub/deep/deeper/d.txt', 4),
+    ]
+    listing = _write_listing(tmp_path / 'l.parquet', rows)
+    outs = []
+    for j in (1, 4):
+        out = str(tmp_path / f'out-j{j}.parquet')
+        aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=out, jobs=j)
+        outs.append(out)
+    assert open(outs[0], 'rb').read() == open(outs[1], 'rb').read()
+
+
 def test_unsorted_part_multi_slice_sort(tmp_path: Path):
     """The unsorted-part sort takes in bounded index slices (a >2GiB string
     column overflows 32-bit offsets under `Table.sort_by` — hit on eu-west4's

@@ -830,35 +830,111 @@ def _write_boundary_parts(
     return parts, r
 
 
+# An unsorted part with more runs than this falls back to the in-memory sort
+# (pathological — inversions come from prefix-sibling dirs, normally sparse).
+_MAX_PART_RUNS = 8192
+
+
+def _detect_runs(path: str, key: str = 'path') -> list[int]:
+    """Sorted-run start ordinals of a part parquet's `key` column (cheap
+    names-only scan, same vectorized boundary check as pass-1)."""
+    import numpy as np
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+    starts: list[int] = []
+    prev_last: str | None = None
+    ord0 = 0
+    for batch in pq.ParquetFile(path).iter_batches(columns=[key]):
+        col = batch.column(key)
+        n = len(col)
+        if n == 0:
+            continue
+        if not starts:
+            starts.append(0)
+        elif prev_last is not None and col[0].as_py() < prev_last:
+            starts.append(ord0)
+        if n > 1:
+            ge = pc.greater_equal(col.slice(1), col.slice(0, n - 1))
+            for idx in np.nonzero(~ge.to_numpy(zero_copy_only=False))[0]:
+                starts.append(ord0 + int(idx) + 1)
+        prev_last = col[n - 1].as_py()
+        ord0 += n
+    return starts
+
+
+def _rows_range(path: str, start: int, stop: int | None, batch_rows: int):
+    """Record batches of rows [start, stop) of a parquet file, skipping
+    non-intersecting row groups."""
+    import pyarrow.parquet as pq
+    pf = pq.ParquetFile(path)
+    md = pf.metadata
+    rgs: list[int] = []
+    off = 0
+    ord0 = 0
+    for i in range(md.num_row_groups):
+        n_rg = md.row_group(i).num_rows
+        if off + n_rg > start and (stop is None or off < stop):
+            if not rgs:
+                ord0 = off
+            rgs.append(i)
+        off += n_rg
+    if not rgs:
+        return
+    for batch in pf.iter_batches(batch_size=batch_rows, row_groups=rgs):
+        nb = batch.num_rows
+        lo = max(start - ord0, 0)
+        hi = nb if stop is None else min(stop - ord0, nb)
+        ord0 += nb
+        if lo >= hi:
+            if stop is not None and ord0 >= stop:
+                return
+            continue
+        yield batch.slice(lo, hi - lo)
+
+
 def _part_batches(path: str, part_sorted: bool, batch_rows: int):
     """Record batches of one part, in path order.
 
-    A part that measured unsorted at write time (prefix-sibling dir inversions)
-    is loaded and sorted here — bounded by that single (depth, kind) slice, not
-    the whole output (the win over the retired global external sort).
+    A part that measured unsorted at write time (prefix-sibling dir
+    inversions) is *nearly* sorted — each inversion starts a new run. Detect
+    the runs and merge them as batch streams (pairwise tree of
+    :func:`_merge_batches`): O(batch × runs) memory, no whole-part
+    materialization. The in-memory sort this replaces died twice on
+    eu-west4's 51M-row dir parts: pyarrow `take`/`sort_by` concatenate each
+    chunked *input* column into one contiguous Array, and >2GiB `string`
+    columns overflow 32-bit offsets (`ArrowInvalid: offset overflow`) no
+    matter how the output is sliced. The sort survives only as the
+    pathological-run-count fallback, with a large_string round-trip
+    legalizing the internal concatenation.
     """
     import pyarrow as pa
     import pyarrow.parquet as pq
     if part_sorted:
         yield from pq.ParquetFile(path).iter_batches(batch_size=batch_rows)
-    else:
-        # pyarrow `take` (and therefore `sort_by`) concatenates each chunked
-        # *input* column into one contiguous Array before taking — so a >2GiB
-        # `string` column (`path`/`uri` on eu-west4's 51M-row dir parts)
-        # overflows 32-bit offsets (`ArrowInvalid: offset overflow while
-        # concatenating arrays`) no matter how small the index slice is.
-        # Cast string columns to large_string first (a chunk-wise, zero-concat
-        # cast; 64-bit offsets make the internal concatenation legal), sort,
-        # and hand back batch-sized chunks cast to the part's original schema
-        # (the finalize writer's schema uses `string`).
-        tbl = pq.read_table(path)
-        orig = tbl.schema
-        big = pa.schema([
-            (f.name, pa.large_string() if pa.types.is_string(f.type) else f.type)
-            for f in orig
-        ])
-        for rb in tbl.cast(big).sort_by('path').to_batches(max_chunksize=batch_rows):
-            yield rb.cast(orig)
+        return
+    starts = _detect_runs(path)
+    k = len(starts)
+    if k <= _MAX_PART_RUNS:
+        # Merge tree primes one batch per run source — scale batch size down
+        # so priming stays ~O(1GB) even at the run-count cap.
+        rb_rows = max(1024, min(batch_rows, (1 << 22) // max(1, k)))
+        bounds: list[int | None] = [*starts[1:], None]
+        streams = [_rows_range(path, s, e, rb_rows) for s, e in zip(starts, bounds)]
+        while len(streams) > 1:
+            streams = [
+                _merge_batches(streams[i], streams[i + 1]) if i + 1 < len(streams) else streams[i]
+                for i in range(0, len(streams), 2)
+            ]
+        yield from streams[0]
+        return
+    tbl = pq.read_table(path)
+    orig = tbl.schema
+    big = pa.schema([
+        (f.name, pa.large_string() if pa.types.is_string(f.type) else f.type)
+        for f in orig
+    ])
+    for rb in tbl.cast(big).sort_by('path').to_batches(max_chunksize=batch_rows):
+        yield rb.cast(orig)
 
 
 def _merge_batches(sa, sb):
@@ -911,11 +987,56 @@ def _merge_batches(sa, sb):
         b = next(sb, None)
 
 
+def _depth_stream(parts_dir: str, kinds: dict[str, list[dict]], batch_rows: int):
+    """One depth's merged, path-ordered record-batch stream (dirs before files
+    on equal path)."""
+    import os
+
+    def kind_stream(parts_list: list[dict]):
+        its = [
+            _part_batches(os.path.join(parts_dir, p['file']), p['sorted'], batch_rows)
+            for p in sorted(parts_list, key=itemgetter('file'))
+        ]
+        s = its[0]
+        for it in its[1:]:
+            s = _merge_batches(s, it)
+        return s
+
+    if len(kinds) == 1:
+        return kind_stream(next(iter(kinds.values())))
+    return _merge_batches(kind_stream(kinds['dir']), kind_stream(kinds['file']))
+
+
+def _finalize_depth_worker(
+    parts_dir: str,
+    kinds: dict[str, list[dict]],
+    batch_rows: int,
+    tmp_path: str,
+) -> str:
+    """Parallel-finalize worker: merge one depth's parts → temp parquet.
+
+    The parent streams the temp back through its own row-group batching, so
+    worker batch edges never reach the final file (byte-identity for any
+    `jobs`)."""
+    import pyarrow.parquet as pq
+    writer = None
+    try:
+        for rb in _depth_stream(parts_dir, kinds, batch_rows):
+            if writer is None:
+                writer = pq.ParquetWriter(tmp_path, rb.schema)
+            writer.write_batch(rb)
+    finally:
+        if writer is not None:
+            writer.close()
+    return tmp_path if writer is not None else ''
+
+
 def _finalize_parts(
     parts_dir: str,
     manifest: dict,
     out_parquet: str,
     batch_rows: int = 1 << 16,
+    jobs: int = 1,
 ) -> None:
     """Depth-partitioned, sort-free finalize: parts → canonical layer-2 parquet.
 
@@ -985,36 +1106,50 @@ def _finalize_parts(
         buf = []
         buf_rows = 0
 
-    def kind_stream(parts_list: list[dict]):
-        its = [
-            _part_batches(os.path.join(parts_dir, p['file']), p['sorted'], batch_rows)
-            for p in sorted(parts_list, key=itemgetter('file'))
-        ]
-        s = its[0]
-        for it in its[1:]:
-            s = _merge_batches(s, it)
-        return s
-
     try:
-        for depth in sorted(by_depth):
-            kinds = by_depth[depth]
-            if len(kinds) == 1:
-                stream = kind_stream(next(iter(kinds.values())))
-            else:
-                stream = _merge_batches(kind_stream(kinds['dir']), kind_stream(kinds['file']))
-            for rb in stream:
-                emit(rb)
-        flush()
+        if jobs > 1 and len(by_depth) > 1:
+            # Depth merges are independent — fan them out to worker processes
+            # (biggest depths first to kill the straggler tail), each writing
+            # a per-depth temp; the parent consumes temps in depth order
+            # through emit(), so row-group edges (and bytes) match jobs=1.
+            import multiprocessing as mp
+            from concurrent.futures import ProcessPoolExecutor
+            tmp_dir = os.path.join(parts_dir, 'finalize-tmp')
+            os.makedirs(tmp_dir, exist_ok=True)
+            weights = {
+                d: sum(p['rows'] for ps in kinds.values() for p in ps)
+                for d, kinds in by_depth.items()
+            }
+            with ProcessPoolExecutor(max_workers=jobs, mp_context=mp.get_context('spawn')) as ex:
+                futs = {
+                    d: ex.submit(
+                        _finalize_depth_worker, parts_dir, by_depth[d], batch_rows,
+                        os.path.join(tmp_dir, f'depth-{d}.parquet'),
+                    )
+                    for d in sorted(by_depth, key=lambda d: -weights[d])
+                }
+                for depth in sorted(by_depth):
+                    tmp = futs[depth].result()
+                    if tmp:
+                        for rb in pq.ParquetFile(tmp).iter_batches(batch_size=batch_rows):
+                            emit(rb)
+                        os.remove(tmp)
+            flush()
+        else:
+            for depth in sorted(by_depth):
+                for rb in _depth_stream(parts_dir, by_depth[depth], batch_rows):
+                    emit(rb)
+            flush()
     finally:
         writer.close()
 
 
-def _finalize_and_clean(parts_dir: str, manifest: dict, out_parquet: str) -> dict:
+def _finalize_and_clean(parts_dir: str, manifest: dict, out_parquet: str, jobs: int = 1) -> dict:
     """Run the finalize; preserve the parts dir on failure (resume token),
     remove it on success; return the engine stats dict."""
     import shutil
     try:
-        _finalize_parts(parts_dir, manifest, out_parquet)
+        _finalize_parts(parts_dir, manifest, out_parquet, jobs=jobs)
     except BaseException:
         # A finalize-only failure must not cost the (expensive) stream pass:
         # the parts + manifest stay put, and a rerun with the same output path
@@ -1078,17 +1213,17 @@ def aggregate_stream(
     # The parts dir sits next to the output; its manifest doubles as the
     # resume token — a finalize-only failure leaves it in place, and a rerun
     # with the same output path skips straight to the merge.
+    if jobs == 0:
+        jobs = os.cpu_count() or 1
+    jobs = max(1, jobs)
+
     parts_dir = f'{out_parquet}.parts'
     manifest_path = os.path.join(parts_dir, 'manifest.json')
     if os.path.exists(manifest_path):
         with open(manifest_path) as fh:
             manifest = json.load(fh)
         _stage(f"resuming from streamed parts at {parts_dir} (stream pass skipped)")
-        return _finalize_and_clean(parts_dir, manifest, out_parquet)
-
-    if jobs == 0:
-        jobs = os.cpu_count() or 1
-    jobs = max(1, jobs)
+        return _finalize_and_clean(parts_dir, manifest, out_parquet, jobs=jobs)
     ex = None
     if jobs > 1:
         import multiprocessing as mp
@@ -1230,4 +1365,4 @@ def aggregate_stream(
     finally:
         if ex is not None:
             ex.shutdown()
-    return _finalize_and_clean(parts_dir, manifest, out_parquet)
+    return _finalize_and_clean(parts_dir, manifest, out_parquet, jobs=jobs)
