@@ -837,11 +837,22 @@ def _part_batches(path: str, part_sorted: bool, batch_rows: int):
     is loaded and sorted here — bounded by that single (depth, kind) slice, not
     the whole output (the win over the retired global external sort).
     """
+    import pyarrow.compute as pc
     import pyarrow.parquet as pq
     if part_sorted:
         yield from pq.ParquetFile(path).iter_batches(batch_size=batch_rows)
     else:
-        yield from pq.read_table(path).sort_by('path').to_batches(max_chunksize=batch_rows)
+        # NOT `Table.sort_by`: its take() materializes each permuted column as
+        # one contiguous Array, and a >2GiB string column (`path`/`uri` at
+        # fleet scale — eu-west4's dir parts) overflows 32-bit string offsets
+        # (`ArrowInvalid: offset overflow while concatenating arrays`).
+        # Sort indices once, then take in batch-sized slices — every output
+        # chunk stays small, memory stays ~batch-bound.
+        tbl = pq.read_table(path)
+        idx = pc.sort_indices(tbl, sort_keys=[('path', 'ascending')])
+        for lo in range(0, len(idx), batch_rows):
+            for rb in tbl.take(idx.slice(lo, batch_rows)).to_batches():
+                yield rb
 
 
 def _merge_batches(sa, sb):

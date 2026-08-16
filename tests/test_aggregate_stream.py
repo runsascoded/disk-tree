@@ -298,6 +298,21 @@ def test_finalize_failure_preserves_parts_and_resumes(tmp_path: Path, capsys, mo
     assert stats['rows'] == 5
 
 
+def test_unsorted_part_multi_slice_sort(tmp_path: Path):
+    """The unsorted-part sort takes in bounded index slices (a >2GiB string
+    column overflows 32-bit offsets under `Table.sort_by` — hit on eu-west4's
+    51M-row dir parts). batch_rows=2 forces many slices; order must still be
+    globally sorted across slice boundaries."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq_
+    from disk_tree.find.aggregate_stream import _part_batches
+    paths = ['m', 'z', 'a', 'q', 'b', 'x', 'c']
+    part = str(tmp_path / 'part.parquet')
+    pq_.write_table(pa.table({'path': paths, 'size': list(range(len(paths)))}), part)
+    got = [r for rb in _part_batches(part, part_sorted=False, batch_rows=2) for r in rb.column('path').to_pylist()]
+    assert got == sorted(paths)
+
+
 def test_prefix_sibling_dir_inversion(tmp_path: Path):
     """Sibling dirs where one name is a proper prefix of the other with next
     char < '/' (`store` vs `store-backup`): `store-backup/`'s subtree sorts
