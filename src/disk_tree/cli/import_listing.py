@@ -28,6 +28,7 @@ from disk_tree.cli.base import cli
 @option('-e', '--engine', type=Choice(['pandas', 'duckdb', 'stream']), default='pandas', help='Aggregation engine: `pandas` (in-memory; small), `duckdb` (out-of-core; big), or `stream` (O(depth) over sorted listings; biggest)')
 @option('-l', '--listing', 'listings', required=True, multiple=True, help='Listing parquet glob(s) — raw / SII / S3-Inventory; repeatable, earlier sources win per bucket')
 @option('-b', '--bucket', 'buckets', multiple=True, help='Bucket to import as one scan; repeatable. Default: every distinct bucket in the listings')
+@option('-j', '--jobs', default=1, help='Stream engine only: partition the keyspace into N ranges streamed by parallel worker processes (0 = all cores). Output is byte-identical for any value.')
 @option('-M', '--memory-limit', default='8GB', help='DuckDB memory cap (duckdb engine only). Excess spills to `--temp-dir`.')
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendant files) per path')
 @option('-p', '--pivot-sum', 'pivot_sums', multiple=True, help='Emit per-value byte-sum columns `sum_<col>_<v>` for this layer-1 column (e.g. storage_class_id); repeatable')
@@ -39,6 +40,7 @@ def import_cmd(
     engine: str,
     listings: tuple[str, ...],
     buckets: tuple[str, ...],
+    jobs: int,
     memory_limit: str,
     mean_mtime: bool,
     pivot_sums: tuple[str, ...],
@@ -72,7 +74,7 @@ def import_cmd(
             db=db, storage=storage, con=con,
             engine=engine, listings=listings, bucket=bucket, scheme=scheme,
             snap_time=snap_time, memory_limit=memory_limit, temp_dir=temp_dir,
-            max_temp_size=max_temp_size,
+            max_temp_size=max_temp_size, jobs=jobs,
             pivot_sums=pivot_sums, mean_mtime=mean_mtime,
         )
 
@@ -89,6 +91,7 @@ def import_bucket(
     memory_limit: str = '8GB',
     temp_dir: str | None = None,
     max_temp_size: str | None = None,
+    jobs: int = 1,
     pivot_sums: tuple[str, ...] = (),
     mean_mtime: bool = False,
     replace=None,
@@ -136,7 +139,7 @@ def import_bucket(
                 stats = aggregate_stream(
                     listings, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
                     con=con, memory_limit=memory_limit, temp_dir=temp_dir,
-                    max_temp_size=max_temp_size,
+                    max_temp_size=max_temp_size, jobs=jobs,
                     pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                 )
             # Hand the file itself to the storage backend — reading a

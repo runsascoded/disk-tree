@@ -25,17 +25,26 @@ from disk_tree.listing import prepare_listing
 from test_aggregate_duckdb import _IDENTITY_LISTING, _normalize, TS
 
 
-def _write_listing(path: Path, rows: list[tuple[str, int]], bucket: str = 'b1', sort: bool = True):
-    """Raw-schema listing parquet; sorted by key like real object-store listings."""
+def _write_listing(
+    path: Path,
+    rows: list[tuple[str, int]],
+    bucket: str = 'b1',
+    sort: bool = True,
+    row_group_size: int | None = None,
+):
+    """Raw-schema listing parquet; sorted by key like real object-store listings.
+    `row_group_size` shrinks read batches → more pass-1 checkpoints, so organic
+    partition-boundary selection engages on tiny fixtures."""
     if sort:
         rows = sorted(rows)
+    kw = {'row_group_size': row_group_size} if row_group_size else {}
     pd.DataFrame({
         'bucket': [bucket] * len(rows),
         'name': [n for n, _ in rows],
         'size_bytes': [s for _, s in rows],
         'created': [TS] * len(rows),
         'storage_class_id': [1] * len(rows),
-    }).to_parquet(path)
+    }).to_parquet(path, **kw)
     return str(path)
 
 
@@ -434,6 +443,144 @@ def test_trailing_slash_key(tmp_path: Path):
     got_pandas = _normalize(import_listing((listing,), bucket='b1', scheme='gcs').df)
     got_stream, _ = _stream((listing,), tmp_path)
     pd.testing.assert_frame_equal(got_pandas, got_stream)
+
+
+# ---------- Keyspace-partitioned parallel streaming (-j) ----------
+# spec: stream-partition-parallel.md — output must be byte-identical for any
+# `jobs`, including adversarial boundary placements.
+
+def _md5(p) -> str:
+    import hashlib
+    return hashlib.md5(Path(p).read_bytes()).hexdigest()
+
+
+_ROOT_STATS = ['rows', 'files', 'root_size', 'root_n_desc', 'root_n_files', 'root_n_children', 'root_mtime']
+
+
+def _assert_jobs_identical(tmp_path: Path, listing: str, jobs: int, monkeypatch=None, boundaries=None, **kw):
+    """Aggregate with jobs=1 and jobs=N (optionally with forced boundaries);
+    assert byte-identical outputs, identical root stats, and frame-identity
+    vs the pandas engine."""
+    if boundaries is not None:
+        from disk_tree.find import aggregate_stream as mod
+        monkeypatch.setattr(mod, '_choose_boundaries', lambda *a, **k: boundaries)
+    out1 = str(tmp_path / 'j1.parquet')
+    outn = str(tmp_path / 'jn.parquet')
+    s1 = aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=out1, **kw)
+    sn = aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=outn, jobs=jobs, **kw)
+    assert _md5(out1) == _md5(outn)
+    assert {k: s1[k] for k in _ROOT_STATS} == {k: sn[k] for k in _ROOT_STATS}
+    got = _normalize(pd.read_parquet(outn))
+    expected = _normalize(
+        import_listing((listing,), bucket='b1', scheme='gcs',
+                       pivot_sums=kw.get('pivot_sums', ()), mean_mtime=kw.get('mean_mtime', False)).df
+        [got.columns]
+    )
+    pd.testing.assert_frame_equal(got, expected)
+    return sn
+
+
+_PARTITION_ROWS = [
+    ('data/a/000.bin', 11), ('data/a/001.bin', 12), ('data/a/sub/002.bin', 13),
+    ('data/a/sub/003.bin', 14), ('data/b/004.bin', 15), ('data/b/005.bin', 16),
+    ('store-backup/old/006.bin', 17), ('store-backup/007.bin', 18),
+    ('store.old/008.bin', 19),
+    ('store/009.bin', 20), ('store/x/010.bin', 21), ('store/x/y/011.bin', 22),
+    ('store/x/y/012.bin', 23), ('store/z/013.bin', 24),
+    ('top.bin', 25),
+    ('zz/deep/d1/d2/d3/014.bin', 26), ('zz/deep/d1/d2/d3/015.bin', 27), ('zz/016.bin', 28),
+]
+
+
+def test_partitioned_organic_boundaries(tmp_path: Path, capsys, monkeypatch):
+    """Real end-to-end `-j 3`: checkpoint-quantile boundary selection (2-row
+    pass-1 batches → one checkpoint per 2 rows), spawned workers, monoid
+    reduce. The env var reaches spawned pass-1 workers; the attr patch covers
+    the already-imported parent module."""
+    from disk_tree.find import aggregate_stream as mod
+    monkeypatch.setenv('DISK_TREE_SCAN_BATCH_ROWS', '2')
+    monkeypatch.setattr(mod, '_SCAN_BATCH_ROWS', 2)
+    listing = _write_listing(tmp_path / 'l.parquet', _PARTITION_ROWS, row_group_size=2)
+    _assert_jobs_identical(tmp_path, listing, jobs=3)
+    assert ', 3 partition(s)' in capsys.readouterr().err
+
+
+def test_partition_boundary_mid_deep_subtree(tmp_path: Path, monkeypatch):
+    """Boundaries deep inside subtrees force multi-level spanning-dir chains
+    (every ancestor of the boundary key is assembled in the reduce)."""
+    listing = _write_listing(tmp_path / 'l.parquet', _PARTITION_ROWS, row_group_size=2)
+    _assert_jobs_identical(
+        tmp_path, listing, jobs=3, monkeypatch=monkeypatch,
+        boundaries=['data/a/sub/003.bin', 'store/x/y/012.bin', 'zz/deep/d1/d2/d3/015.bin'],
+    )
+
+
+def test_partition_boundary_prefix_sibling(tmp_path: Path, monkeypatch):
+    """A boundary between `store-backup/…` and `store/…` splits the
+    prefix-sibling inversion across workers: worker parts at the same depth
+    overlap in plain path order and the finalize's dir-stream merge must
+    interleave them (not just concatenate)."""
+    listing = _write_listing(tmp_path / 'l.parquet', _PARTITION_ROWS, row_group_size=2)
+    _assert_jobs_identical(
+        tmp_path, listing, jobs=2, monkeypatch=monkeypatch,
+        boundaries=['store.old/008.bin'],
+    )
+
+
+def test_partition_empty_range(tmp_path: Path, monkeypatch):
+    """A boundary below the whole keyspace yields an empty first partition —
+    its root-only segment must reduce away (no stat skew)."""
+    listing = _write_listing(tmp_path / 'l.parquet', _PARTITION_ROWS, row_group_size=2)
+    _assert_jobs_identical(
+        tmp_path, listing, jobs=2, monkeypatch=monkeypatch,
+        boundaries=['0', 'store/009.bin'],
+    )
+
+
+def test_partitioned_pivot_mean(tmp_path: Path, monkeypatch):
+    """Pivot sums + `mtime_mean` across a boundary that splits a multi-class
+    dir: the exact Σ mtime·size bigints and per-class byte sums must merge in
+    the reduce, and `mean_of` must run on the merged totals."""
+    rows = sorted([
+        ('data/hot.bin', 1000, 10, 1),
+        ('data/warm.bin', 2000, 20, 2),
+        ('data/z/cold.bin', 4000, 5, 4),
+        ('archive/a.bin', 8000, 1, 4),
+        ('archive/b.bin', 8000, 3, 4),
+        ('empty/marker', 0, 15, 1),
+        ('top.txt', 500, 25, 1),
+    ])
+    listing = str(tmp_path / 'l.parquet')
+    pd.DataFrame({
+        'bucket': ['b1'] * len(rows),
+        'name': [n for n, *_ in rows],
+        'size_bytes': [s for _, s, *_ in rows],
+        'created': [dt.datetime(2026, 7, d, tzinfo=dt.timezone.utc) for *_, d, _ in rows],
+        'storage_class_id': [c for *_, c in rows],
+    }).to_parquet(listing, row_group_size=2)
+    _assert_jobs_identical(
+        tmp_path, listing, jobs=2, monkeypatch=monkeypatch,
+        boundaries=['data/warm.bin'],  # splits dir `data` (classes 1/2/4) mid-subtree
+        pivot_sums=('storage_class_id',), mean_mtime=True,
+    )
+
+
+def test_partition_boundary_with_dirty_keys(tmp_path: Path, monkeypatch):
+    """Dirty (`//`) keys route to workers by *canonical* position: raw
+    `a//b/c.txt` sorts first but canonically belongs to the second partition
+    (≥ `a/b`), where dir `a/b` also gets a clean file."""
+    rows = [
+        ('a//b/c.txt', 1),
+        ('a/aa.txt', 2),
+        ('a/b/d.txt', 4),
+        ('a/z.txt', 8),
+    ]
+    listing = _write_listing(tmp_path / 'l.parquet', rows, row_group_size=1)
+    sn = _assert_jobs_identical(
+        tmp_path, listing, jobs=2, monkeypatch=monkeypatch,
+        boundaries=['a/b/d.txt'],
+    )
+    assert sn['files'] == 4
 
 
 # ---------- CLI --engine stream creates a scan row (subprocess isolation) ----------
