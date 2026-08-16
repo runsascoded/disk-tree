@@ -323,6 +323,31 @@ def test_finalize_jobs_byte_identical(tmp_path: Path):
     assert open(outs[0], 'rb').read() == open(outs[1], 'rb').read()
 
 
+@pytest.mark.parametrize('batch_rows', [1, 2, 3, 1 << 13])
+def test_shard_read_is_batch_size_independent(tmp_path: Path, monkeypatch, batch_rows: int):
+    """`_shard_rows` bounds its decode buffer via `batch_size` (one live batch
+    per open merge source, ~1K open on a real bucket — pyarrow's 65536 default
+    cost 13.6GB and an OOM kill). Run-sortedness checks, dirty-key filtering
+    and `[lo, hi)` clipping all run per batch, so output must not depend on
+    where batch edges land."""
+    from disk_tree.find import aggregate_stream as ags
+    rows = [
+        ('a//b/c.txt', 1),   # dirty key (canonical a/b/c.txt)
+        ('a/aa.txt', 2),
+        ('a/b/d.txt', 4),
+        ('a/z.txt', 8),
+        ('sub/deep/e.txt', 16),
+        ('sub/f.txt', 32),
+    ]
+    listing = _write_listing(tmp_path / 'l.parquet', rows, row_group_size=2)
+    monkeypatch.setattr(ags, '_SHARD_BATCH_ROWS', batch_rows)
+    out = str(tmp_path / f'out-{batch_rows}.parquet')
+    aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=out)
+    got = _normalize(pd.read_parquet(out))
+    expected = _normalize(import_listing((listing,), bucket='b1', scheme='gcs').df)
+    pd.testing.assert_frame_equal(got, expected)
+
+
 def test_merge_batches_converts_keys_once_per_batch():
     """`_merge_batches` must convert each batch's key column to numpy exactly
     once. Re-converting the unconsumed tail after every split is quadratic in

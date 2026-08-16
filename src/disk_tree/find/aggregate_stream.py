@@ -58,6 +58,13 @@ _DIRTY_MAX = 10_000_000
 # Rows buffered before flushing a parquet row group in the pre-output writer.
 _FLUSH_ROWS = 1 << 18
 
+# Rows decoded per listing-shard read buffer. The k-way merge holds one live
+# batch per open source and ~1K stay open on a real bucket, so this multiplies
+# by ~1000 in a worker's RSS — pyarrow's 65536 default cost 13.6GB and an
+# OOM kill. Rows leave `_shard_rows` as Python tuples regardless, so shrinking
+# this trades no throughput.
+_SHARD_BATCH_ROWS = 1 << 13
+
 _COLS = ['path', 'size', 'mtime', 'kind', 'parent', 'uri', 'n_desc', 'n_files', 'n_children', 'depth']
 
 
@@ -331,6 +338,7 @@ def _shard_rows(
     stop: int | None = None,
     lo: str | None = None,
     hi: str | None = None,
+    batch_rows: int = _SHARD_BATCH_ROWS,
 ) -> Iterator[tuple]:
     """Clean rows of one sorted run of a shard as (name, size, mtime,
     *pivot_values). `[start, stop)` are *raw* row ordinals from
@@ -342,7 +350,14 @@ def _shard_rows(
 
     `[lo, hi)` optionally restricts to a key range (partitioned streaming):
     whole batches below `lo` skip, the read stops at the first batch starting
-    ≥ `hi`, and edge batches are mask-filtered exactly."""
+    ≥ `hi`, and edge batches are mask-filtered exactly.
+
+    `batch_rows` bounds each source's decode buffer. The k-way merge holds one
+    live batch per *open* source, and lazy-open still leaves ~1K sources open
+    on a real bucket (central2 peaked at 969), so pyarrow's 65536-row default
+    put ~10MB × ~1K = 13.6GB in one worker — OOM-killed on eu-west4 at
+    `-j 14`. Rows are yielded as Python tuples either way, so this is purely a
+    memory knob, not a throughput one."""
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
     pf = pq.ParquetFile(shard)
@@ -365,7 +380,7 @@ def _shard_rows(
     if not rgs:
         return
     prev: str | None = None
-    for batch in pf.iter_batches(columns=cols, row_groups=rgs):
+    for batch in pf.iter_batches(batch_size=batch_rows, columns=cols, row_groups=rgs):
         nb = batch.num_rows
         lo_i = max(start - ord0, 0)
         hi_i = nb if stop is None else min(stop - ord0, nb)
