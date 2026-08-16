@@ -768,6 +768,11 @@ def get_scan():
         return jsonify({'error': 'URI not found in scan', 'uri': uri, 'scan_path': scan['path']}), 404
 
     root = root_row.iloc[0].to_dict()
+    for k, v in root.items():
+        if hasattr(v, 'item'):
+            v = root[k] = v.item()
+        if isinstance(v, float) and v != v:
+            root[k] = None
     root['path'] = '.'
     root['parent'] = None
 
@@ -803,10 +808,13 @@ def get_scan():
 
     def row_to_dict(row):
         d = row.to_dict()
-        # Convert numpy types to Python types
+        # Convert numpy types to Python types; NaN → None (NaN is not valid
+        # JSON — e.g. `mtime_mean` is NULL for zero-size dirs).
         for k, v in d.items():
             if hasattr(v, 'item'):
-                d[k] = v.item()
+                v = d[k] = v.item()
+            if isinstance(v, float) and v != v:
+                d[k] = None
         # Use rel_path and rel_parent when viewing a subdir of a scan
         if use_rel_path:
             if 'rel_path' in d:
@@ -1329,6 +1337,7 @@ def run_scan_job(job_id: str, path: str, force: bool = True):
         cmd = ['disk-tree', 'index']
         if force:
             cmd.append('-C')  # Force fresh scan, don't use cache
+        cmd.append('-m')  # mtime_mean feeds the UI's age lens
         cmd.append(path)
         result = subprocess.run(
             cmd,

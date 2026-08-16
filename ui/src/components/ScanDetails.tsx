@@ -538,8 +538,10 @@ interface DTNode {
   path: string
   label: string
   size: number
-  /** Newest descendant mtime (epoch s) — v0 age signal for the age lens. */
+  /** Newest descendant mtime (epoch s) — age-lens fallback when no mean is available. */
   mtime?: number | null
+  /** Size-weighted mean mtime (epoch s) — preferred age signal (`--mean-mtime` scans). */
+  mtimeMean?: number | null
   children?: DTNode[]
   /** True for synthetic "…" placeholders — kept clickless. */
   isPlaceholder?: boolean
@@ -565,6 +567,7 @@ function Treemap({ root, rows, ageLens }: { root: Row; rows: Row[]; ageLens: boo
         label: r.path.split('/').pop() || r.path,
         size: r.size ?? 0,
         mtime: r.mtime,
+        mtimeMean: r.mtime_mean,
         children: r.kind === 'dir' ? build(r.path, r.size ?? 0) : undefined,
       }))
       // Add "…" placeholder for unaccounted area (dropped rows / depth limits).
@@ -594,9 +597,13 @@ function Treemap({ root, rows, ageLens }: { root: Row; rows: Row[]; ageLens: boo
     } satisfies DTNode
   }, [root, rows])
 
-  // Age-lens domain over all rows' mtimes (not just the drill level), so a
-  // cell's fade is stable as you drill instead of renormalizing per level.
-  const mtimeDomain = useMemo(() => ageDomain(rows, r => r.mtime), [rows])
+  // Age-lens domain over all rows (not just the drill level), so a cell's
+  // fade is stable as you drill instead of renormalizing per level. Prefer
+  // the size-weighted mean mtime (`--mean-mtime` scans) — a stale 10 TB dir
+  // with one fresh file reads stale, not fresh; fall back to max-mtime.
+  const rowAge = (r: Row) => r.mtime_mean ?? r.mtime
+  const mtimeDomain = useMemo(() => ageDomain(rows, rowAge), [rows])
+  const nodeAge = (n: DTNode) => n.mtimeMean ?? n.mtime
 
   return (
     <Box sx={{ height: 400 }}>
@@ -613,19 +620,19 @@ function Treemap({ root, rows, ageLens }: { root: Row; rows: Row[]; ageLens: boo
         }
         lens={
           ageLens && mtimeDomain
-            ? (n, _path, _depth, _ctx, style) =>
-                n.mtime == null || n.isPlaceholder
-                  ? null
-                  : ageFade(style, age01(n.mtime, mtimeDomain))
+            ? (n, _path, _depth, _ctx, style) => {
+                const age = nodeAge(n)
+                return age == null || n.isPlaceholder ? null : ageFade(style, age01(age, mtimeDomain))
+              }
             : undefined
         }
         renderTooltip={n => (
           <>
             <div style={{ fontWeight: 500 }}>{n.label}</div>
             <div style={{ opacity: 0.75, fontSize: '0.85em' }}>{formatSize(n.size)}</div>
-            {ageLens && n.mtime != null && (
+            {ageLens && nodeAge(n) != null && (
               <div style={{ opacity: 0.6, fontSize: '0.75em', marginTop: 2 }}>
-                modified {timeAgo(n.mtime)}
+                {n.mtimeMean != null ? `mean mtime ${timeAgo(n.mtimeMean)}` : `modified ${timeAgo(n.mtime!)}`}
               </div>
             )}
             {n.isPlaceholder && (
@@ -1418,7 +1425,7 @@ export function ScanDetails() {
           <Treemap root={root} rows={rows} ageLens={ageLens} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{rows.length} items</span>
-            <Tooltip title="Fade cells by age of their newest descendant — older fades toward the background">
+            <Tooltip title="Fade cells by age (size-weighted mean mtime when the scan has it, else newest descendant) — older fades toward the background">
               <label style={{ cursor: 'pointer' }}>
                 <input
                   type="checkbox"

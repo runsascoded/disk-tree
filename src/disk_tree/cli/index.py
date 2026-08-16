@@ -13,14 +13,16 @@ from utz import err, iec
 
 @cli.command
 @option('-C', '--no-cache-read', is_flag=True)
-@option('-m', '--measure-memory', is_flag=True)
 @option('-g', '--gc', is_flag=True)
+@option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendants) per path')
+@option('-M', '--measure-memory', is_flag=True)
 @option('-s', '--sudo', is_flag=True, help='Run `find` as sudo')
 @argument('url', required=False)
 def index(
     no_cache_read: bool,
-    measure_memory: bool,
     gc: bool,
+    mean_mtime: bool,
+    measure_memory: bool,
     sudo: bool,
     url: str | None,
 ):
@@ -40,9 +42,9 @@ def index(
 
     with ctx, time("scan"):
         if no_cache_read:
-            scan, df = Scan.create(url, gc=gc, sudo=sudo)
+            scan, df = Scan.create(url, gc=gc, sudo=sudo, mean_mtime=mean_mtime)
         else:
-            scan, df = Scan.load_or_create(url, gc=gc, sudo=sudo)
+            scan, df = Scan.load_or_create(url, gc=gc, sudo=sudo, mean_mtime=mean_mtime)
 
     elapsed = time['scan']
     # Find root row: try 'path == "."', fallback to 'parent == ""'

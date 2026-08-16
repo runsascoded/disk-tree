@@ -17,6 +17,8 @@ export type Row = {
   path: string
   size: number | null
   mtime: number | null
+  /** Size-weighted mean mtime (epoch s) — present when the scan was indexed with `--mean-mtime`. */
+  mtime_mean?: number | null
   kind: 'file' | 'dir'
   parent: string | null
   uri: string

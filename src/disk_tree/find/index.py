@@ -139,6 +139,7 @@ def aggregate(
 def index(
     path: str,
     sudo: bool = False,
+    mean_mtime: bool = False,
     progress_callback: ProgressCallback | None = None,
     progress_interval: float = 1.0,
     excludes: list[str] | None = None,
@@ -198,6 +199,9 @@ def index(
             'uri': path0,
             'depth': 0,
         }])
+        if mean_mtime:
+            from .agg_ext import MTIME_MEAN
+            df[MTIME_MEAN] = pd.array([None], dtype='float64')
         return IndexResult(
             df=df,
             error_count=errors.count,
@@ -212,11 +216,19 @@ def index(
         'parent': parent_l,
         'uri': uri_l,
     })
+    if mean_mtime:
+        from .agg_ext import MT_WSUM
+        # Every row contributes size·mtime — including dir/symlink inodes,
+        # whose own block sizes cascade into `size`; matching them here keeps
+        # weights summing to exactly `size` (an empty dir would otherwise get
+        # wsum=0 over size>0, i.e. a nonsense epoch-1970 mean). Python bigints
+        # (object dtype): Σ mtime·size overflows int64 at PB scale.
+        df[MT_WSUM] = pd.array([int(s) * int(m) for s, m in zip(size_l, mtime_l)], dtype=object)
     # Free the per-column lists now that the DataFrame owns the data — peak memory
     # otherwise has both representations resident through the aggregation passes.
     del path_l, size_l, mtime_l, kind_l, parent_l, uri_l
     return IndexResult(
-        df=aggregate(df, scan_root=path0),
+        df=aggregate(df, scan_root=path0, mean_mtime=mean_mtime),
         error_count=errors.count,
         error_paths=errors.paths,
     )
