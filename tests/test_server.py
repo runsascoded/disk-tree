@@ -846,3 +846,93 @@ class TestCacheInvalidation:
         response = client.get('/api/scan?uri=/test')
         assert response.status_code == 200
         # Request should succeed (caching is now internal to storage backend)
+
+
+class TestGetHistogram:
+    """Tests for GET /api/histogram endpoint (spec: viz-widgets.md §4)."""
+
+    @staticmethod
+    def _seed(db_path: str, scans_dir: str, path: str = '/test') -> None:
+        """A scan of `path` with two dirs and a loose file at known mtimes."""
+        parquet_path = create_test_parquet(scans_dir, 'hist', [
+            {'path': '.', 'size': 300, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': path, 'n_desc': 6, 'n_children': 3, 'depth': 0},
+            {'path': 'a', 'size': 210, 'mtime': 100, 'kind': 'dir', 'parent': '.', 'uri': f'{path}/a', 'n_desc': 2, 'n_children': 2, 'depth': 1},
+            {'path': 'b', 'size': 60, 'mtime': 50, 'kind': 'dir', 'parent': '.', 'uri': f'{path}/b', 'n_desc': 1, 'n_children': 1, 'depth': 1},
+            {'path': 'loose.txt', 'size': 30, 'mtime': 75, 'kind': 'file', 'parent': '.', 'uri': f'{path}/loose.txt', 'n_desc': 0, 'n_children': 0, 'depth': 1},
+            {'path': 'a/old.bin', 'size': 200, 'mtime': 0, 'kind': 'file', 'parent': 'a', 'uri': f'{path}/a/old.bin', 'n_desc': 0, 'n_children': 0, 'depth': 2},
+            {'path': 'a/new.bin', 'size': 10, 'mtime': 100, 'kind': 'file', 'parent': 'a', 'uri': f'{path}/a/new.bin', 'n_desc': 0, 'n_children': 0, 'depth': 2},
+            {'path': 'b/mid.bin', 'size': 60, 'mtime': 50, 'kind': 'file', 'parent': 'b', 'uri': f'{path}/b/mid.bin', 'n_desc': 0, 'n_children': 0, 'depth': 2},
+        ])
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            'INSERT INTO scan (path, time, blob, size, n_children, n_desc, mtime) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            (path, '2025-01-01T12:00:00', parquet_path, 300, 3, 6, 100),
+        )
+        conn.commit()
+        conn.close()
+
+    def test_bins_bytes_per_child(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/histogram?uri=/test&bins=4')
+        assert response.status_code == 200
+        assert response.json == {
+            'uri': '/test',
+            'scan_path': '/test',
+            'time': '2025-01-01T12:00:00',
+            'edges': [0, 25, 50, 75, 100],
+            'children': [
+                {'path': 'a', 'kind': 'dir', 'bytes': [200, 0, 0, 10], 'total_bytes': 210, 'n_files': 2},
+                {'path': 'b', 'kind': 'dir', 'bytes': [0, 0, 60, 0], 'total_bytes': 60, 'n_files': 1},
+                {'path': 'loose.txt', 'kind': 'file', 'bytes': [0, 0, 0, 30], 'total_bytes': 30, 'n_files': 1},
+            ],
+            'omitted': 0,
+            'omitted_bytes': 0,
+        }
+
+    def test_drills_into_subdir_of_an_ancestor_scan(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/histogram?uri=/test/a&bins=2')
+        assert response.status_code == 200
+        body = response.json
+        assert body['scan_path'] == '/test'
+        assert body['edges'] == [0, 50, 100]
+        assert body['children'] == [
+            {'path': 'old.bin', 'kind': 'file', 'bytes': [200, 0], 'total_bytes': 200, 'n_files': 1},
+            {'path': 'new.bin', 'kind': 'file', 'bytes': [0, 10], 'total_bytes': 10, 'n_files': 1},
+        ]
+
+    def test_limit_reports_omitted_children(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/histogram?uri=/test&bins=2&limit=1')
+        assert response.status_code == 200
+        body = response.json
+        assert [c['path'] for c in body['children']] == ['a']
+        assert (body['omitted'], body['omitted_bytes']) == (2, 90)
+
+    def test_limit_0_returns_all_children(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/histogram?uri=/test&bins=2&limit=0')
+        assert response.status_code == 200
+        assert [c['path'] for c in response.json['children']] == ['a', 'b', 'loose.txt']
+
+    def test_missing_scan_is_404(self, test_client):
+        client, _, _ = test_client
+        response = client.get('/api/histogram?uri=/nope')
+        assert response.status_code == 404
+        assert response.json == {'error': 'No scan found for path', 'uri': '/nope'}
+
+    def test_invalid_bins_is_400(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/histogram?uri=/test&bins=0')
+        assert response.status_code == 400
+        assert response.json == {'error': 'bins must be >= 1; got 0'}

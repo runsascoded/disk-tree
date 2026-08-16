@@ -1113,6 +1113,94 @@ def get_scan_history():
     return jsonify(results)
 
 
+def freshest_scan_covering(db, uri: str, scan_id: str | None = None) -> dict | None:
+    """Newest scan whose path is `uri` or an ancestor of it (or `scan_id`, verified)."""
+    from disk_tree.backends import url_parent
+    if scan_id:
+        row = db.execute('SELECT * FROM scan WHERE id = ?', (scan_id,)).fetchone()
+        if not row:
+            return None
+        scan = dict(row)
+        if uri == scan['path'] or uri.startswith(scan['path'].rstrip('/') + '/'):
+            return scan
+        return None
+    candidates = []
+    test_path = uri
+    while test_path:
+        row = db.execute(
+            'SELECT * FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1', (test_path,)
+        ).fetchone()
+        if row:
+            candidates.append(dict(row))
+        parent = url_parent(test_path)
+        if parent is None or parent == test_path:
+            break
+        test_path = parent
+    if not candidates:
+        return None
+    return max(candidates, key=lambda s: s['time'])
+
+
+@app.route('/api/histogram')
+def get_histogram():
+    """Byte-weighted mtime histograms for each child of a URI (spec: viz-widgets.md §4).
+
+    Query params:
+        uri: path or s3:// URI to break down
+        bins: number of mtime bins (default 24)
+        limit: max children returned, biggest-first; 0 = all (default 20)
+        scan_id: specific scan to use (time-travel)
+
+    Unlike `/api/scan`, this needs *every* descendant file row (a distribution
+    can't be rolled up from per-dir means), so there is no depth pushdown to
+    lean on — responses are cached for `CACHE_TTL` and the UI only requests
+    them when the histogram view is open.
+    """
+    uri = request.args.get('uri', '/').rstrip('/') or '/'
+    scan_id = request.args.get('scan_id')
+    try:
+        bins = int(request.args.get('bins', 24))
+        limit_arg = request.args.get('limit', '20')
+        limit = None if limit_arg in ('0', 'none', '') else int(limit_arg)
+    except ValueError as e:
+        return jsonify({'error': f'invalid parameter: {e}'}), 400
+    if bins < 1:
+        return jsonify({'error': f'bins must be >= 1; got {bins}'}), 400
+
+    cache_key = f"histogram:{uri}:{scan_id}:{bins}:{limit}"
+    now = time.time()
+    if cache_key in _cache:
+        cached_time, cached_result = _cache[cache_key]
+        if now - cached_time < CACHE_TTL:
+            return jsonify(cached_result)
+
+    search_path = uri if ('://' in uri or uri.startswith('/')) else f'/{uri}'
+    scan = freshest_scan_covering(get_db(), search_path, scan_id)
+    if not scan:
+        return jsonify({'error': 'No scan found for path', 'uri': uri}), 404
+
+    if scan['path'] == uri:
+        relative_path = '.'
+    else:
+        scan_prefix = scan['path'].rstrip('/') + '/'
+        relative_path = uri[len(scan_prefix):] if uri.startswith(scan_prefix) else '.'
+
+    effective_blob, rebased_path = resolve_chunk_for_path(scan['blob'], relative_path)
+    df = load_scan_data(effective_blob)
+
+    from disk_tree.histogram import age_histograms
+    hist = age_histograms(df, rel_path=rebased_path, bins=bins, limit=limit)
+
+    response = {
+        'uri': uri,
+        'scan_path': scan['path'],
+        'time': scan['time'],
+        **hist.to_dict(),
+    }
+    _cache[cache_key] = (now, response)
+    return jsonify(response)
+
+
 @app.route('/api/compare')
 def compare_scans():
     """Compare two scans of the same path.

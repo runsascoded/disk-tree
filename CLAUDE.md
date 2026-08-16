@@ -47,6 +47,8 @@ Key goals:
 - `POST /api/scan/start` — Start a new scan (background thread)
 - `GET /api/scans/progress` — Current progress of active scans
 - `GET /api/scans/progress/stream` — SSE stream for real-time progress
+- `GET /api/histogram?uri=<path>&bins=N&limit=N` — Byte-weighted mtime histogram per child
+  - Loads every descendant file row (no depth pushdown possible); response cached, UI fetches lazily
 - `POST /api/delete` — Delete a file/directory and update scan parquets
 - Static file serving for bundled UI (SPA with catch-all routing)
 
@@ -55,10 +57,13 @@ Key goals:
 disk-tree index [URL]     # Scan directory or s3:// bucket
   -C, --no-cache-read     # Force fresh scan
   -g, --gc                # Garbage collect old scans
+  -m, --mean-mtime        # Emit `mtime_mean` (size-weighted mean mtime; feeds the UI age lens)
+  -M, --measure-memory    # Track peak memory
   -s, --sudo              # Run gfind with sudo
-  -m, --measure-memory    # Track peak memory
 
 disk-tree scans           # List cached scans (JSON)
+
+disk-tree histogram URI   # Byte-weighted mtime distribution per child (sparklines; -j for JSON)
 
 disk-tree fetch [BUCKET…] # Bulk-list configured buckets → dated raw-listing shards
 disk-tree pull [BUCKET…]  # fetch + import as dated scans
@@ -73,7 +78,8 @@ disk-tree-server          # Start Flask API server
 
 ### Web UI (`ui/`)
 
-Vite + React + TypeScript with Material-UI, Plotly treemaps, TanStack Query.
+Vite + React + TypeScript with Material-UI, TanStack Query, and `@disk-tree/react` widgets
+(chart-lib-free DIY SVG: `<Treemap>`, `<TimeSeries>`, `<StalenessScatter>`, `<AgeHistograms>`).
 
 **Key features**:
 - Directory listing with size, mtime, n_children, n_desc columns
@@ -81,7 +87,7 @@ Vite + React + TypeScript with Material-UI, Plotly treemaps, TanStack Query.
 - Rescan button with real-time progress (SSE)
 - Multi-select with keyboard navigation (Shift+arrows)
 - Bulk delete for selected items
-- Treemap visualization (Plotly, lazy-loaded)
+- Viz panel with a `View:` toggle — Treemap (+ age lens), Staleness scatter, Age histograms
 - Pagination and search/filter
 - S3 bucket list with treemap visualization
 
@@ -90,7 +96,6 @@ Vite + React + TypeScript with Material-UI, Plotly treemaps, TanStack Query.
 - `src/components/ScanList.tsx` — Scans list with pagination
 - `src/components/ScanDetails.tsx` — Directory listing component
 - `src/components/S3BucketList.tsx` — S3 bucket browser with treemap
-- `src/components/LazyPlot.tsx` — Code-split Plotly wrapper
 - `src/hooks/useScanProgress.ts` — SSE-based progress tracking
 
 ## Development
@@ -106,7 +111,7 @@ disk-tree-server  # http://localhost:5001
 # Web UI
 cd ui
 pnpm install
-pnpm dev        # http://localhost:5180
+pnpm dev        # http://localhost:7788
 ```
 
 ## Packaging / Distribution

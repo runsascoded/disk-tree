@@ -3,11 +3,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import { useAction } from 'use-kbd'
-import { age01, ageDomain, ageFade, BytesOverTime, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
+import { AgeHistograms, age01, ageDomain, ageFade, BytesOverTime, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
-import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
-import type { Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
+import { fetchScanDetails, fetchScanHistory, fetchHistogram, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
+import type { HistogramChild, Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
@@ -24,7 +24,7 @@ import {
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
 
 /** Which visualization the panel under the table renders. */
-type Viz = 'treemap' | 'scatter'
+type Viz = 'treemap' | 'scatter' | 'histograms'
 type SortDir = 'asc' | 'desc'
 type SortSpec = { key: SortKey; dir: SortDir }
 
@@ -703,6 +703,71 @@ function StalenessPanel({
         )}
       />
     </Box>
+  )
+}
+
+/**
+ * Byte-weighted age histograms for the drill dir's children (spec §4). Fetched
+ * lazily — unlike `/api/scan`, the histogram needs every descendant file row,
+ * so it only runs when this view is open.
+ */
+function HistogramPanel({ uri, scanId }: { uri: string; scanId?: number }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['histogram', uri, scanId],
+    queryFn: () => fetchHistogram(uri, 24, 10, scanId),
+    staleTime: 60 * 1000,
+  })
+  const [threshold, setThreshold] = useState<number | null>(null)
+  const [reclaimable, setReclaimable] = useState(0)
+  const [normalize, setNormalize] = useState(false)
+
+  if (isLoading) return <Box sx={{ height: 400, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><CircularProgress size={24} /></Box>
+  if (error) return <Alert severity="error">{(error as Error).message}</Alert>
+  if (!data || data.children.length === 0) return <Box sx={{ opacity: 0.6, fontSize: '0.85rem' }}>No file mtimes to bin here.</Box>
+
+  return (
+    <>
+      <Box sx={{ height: 400 }}>
+        <AgeHistograms<HistogramChild>
+          items={data.children}
+          edges={data.edges}
+          getBins={c => c.bytes}
+          getLabel={c => c.path}
+          formatSize={formatSize}
+          formatTime={t => new Date(t * 1000).toLocaleDateString()}
+          threshold={threshold}
+          onThresholdChange={(t, bytes) => { setThreshold(t); setReclaimable(bytes) }}
+          normalize={normalize}
+          renderTooltip={c => (
+            <>
+              <div style={{ fontWeight: 500 }}>{c.path}</div>
+              <div style={{ opacity: 0.75, fontSize: '0.85em' }}>
+                {formatSize(c.total_bytes)} · {formatCount(c.n_files)} files
+              </div>
+            </>
+          )}
+        />
+      </Box>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, fontSize: '0.8rem', opacity: 0.7, mt: 0.5 }}>
+        <Tooltip title="Scale each column to its own largest bin. Shapes become legible when children differ by orders of magnitude, but bar widths stop being comparable between columns.">
+          <label style={{ cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            <input
+              type="checkbox"
+              checked={normalize}
+              onChange={e => setNormalize(e.target.checked)}
+              style={{ marginRight: 4, verticalAlign: 'middle' }}
+            />
+            Shape only
+          </label>
+        </Tooltip>
+        <span>
+        {threshold == null
+          ? 'Drag in the plot to set an age threshold; the shaded area is what deleting everything older would reclaim.'
+          : `${formatSize(reclaimable)} older than ${new Date(threshold * 1000).toLocaleDateString()}`}
+        {data.omitted > 0 && ` · ${formatCount(data.omitted)} smaller children omitted (${formatSize(data.omitted_bytes)})`}
+        </span>
+      </Box>
+    </>
   )
 }
 
@@ -1482,9 +1547,13 @@ export function ScanDetails() {
       )}
       {rows.length > 0 && (
         <Box sx={{ mt: 2 }}>
-          {viz === 'treemap'
-            ? <Treemap root={root} rows={rows} ageLens={ageLens} />
-            : <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />}
+          {viz === 'treemap' ? (
+            <Treemap root={root} rows={rows} ageLens={ageLens} />
+          ) : viz === 'scatter' ? (
+            <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
+          ) : (
+            <HistogramPanel uri={uri} scanId={selectedScanId} />
+          )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{viz === 'treemap' ? `${rows.length} items` : `${filteredChildren.length} children`}</span>
             <label>
@@ -1492,6 +1561,7 @@ export function ScanDetails() {
               <select value={viz} onChange={e => setViz(e.target.value as Viz)} style={{ marginLeft: 4 }}>
                 <option value="treemap">Treemap</option>
                 <option value="scatter">Staleness</option>
+                <option value="histograms">Age histograms</option>
               </select>
             </label>
             {viz === 'treemap' && (

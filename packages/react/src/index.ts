@@ -9,6 +9,9 @@ export type { AgeFadeOpts } from './colors'
 export { formatTbYears, pow10, SEC_PER_YEAR, sumTbYears, TB } from './stats'
 export { StalenessScatter } from './StalenessScatter'
 export type { StalenessScatterProps } from './StalenessScatter'
+export { AgeHistograms } from './AgeHistograms'
+export type { AgeHistogramsProps } from './AgeHistograms'
+export { bytesOlderThan, peakBin, timeTicks, totalBytes } from './histogram'
 export {
   decadesBetween,
   isoScoreDecades,

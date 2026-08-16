@@ -52,6 +52,39 @@ export async function fetchScans(): Promise<Scan[]> {
   return res.json()
 }
 
+export type HistogramChild = {
+  path: string
+  kind: 'file' | 'dir'
+  /** Bytes per bin; length === edges.length - 1. */
+  bytes: number[]
+  total_bytes: number
+  n_files: number
+}
+
+export type Histogram = {
+  uri: string
+  scan_path: string
+  time: string
+  /** Shared bin edges, epoch seconds ascending. */
+  edges: number[]
+  children: HistogramChild[]
+  omitted: number
+  omitted_bytes: number
+}
+
+export async function fetchHistogram(uri: string, bins: number = 24, limit: number = 20, scanId?: number): Promise<Histogram> {
+  const params = new URLSearchParams({ uri, bins: String(bins), limit: String(limit) })
+  if (scanId !== undefined) {
+    params.set('scan_id', String(scanId))
+  }
+  const res = await fetch(`/api/histogram?${params}`)
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.error || 'Failed to fetch histogram')
+  }
+  return res.json()
+}
+
 export async function fetchScanDetails(uri: string, scanId?: number, depth: number = 2, maxRows: number = DEFAULT_MAX_ROWS): Promise<ScanDetails> {
   const params = new URLSearchParams({ uri, depth: String(depth), max_rows: String(maxRows) })
   if (scanId !== undefined) {

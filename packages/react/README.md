@@ -11,6 +11,7 @@ Ships:
 | [`<Treemap>`](#treemap) | Squarified layout, drill-on-click, pin-on-leaf tooltip, keyboard nav, fold-small "…" tiles, fullscreen, slot-based coloring/tooltip/legend/rollup. |
 | [`<TimeSeries>`](#timeseries) / [`<BytesOverTime>`](#timeseries) | Multi-series line/area chart with hover-follow crosshair. ~330 LOC total, zero deps. |
 | [`<StalenessScatter>`](#stalenessscatter) | Log-log age-vs-bytes "triage frontier": marker area ∝ a count channel, exact iso-sum-TB·year diagonals, hover/pin tooltip, click-to-drill. |
+| [`<AgeHistograms>`](#agehistograms) | Byte-weighted mtime distribution per child, with a draggable threshold that reads out reclaimable bytes. |
 | [`useHoverPin`](#usehoverpin) | Headless hover+pin state (single pin, touch-safe, outside-click / Esc clear). |
 | `squarify` / `foldSmall` | Pure layout primitives if you want to render the cells yourself. |
 | `divergingColor` / `divergingInk` | Red/green diverging scale for Δ views. |
@@ -147,6 +148,37 @@ SI (1 TB = 1e12 B) so the axis agrees with the score's units.
 The layout math is exported separately if you want to render your own
 marks: `logDomain`, `logPos`, `logTicks`, `isoScoreSegment`,
 `isoScoresForData`, `decadesBetween`, `radiusFor`.
+
+## `<AgeHistograms>`
+
+One column per child, y = mtime, bars weighted by **bytes** against a
+shared scale — so a column's area is its byte total and the area below
+the threshold line is exactly what deleting everything older reclaims.
+A mean can't tell you a directory is half ancient and half fresh; this
+can.
+
+```tsx
+import { AgeHistograms } from '@disk-tree/react'
+
+// From disk-tree's /api/histogram: shared `edges`, per-child `bytes`.
+<AgeHistograms<Child>
+  items={data.children}
+  edges={data.edges}            // epoch seconds, length = bins + 1
+  getBins={c => c.bytes}        // length = edges.length - 1
+  getLabel={c => c.path}
+  threshold={threshold}
+  onThresholdChange={(t, reclaimable) => { … }}   // drag anywhere in the plot
+  normalize={false}             // true = per-column shape, area no longer comparable
+/>
+```
+
+`normalize` exists because real directory trees span orders of
+magnitude: honest shared scaling renders a 5 MB child next to a 2 GB one
+as a hairline. Expose it as an explicitly-labeled toggle ("shape only"),
+not as the default.
+
+Math is exported too: `bytesOlderThan` (whole bins plus a linear split
+of the straddling one), `totalBytes`, `peakBin`, `timeTicks`.
 
 ## `useHoverPin`
 
