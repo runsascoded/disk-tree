@@ -837,22 +837,28 @@ def _part_batches(path: str, part_sorted: bool, batch_rows: int):
     is loaded and sorted here — bounded by that single (depth, kind) slice, not
     the whole output (the win over the retired global external sort).
     """
-    import pyarrow.compute as pc
+    import pyarrow as pa
     import pyarrow.parquet as pq
     if part_sorted:
         yield from pq.ParquetFile(path).iter_batches(batch_size=batch_rows)
     else:
-        # NOT `Table.sort_by`: its take() materializes each permuted column as
-        # one contiguous Array, and a >2GiB string column (`path`/`uri` at
-        # fleet scale — eu-west4's dir parts) overflows 32-bit string offsets
-        # (`ArrowInvalid: offset overflow while concatenating arrays`).
-        # Sort indices once, then take in batch-sized slices — every output
-        # chunk stays small, memory stays ~batch-bound.
+        # pyarrow `take` (and therefore `sort_by`) concatenates each chunked
+        # *input* column into one contiguous Array before taking — so a >2GiB
+        # `string` column (`path`/`uri` on eu-west4's 51M-row dir parts)
+        # overflows 32-bit offsets (`ArrowInvalid: offset overflow while
+        # concatenating arrays`) no matter how small the index slice is.
+        # Cast string columns to large_string first (a chunk-wise, zero-concat
+        # cast; 64-bit offsets make the internal concatenation legal), sort,
+        # and hand back batch-sized chunks cast to the part's original schema
+        # (the finalize writer's schema uses `string`).
         tbl = pq.read_table(path)
-        idx = pc.sort_indices(tbl, sort_keys=[('path', 'ascending')])
-        for lo in range(0, len(idx), batch_rows):
-            for rb in tbl.take(idx.slice(lo, batch_rows)).to_batches():
-                yield rb
+        orig = tbl.schema
+        big = pa.schema([
+            (f.name, pa.large_string() if pa.types.is_string(f.type) else f.type)
+            for f in orig
+        ])
+        for rb in tbl.cast(big).sort_by('path').to_batches(max_chunksize=batch_rows):
+            yield rb.cast(orig)
 
 
 def _merge_batches(sa, sb):
