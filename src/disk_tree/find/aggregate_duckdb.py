@@ -289,6 +289,7 @@ def aggregate_listing_to_parquet(
     con: "duckdb.DuckDBPyConnection | None" = None,
     memory_limit: str = '8GB',
     temp_dir: str | None = None,
+    max_temp_size: str | None = None,
     pivot_sums: tuple[str, ...] = (),
     mean_mtime: bool = False,
 ) -> dict:
@@ -311,8 +312,17 @@ def aggregate_listing_to_parquet(
     # parquet-writer row groups scale with thread count and sit largely
     # outside `memory_limit` accounting).
     con.execute("SET threads = 8")
-    if temp_dir:
-        con.execute(f"SET temp_directory = '{temp_dir}'")
+    # Per-invocation spill dir: DuckDB's default temp_directory is a *relative*
+    # `.tmp/`, so concurrent imports sharing a cwd corrupt each other's spill
+    # files. On failure the dir is left in place (spill files may still be
+    # referenced by the connection); on success it's removed.
+    import tempfile
+    spill_dir = temp_dir or tempfile.mkdtemp(prefix='disk-tree-spill-')
+    con.execute(f"SET temp_directory = '{spill_dir}'")
+    # DuckDB auto-caps spill at free-disk-at-launch; a concurrent writer
+    # shrinking that snapshot kills the sort even when disk frees up later.
+    if max_temp_size:
+        con.execute(f"SET max_temp_directory_size = '{max_temp_size}'")
 
     scan_root = f'{scheme}://{bucket}'
     # Collapse consecutive slashes + strip trailing slashes so `a//b` reads as
@@ -498,6 +508,9 @@ def aggregate_listing_to_parquet(
         WHERE path = '.' LIMIT 1
     """).df()
     root = root.iloc[0] if len(root) else None
+    if temp_dir is None:
+        import shutil
+        shutil.rmtree(spill_dir, ignore_errors=True)
     return {
         'rows': int(rows),
         'files': int(n_files),

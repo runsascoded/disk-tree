@@ -259,6 +259,24 @@ def test_lazy_merge_bounds_open_sources(tmp_path: Path):
     pd.testing.assert_frame_equal(got_stream, _normalize(pd.read_parquet(ooc)))
 
 
+def test_sort_failure_preserves_pre_output(tmp_path: Path, capsys):
+    """A final-sort-only failure keeps the streamed pre-output parquet (a
+    63-minute stream pass must not re-run for a sort failure) and reports
+    where it landed."""
+    import re
+    listing = _write_listing(tmp_path / 'l.parquet', [('a/x', 1), ('b/y', 2)])
+    out = tmp_path / 'out.parquet'
+    with pytest.raises(Exception):
+        # Invalid memory_limit fails in the final-sort setup, after streaming.
+        aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=str(out), memory_limit='not-a-size')
+    m = re.search(r'unsorted pre-output preserved at (\S+)', capsys.readouterr().err)
+    assert m, 'expected a preserved-pre-output stage line on stderr'
+    pre = pd.read_parquet(m.group(1))
+    # The pre-output holds the full streamed row set (unsorted): 2 files,
+    # 2 dirs, 1 root.
+    assert sorted(pre['path']) == ['.', 'a', 'a/x', 'b', 'b/y']
+
+
 def test_essentially_unsorted_raises(tmp_path: Path, monkeypatch):
     """The run-count guard: input whose runs explode (≈ every row its own run)
     gets the clear duckdb hint instead of a degenerate 1-row-per-source merge."""

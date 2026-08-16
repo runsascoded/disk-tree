@@ -405,6 +405,7 @@ def aggregate_stream(
     con: "object | None" = None,
     memory_limit: str | None = None,
     temp_dir: str | None = None,
+    max_temp_size: str | None = None,
     pivot_sums: tuple[str, ...] = (),
     mean_mtime: bool = False,
 ) -> dict:
@@ -509,6 +510,7 @@ def aggregate_stream(
     writer = _Writer(tmp_parquet, out_cols, mean_mtime)
     n_files_total = 0
     root_stats: dict = {}
+    spill_dir: str | None = None
     try:
         stack: list[_Acc] = [_Acc('', n_pivot)]
 
@@ -619,8 +621,15 @@ def aggregate_stream(
         _con = con if con is not None else _duckdb.connect()
         if memory_limit:
             _con.execute(f"SET memory_limit = '{memory_limit}'")
-        if temp_dir:
-            _con.execute(f"SET temp_directory = '{temp_dir}'")
+        # Per-invocation spill dir: DuckDB's default temp_directory is a
+        # *relative* `.tmp/`, so concurrent imports sharing a cwd corrupt each
+        # other's spill files mid-sort.
+        spill_dir = temp_dir or tempfile.mkdtemp(prefix='disk-tree-spill-')
+        _con.execute(f"SET temp_directory = '{spill_dir}'")
+        # DuckDB auto-caps spill at free-disk-at-launch; a concurrent writer
+        # shrinking that snapshot kills the sort even when disk frees up later.
+        if max_temp_size:
+            _con.execute(f"SET max_temp_directory_size = '{max_temp_size}'")
         # Canonical column order (matches the pandas concat / duckdb tail:
         # extras between `parent` and `uri`) — the pre-output's internal order
         # is a writer convenience; the published layer-2 must be column-order
@@ -642,9 +651,19 @@ def aggregate_stream(
             ) TO '{out_parquet}' (FORMAT PARQUET)
         """)
         _stage("final sort done")
-    finally:
+    except BaseException:
+        # A sort-only failure must not cost the (expensive) stream pass: keep
+        # the pre-output parquet so the sort can be redone without re-streaming.
+        if os.path.exists(tmp_parquet):
+            _stage(f"FAILED — unsorted pre-output preserved at {tmp_parquet}")
+        raise
+    else:
         if os.path.exists(tmp_parquet):
             os.remove(tmp_parquet)
+    finally:
+        if spill_dir is not None and temp_dir is None:
+            import shutil
+            shutil.rmtree(spill_dir, ignore_errors=True)
 
     return {
         'rows': writer.n_rows,

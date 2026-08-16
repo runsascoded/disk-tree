@@ -32,8 +32,9 @@ from disk_tree.cli.base import cli
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendant files) per path')
 @option('-p', '--pivot-sum', 'pivot_sums', multiple=True, help='Emit per-value byte-sum columns `sum_<col>_<v>` for this layer-1 column (e.g. storage_class_id); repeatable')
 @option('-s', '--scheme', default='gcs', help='URI scheme for the scan root (gcs / s3 / r2)')
-@option('-T', '--temp-dir', default=None, help='DuckDB spill directory (duckdb engine only). Default: system tmp.')
+@option('-T', '--temp-dir', default=None, help='DuckDB spill directory (duckdb/stream engines). Default: fresh per-invocation temp dir (safe under concurrent imports).')
 @option('-t', '--time', 'time_str', default=None, help='Snapshot time (ISO 8601) recorded on each Scan; default: now')
+@option('-x', '--max-temp-size', default=None, help="DuckDB `max_temp_directory_size` (e.g. `500GiB`). Default: DuckDB's auto-cap = free disk at launch, a stale snapshot under concurrent writers.")
 def import_cmd(
     engine: str,
     listings: tuple[str, ...],
@@ -44,6 +45,7 @@ def import_cmd(
     scheme: str,
     temp_dir: str | None,
     time_str: str | None,
+    max_temp_size: str | None,
 ):
     """Import one or more buckets from listing parquet(s) as canonical scans."""
     import duckdb
@@ -70,6 +72,7 @@ def import_cmd(
             db=db, storage=storage, con=con,
             engine=engine, listings=listings, bucket=bucket, scheme=scheme,
             snap_time=snap_time, memory_limit=memory_limit, temp_dir=temp_dir,
+            max_temp_size=max_temp_size,
             pivot_sums=pivot_sums, mean_mtime=mean_mtime,
         )
 
@@ -85,6 +88,7 @@ def import_bucket(
     snap_time: datetime,
     memory_limit: str = '8GB',
     temp_dir: str | None = None,
+    max_temp_size: str | None = None,
     pivot_sums: tuple[str, ...] = (),
     mean_mtime: bool = False,
     replace=None,
@@ -124,6 +128,7 @@ def import_bucket(
                 stats = aggregate_listing_to_parquet(
                     src, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
                     con=con, memory_limit=memory_limit, temp_dir=temp_dir,
+                    max_temp_size=max_temp_size,
                     pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                 )
             else:  # stream
@@ -131,6 +136,7 @@ def import_bucket(
                 stats = aggregate_stream(
                     listings, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
                     con=con, memory_limit=memory_limit, temp_dir=temp_dir,
+                    max_temp_size=max_temp_size,
                     pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                 )
             # Hand the file itself to the storage backend — reading a
