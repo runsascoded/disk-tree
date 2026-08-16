@@ -37,6 +37,7 @@ from __future__ import annotations
 import re
 import sys
 from bisect import bisect_left
+from concurrent.futures.process import BrokenProcessPool
 from datetime import datetime
 from glob import glob as _glob
 from operator import itemgetter
@@ -848,6 +849,15 @@ _RECHUNK_RUNS = 16
 # share the same overall budget.
 _PRIME_ROWS = 1 << 22
 
+# Below this many rows the finalize stays serial even at `jobs > 1`: the
+# depth workers' spawn + temp round-trip costs more than the depth
+# parallelism saves. Measured on a 10M-row listing (mixed-radix tree): serial
+# 3s vs parallel 7s at both -j 4 and -j 8, while the stream phase kept its
+# speedup. The parallel path is a huge win at 300M rows (mgu's serial
+# finalize ran >1h53m without completing) — this only skips it where it
+# loses. Output bytes are identical either way, so the switch is invisible.
+_PARALLEL_FINALIZE_MIN_ROWS = int(_os.environ.get('DISK_TREE_PARALLEL_FINALIZE_MIN_ROWS', str(20_000_000)))
+
 
 def _detect_runs(path: str, key: str = 'path') -> list[int]:
     """Sorted-run start ordinals of a part parquet's `key` column (cheap
@@ -1173,8 +1183,19 @@ def _finalize_parts(
         buf = []
         buf_rows = 0
 
+    total_rows = sum(p['rows'] for kinds in by_depth.values() for ps in kinds.values() for p in ps)
+    parallel = jobs > 1 and len(by_depth) > 1 and total_rows >= _PARALLEL_FINALIZE_MIN_ROWS
+    if parallel:
+        _stage(f"finalize: {len(by_depth)} depth(s) across {jobs} worker(s)")
+    elif jobs > 1 and len(by_depth) > 1:
+        _stage(
+            f"finalize: {len(by_depth)} depth(s), serial "
+            f"({total_rows:,} rows < {_PARALLEL_FINALIZE_MIN_ROWS:,} parallel threshold)"
+        )
+    else:
+        _stage(f"finalize: {len(by_depth)} depth(s), serial")
     try:
-        if jobs > 1 and len(by_depth) > 1:
+        if parallel:
             # Depth merges are independent — fan them out to worker processes
             # (biggest depths first to kill the straggler tail), each writing
             # a per-depth temp; the parent consumes temps in depth order
@@ -1267,9 +1288,17 @@ def aggregate_stream(
     monoid sums, so they stream identically (see :mod:`disk_tree.find.agg_ext`).
 
     `jobs` partitions the keyspace into that many contiguous ranges streamed
-    by parallel worker processes (pass-1 shard scans parallelize through the
-    same pool); 0 = all cores; the default 1 stays fully in-process. Output is
-    byte-identical for any value (spec: stream-partition-parallel.md).
+    by parallel worker processes (pass-1 shard scans and the depth finalize
+    parallelize through the same pool); 0 = all cores; the default 1 stays
+    fully in-process. Output is byte-identical for any value (spec:
+    stream-partition-parallel.md).
+
+    **`jobs > 1` requires an import-safe caller.** The pool uses the `spawn`
+    start method, so each worker re-imports the caller's `__main__`: a driver
+    script that calls this at module top level re-executes itself in every
+    worker and dies. Guard the call with `if __name__ == '__main__':` (or call
+    from an importable module). Heredoc / `python -c` / stdin scripts cannot
+    satisfy this — use `jobs=1` there.
 
     `con` / `memory_limit` / `temp_dir` / `max_temp_size` are accepted for
     call-site compatibility but unused: the finalize is a depth-partitioned
@@ -1433,6 +1462,16 @@ def aggregate_stream(
             f"max {max_open} source(s) open) into {len(part_list)} part(s)"
             f" ({n_unsorted} unsorted); finalize"
         )
+    except BrokenProcessPool as e:
+        # Spawn workers re-import the caller's `__main__`; a driver that calls
+        # us at module top level re-executes itself in every worker and dies
+        # before running a task. The raw error names neither cause nor cure.
+        raise RuntimeError(
+            f"worker pool died immediately (jobs={jobs}). `jobs > 1` uses the spawn start "
+            f"method, so every worker re-imports the calling module: guard the call with "
+            f"`if __name__ == '__main__':`, or call it from an importable module. Heredoc / "
+            f"`python -c` / stdin scripts cannot satisfy that — use jobs=1 there. ({e})"
+        ) from e
     finally:
         if ex is not None:
             ex.shutdown()

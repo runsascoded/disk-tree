@@ -30,6 +30,7 @@ from disk_tree.cli.base import cli
 @option('-b', '--bucket', 'buckets', multiple=True, help='Bucket to import as one scan; repeatable. Default: every distinct bucket in the listings')
 @option('-j', '--jobs', default=1, help='Stream engine only: partition the keyspace into N ranges streamed by parallel worker processes (0 = all cores). Output is byte-identical for any value.')
 @option('-M', '--memory-limit', default='8GB', help='DuckDB memory cap (duckdb engine only). Excess spills to `--temp-dir`.')
+@option('-o', '--out-dir', default=None, help="Aggregate into `<DIR>/<scheme>-<bucket>.parquet` instead of a fresh temp file. Stream engine: makes the `<out>.parts` resume token reachable across invocations, so a run that died in the finalize resumes at the merge instead of re-streaming.")
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendant files) per path')
 @option('-p', '--pivot-sum', 'pivot_sums', multiple=True, help='Emit per-value byte-sum columns `sum_<col>_<v>` for this layer-1 column (e.g. storage_class_id); repeatable')
 @option('-s', '--scheme', default='gcs', help='URI scheme for the scan root (gcs / s3 / r2)')
@@ -43,6 +44,7 @@ def import_cmd(
     jobs: int,
     memory_limit: str,
     mean_mtime: bool,
+    out_dir: str | None,
     pivot_sums: tuple[str, ...],
     scheme: str,
     temp_dir: str | None,
@@ -74,7 +76,7 @@ def import_cmd(
             db=db, storage=storage, con=con,
             engine=engine, listings=listings, bucket=bucket, scheme=scheme,
             snap_time=snap_time, memory_limit=memory_limit, temp_dir=temp_dir,
-            max_temp_size=max_temp_size, jobs=jobs,
+            max_temp_size=max_temp_size, jobs=jobs, out_dir=out_dir,
             pivot_sums=pivot_sums, mean_mtime=mean_mtime,
         )
 
@@ -92,6 +94,7 @@ def import_bucket(
     temp_dir: str | None = None,
     max_temp_size: str | None = None,
     jobs: int = 1,
+    out_dir: str | None = None,
     pivot_sums: tuple[str, ...] = (),
     mean_mtime: bool = False,
     replace=None,
@@ -100,6 +103,9 @@ def import_bucket(
 
     `replace`: an existing Scan row to update in place (same path+time)
     instead of inserting a new one — used by `disk-tree pull --force`.
+    `out_dir`: aggregate into a deterministic `<out_dir>/<scheme>-<bucket>.parquet`
+    rather than a fresh temp name, so the stream engine's `<out>.parts` resume
+    token is findable on a rerun (a per-invocation temp name never is).
     Returns the Scan.
     """
     from disk_tree.sqla.model import Scan
@@ -121,8 +127,12 @@ def import_bucket(
     else:
         # Aggregate straight to a parquet in a temp location, then have the storage
         # backend adopt it — mirrors what a `save-from-file` API would do if we had one.
-        with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as fh:
-            out_parquet = fh.name
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+            out_parquet = os.path.join(out_dir, f'{scheme}-{bucket}.parquet')
+        else:
+            with tempfile.NamedTemporaryFile(suffix='.parquet', delete=False) as fh:
+                out_parquet = fh.name
         try:
             if engine == 'duckdb':
                 from disk_tree.find.aggregate_duckdb import aggregate_listing_to_parquet

@@ -696,3 +696,118 @@ def test_cli_engine_stream_creates_scan(tmp_path: Path):
     rows = conn.execute("SELECT path, size, n_children, n_desc FROM scan").fetchall()
     conn.close()
     assert rows == [('gcs://b1', 300, 2, 4)]
+
+
+def test_cli_out_dir_makes_resume_reachable(tmp_path: Path, monkeypatch):
+    """The CLI's per-invocation temp name hides the `<out>.parts` resume token
+    (mgu burn-in: an expensive stream pass re-ran even though its parts had
+    survived). `--out-dir` gives the output a deterministic per-bucket name, so
+    an interrupted finalize resumes at the merge — with identical output."""
+    from disk_tree.cli.import_listing import import_bucket
+    from disk_tree.find import aggregate_stream as mod
+    from disk_tree.sqla.db import init
+    from disk_tree.storage import get_backend, reset_backend
+
+    listing = _write_listing(tmp_path / 'l.parquet', [('a/x', 1), ('b/y', 2)])
+    out_dir = tmp_path / 'agg'
+    monkeypatch.setenv('DISK_TREE_ROOT', str(tmp_path / 'dt-root'))
+    reset_backend()
+    db = init()
+    db.create_all()
+
+    def boom(*a, **kw):
+        raise RuntimeError('injected finalize failure')
+
+    monkeypatch.setattr(mod, '_finalize_parts', boom)
+    with pytest.raises(RuntimeError):
+        import_bucket(
+            db=db, storage=get_backend(), con=None, engine='stream',
+            listings=(str(listing),), bucket='b1', scheme='gcs', snap_time=TS,
+            out_dir=str(out_dir),
+        )
+    # Deterministic name → the token is where a rerun will look for it.
+    parts_dir = out_dir / 'gcs-b1.parquet.parts'
+    assert sorted(p.name for p in out_dir.iterdir()) == ['gcs-b1.parquet.parts']
+    assert (parts_dir / 'manifest.json').exists()
+
+    monkeypatch.undo()
+    monkeypatch.setenv('DISK_TREE_ROOT', str(tmp_path / 'dt-root'))
+    scan = import_bucket(
+        db=db, storage=get_backend(), con=None, engine='stream',
+        listings=(str(listing),), bucket='b1', scheme='gcs', snap_time=TS,
+        out_dir=str(out_dir),
+    )
+    assert not parts_dir.exists()
+    assert (scan.path, scan.size, scan.n_children, scan.n_desc) == ('gcs://b1', 3, 2, 5)
+    got = _normalize(get_backend().load(scan.blob))
+    expected = _normalize(import_listing((str(listing),), bucket='b1', scheme='gcs').df)
+    pd.testing.assert_frame_equal(got, expected)
+
+
+def test_jobs_gt_1_from_unimportable_main_explains_itself(tmp_path: Path, monkeypatch):
+    """A spawn pool whose workers can't re-import `__main__` dies with a bare
+    BrokenProcessPool naming neither cause nor cure (mgu lost a resume to it).
+    We translate it into an actionable message."""
+    from concurrent.futures.process import BrokenProcessPool
+    from disk_tree.find import aggregate_stream as mod
+
+    listing = _write_listing(tmp_path / 'l.parquet', [('a/x', 1), ('b/y', 2)])
+
+    class DeadPool:
+        def __init__(self, *a, **kw):
+            pass
+
+        def map(self, *a, **kw):
+            raise BrokenProcessPool('A process in the process pool was terminated abruptly')
+
+        def submit(self, *a, **kw):
+            raise BrokenProcessPool('A process in the process pool was terminated abruptly')
+
+        def shutdown(self, *a, **kw):
+            pass
+
+    monkeypatch.setattr('concurrent.futures.ProcessPoolExecutor', DeadPool)
+    with pytest.raises(RuntimeError) as exc:
+        mod.aggregate_stream(
+            (listing,), bucket='b1', scheme='gcs',
+            out_parquet=str(tmp_path / 'out.parquet'), jobs=4,
+        )
+    msg = str(exc.value)
+    assert msg.startswith('worker pool died immediately (jobs=4).')
+    assert "if __name__ == '__main__':" in msg
+    assert isinstance(exc.value.__cause__, BrokenProcessPool)
+
+
+def _finalize_stage_line(err: str) -> str:
+    """The single `finalize: …` stage line, minus its timestamp prefix."""
+    lines = [ln.split('] ', 1)[1] for ln in err.strip().split('\n') if '] finalize: ' in ln]
+    assert len(lines) == 1, err
+    return lines[0]
+
+
+def test_small_finalize_stays_serial_despite_jobs(tmp_path: Path, capsys):
+    """Depth-worker spawn + temp round-trip costs more than depth parallelism
+    saves on small inputs (10M rows: 3s serial vs 7s parallel). Below the
+    threshold the finalize stays serial and says so."""
+    listing = _write_listing(tmp_path / 'l.parquet', _PARTITION_ROWS, row_group_size=2)
+    out = str(tmp_path / 'out.parquet')
+    aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=out, jobs=2)
+    line = _finalize_stage_line(capsys.readouterr().err)
+    assert line == 'finalize: 7 depth(s), serial (35 rows < 20,000,000 parallel threshold)'
+
+
+def test_parallel_finalize_engages_above_threshold_with_identical_bytes(tmp_path: Path, capsys, monkeypatch):
+    """Above the threshold the depth workers run — and the bytes are the same
+    as the serial path's, which is what makes the switch safe to make on size."""
+    from disk_tree.find import aggregate_stream as mod
+
+    listing = _write_listing(tmp_path / 'l.parquet', _PARTITION_ROWS, row_group_size=2)
+    serial_out = str(tmp_path / 'serial.parquet')
+    aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=serial_out, jobs=2)
+    capsys.readouterr()
+
+    monkeypatch.setattr(mod, '_PARALLEL_FINALIZE_MIN_ROWS', 0)
+    parallel_out = str(tmp_path / 'parallel.parquet')
+    aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=parallel_out, jobs=2)
+    assert _finalize_stage_line(capsys.readouterr().err) == 'finalize: 7 depth(s) across 2 worker(s)'
+    assert _md5(serial_out) == _md5(parallel_out)
