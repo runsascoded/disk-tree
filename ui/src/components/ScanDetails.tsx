@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import { useAction } from 'use-kbd'
-import { BytesOverTime, Treemap as DTTreemap } from '@disk-tree/react'
+import { age01, ageDomain, ageFade, BytesOverTime, Treemap as DTTreemap } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
@@ -538,12 +538,14 @@ interface DTNode {
   path: string
   label: string
   size: number
+  /** Newest descendant mtime (epoch s) — v0 age signal for the age lens. */
+  mtime?: number | null
   children?: DTNode[]
   /** True for synthetic "…" placeholders — kept clickless. */
   isPlaceholder?: boolean
 }
 
-function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
+function Treemap({ root, rows, ageLens }: { root: Row; rows: Row[]; ageLens: boolean }) {
   const tree = useMemo(() => {
     const childrenByParent = new Map<string, Row[]>()
     for (const row of rows) {
@@ -562,6 +564,7 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
         path: r.path,
         label: r.path.split('/').pop() || r.path,
         size: r.size ?? 0,
+        mtime: r.mtime,
         children: r.kind === 'dir' ? build(r.path, r.size ?? 0) : undefined,
       }))
       // Add "…" placeholder for unaccounted area (dropped rows / depth limits).
@@ -591,6 +594,10 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
     } satisfies DTNode
   }, [root, rows])
 
+  // Age-lens domain over all rows' mtimes (not just the drill level), so a
+  // cell's fade is stable as you drill instead of renormalizing per level.
+  const mtimeDomain = useMemo(() => ageDomain(rows, r => r.mtime), [rows])
+
   return (
     <Box sx={{ height: 400 }}>
       <DTTreemap<DTNode>
@@ -604,10 +611,23 @@ function Treemap({ root, rows }: { root: Row; rows: Row[] }) {
           // default categorical palette handles real nodes.
           n.isPlaceholder ? { bg: '#4a4a52', ink: '#d0d0d8' } : null
         }
+        lens={
+          ageLens && mtimeDomain
+            ? (n, _path, _depth, _ctx, style) =>
+                n.mtime == null || n.isPlaceholder
+                  ? null
+                  : ageFade(style, age01(n.mtime, mtimeDomain))
+            : undefined
+        }
         renderTooltip={n => (
           <>
             <div style={{ fontWeight: 500 }}>{n.label}</div>
             <div style={{ opacity: 0.75, fontSize: '0.85em' }}>{formatSize(n.size)}</div>
+            {ageLens && n.mtime != null && (
+              <div style={{ opacity: 0.6, fontSize: '0.75em', marginTop: 2 }}>
+                modified {timeAgo(n.mtime)}
+              </div>
+            )}
             {n.isPlaceholder && (
               <div style={{ opacity: 0.6, fontSize: '0.75em', marginTop: 2 }}>
                 unaccounted (dropped by row-limit or depth-limit)
@@ -723,6 +743,7 @@ export function ScanDetails() {
   })
 
   const [treemapMaxRows, setTreemapMaxRows] = useState(DEFAULT_MAX_ROWS)
+  const [ageLens, setAgeLens] = useState(false)
   const { data: details, isLoading, error: queryError, refetch } = useQuery({
     queryKey: ['scan-details', uri, selectedScanId, treemapMaxRows],
     queryFn: () => fetchScanDetails(uri, selectedScanId, 2, treemapMaxRows),
@@ -1394,9 +1415,20 @@ export function ScanDetails() {
       )}
       {rows.length > 0 && (
         <Box sx={{ mt: 2 }}>
-          <Treemap root={root} rows={rows} />
+          <Treemap root={root} rows={rows} ageLens={ageLens} />
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{rows.length} items</span>
+            <Tooltip title="Fade cells by age of their newest descendant — older fades toward the background">
+              <label style={{ cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={ageLens}
+                  onChange={e => setAgeLens(e.target.checked)}
+                  style={{ marginRight: 4, verticalAlign: 'middle' }}
+                />
+                Age lens
+              </label>
+            </Tooltip>
             <label>
               Max:
               <select

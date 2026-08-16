@@ -60,7 +60,7 @@ Text input (substring/regex) → every widget re-slices to matching paths.
 
 ## Sequencing
 
-1. **V.1** age-lens helpers (`colors.ts`) + `ScanDetails` checkbox lens (max-mtime v0). Pure FE.
+1. **V.1** age-lens helpers (`colors.ts`) + `ScanDetails` checkbox lens (max-mtime v0). Pure FE. — **DONE**: `ageFade`/`ageDomain`/`age01` + a generic `lens` slot on `<Treemap>` (post-resolution style transform, stacks on any `colorForCell`); `ScanDetails` "Age lens" checkbox + tooltip age line; CIC-verified on the `/Users/ryan` scan (old repos fade, active dirs stay saturated, hue preserved).
 2. **V.2** `disk-tree index -m` + `/api/scan` `mtime_mean` passthrough → lens upgrades to mean-age; `stats.ts` sum-TBy helpers.
 3. **V.3** `<StalenessScatter>` + a DT `ui/` panel at the drill level.
 4. **V.4** histogram endpoint/CLI + `<AgeHistograms>` with threshold-slider reclaimable-bytes readout.

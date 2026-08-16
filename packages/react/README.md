@@ -13,6 +13,7 @@ Ships:
 | [`useHoverPin`](#usehoverpin) | Headless hover+pin state (single pin, touch-safe, outside-click / Esc clear). |
 | `squarify` / `foldSmall` | Pure layout primitives if you want to render the cells yourself. |
 | `divergingColor` / `divergingInk` | Red/green diverging scale for Δ views. |
+| `ageFade` / `ageDomain` / `age01` | Age lens: fade cells toward the panel background by age (`color-mix` in OKLCH, so equal age reads as equal fade across hues). Compose via the treemap's `lens` slot — stacks on any `colorForCell`. |
 
 ## Install
 

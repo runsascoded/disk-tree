@@ -52,6 +52,14 @@ export interface TreemapProps<T> {
    * colors, and leaf-only treatments (hatch, highlight-dim) key off it.
    */
   colorForCell?: (n: T, path: T[], depth: number, ctx: CellCtx) => CellStyle | null | undefined
+  /**
+   * Post-resolution style transform, applied to whatever `colorForCell` or
+   * the default palette produced — so lenses (e.g. the age fade in
+   * `colors.ts`) *stack* on any color mode instead of replacing it. Return
+   * null/undefined to leave the resolved style untouched. Not called for
+   * synthetic folded tiles.
+   */
+  lens?: (n: T, path: T[], depth: number, ctx: CellCtx, style: CellStyle) => CellStyle | null | undefined
   /** Optional extra content rendered inside the cell after the label. */
   renderCellExtra?: (n: T, path: T[], dims: CellDims) => ReactNode
   /** Tooltip body; return null to suppress the tooltip. */
@@ -170,6 +178,7 @@ export function Treemap<T>({
   getId,
   formatSize = defaultFormat,
   colorForCell,
+  lens,
   renderCellExtra,
   renderTooltip,
   renderRollup,
@@ -331,6 +340,9 @@ export function Treemap<T>({
       style = kids.length > 0
         ? { bg: 'var(--dt-treemap-container-bg, #202024)', ink: 'var(--dt-treemap-ink, #d0d0d8)' }
         : { bg: slot ?? DEFAULT_SLOTS[0], ink: '#fff' }
+    }
+    if (lens && !folded) {
+      style = lens(kid, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 }, style) ?? style
     }
 
     const cellKey = folded
