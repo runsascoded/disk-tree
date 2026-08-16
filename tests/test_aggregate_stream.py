@@ -338,6 +338,30 @@ def test_unsorted_part_multi_slice_sort(tmp_path: Path):
     assert got == sorted(paths)
 
 
+def test_unsorted_part_many_runs_rechunks(tmp_path: Path):
+    """Beyond `_RECHUNK_RUNS` runs the part is re-chunked to merge-budget-sized
+    row groups before the run-merge (each run reader buffers one decoded row
+    group; at `_FLUSH_ROWS`-sized groups that's ~50MB × runs — OOM'd a 61GB
+    node). Rows must come out globally sorted with columns intact, and the
+    `.rechunk` temp must be cleaned up."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq_
+    from disk_tree.find.aggregate_stream import _RECHUNK_RUNS, _detect_runs, _part_batches
+    # 40 ascending blocks emitted in descending block order → 40 runs of 3.
+    paths = [f'r{i:02d}-{j}' for i in reversed(range(40)) for j in range(3)]
+    sizes = list(range(len(paths)))
+    part = str(tmp_path / 'part.parquet')
+    pq_.write_table(pa.table({'path': paths, 'size': sizes}), part, row_group_size=7)
+    assert len(_detect_runs(part)) == 40 > _RECHUNK_RUNS
+    got = [
+        (p, s)
+        for rb in _part_batches(part, part_sorted=False, batch_rows=5)
+        for p, s in zip(rb.column('path').to_pylist(), rb.column('size').to_pylist())
+    ]
+    assert got == sorted(zip(paths, sizes))
+    assert not (tmp_path / 'part.parquet.rechunk').exists()
+
+
 def test_prefix_sibling_dir_inversion(tmp_path: Path):
     """Sibling dirs where one name is a proper prefix of the other with next
     char < '/' (`store` vs `store-backup`): `store-backup/`'s subtree sorts

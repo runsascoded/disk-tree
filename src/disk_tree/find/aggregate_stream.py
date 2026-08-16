@@ -834,6 +834,20 @@ def _write_boundary_parts(
 # (pathological — inversions come from prefix-sibling dirs, normally sparse).
 _MAX_PART_RUNS = 8192
 
+# Run-merge a part in place only up to this many runs; beyond it, re-chunk the
+# part to merge-budget-sized row groups first. Each run reader buffers one
+# decoded row group, and at the part writer's `_FLUSH_ROWS`-sized groups that
+# is ~50MB × runs — tens of GB at thousands of runs (OOM-livelocked a 61GB
+# node on the first real-data finalize). Re-chunking is one sequential
+# read+write at O(batch) memory and caps total reader buffers at roughly the
+# priming budget.
+_RECHUNK_RUNS = 16
+
+# Total rows the run-merge may hold primed across all run readers of one part.
+# `_finalize_parts` scales this down by `jobs` so concurrent depth workers
+# share the same overall budget.
+_PRIME_ROWS = 1 << 22
+
 
 def _detect_runs(path: str, key: str = 'path') -> list[int]:
     """Sorted-run start ordinals of a part parquet's `key` column (cheap
@@ -862,11 +876,13 @@ def _detect_runs(path: str, key: str = 'path') -> list[int]:
     return starts
 
 
-def _rows_range(path: str, start: int, stop: int | None, batch_rows: int):
+def _rows_range(path: str, start: int, stop: int | None, batch_rows: int, metadata=None):
     """Record batches of rows [start, stop) of a parquet file, skipping
-    non-intersecting row groups."""
+    non-intersecting row groups. Pass a shared `metadata` (FileMetaData) when
+    opening many readers on the same file — re-parsing a many-row-group footer
+    once per run reader is its own CPU/memory multiplier."""
     import pyarrow.parquet as pq
-    pf = pq.ParquetFile(path)
+    pf = pq.ParquetFile(path, metadata=metadata)
     md = pf.metadata
     rgs: list[int] = []
     off = 0
@@ -892,7 +908,7 @@ def _rows_range(path: str, start: int, stop: int | None, batch_rows: int):
         yield batch.slice(lo, hi - lo)
 
 
-def _part_batches(path: str, part_sorted: bool, batch_rows: int):
+def _part_batches(path: str, part_sorted: bool, batch_rows: int, prime_rows: int = _PRIME_ROWS):
     """Record batches of one part, in path order.
 
     A part that measured unsorted at write time (prefix-sibling dir
@@ -906,7 +922,15 @@ def _part_batches(path: str, part_sorted: bool, batch_rows: int):
     matter how the output is sliced. The sort survives only as the
     pathological-run-count fallback, with a large_string round-trip
     legalizing the internal concatenation.
+
+    Beyond `_RECHUNK_RUNS` runs, the part is first re-chunked to
+    `rb_rows`-sized row groups so each run reader's decode buffer matches the
+    merge budget instead of the part writer's `_FLUSH_ROWS` groups (see
+    `_RECHUNK_RUNS`). Internal batch/row-group edges never reach the final
+    output (`emit()` re-batches at exactly `_FLUSH_ROWS`), so none of this
+    affects the published bytes.
     """
+    import os
     import pyarrow as pa
     import pyarrow.parquet as pq
     if part_sorted:
@@ -916,16 +940,32 @@ def _part_batches(path: str, part_sorted: bool, batch_rows: int):
     k = len(starts)
     if k <= _MAX_PART_RUNS:
         # Merge tree primes one batch per run source — scale batch size down
-        # so priming stays ~O(1GB) even at the run-count cap.
-        rb_rows = max(1024, min(batch_rows, (1 << 22) // max(1, k)))
-        bounds: list[int | None] = [*starts[1:], None]
-        streams = [_rows_range(path, s, e, rb_rows) for s, e in zip(starts, bounds)]
-        while len(streams) > 1:
+        # so priming stays within `prime_rows` even at the run-count cap.
+        rb_rows = max(1024, min(batch_rows, prime_rows // max(1, k)))
+        rechunk = None
+        if k > _RECHUNK_RUNS:
+            rechunk = path + '.rechunk'
+            pf = pq.ParquetFile(path)
+            with pq.ParquetWriter(rechunk, pf.schema_arrow) as w:
+                for rb in pf.iter_batches(batch_size=rb_rows):
+                    w.write_batch(rb, row_group_size=rb_rows)
+            path = rechunk
+        try:
+            md = pq.ParquetFile(path).metadata
+            bounds: list[int | None] = [*starts[1:], None]
             streams = [
-                _merge_batches(streams[i], streams[i + 1]) if i + 1 < len(streams) else streams[i]
-                for i in range(0, len(streams), 2)
+                _rows_range(path, s, e, rb_rows, metadata=md)
+                for s, e in zip(starts, bounds)
             ]
-        yield from streams[0]
+            while len(streams) > 1:
+                streams = [
+                    _merge_batches(streams[i], streams[i + 1]) if i + 1 < len(streams) else streams[i]
+                    for i in range(0, len(streams), 2)
+                ]
+            yield from streams[0]
+        finally:
+            if rechunk is not None:
+                os.remove(rechunk)
         return
     tbl = pq.read_table(path)
     orig = tbl.schema
@@ -987,14 +1027,14 @@ def _merge_batches(sa, sb):
         b = next(sb, None)
 
 
-def _depth_stream(parts_dir: str, kinds: dict[str, list[dict]], batch_rows: int):
+def _depth_stream(parts_dir: str, kinds: dict[str, list[dict]], batch_rows: int, prime_rows: int = _PRIME_ROWS):
     """One depth's merged, path-ordered record-batch stream (dirs before files
     on equal path)."""
     import os
 
     def kind_stream(parts_list: list[dict]):
         its = [
-            _part_batches(os.path.join(parts_dir, p['file']), p['sorted'], batch_rows)
+            _part_batches(os.path.join(parts_dir, p['file']), p['sorted'], batch_rows, prime_rows)
             for p in sorted(parts_list, key=itemgetter('file'))
         ]
         s = its[0]
@@ -1012,6 +1052,7 @@ def _finalize_depth_worker(
     kinds: dict[str, list[dict]],
     batch_rows: int,
     tmp_path: str,
+    prime_rows: int = _PRIME_ROWS,
 ) -> str:
     """Parallel-finalize worker: merge one depth's parts → temp parquet.
 
@@ -1021,7 +1062,7 @@ def _finalize_depth_worker(
     import pyarrow.parquet as pq
     writer = None
     try:
-        for rb in _depth_stream(parts_dir, kinds, batch_rows):
+        for rb in _depth_stream(parts_dir, kinds, batch_rows, prime_rows):
             if writer is None:
                 writer = pq.ParquetWriter(tmp_path, rb.schema)
             writer.write_batch(rb)
@@ -1120,11 +1161,15 @@ def _finalize_parts(
                 d: sum(p['rows'] for ps in kinds.values() for p in ps)
                 for d, kinds in by_depth.items()
             }
+            # Depth workers share one priming budget: each unsorted-part
+            # run-merge may hold `prime_rows` rows across its run readers, so
+            # divide the global budget by the worker count.
+            prime_rows = max(1 << 16, _PRIME_ROWS // jobs)
             with ProcessPoolExecutor(max_workers=jobs, mp_context=mp.get_context('spawn')) as ex:
                 futs = {
                     d: ex.submit(
                         _finalize_depth_worker, parts_dir, by_depth[d], batch_rows,
-                        os.path.join(tmp_dir, f'depth-{d}.parquet'),
+                        os.path.join(tmp_dir, f'depth-{d}.parquet'), prime_rows,
                     )
                     for d in sorted(by_depth, key=lambda d: -weights[d])
                 }
