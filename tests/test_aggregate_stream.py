@@ -323,6 +323,23 @@ def test_finalize_jobs_byte_identical(tmp_path: Path):
     assert open(outs[0], 'rb').read() == open(outs[1], 'rb').read()
 
 
+def test_part_flush_size_does_not_reach_output(tmp_path: Path, monkeypatch):
+    """`_PART_FLUSH_ROWS` is a pure memory knob: a worker holds one buffer per
+    open (depth, kind) writer, so it multiplies by ~44 on a deep tree. It must
+    not reach the published file — the finalize re-batches at `_FLUSH_ROWS`,
+    which is what keeps output bytes a function of row content alone."""
+    from disk_tree.find import aggregate_stream as ags
+    rows = [(f'sub{i % 5}/deep/f{i:04d}.bin', i) for i in range(400)]
+    listing = _write_listing(tmp_path / 'l.parquet', rows)
+    outs = []
+    for part_flush in (7, 1 << 15):
+        monkeypatch.setattr(ags, '_PART_FLUSH_ROWS', part_flush)
+        out = str(tmp_path / f'out-{part_flush}.parquet')
+        aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=out)
+        outs.append(out)
+    assert open(outs[0], 'rb').read() == open(outs[1], 'rb').read()
+
+
 @pytest.mark.parametrize('batch_rows', [1, 2, 3, 1 << 13])
 def test_shard_read_is_batch_size_independent(tmp_path: Path, monkeypatch, batch_rows: int):
     """`_shard_rows` bounds its decode buffer via `batch_size` (one live batch

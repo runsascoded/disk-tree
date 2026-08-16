@@ -55,8 +55,19 @@ def _stage(msg: str) -> None:
 # keys something is pathological — the pre-scan diversion isn't the right tool.
 _DIRTY_MAX = 10_000_000
 
-# Rows buffered before flushing a parquet row group in the pre-output writer.
+# Rows per row group in the *final* layer-2 parquet. Contractual: the finalize
+# slices at exactly this, which is what makes output bytes independent of `jobs`.
 _FLUSH_ROWS = 1 << 18
+
+# Rows buffered per open part writer before flushing a row group. Deliberately
+# smaller than `_FLUSH_ROWS`: a worker keeps one writer open per (depth, kind)
+# — ~44 on a 22-deep tree — and each buffer holds Python tuples (measured
+# 484 B/row vs 292 B/row for the equivalent Arrow), so at `_FLUSH_ROWS` that is
+# ~121 MiB per writer, ~5 GB per worker at worst, plus a ~100 MiB transient per
+# flush. Part row-group size does not reach the published file (the finalize
+# re-batches at `_FLUSH_ROWS`), so this is free to tune for memory; smaller
+# groups also shrink the finalize's per-part read buffers.
+_PART_FLUSH_ROWS = 1 << 15
 
 # Rows decoded per listing-shard read buffer. The k-way merge holds one live
 # batch per open source and ~1K stay open on a real bucket, so this multiplies
@@ -534,7 +545,7 @@ class _Writer:
     def write(self, row: tuple) -> None:
         self._rows.append(row)
         self.n_rows += 1
-        if len(self._rows) >= _FLUSH_ROWS:
+        if len(self._rows) >= _PART_FLUSH_ROWS:
             self._flush()
 
     def _flush(self) -> None:
@@ -852,11 +863,11 @@ _MAX_PART_RUNS = 8192
 
 # Run-merge a part in place only up to this many runs; beyond it, re-chunk the
 # part to merge-budget-sized row groups first. Each run reader buffers one
-# decoded row group, and at the part writer's `_FLUSH_ROWS`-sized groups that
-# is ~50MB × runs — tens of GB at thousands of runs (OOM-livelocked a 61GB
-# node on the first real-data finalize). Re-chunking is one sequential
-# read+write at O(batch) memory and caps total reader buffers at roughly the
-# priming budget.
+# decoded row group, so at the part writer's `_PART_FLUSH_ROWS`-sized groups
+# that is ~6MB × runs — GBs at thousands of runs (at the `_FLUSH_ROWS` groups
+# parts used to carry, it OOM-livelocked a 61GB node on the first real-data
+# finalize). Re-chunking is one sequential read+write at O(batch) memory and
+# caps total reader buffers at roughly the priming budget.
 _RECHUNK_RUNS = 16
 
 # Total rows the run-merge may hold primed across all run readers of one part.
@@ -950,7 +961,7 @@ def _part_batches(path: str, part_sorted: bool, batch_rows: int, prime_rows: int
 
     Beyond `_RECHUNK_RUNS` runs, the part is first re-chunked to
     `rb_rows`-sized row groups so each run reader's decode buffer matches the
-    merge budget instead of the part writer's `_FLUSH_ROWS` groups (see
+    merge budget instead of the part writer's `_PART_FLUSH_ROWS` groups (see
     `_RECHUNK_RUNS`). Internal batch/row-group edges never reach the final
     output (`emit()` re-batches at exactly `_FLUSH_ROWS`), so none of this
     affects the published bytes.
