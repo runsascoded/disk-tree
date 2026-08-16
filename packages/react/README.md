@@ -16,6 +16,7 @@ Ships:
 | `squarify` / `foldSmall` | Pure layout primitives if you want to render the cells yourself. |
 | `divergingColor` / `divergingInk` | Red/green diverging scale for Δ views. |
 | `ageFade` / `ageDomain` / `age01` | Age lens: fade cells toward the panel background by age (`color-mix` in OKLCH, so equal age reads as equal fade across hues). Compose via the treemap's `lens` slot — stacks on any `colorForCell`. |
+| `parseQuery` / `filterNodes` / `dimUnmatched` | Filter plane: substring or `/regex/` path matching (a half-typed regex degrades to substring, never throws), plus a dim transform for the treemap's `lens` slot. |
 | `sumTbYears` / `formatTbYears` | Additive staleness score: Σ descendant-file size·age = `size × (now − mtime_mean)` in TB·years. Cascades like `size` (parent = Σ children), so it's honest as a treemap size accessor and exact as iso-score diagonals on a log-log (age, bytes) scatter. |
 
 ## Install

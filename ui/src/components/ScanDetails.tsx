@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
 import { useAction } from 'use-kbd'
-import { AgeHistograms, age01, ageDomain, ageFade, BytesOverTime, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
+import { AgeHistograms, age01, ageDomain, ageFade, BytesOverTime, dimUnmatched, parseQuery, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, fetchHistogram, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
@@ -550,7 +550,7 @@ interface DTNode {
   isPlaceholder?: boolean
 }
 
-function Treemap({ root, rows, ageLens }: { root: Row; rows: Row[]; ageLens: boolean }) {
+function Treemap({ root, rows, ageLens, query }: { root: Row; rows: Row[]; ageLens: boolean; query: string }) {
   const tree = useMemo(() => {
     const childrenByParent = new Map<string, Row[]>()
     for (const row of rows) {
@@ -607,6 +607,10 @@ function Treemap({ root, rows, ageLens }: { root: Row; rows: Row[]; ageLens: boo
   const rowAge = (r: Row) => r.mtime_mean ?? r.mtime
   const mtimeDomain = useMemo(() => ageDomain(rows, rowAge), [rows])
   const nodeAge = (n: DTNode) => n.mtimeMean ?? n.mtime
+  // Filter is a *display* lens at this level: it dims non-matching cells and
+  // stacks on whatever the palette/age lens resolved. Sizes keep counting
+  // hidden children — this is highlight, not re-aggregation (spec §5 v0).
+  const matches = useMemo(() => parseQuery(query), [query])
 
   return (
     <Box sx={{ height: 400 }}>
@@ -622,10 +626,19 @@ function Treemap({ root, rows, ageLens }: { root: Row; rows: Row[]; ageLens: boo
           n.isPlaceholder ? { bg: '#4a4a52', ink: '#d0d0d8' } : null
         }
         lens={
-          ageLens && mtimeDomain
+          ageLens || query.trim()
             ? (n, _path, _depth, _ctx, style) => {
+                let out = style
                 const age = nodeAge(n)
-                return age == null || n.isPlaceholder ? null : ageFade(style, age01(age, mtimeDomain))
+                if (ageLens && mtimeDomain && age != null && !n.isPlaceholder) {
+                  out = ageFade(out, age01(age, mtimeDomain))
+                }
+                if (query.trim()) {
+                  // Placeholders can't match a path query, so they dim too —
+                  // leaving them bright would read as "these matched".
+                  out = dimUnmatched(out, !n.isPlaceholder && matches(n.path)) ?? out
+                }
+                return out
               }
             : undefined
         }
@@ -711,7 +724,7 @@ function StalenessPanel({
  * lazily — unlike `/api/scan`, the histogram needs every descendant file row,
  * so it only runs when this view is open.
  */
-function HistogramPanel({ uri, scanId }: { uri: string; scanId?: number }) {
+function HistogramPanel({ uri, scanId, query }: { uri: string; scanId?: number; query: string }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ['histogram', uri, scanId],
     queryFn: () => fetchHistogram(uri, 24, 10, scanId),
@@ -725,11 +738,17 @@ function HistogramPanel({ uri, scanId }: { uri: string; scanId?: number }) {
   if (error) return <Alert severity="error">{(error as Error).message}</Alert>
   if (!data || data.children.length === 0) return <Box sx={{ opacity: 0.6, fontSize: '0.85rem' }}>No file mtimes to bin here.</Box>
 
+  // Same display-level filter semantics as the other views: hide non-matching
+  // columns; each column's own bins are unchanged.
+  const matches = parseQuery(query)
+  const shown = data.children.filter(c => matches(c.path))
+  if (shown.length === 0) return <Box sx={{ opacity: 0.6, fontSize: '0.85rem' }}>No children match the filter.</Box>
+
   return (
     <>
       <Box sx={{ height: 400 }}>
         <AgeHistograms<HistogramChild>
-          items={data.children}
+          items={shown}
           edges={data.edges}
           getBins={c => c.bytes}
           getLabel={c => c.path}
@@ -1548,14 +1567,19 @@ export function ScanDetails() {
       {rows.length > 0 && (
         <Box sx={{ mt: 2 }}>
           {viz === 'treemap' ? (
-            <Treemap root={root} rows={rows} ageLens={ageLens} />
+            <Treemap root={root} rows={rows} ageLens={ageLens} query={filter} />
           ) : viz === 'scatter' ? (
             <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
           ) : (
-            <HistogramPanel uri={uri} scanId={selectedScanId} />
+            <HistogramPanel uri={uri} scanId={selectedScanId} query={filter} />
           )}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{viz === 'treemap' ? `${rows.length} items` : `${filteredChildren.length} children`}</span>
+            {filter.trim() && (
+              <Tooltip title="The filter highlights and re-lays-out what's shown at this level; directory sizes still include children the filter hides (no re-aggregation).">
+                <span style={{ fontStyle: 'italic' }}>filtered (display only)</span>
+              </Tooltip>
+            )}
             <label>
               View:
               <select value={viz} onChange={e => setViz(e.target.value as Viz)} style={{ marginLeft: 4 }}>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { DEFAULT_PALETTE } from './colors'
 import { pow10 } from './stats'
@@ -94,9 +94,13 @@ export function TimeSeries<T>({
   const wrapRef = useRef<HTMLDivElement>(null)
   const [dims, setDims] = useState({ w: 0, h: 0 })
 
-  useEffect(() => {
+  // Measure synchronously first — a ResizeObserver's initial delivery can be
+  // arbitrarily late (and never arrives in a hidden tab), which would leave
+  // the chart blank at its correct size.
+  useLayoutEffect(() => {
     const el = wrapRef.current
     if (!el) return
+    setDims({ w: el.clientWidth, h: el.clientHeight })
     const ro = new ResizeObserver(() => setDims({ w: el.clientWidth, h: el.clientHeight }))
     ro.observe(el)
     return () => ro.disconnect()

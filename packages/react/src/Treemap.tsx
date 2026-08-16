@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { DEFAULT_PALETTE } from './colors'
 import { foldSmall, squarify } from './squarify'
@@ -215,10 +215,14 @@ export function Treemap<T>({
     // path is a fresh array on every drill — safe to depend on it
   }, [path, onPathChange])
 
-  // Track container size via ResizeObserver.
-  useEffect(() => {
+  // Track container size: measure synchronously, then observe for changes.
+  // The initial ResizeObserver delivery is not guaranteed to arrive — in a
+  // hidden/background tab it never did, leaving a correctly-sized container
+  // rendering zero cells until something resized it.
+  useLayoutEffect(() => {
     const el = mapRef.current
     if (!el) return
+    setSize({ w: el.clientWidth, h: el.clientHeight })
     const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }))
     ro.observe(el)
     return () => ro.disconnect()

@@ -12,6 +12,8 @@ export type { StalenessScatterProps } from './StalenessScatter'
 export { AgeHistograms } from './AgeHistograms'
 export type { AgeHistogramsProps } from './AgeHistograms'
 export { bytesOlderThan, peakBin, timeTicks, totalBytes } from './histogram'
+export { dimUnmatched, filterNodes, parseQuery } from './filter'
+export type { DimOpts, QueryOpts } from './filter'
 export {
   decadesBetween,
   isoScoreDecades,
