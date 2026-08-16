@@ -8,6 +8,7 @@ import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, fetchHistogram, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
 import type { HistogramChild, Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
+import { VizBoundary } from './VizBoundary'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
@@ -25,6 +26,12 @@ type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 's
 
 /** Which visualization the panel under the table renders. */
 type Viz = 'treemap' | 'scatter' | 'histograms'
+
+const VIZ_LABELS: Record<Viz, string> = {
+  treemap: 'treemap',
+  scatter: 'staleness scatter',
+  histograms: 'age histograms',
+}
 type SortDir = 'asc' | 'desc'
 type SortSpec = { key: SortKey; dir: SortDir }
 
@@ -1566,13 +1573,15 @@ export function ScanDetails() {
       )}
       {rows.length > 0 && (
         <Box sx={{ mt: 2 }}>
-          {viz === 'treemap' ? (
-            <Treemap root={root} rows={rows} ageLens={ageLens} query={filter} />
-          ) : viz === 'scatter' ? (
-            <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
-          ) : (
-            <HistogramPanel uri={uri} scanId={selectedScanId} query={filter} />
-          )}
+          <VizBoundary label={VIZ_LABELS[viz]}>
+            {viz === 'treemap' ? (
+              <Treemap root={root} rows={rows} ageLens={ageLens} query={filter} />
+            ) : viz === 'scatter' ? (
+              <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
+            ) : (
+              <HistogramPanel uri={uri} scanId={selectedScanId} query={filter} />
+            )}
+          </VizBoundary>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{viz === 'treemap' ? `${rows.length} items` : `${filteredChildren.length} children`}</span>
             {filter.trim() && (
