@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { DEFAULT_PALETTE } from './colors'
+import { pow10 } from './stats'
 
 /**
  * DIY SVG line/area chart. No Plotly, no recharts, no d3 — the whole widget
@@ -59,13 +60,13 @@ function niceTicks(min: number, max: number, count: number, log = false): number
     const lmax = Math.log10(Math.max(10, max))
     const step = Math.max(1, Math.ceil((lmax - lmin) / count))
     const out: number[] = []
-    for (let e = Math.ceil(lmin); e <= Math.floor(lmax); e += step) out.push(10 ** e)
+    for (let e = Math.ceil(lmin); e <= Math.floor(lmax); e += step) out.push(pow10(e))
     return out
   }
   if (min === max) return [min]
   const range = max - min
   const rawStep = range / Math.max(1, count)
-  const mag = 10 ** Math.floor(Math.log10(rawStep))
+  const mag = pow10(Math.floor(Math.log10(rawStep)))
   const norm = rawStep / mag
   const stepMult = norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10
   const step = stepMult * mag

@@ -10,6 +10,8 @@
  * approximation.
  */
 
+import { pow10 } from './stats'
+
 // Guards decade arithmetic against log10 landing a hair off an integer.
 const EPS = 1e-9
 
@@ -28,8 +30,8 @@ export function logDomain(values: Iterable<number | null | undefined>): [number,
     if (v > max) max = v
   }
   if (min > max) return null
-  const lo = 10 ** Math.floor(Math.log10(min) + EPS)
-  const hi = 10 ** Math.ceil(Math.log10(max) - EPS)
+  const lo = pow10(Math.floor(Math.log10(min) + EPS))
+  const hi = pow10(Math.ceil(Math.log10(max) - EPS))
   return lo < hi ? [lo, hi] : [lo / 10, lo * 10]
 }
 
@@ -47,7 +49,7 @@ export function logTicks([lo, hi]: [number, number], maxTicks = 6): number[] {
   if (k1 < k0) return []
   const step = Math.max(1, Math.ceil((k1 - k0 + 1) / maxTicks))
   const out: number[] = []
-  for (let k = k0; k <= k1; k += step) out.push(10 ** k)
+  for (let k = k0; k <= k1; k += step) out.push(pow10(k))
   return out
 }
 
@@ -79,7 +81,7 @@ export function decadesBetween(lo: number, hi: number, maxCount = 5): number[] {
   if (k1 < k0) return []
   const step = Math.max(1, Math.ceil((k1 - k0 + 1) / maxCount))
   const out: number[] = []
-  for (let k = k0; k <= k1; k += step) out.push(10 ** k)
+  for (let k = k0; k <= k1; k += step) out.push(pow10(k))
   return out
 }
 
@@ -119,7 +121,7 @@ export function isoScoresForData(
     const found = decadesBetween(Math.min(...pos), Math.max(...pos), maxLines).filter(inBox)
     if (found.length) return found
     // Sub-decade spread: label the decade the data sits on, if it fits.
-    const mid = 10 ** Math.round(Math.log10(Math.max(...pos)))
+    const mid = pow10(Math.round(Math.log10(Math.max(...pos))))
     if (inBox(mid)) return [mid]
   }
   return isoScoreDecades(xDomain, yDomain, maxLines).filter(inBox)

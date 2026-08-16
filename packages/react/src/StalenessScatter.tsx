@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { DEFAULT_PALETTE } from './colors'
 import { isoScoresForData, isoScoreSegment, logDomain, logPos, logTicks, radiusFor } from './scatter'
-import { formatTbYears, SEC_PER_YEAR, TB } from './stats'
+import { formatTbYears, pow10, SEC_PER_YEAR, TB } from './stats'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -64,7 +64,7 @@ const SI_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 function defaultFormatSize(bytes: number): string {
   if (!(bytes > 0)) return '0 B'
   const e = Math.min(SI_UNITS.length - 1, Math.floor(Math.log10(bytes) / 3))
-  const v = bytes / 1000 ** e
+  const v = bytes / pow10(3 * e)
   return `${Number(v.toPrecision(3))} ${SI_UNITS[e]}`
 }
 
