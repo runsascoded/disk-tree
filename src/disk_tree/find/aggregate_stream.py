@@ -397,6 +397,233 @@ class _Writer:
         self._writer.close()
 
 
+class _PartWriters:
+    """Per-(depth, kind) family of buffered parquet part writers.
+
+    The du-stack's emission is already *almost* the output contract: file rows
+    at a fixed depth are a subsequence of the globally-sorted key stream (so
+    sorted by path), and dir rows at a fixed depth pop in subtree-interval
+    order — i.e. sorted by ``path + '/'``, which differs from plain ``path``
+    order exactly when a dir name is a proper prefix of a same-depth sibling
+    whose next char is < ``'/'`` (``store`` vs ``store-backup``: the sibling's
+    subtree sorts *before* ``store/``, so it pops first, inverted). Rather than
+    trust that analysis, each part *measures* its own sortedness (one string
+    compare per row); the finalize sorts only the parts that actually need it
+    and streams the rest — no global external sort anywhere.
+    """
+
+    def __init__(self, parts_dir: str, cols: list[str], mean_mtime: bool):
+        import os
+        self._dir = parts_dir
+        self._cols = cols
+        self._mean_mtime = mean_mtime
+        self._writers: dict[tuple[int, str], _Writer] = {}
+        self._last: dict[tuple[int, str], str] = {}
+        self._unsorted: set[tuple[int, str]] = set()
+        self._join = os.path.join
+        self.n_rows = 0
+
+    def write(self, depth: int, kind: str, path: str, row: tuple) -> None:
+        key = (depth, kind)
+        w = self._writers.get(key)
+        if w is None:
+            w = self._writers[key] = _Writer(
+                self._join(self._dir, f'{depth:04d}-{kind}.parquet'), self._cols, self._mean_mtime,
+            )
+        if key not in self._unsorted:
+            last = self._last.get(key)
+            if last is not None and path < last:
+                self._unsorted.add(key)
+            self._last[key] = path
+        w.write(row)
+        self.n_rows += 1
+
+    def close(self) -> list[dict]:
+        """Close all writers; return part descriptors for the manifest."""
+        parts = []
+        for (depth, kind), w in sorted(self._writers.items()):
+            w.close()
+            parts.append({
+                'depth': depth,
+                'kind': kind,
+                'file': f'{depth:04d}-{kind}.parquet',
+                'rows': w.n_rows,
+                'sorted': (depth, kind) not in self._unsorted,
+            })
+        return parts
+
+
+def _part_batches(path: str, part_sorted: bool, batch_rows: int):
+    """Record batches of one part, in path order.
+
+    A part that measured unsorted at write time (prefix-sibling dir inversions)
+    is loaded and sorted here — bounded by that single (depth, kind) slice, not
+    the whole output (the win over the retired global external sort).
+    """
+    import pyarrow.parquet as pq
+    if part_sorted:
+        yield from pq.ParquetFile(path).iter_batches(batch_size=batch_rows)
+    else:
+        yield from pq.read_table(path).sort_by('path').to_batches(max_chunksize=batch_rows)
+
+
+def _merge_two_sorted(dirs, files, emit) -> None:
+    """Ordered merge of two path-sorted record-batch streams; ties → dir first.
+
+    Vectorized boundary merge: whole batches pass through when their key
+    ranges don't interleave; otherwise the earlier batch is split at the
+    other's boundary key (``searchsorted``) — O(#batches) Python, O(rows) C.
+    """
+    import numpy as np
+
+    def _paths(rb):
+        return rb.column('path')
+
+    a = next(dirs, None)
+    b = next(files, None)
+    while a is not None and b is not None:
+        if a.num_rows == 0:
+            a = next(dirs, None)
+            continue
+        if b.num_rows == 0:
+            b = next(files, None)
+            continue
+        pa_, pb = _paths(a), _paths(b)
+        a_first, a_last = pa_[0].as_py(), pa_[a.num_rows - 1].as_py()
+        b_first, b_last = pb[0].as_py(), pb[b.num_rows - 1].as_py()
+        if a_last <= b_first:
+            # All dir keys ≤ first file key; equal path → dir row first, so
+            # the whole dirs batch goes before the files batch.
+            emit(a)
+            a = next(dirs, None)
+        elif b_last < a_first:
+            # Strictly before every dir key (a tie would owe the dir row first).
+            emit(b)
+            b = next(files, None)
+        elif a_first <= b_first:
+            # Overlap, dirs start first: peel dir keys ≤ b_first (ties are
+            # dirs → included, keeping dir-before-file on equal path).
+            idx = int(np.searchsorted(pa_.to_numpy(zero_copy_only=False), b_first, side='right'))
+            emit(a.slice(0, idx))
+            a = a.slice(idx)
+        else:
+            # Overlap, files start first: peel file keys strictly < a_first.
+            idx = int(np.searchsorted(pb.to_numpy(zero_copy_only=False), a_first, side='left'))
+            emit(b.slice(0, idx))
+            b = b.slice(idx)
+    while a is not None:
+        emit(a)
+        a = next(dirs, None)
+    while b is not None:
+        emit(b)
+        b = next(files, None)
+
+
+def _finalize_parts(
+    parts_dir: str,
+    manifest: dict,
+    out_parquet: str,
+    batch_rows: int = 1 << 16,
+) -> None:
+    """Depth-partitioned, sort-free finalize: parts → canonical layer-2 parquet.
+
+    For each depth ascending, a 2-way ordered merge of that depth's (dirs,
+    files) parts, written in canonical column order. O(1) memory and zero
+    spill except for parts that measured unsorted (see :func:`_part_batches`).
+    """
+    import os
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from .agg_ext import MTIME_MEAN
+
+    pivot_names = manifest['pivot_names']
+    mean_mtime = manifest['mean_mtime']
+    # Canonical column order (matches the pandas concat / duckdb tail: extras
+    # between `parent` and `uri`) — the published layer-2 must be column-order
+    # identical across engines so file-level diffs and positional set ops
+    # (EXCEPT) work.
+    canonical_cols = [
+        'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
+        *pivot_names, *([MTIME_MEAN] if mean_mtime else []),
+        'uri', 'depth',
+    ]
+    fields = []
+    for c in canonical_cols:
+        if c in ('path', 'kind', 'parent', 'uri'):
+            fields.append((c, pa.string()))
+        elif c == MTIME_MEAN:
+            fields.append((c, pa.float64()))
+        else:
+            fields.append((c, pa.int64()))
+    schema = pa.schema(fields)
+
+    by_depth: dict[int, dict[str, dict]] = {}
+    for part in manifest['parts']:
+        by_depth.setdefault(part['depth'], {})[part['kind']] = part
+
+    writer = pq.ParquetWriter(out_parquet, schema)
+    buf: list = []
+    buf_rows = 0
+
+    def emit(rb) -> None:
+        nonlocal buf_rows
+        if rb.num_rows == 0:
+            return
+        buf.append(rb.select(canonical_cols))
+        buf_rows += rb.num_rows
+        if buf_rows >= _FLUSH_ROWS:
+            flush()
+
+    def flush() -> None:
+        nonlocal buf_rows
+        if buf:
+            writer.write_table(pa.Table.from_batches(buf, schema=schema))
+            buf.clear()
+            buf_rows = 0
+
+    try:
+        for depth in sorted(by_depth):
+            kinds = by_depth[depth]
+            streams = {
+                kind: _part_batches(os.path.join(parts_dir, p['file']), p['sorted'], batch_rows)
+                for kind, p in kinds.items()
+            }
+            if len(streams) == 1:
+                for rb in next(iter(streams.values())):
+                    emit(rb)
+            else:
+                _merge_two_sorted(streams['dir'], streams['file'], emit)
+        flush()
+    finally:
+        writer.close()
+
+
+def _finalize_and_clean(parts_dir: str, manifest: dict, out_parquet: str) -> dict:
+    """Run the finalize; preserve the parts dir on failure (resume token),
+    remove it on success; return the engine stats dict."""
+    import shutil
+    try:
+        _finalize_parts(parts_dir, manifest, out_parquet)
+    except BaseException:
+        # A finalize-only failure must not cost the (expensive) stream pass:
+        # the parts + manifest stay put, and a rerun with the same output path
+        # resumes at the merge.
+        _stage(f"FAILED — streamed parts preserved at {parts_dir}; rerun resumes at finalize")
+        raise
+    _stage("finalize done")
+    shutil.rmtree(parts_dir, ignore_errors=True)
+    return {
+        'rows': manifest['rows'],
+        'files': manifest['files'],
+        'max_open_sources': manifest['max_open_sources'],
+        'root_size': manifest['root_size'],
+        'root_n_desc': manifest['root_n_desc'],
+        'root_n_files': manifest['root_n_files'],
+        'root_n_children': manifest['root_n_children'],
+        'root_mtime': manifest['root_mtime'],
+    }
+
+
 def aggregate_stream(
     listings: tuple[str, ...],
     bucket: str,
@@ -420,10 +647,27 @@ def aggregate_stream(
     becomes a merge source) — for anything else, `-e duckdb`.
     `pivot_sums` / `mean_mtime` are the opt-in aggregation extensions — all
     monoid sums, so they stream identically (see :mod:`disk_tree.find.agg_ext`).
+
+    `con` / `memory_limit` / `temp_dir` / `max_temp_size` are accepted for
+    call-site compatibility but unused: the finalize is a depth-partitioned
+    ordered merge (see :func:`_finalize_parts`), not a DuckDB external sort,
+    so there is nothing to cap or spill.
     """
+    import json
     import os
-    import tempfile
+    import shutil
     from .agg_ext import MTIME_MEAN, check_pivot_values, mean_of, pivot_col
+
+    # The parts dir sits next to the output; its manifest doubles as the
+    # resume token — a finalize-only failure leaves it in place, and a rerun
+    # with the same output path skips straight to the merge.
+    parts_dir = f'{out_parquet}.parts'
+    manifest_path = os.path.join(parts_dir, 'manifest.json')
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as fh:
+            manifest = json.load(fh)
+        _stage(f"resuming from streamed parts at {parts_dir} (stream pass skipped)")
+        return _finalize_and_clean(parts_dir, manifest, out_parquet)
 
     required = frozenset({'bucket', 'name', 'size_bytes', *pivot_sums})
 
@@ -505,12 +749,12 @@ def aggregate_stream(
         merged = _merge_runs(run_srcs, hw)
     _stage(f"merge+stream: {len(sources)} source(s) ({'disjoint, concatenating' if disjoint else 'lazy-open merge'})")
 
-    fd, tmp_parquet = tempfile.mkstemp(suffix='.parquet', dir=os.path.dirname(out_parquet) or None)
-    os.close(fd)
-    writer = _Writer(tmp_parquet, out_cols, mean_mtime)
+    if os.path.isdir(parts_dir):
+        # Manifest-less leftovers from a mid-stream crash — unusable.
+        shutil.rmtree(parts_dir)
+    os.makedirs(parts_dir)
+    parts = _PartWriters(parts_dir, out_cols, mean_mtime)
     n_files_total = 0
-    root_stats: dict = {}
-    spill_dir: str | None = None
     try:
         stack: list[_Acc] = [_Acc('', n_pivot)]
 
@@ -531,12 +775,13 @@ def aggregate_stream(
                 parent_acc.pivot[i] += v
             parent_acc.mt_wsum += acc.mt_wsum
             raw_parent = _parent_of(acc.path)
-            writer.write((
+            depth = acc.path.count('/') + 1
+            parts.write(depth, 'dir', acc.path, (
                 acc.path, acc.size, acc.mtime, 'dir',
                 raw_parent if raw_parent else '.',
                 f'{scan_root}/{acc.path}',
                 acc.n_desc, acc.n_files, acc.n_children,
-                acc.path.count('/') + 1,
+                depth,
                 *dir_extras(acc),
             ))
 
@@ -586,9 +831,10 @@ def aggregate_stream(
             n_files_total += 1
             if n_files_total % 10_000_000 == 0:
                 _stage(f"  …{n_files_total:,} files streamed")
-            writer.write((
+            depth = name.count('/') + 1
+            parts.write(depth, 'file', name, (
                 name, size, mtime, 'file', parent, f'{scan_root}/{name}',
-                1, 1, 0, name.count('/') + 1,
+                1, 1, 0, depth,
                 *file_pivot,
                 *([float(mtime)] if mean_mtime else []),
             ))
@@ -598,76 +844,36 @@ def aggregate_stream(
         while len(stack) > 1:
             pop_emit()
         root = stack.pop()
-        writer.write((
+        parts.write(0, 'dir', '.', (
             '.', root.size, root.mtime, 'dir', '', scan_root,
             root.n_desc, root.n_files, root.n_children, 0,
             *dir_extras(root),
         ))
-        root_stats = {
-            'root_size': root.size,
-            'root_n_desc': root.n_desc,
-            'root_n_files': root.n_files,
-            'root_n_children': root.n_children,
-            'root_mtime': root.mtime,
-        }
-        writer.close()
-        _stage(
-            f"streamed {writer.n_rows:,} rows ({n_files_total:,} files, "
-            f"max {hw['max_open']} source(s) open); final sort"
-        )
-
-        # ---- final bounded sort: restore the (depth, path) contract ----
-        import duckdb as _duckdb
-        _con = con if con is not None else _duckdb.connect()
-        if memory_limit:
-            _con.execute(f"SET memory_limit = '{memory_limit}'")
-        # Per-invocation spill dir: DuckDB's default temp_directory is a
-        # *relative* `.tmp/`, so concurrent imports sharing a cwd corrupt each
-        # other's spill files mid-sort.
-        spill_dir = temp_dir or tempfile.mkdtemp(prefix='disk-tree-spill-')
-        _con.execute(f"SET temp_directory = '{spill_dir}'")
-        # DuckDB auto-caps spill at free-disk-at-launch; a concurrent writer
-        # shrinking that snapshot kills the sort even when disk frees up later.
-        if max_temp_size:
-            _con.execute(f"SET max_temp_directory_size = '{max_temp_size}'")
-        # Canonical column order (matches the pandas concat / duckdb tail:
-        # extras between `parent` and `uri`) — the pre-output's internal order
-        # is a writer convenience; the published layer-2 must be column-order
-        # identical across engines so file-level diffs and positional set ops
-        # (EXCEPT) work.
-        canonical_cols = [
-            'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
-            *pivot_names, *([MTIME_MEAN] if mean_mtime else []),
-            'uri', 'depth',
-        ]
-        _con.execute(f"""
-            COPY (
-                SELECT {', '.join(canonical_cols)}
-                FROM read_parquet('{tmp_parquet}')
-                -- kind tiebreaker: when a key is both a file and a dir name,
-                -- the other engines emit the dir row first (stable sort over
-                -- dirs-then-files concat); 'dir' < 'file' reproduces that.
-                ORDER BY depth, path, kind
-            ) TO '{out_parquet}' (FORMAT PARQUET)
-        """)
-        _stage("final sort done")
+        part_list = parts.close()
     except BaseException:
-        # A sort-only failure must not cost the (expensive) stream pass: keep
-        # the pre-output parquet so the sort can be redone without re-streaming.
-        if os.path.exists(tmp_parquet):
-            _stage(f"FAILED — unsorted pre-output preserved at {tmp_parquet}")
+        # Mid-stream failure: partial parts (no manifest) are unusable.
+        shutil.rmtree(parts_dir, ignore_errors=True)
         raise
-    else:
-        if os.path.exists(tmp_parquet):
-            os.remove(tmp_parquet)
-    finally:
-        if spill_dir is not None and temp_dir is None:
-            import shutil
-            shutil.rmtree(spill_dir, ignore_errors=True)
 
-    return {
-        'rows': writer.n_rows,
+    manifest = {
+        'pivot_names': pivot_names,
+        'mean_mtime': mean_mtime,
+        'rows': parts.n_rows,
         'files': n_files_total,
         'max_open_sources': hw['max_open'],
-        **root_stats,
+        'root_size': root.size,
+        'root_n_desc': root.n_desc,
+        'root_n_files': root.n_files,
+        'root_n_children': root.n_children,
+        'root_mtime': root.mtime,
+        'parts': part_list,
     }
+    with open(manifest_path, 'w') as fh:
+        json.dump(manifest, fh)
+    n_unsorted = sum(1 for p in part_list if not p['sorted'])
+    _stage(
+        f"streamed {parts.n_rows:,} rows ({n_files_total:,} files, "
+        f"max {hw['max_open']} source(s) open) into {len(part_list)} part(s)"
+        f" ({n_unsorted} unsorted); finalize"
+    )
+    return _finalize_and_clean(parts_dir, manifest, out_parquet)

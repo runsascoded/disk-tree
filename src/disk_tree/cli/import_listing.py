@@ -32,9 +32,9 @@ from disk_tree.cli.base import cli
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendant files) per path')
 @option('-p', '--pivot-sum', 'pivot_sums', multiple=True, help='Emit per-value byte-sum columns `sum_<col>_<v>` for this layer-1 column (e.g. storage_class_id); repeatable')
 @option('-s', '--scheme', default='gcs', help='URI scheme for the scan root (gcs / s3 / r2)')
-@option('-T', '--temp-dir', default=None, help='DuckDB spill directory (duckdb/stream engines). Default: fresh per-invocation temp dir (safe under concurrent imports).')
+@option('-T', '--temp-dir', default=None, help='DuckDB spill directory (duckdb engine only; the stream engine is sort-free). Default: fresh per-invocation temp dir (safe under concurrent imports).')
 @option('-t', '--time', 'time_str', default=None, help='Snapshot time (ISO 8601) recorded on each Scan; default: now')
-@option('-x', '--max-temp-size', default=None, help="DuckDB `max_temp_directory_size` (e.g. `500GiB`). Default: DuckDB's auto-cap = free disk at launch, a stale snapshot under concurrent writers.")
+@option('-x', '--max-temp-size', default=None, help="DuckDB `max_temp_directory_size` (duckdb engine only; e.g. `500GiB`). Default: DuckDB's auto-cap = free disk at launch, a stale snapshot under concurrent writers.")
 def import_cmd(
     engine: str,
     listings: tuple[str, ...],

@@ -259,22 +259,85 @@ def test_lazy_merge_bounds_open_sources(tmp_path: Path):
     pd.testing.assert_frame_equal(got_stream, _normalize(pd.read_parquet(ooc)))
 
 
-def test_sort_failure_preserves_pre_output(tmp_path: Path, capsys):
-    """A final-sort-only failure keeps the streamed pre-output parquet (a
-    63-minute stream pass must not re-run for a sort failure) and reports
-    where it landed."""
-    import re
+def test_finalize_failure_preserves_parts_and_resumes(tmp_path: Path, capsys, monkeypatch):
+    """A finalize-only failure keeps the streamed parts dir (a 63-minute
+    stream pass must not re-run), and a rerun with the same output path
+    resumes at the merge — skipping the stream pass entirely."""
+    from disk_tree.find import aggregate_stream as mod
     listing = _write_listing(tmp_path / 'l.parquet', [('a/x', 1), ('b/y', 2)])
     out = tmp_path / 'out.parquet'
-    with pytest.raises(Exception):
-        # Invalid memory_limit fails in the final-sort setup, after streaming.
-        aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=str(out), memory_limit='not-a-size')
-    m = re.search(r'unsorted pre-output preserved at (\S+)', capsys.readouterr().err)
-    assert m, 'expected a preserved-pre-output stage line on stderr'
-    pre = pd.read_parquet(m.group(1))
-    # The pre-output holds the full streamed row set (unsorted): 2 files,
-    # 2 dirs, 1 root.
-    assert sorted(pre['path']) == ['.', 'a', 'a/x', 'b', 'b/y']
+
+    def boom(*a, **kw):
+        raise RuntimeError('injected finalize failure')
+
+    monkeypatch.setattr(mod, '_finalize_parts', boom)
+    with pytest.raises(RuntimeError):
+        aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=str(out))
+    err = capsys.readouterr().err
+    assert 'streamed parts preserved at' in err.rsplit('\n', 2)[-2]
+    parts_dir = Path(f'{out}.parts')
+    assert (parts_dir / 'manifest.json').exists()
+
+    monkeypatch.undo()
+    # Same output path → the parts manifest is the resume token.
+    stats = aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=str(out))
+    assert 'stream pass skipped' in capsys.readouterr().err
+    assert not parts_dir.exists()
+    got = _normalize(pd.read_parquet(out))
+    expected = _normalize(import_listing((listing,), bucket='b1', scheme='gcs').df)
+    pd.testing.assert_frame_equal(got, expected)
+    assert stats['rows'] == 5
+
+
+def test_prefix_sibling_dir_inversion(tmp_path: Path):
+    """Sibling dirs where one name is a proper prefix of the other with next
+    char < '/' (`store` vs `store-backup`): `store-backup/`'s subtree sorts
+    *before* `store/`, so its dir row pops first — the depth's dir part is
+    genuinely unsorted and the finalize must sort it. Identity vs pandas locks
+    the repair."""
+    rows = [
+        ('store-backup/old.bin', 10),
+        ('store.old/x.bin', 7),
+        ('store/a.bin', 1),
+        ('store/b.bin', 2),
+    ]
+    listing = _write_listing(tmp_path / 'l.parquet', rows)
+    got, _ = _stream((listing,), tmp_path)
+    expected = _normalize(import_listing((listing,), bucket='b1', scheme='gcs').df)
+    pd.testing.assert_frame_equal(got, expected)
+
+
+def test_deep_chain(tmp_path: Path):
+    """Many depths, ~one row each — exercises part-writer family churn and the
+    depth-ascending finalize."""
+    path = '/'.join(f'd{i:02d}' for i in range(40))
+    listing = _write_listing(tmp_path / 'l.parquet', [(f'{path}/leaf.bin', 5), ('top.bin', 3)])
+    got, stats = _stream((listing,), tmp_path)
+    expected = _normalize(import_listing((listing,), bucket='b1', scheme='gcs').df)
+    pd.testing.assert_frame_equal(got, expected)
+    assert stats['rows'] == 43  # 2 files + 40 chain dirs + root
+
+
+def test_same_path_file_and_dir_tiny_batches(tmp_path: Path, monkeypatch):
+    """A key that is both a file and a dir name at the same depth is the merge
+    tiebreak (dir row first); tiny flush/batch sizes force the boundary-split
+    paths in `_merge_two_sorted` instead of whole-batch passthrough."""
+    from disk_tree.find import aggregate_stream as mod
+    monkeypatch.setattr(mod, '_FLUSH_ROWS', 2)
+    rows = [
+        ('a/x', 1), ('a/x/1.bin', 2), ('a/x/2.bin', 3),
+        ('a/y', 4), ('b/x', 5), ('b/y/z.bin', 6), ('c.bin', 7),
+    ]
+    listing = _write_listing(tmp_path / 'l.parquet', rows)
+    out = str(tmp_path / 'out.parquet')
+    mod.aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=out)
+    got = pd.read_parquet(out)
+    expected = import_listing((listing,), bucket='b1', scheme='gcs').df
+    # Raw (un-normalized) comparison: row order and column order must match
+    # the pandas engine byte-for-byte, including the dir-before-file tiebreak.
+    pd.testing.assert_frame_equal(
+        got.reset_index(drop=True), expected.reset_index(drop=True), check_dtype=False,
+    )
 
 
 def test_essentially_unsorted_raises(tmp_path: Path, monkeypatch):
