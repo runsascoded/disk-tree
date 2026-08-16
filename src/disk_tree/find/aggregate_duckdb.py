@@ -186,7 +186,10 @@ def _aggregate_shared(
     if mean_mtime:
         extra_out += (
             f", CASE WHEN SUM(d.size) > 0"
-            f" THEN SUM(d.{MT_WSUM})::DOUBLE / SUM(d.size)::DOUBLE"
+            # HUGEINT::DOUBLE is not correctly rounded (1-ULP drift past 2^64 vs
+            # Python's int->float in the other engines' `mean_of`); the VARCHAR
+            # parse is, keeping `mtime_mean` byte-identical across engines.
+            f" THEN SUM(d.{MT_WSUM})::VARCHAR::DOUBLE / SUM(d.size)::DOUBLE"
             f" END AS {MTIME_MEAN}"
         )
 
@@ -430,7 +433,10 @@ def aggregate_listing_to_parquet(
     if mean_mtime:
         extra_out += (
             f", CASE WHEN SUM(d.size) > 0"
-            f" THEN SUM(d.{MT_WSUM})::DOUBLE / SUM(d.size)::DOUBLE"
+            # HUGEINT::DOUBLE is not correctly rounded (1-ULP drift past 2^64 vs
+            # Python's int->float in the other engines' `mean_of`); the VARCHAR
+            # parse is, keeping `mtime_mean` byte-identical across engines.
+            f" THEN SUM(d.{MT_WSUM})::VARCHAR::DOUBLE / SUM(d.size)::DOUBLE"
             f" END AS {MTIME_MEAN}"
         )
     extra_names = ''.join(f', {c}' for c in [*sum_cols, *([MTIME_MEAN] if mean_mtime else [])])

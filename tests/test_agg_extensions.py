@@ -227,3 +227,42 @@ def test_mean_mtime_exact_at_scale_boundary(tmp_path: Path):
     for name, df in [('pandas', got_pandas), ('duckdb', got_duckdb), ('stream', got_stream)]:
         root = df[df.path == '.'].iloc[0]
         assert float(root['mtime_mean']) == expect, name
+
+
+def test_mtime_mean_hugeint_rounding(tmp_path):
+    """`mt_wsum` ≥ 2^64 with an unlucky bit pattern: DuckDB's direct
+    HUGEINT→DOUBLE cast rounds up 1 ULP where Python's int→float (the
+    pandas/stream engines' `mean_of`) rounds to even. The duckdb engine must
+    route the conversion through VARCHAR (correctly-rounded parse) so all
+    three engines stay byte-identical.
+
+    Fixture: one file, size=20_064_072_762, mtime=1_785_542_400 →
+    wsum = 35_825_252_633_236_108_800 (65 bits, tie-ish pattern)."""
+    import duckdb
+    import pandas as pd
+    from disk_tree.find.aggregate_stream import aggregate_stream
+    from disk_tree.find.aggregate_duckdb import aggregate_listing_to_parquet
+    from disk_tree.listing import prepare_listing
+
+    listing = str(tmp_path / 'l.parquet')
+    pd.DataFrame({
+        'bucket': ['b1'],
+        'name': ['d/f.bin'],
+        'size_bytes': [20_064_072_762],
+        'created': [pd.Timestamp(1_785_542_400, unit='s', tz='UTC')],
+        'storage_class_id': [1],
+    }).to_parquet(listing)
+    exact = float(1_785_542_400 * 20_064_072_762) / float(20_064_072_762)
+
+    out_s = str(tmp_path / 's.parquet')
+    aggregate_stream((listing,), bucket='b1', scheme='s3', out_parquet=out_s, mean_mtime=True)
+    con = duckdb.connect()
+    out_d = str(tmp_path / 'd.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (listing,)), bucket='b1', scheme='s3',
+        out_parquet=out_d, con=con, mean_mtime=True,
+    )
+    ds = pd.read_parquet(out_s).set_index('path')['mtime_mean']
+    dd = pd.read_parquet(out_d).set_index('path')['mtime_mean']
+    assert ds['d'] == exact
+    assert dd['d'] == exact
