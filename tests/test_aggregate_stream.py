@@ -323,6 +323,50 @@ def test_finalize_jobs_byte_identical(tmp_path: Path):
     assert open(outs[0], 'rb').read() == open(outs[1], 'rb').read()
 
 
+def test_merge_batches_converts_keys_once_per_batch():
+    """`_merge_batches` must convert each batch's key column to numpy exactly
+    once. Re-converting the unconsumed tail after every split is quadratic in
+    splits per batch, and the dir↔file merge splits once per directory
+    (millions of times per depth on a real bucket) — it held the finalize at
+    ~37K rows/s vs the stream pass's ~830K."""
+    import pyarrow as pa
+    from disk_tree.find.aggregate_stream import _merge_batches
+
+    class CountingBatch:
+        """Proxy counting key-column accesses (one `to_numpy` each)."""
+
+        def __init__(self, rb, counter):
+            self._rb, self._counter = rb, counter
+
+        @property
+        def num_rows(self):
+            return self._rb.num_rows
+
+        def column(self, name):
+            self._counter[0] += 1
+            return self._rb.column(name)
+
+        def slice(self, *a):
+            # Proxy the slice too, so conversions of a batch's tail after a
+            # split are counted (the whole point of the assertion).
+            return CountingBatch(self._rb.slice(*a), self._counter)
+
+    dirs = [f'd{i:03d}' for i in range(50)]
+    files = [f'd{i:03d}!' for i in range(50)]  # '!' < '/': fully interleaved
+    counter = [0]
+    batches = [
+        CountingBatch(pa.record_batch({'path': pa.array(p)}), counter)
+        for p in (dirs, files)
+    ]
+    out = list(_merge_batches(iter(batches[:1]), iter(batches[1:])))
+    conversions = counter[0]
+    got = [v for rb in out for v in (rb._rb if isinstance(rb, CountingBatch) else rb).column('path').to_pylist()]
+    assert got == sorted(dirs + files)
+    # One per input batch — NOT one per split (49 splits happen here).
+    assert conversions == 2
+    assert len(out) > 49
+
+
 def test_finalize_worker_coalesces_row_groups(tmp_path: Path, monkeypatch):
     """A depth's dir↔file merge emits one slice per alternation (tens of
     millions on a real bucket). The worker must coalesce them into

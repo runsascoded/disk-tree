@@ -994,47 +994,71 @@ def _merge_batches(sa, sb):
     Vectorized boundary merge: whole batches pass through when their key
     ranges don't interleave; otherwise the earlier batch is split at the
     other's boundary key (``searchsorted``) — O(#batches) Python, O(rows) C.
+
+    Each batch's key column is converted to numpy exactly once and then
+    consumed through an integer cursor. Re-converting the *remaining tail*
+    after every split (the obvious formulation) is quadratic in splits per
+    batch, and splits are not rare: the dir↔file merge at one depth alternates
+    once per directory — millions of times on a real bucket — which pinned the
+    finalize at ~37K rows/s against the stream pass's ~830K.
     """
     import numpy as np
 
-    a = next(sa, None)
-    b = next(sb, None)
+    def cursors(stream):
+        """(batch, keys) pairs, skipping empties; one conversion per batch."""
+        for rb in stream:
+            if rb.num_rows:
+                yield rb, rb.column('path').to_numpy(zero_copy_only=False)
+
+    ca, cb = cursors(sa), cursors(sb)
+    a = next(ca, None)
+    b = next(cb, None)
+    ai = bi = 0
     while a is not None and b is not None:
-        if a.num_rows == 0:
-            a = next(sa, None)
-            continue
-        if b.num_rows == 0:
-            b = next(sb, None)
-            continue
-        pa_, pb = a.column('path'), b.column('path')
-        a_first, a_last = pa_[0].as_py(), pa_[a.num_rows - 1].as_py()
-        b_first, b_last = pb[0].as_py(), pb[b.num_rows - 1].as_py()
+        arb, ak = a
+        brb, bk = b
+        a_first, a_last = ak[ai], ak[-1]
+        b_first, b_last = bk[bi], bk[-1]
         if a_last <= b_first:
             # All left keys ≤ first right key; equal path → left row first, so
-            # the whole left batch goes before the right batch.
-            yield a
-            a = next(sa, None)
+            # the whole left remainder goes before the right batch.
+            yield arb.slice(ai) if ai else arb
+            a = next(ca, None)
+            ai = 0
         elif b_last < a_first:
             # Strictly before every left key (a tie would owe the left row first).
-            yield b
-            b = next(sb, None)
+            yield brb.slice(bi) if bi else brb
+            b = next(cb, None)
+            bi = 0
         elif a_first <= b_first:
             # Overlap, left starts first: peel left keys ≤ b_first (ties are
-            # left → included, keeping dir-before-file on equal path).
-            idx = int(np.searchsorted(pa_.to_numpy(zero_copy_only=False), b_first, side='right'))
-            yield a.slice(0, idx)
-            a = a.slice(idx)
+            # left → included, keeping dir-before-file on equal path). The
+            # searchsorted runs on a view of the unconsumed tail, and
+            # a_first ≤ b_first guarantees it advances by ≥1 row.
+            idx = ai + int(np.searchsorted(ak[ai:], b_first, side='right'))
+            yield arb.slice(ai, idx - ai)
+            ai = idx
+            if ai >= len(ak):
+                a = next(ca, None)
+                ai = 0
         else:
             # Overlap, right starts first: peel right keys strictly < a_first.
-            idx = int(np.searchsorted(pb.to_numpy(zero_copy_only=False), a_first, side='left'))
-            yield b.slice(0, idx)
-            b = b.slice(idx)
+            idx = bi + int(np.searchsorted(bk[bi:], a_first, side='left'))
+            yield brb.slice(bi, idx - bi)
+            bi = idx
+            if bi >= len(bk):
+                b = next(cb, None)
+                bi = 0
     while a is not None:
-        yield a
-        a = next(sa, None)
+        arb, _ = a
+        yield arb.slice(ai) if ai else arb
+        ai = 0
+        a = next(ca, None)
     while b is not None:
-        yield b
-        b = next(sb, None)
+        brb, _ = b
+        yield brb.slice(bi) if bi else brb
+        bi = 0
+        b = next(cb, None)
 
 
 def _depth_stream(parts_dir: str, kinds: dict[str, list[dict]], batch_rows: int, prime_rows: int = _PRIME_ROWS):
