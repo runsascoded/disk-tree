@@ -1058,14 +1058,40 @@ def _finalize_depth_worker(
 
     The parent streams the temp back through its own row-group batching, so
     worker batch edges never reach the final file (byte-identity for any
-    `jobs`)."""
+    `jobs`).
+
+    Batches are coalesced into `_FLUSH_ROWS` row groups before writing. A
+    parquet writer holds one ColumnChunkMetaData — including min/max
+    statistics, i.e. two full paths per string column — per row group per
+    column in memory until the footer is written at close. One row group per
+    incoming batch is therefore not just inefficient encoding: the depth's
+    dir↔file merge emits a slice per alternation (tens of millions on a real
+    bucket), and the accumulated footer OOM'd a 61GB node in minutes. Row
+    groups must scale with rows, never with merge slices.
+    """
+    import pyarrow as pa
     import pyarrow.parquet as pq
     writer = None
+    schema = None
+    buf: list = []
+    buf_rows = 0
     try:
         for rb in _depth_stream(parts_dir, kinds, batch_rows, prime_rows):
+            if rb.num_rows == 0:
+                continue
             if writer is None:
-                writer = pq.ParquetWriter(tmp_path, rb.schema)
-            writer.write_batch(rb)
+                schema = rb.schema
+                writer = pq.ParquetWriter(tmp_path, schema)
+            buf.append(rb)
+            buf_rows += rb.num_rows
+            while buf_rows >= _FLUSH_ROWS:
+                t = pa.Table.from_batches(buf, schema)
+                writer.write_table(t.slice(0, _FLUSH_ROWS).combine_chunks())
+                rest = t.slice(_FLUSH_ROWS)
+                buf = rest.to_batches()
+                buf_rows = rest.num_rows
+        if buf_rows:
+            writer.write_table(pa.Table.from_batches(buf, schema).combine_chunks())
     finally:
         if writer is not None:
             writer.close()

@@ -323,6 +323,39 @@ def test_finalize_jobs_byte_identical(tmp_path: Path):
     assert open(outs[0], 'rb').read() == open(outs[1], 'rb').read()
 
 
+def test_finalize_worker_coalesces_row_groups(tmp_path: Path, monkeypatch):
+    """A depth's dir↔file merge emits one slice per alternation (tens of
+    millions on a real bucket). The worker must coalesce them into
+    `_FLUSH_ROWS` row groups: a parquet writer holds per-row-group, per-column
+    statistics in memory until close, so one row group per merge slice OOM'd a
+    61GB node. Row groups must track rows, not slices."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq_
+    from disk_tree.find import aggregate_stream as ags
+    # Dir and file parts whose paths fully interleave → the dir↔file merge
+    # emits ~1 slice per row.
+    dirs = [f'd{i:03d}' for i in range(30)]
+    files = [f'd{i:03d}!' for i in range(30)]  # '!' < '/' so they alternate
+    for kind, paths in (('dir', dirs), ('file', files)):
+        pq_.write_table(
+            pa.table({'path': paths, 'size': [1] * len(paths)}),
+            str(tmp_path / f'0001-{kind}.parquet'),
+        )
+    kinds = {
+        'dir': [{'file': '0001-dir.parquet', 'sorted': True}],
+        'file': [{'file': '0001-file.parquet', 'sorted': True}],
+    }
+    monkeypatch.setattr(ags, '_FLUSH_ROWS', 16)
+    out = str(tmp_path / 'depth.parquet')
+    assert ags._finalize_depth_worker(str(tmp_path), kinds, 8, out) == out
+    md = pq_.ParquetFile(out).metadata
+    assert md.num_rows == 60
+    # Ceiling of rows/_FLUSH_ROWS — never one row group per merge slice.
+    assert md.num_row_groups == -(-60 // 16) == 4
+    got = pq_.read_table(out).column('path').to_pylist()
+    assert got == sorted(dirs + files)
+
+
 def test_unsorted_part_multi_slice_sort(tmp_path: Path):
     """The unsorted-part sort takes in bounded index slices (a >2GiB string
     column overflows 32-bit offsets under `Table.sort_by` — hit on eu-west4's
