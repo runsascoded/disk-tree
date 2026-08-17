@@ -8,6 +8,7 @@ import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, fetchHistogram, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
 import type { HistogramChild, Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
+import { VoronoiTreemap } from '@disk-tree/react/voronoi'
 import { VizBoundary } from './VizBoundary'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
@@ -25,12 +26,13 @@ import {
 type SortKey = 'kind' | 'path' | 'size' | 'mtime' | 'n_children' | 'n_desc' | 'scanned'
 
 /** Which visualization the panel under the table renders. */
-type Viz = 'treemap' | 'scatter' | 'histograms'
+type Viz = 'treemap' | 'scatter' | 'histograms' | 'voronoi'
 
 const VIZ_LABELS: Record<Viz, string> = {
   treemap: 'treemap',
   scatter: 'staleness scatter',
   histograms: 'age histograms',
+  voronoi: 'voronoi treemap',
 }
 type SortDir = 'asc' | 'desc'
 type SortSpec = { key: SortKey; dir: SortDir }
@@ -794,6 +796,50 @@ function HistogramPanel({ uri, scanId, query }: { uri: string; scanId?: number; 
         </span>
       </Box>
     </>
+  )
+}
+
+/**
+ * Voronoi alt view (spec §6). Not a replacement for the treemap — rectangles
+ * label far better — but it fills a circle, which rectangles can't, and reads
+ * as one organic whole rather than a grid.
+ */
+function VoronoiPanel({
+  nodes,
+  uri,
+  collapsedRows,
+}: {
+  nodes: Row[]
+  uri: string
+  collapsedRows?: CollapsedRow[] | null
+}) {
+  const navigate = useNavigate()
+  const prefix = childLinkPrefix(uri)
+  const collapsedPrefix = collapsedRows?.length
+    ? collapsedRows[collapsedRows.length - 1].original_path
+    : ''
+  return (
+    <Box sx={{ height: 460 }}>
+      <VoronoiTreemap<Row>
+        items={nodes}
+        getValue={r => r.size ?? 0}
+        getLabel={r => r.path}
+        formatValue={formatSize}
+        // Seed off the directory so a given dir always lays out the same way.
+        seed={uri}
+        onCellClick={r => {
+          if (r.kind === 'dir') {
+            navigate(`${prefix}/${collapsedPrefix ? collapsedPrefix + '/' : ''}${r.path}`)
+          }
+        }}
+        renderTooltip={r => (
+          <>
+            <div style={{ fontWeight: 500 }}>{r.path}</div>
+            <div style={{ opacity: 0.75, fontSize: '0.85em' }}>{formatSize(r.size)}</div>
+          </>
+        )}
+      />
+    </Box>
   )
 }
 
@@ -1578,8 +1624,10 @@ export function ScanDetails() {
               <Treemap root={root} rows={rows} ageLens={ageLens} query={filter} />
             ) : viz === 'scatter' ? (
               <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
-            ) : (
+            ) : viz === 'histograms' ? (
               <HistogramPanel uri={uri} scanId={selectedScanId} query={filter} />
+            ) : (
+              <VoronoiPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
             )}
           </VizBoundary>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
@@ -1595,6 +1643,7 @@ export function ScanDetails() {
                 <option value="treemap">Treemap</option>
                 <option value="scatter">Staleness</option>
                 <option value="histograms">Age histograms</option>
+                <option value="voronoi">Voronoi</option>
               </select>
             </label>
             {viz === 'treemap' && (

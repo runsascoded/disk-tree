@@ -12,6 +12,7 @@ Ships:
 | [`<TimeSeries>`](#timeseries) / [`<BytesOverTime>`](#timeseries) | Multi-series line/area chart with hover-follow crosshair. ~330 LOC total, zero deps. |
 | [`<StalenessScatter>`](#stalenessscatter) | Log-log age-vs-bytes "triage frontier": marker area ∝ a count channel, exact iso-sum-TB·year diagonals, hover/pin tooltip, click-to-drill. |
 | [`<AgeHistograms>`](#agehistograms) | Byte-weighted mtime distribution per child, with a draggable threshold that reads out reclaimable bytes. |
+| [`<VoronoiTreemap>`](#voronoitreemap) | Circle- (or polygon-) clipped Voronoi tessellation, areas ∝ value. Separate `@disk-tree/react/voronoi` subpath — the only part with dependencies. |
 | [`useHoverPin`](#usehoverpin) | Headless hover+pin state (single pin, touch-safe, outside-click / Esc clear). |
 | `squarify` / `foldSmall` | Pure layout primitives if you want to render the cells yourself. |
 | `divergingColor` / `divergingInk` | Red/green diverging scale for Δ views. |
@@ -180,6 +181,51 @@ not as the default.
 
 Math is exported too: `bytesOlderThan` (whole bins plus a linear split
 of the straddling one), `totalBytes`, `peakBin`, `timeTicks`.
+
+## `<VoronoiTreemap>`
+
+An organic alternative to rectangles, from a **separate subpath** so the
+core package stays dependency-free:
+
+```bash
+pnpm add d3-voronoi-treemap d3-hierarchy   # optional peers
+```
+
+```tsx
+import { VoronoiTreemap } from '@disk-tree/react/voronoi'
+
+<VoronoiTreemap<Row>
+  items={children}
+  getValue={r => r.size ?? 0}
+  getLabel={r => r.path}
+  shape="circle"          // or "rect", or pass an explicit `clip` polygon
+  seed={uri}              // same dir ⇒ same layout, every render
+  formatValue={formatSize}
+  onCellClick={r => navigate(pathFor(r))}
+/>
+```
+
+Read the caveats before reaching for it — they're why `<Treemap>` stays
+the default:
+
+- **It cannot render a wide value range.** The solver clamps tiny site
+  weights, so a child holding 0.1% of the bytes comes out ~200% too
+  large and drags the whole tessellation off target (measured: 421,710%
+  worst-case error on a 13-child listing). `minShare` (default 0.005)
+  drops those, and the component reports how many and how much. Rect
+  treemaps have no such floor.
+- **It is iterative, not exact.** `converged` / `error` report the worst
+  per-cell *relative* area error; the component labels the chart when it
+  misses `tolerance` (default 2%). Note the solver's own
+  `convergenceRatio` is a fraction of the *clip* area, a different and
+  much weaker guarantee — hence our tighter 0.001 default.
+- **It is randomly seeded.** Unseeded, the same data lays out differently
+  on every render; `seed` (number or string) makes it a pure function.
+- Labels need room, so cells under ~900px² get none.
+
+`voronoiLayout` is exported for custom rendering, along with
+`circlePolygon`, `rectPolygon`, `polygonArea`, `polygonCentroid`,
+`maxAreaError`, `toPointsAttr`, and the `mulberry32` / `hashSeed` PRNG.
 
 ## `useHoverPin`
 
