@@ -149,6 +149,11 @@ Default paths (override with `DISK_TREE_ROOT`):
 - `~/.config/disk-tree/disk-tree.db` — SQLite metadata
 - `~/.config/disk-tree/scans/` — Parquet blob storage
 
+Stream-engine tuning knobs (env, all with measured defaults — see the constants block in `find/aggregate_stream.py`):
+- `DISK_TREE_FLUSH_ROWS` — output row-group size (read-side: smaller = less fetched per directory browse, bigger footer)
+- `DISK_TREE_PARALLEL_FINALIZE_MIN_ROWS` — below this the finalize stays serial even at `-j N`
+- `DISK_TREE_SCAN_BATCH_ROWS` — pass-1 read-batch size (partition balance / seek granularity)
+
 ## Tests
 
 ```bash

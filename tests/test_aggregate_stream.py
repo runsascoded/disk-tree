@@ -931,3 +931,139 @@ def test_parallel_finalize_engages_above_threshold_with_identical_bytes(tmp_path
     aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=parallel_out, jobs=2)
     assert _finalize_stage_line(capsys.readouterr().err) == 'finalize: 7 depth(s) across 2 worker(s)'
     assert _md5(serial_out) == _md5(parallel_out)
+
+
+# ---------- Range-group finalize (a depth split across workers) ----------
+
+def _write_part(parts_dir: Path, name: str, paths: list[str]) -> dict:
+    """A minimal part parquet + its manifest descriptor."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    group = None
+    if '.w' in name:
+        group = int(name.split('.w')[1].split('.')[0])
+    elif '.b.' not in name:
+        group = 0
+    pq.write_table(pa.table({'path': paths}), parts_dir / name)
+    return {'file': name, 'group': group, 'rows': len(paths), 'sorted': True}
+
+
+def _range_group_shape(parts_dir: Path, kinds, boundaries):
+    """(group files, lo, hi) per range group — the split's observable shape."""
+    from disk_tree.find.aggregate_stream import _range_groups
+    groups = _range_groups(kinds, boundaries, str(parts_dir))
+    if groups is None:
+        return None
+    return [
+        ({k: sorted(p['file'] for p in ps) for k, ps in sorted(gk.items())}, lo, hi)
+        for gk, lo, hi in groups
+    ]
+
+
+def test_range_groups_split_by_worker_and_share_the_boundary_part(tmp_path: Path):
+    """Worker parts covering disjoint ascending path ranges merge independently;
+    the boundary part spans them, so every group gets it (clipped at read)."""
+    kinds = {
+        'dir': [
+            _write_part(tmp_path, '0002-dir.w000.parquet', ['aa/x', 'ab/y']),
+            _write_part(tmp_path, '0002-dir.w001.parquet', ['nn/x', 'zz/y']),
+            _write_part(tmp_path, '0002-dir.b.parquet', ['mm/spanning']),
+        ],
+        'file': [
+            _write_part(tmp_path, '0002-file.w000.parquet', ['aa/x/1', 'ab/y/2']),
+            _write_part(tmp_path, '0002-file.w001.parquet', ['nn/x/3', 'zz/y/4']),
+        ],
+    }
+    assert _range_group_shape(tmp_path, kinds, ['m']) == [
+        ({'dir': ['0002-dir.b.parquet', '0002-dir.w000.parquet'], 'file': ['0002-file.w000.parquet']}, None, 'm'),
+        ({'dir': ['0002-dir.b.parquet', '0002-dir.w001.parquet'], 'file': ['0002-file.w001.parquet']}, 'm', None),
+    ]
+
+
+def test_range_groups_refuses_when_group_paths_overlap(tmp_path: Path):
+    """A dir's path is a *prefix* of its keys, so a group can hold a row below
+    its own `lo`. Concatenating overlapping groups would emit out of order —
+    proved against the parts' statistics, not assumed."""
+    kinds = {
+        'dir': [
+            # w001 owns keys ≥ 'm' but its dir row 'aab' sorts below w000's max.
+            _write_part(tmp_path, '0003-dir.w000.parquet', ['aaa', 'aac']),
+            _write_part(tmp_path, '0003-dir.w001.parquet', ['aab', 'zz']),
+        ],
+    }
+    assert _range_group_shape(tmp_path, kinds, ['m']) is None
+
+
+def test_range_groups_cover_ranges_with_no_parts_at_this_depth(tmp_path: Path):
+    """A worker with no rows at a depth still *owns* its keyspace slice, and
+    the boundary rows inside it are emitted by nobody else. Skipping such
+    groups silently dropped 5 spanning dirs from a 10M-row output (identical
+    manifest count, five fewer rows in the file)."""
+    kinds = {
+        'dir': [
+            _write_part(tmp_path, '0001-dir.w000.parquet', ['aa']),
+            # Nothing from w001 at this depth — but 'nn' lies in w001's range.
+            _write_part(tmp_path, '0001-dir.w002.parquet', ['zz']),
+            _write_part(tmp_path, '0001-dir.b.parquet', ['nn']),
+        ],
+    }
+    shape = _range_group_shape(tmp_path, kinds, ['m', 'y'])
+    assert shape == [
+        ({'dir': ['0001-dir.b.parquet', '0001-dir.w000.parquet']}, None, 'm'),
+        ({'dir': ['0001-dir.b.parquet']}, 'm', 'y'),
+        ({'dir': ['0001-dir.b.parquet', '0001-dir.w002.parquet']}, 'y', None),
+    ]
+
+
+def test_range_groups_skip_ranges_that_are_genuinely_empty(tmp_path: Path):
+    """A range with neither parts nor boundary rows contributes nothing —
+    dropping it is fine, and keeps the unit count honest."""
+    kinds = {
+        'dir': [
+            _write_part(tmp_path, '0004-dir.w000.parquet', ['aa']),
+            _write_part(tmp_path, '0004-dir.w002.parquet', ['zz']),
+        ],
+    }
+    # Three ranges; the middle one holds nothing at this depth.
+    assert _range_group_shape(tmp_path, kinds, ['m', 'y']) == [
+        ({'dir': ['0004-dir.w000.parquet']}, None, 'm'),
+        ({'dir': ['0004-dir.w002.parquet']}, 'y', None),
+    ]
+
+
+def test_range_groups_declines_when_the_split_cannot_help(tmp_path: Path):
+    single = {'dir': [_write_part(tmp_path, '0001-dir.w000.parquet', ['a', 'b'])]}
+    # One worker, or no boundaries, or a manifest predating group tags.
+    assert _range_group_shape(tmp_path, single, ['m']) is None
+    assert _range_group_shape(tmp_path, single, []) is None
+    legacy = {'dir': [{'file': '0001-dir.parquet', 'rows': 3, 'sorted': True}]}
+    assert _range_group_shape(tmp_path, legacy, ['m']) is None
+
+
+def test_range_group_finalize_is_byte_identical(tmp_path: Path, monkeypatch, capsys):
+    """The whole point: splitting a depth across workers must not move a byte.
+    Boundary rows in particular must land in exactly one group — clip them
+    wrong and rows duplicate or vanish."""
+    from disk_tree.find import aggregate_stream as mod
+
+    listing = _write_listing(tmp_path / 'l.parquet', _PARTITION_ROWS, row_group_size=2)
+    out1 = str(tmp_path / 'j1.parquet')
+    aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=out1)
+    capsys.readouterr()
+
+    # Force both the split points and the parallel finalize, on a fixture
+    # small enough to reason about. `store/009.bin` splits mid-subtree, so
+    # spanning dirs land in the boundary part — the case that matters.
+    monkeypatch.setattr(mod, '_choose_boundaries', lambda *a, **k: ['store/009.bin', 'zz/016.bin'])
+    monkeypatch.setattr(mod, '_PARALLEL_FINALIZE_MIN_ROWS', 0)
+    outn = str(tmp_path / 'jn.parquet')
+    stats = aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=outn, jobs=3)
+    err = capsys.readouterr().err
+    split_lines = [ln.split('] ', 1)[1] for ln in err.strip().split('\n') if 'range group(s)' in ln]
+    assert split_lines == ['finalize: 7 depth(s) split into 14 range group(s)']
+    assert _md5(out1) == _md5(outn)
+
+    got = _normalize(pd.read_parquet(outn))
+    expected = _normalize(import_listing((listing,), bucket='b1', scheme='gcs').df[got.columns])
+    pd.testing.assert_frame_equal(got, expected)
+    assert stats['rows'] == len(got)
