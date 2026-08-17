@@ -100,7 +100,36 @@ the *listing* plane, whose API-call traffic is negligible-egress and ran fine fr
 - [ ] widgets: ops accessors documented for `<Treemap>`/`<TimeSeries>` (likely zero code)
 - [x] S3/CloudTrail parser stubs; R2 Logpush note — `parsers/{s3,r2}.py` raise
       `NotImplementedError` with pinned interfaces + provider-format doc
-- [ ] Real-data smoke against GCS-delivered CSVs (waiting on delivery — mgu owns)
+- [x] Real-data smoke against GCS-delivered CSVs — done 2026-08-14 on mgu:
+      72GB of CSV (7h × 6 buckets) → 147.8M requests, 46.1TB `bytes_out`.
+      Drove three fixes: `2de9578` (`preserve_insertion_order=false` — the
+      parquet writer OOM'd on the 72GB import), `2b17684` (`DISTINCT ON` narrow
+      projection instead of window-over-`SELECT *`, which materialized unused
+      columns and OOM'd a 12GB cap on a 40M-request hour), `8849e23` (atomic
+      write — a kill mid-`write_parquet` left a truncated shard that passed
+      `[ -s ]` and broke downstream `agg`). Output at `tmp/access/{agg.parquet,
+      top-ops.txt,top-bytes.txt}`; headline finding was that 69% of reads in the
+      window hit `tmp/ttl=1d/zephyr/`.
+- [ ] layer-2a keys on `path` alone — `bucket` is dropped between `access_in`
+      (`aggregate.py:60`) and `access_leaf` (`:74-84`), so identically-named
+      prefixes in different buckets silently merge. Any join to the per-bucket
+      scan snapshots is therefore only valid at fleet-aggregate grain until the
+      key becomes `(bucket, path)`.
+- [ ] `max(ts)` per path — the read-recency ("atime") column
+      `specs/viz-prototypes.md` needs; layer-2a carries only
+      `day, op, n_ops, bytes_out, bytes_in, n_requesters`. atime is the
+      *correct* coldness signal (shuffle scratch is written constantly but read
+      once; archives are written once but read hourly — mtime gets both
+      backwards). GCS-only: CAIOS returns `NotImplemented` for bucket logging.
+- [ ] no `LIST` rows at root in the 2026-08-14 agg — either GCS doesn't log
+      them under a `cs_operation` we map, or the op normalization drops them.
+      LIST is a Class-A cost driver, so a zero here is suspicious, not clean.
+- [ ] scheduled/incremental ingestion — the run above full-reprocessed the
+      whole CSV glob with no watermark. At ~10GB/hr (~240GB/day) fleet-wide
+      that has a hard ceiling, and the logs have accumulated unread since
+      2026-08-13. Must run *in GCP*: cross-cloud egress is ~$0.12/GB (the mgu
+      run cost ≈$7 one-time and is explicitly not the pattern, per the
+      Cost/placement section above).
 - [ ] `dt cost` plane (deferred)
 
 Post-landing (2026-08-14): all core scaffolding + GCS parser + fixture tests
