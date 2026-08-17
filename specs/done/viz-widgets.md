@@ -72,3 +72,15 @@ Text input (substring/regex) → every widget re-slices to matching paths.
 - Widgets render in DT's own `ui/` (reference consumer, CIC-verified) and are consumable by mgu's site with only accessor wiring (their `/read dt` pickup).
 - `@disk-tree/react` tests per widget (vitest, patterned on existing suites); Python tests for V.2/V.4b/V.5b artifacts.
 - mgu retires the overlapping sections of their `viz-prototypes.md` in favor of this spec (their session, via `/read dt`), keeping only the atime/access-plane specifics.
+
+## Status (2026-08-16): complete
+
+V.1–V.6 all shipped and CIC-verified in DT's own `ui/` (`View:` toggle → Treemap + age lens / Staleness / Age histograms / Voronoi, all driven by one filter box). `@disk-tree/react` went 21 → 151 tests; Python 250 → 287.
+
+Deferred by design, not forgotten:
+
+- **V.5b** segment dictionary + inverted index. V.5 v0 (display-level filtering) covers the single-scan case; the index is what cross-scan / true-re-aggregation filtering needs, and it should be built when a consumer actually needs it rather than speculatively.
+- **V.4's grandchild-stacked bars** ("Voronoi the violin" resolved as stacking). The endpoint returns per-child bins; per-grandchild would be a second `bytes[][]` dimension. Worth it when someone wants to see *which* subdirectory owns a child's old bulge.
+- **V.3/V.6 crossover**: Voronoi glyphs *inside* scatter markers. Both pieces now exist (`voronoiLayout` takes any clip polygon, `circlePolygon` builds the marker's); wiring them is a small job whenever the density warrants it.
+
+The atime plane stays consumer-specific (mgu's GCS access logs): every widget takes age through an accessor, so it needs no changes here.
