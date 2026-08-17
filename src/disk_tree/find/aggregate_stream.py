@@ -1087,9 +1087,35 @@ def _merge_batches(sa, sb):
         b = next(cb, None)
 
 
+def _coalesce(stream, min_rows: int):
+    """Concatenate the merge's alternation-sized slices into ~`min_rows` batches.
+
+    `_merge_batches` emits one slice per dir↔file alternation — millions of
+    few-row batches per depth. Every one of them becomes a chunk downstream, so
+    each `_FLUSH_ROWS` flush was building a table with ~10^5 chunks per column,
+    walking them all in `combine_chunks`, then rebuilding them with
+    `to_batches`. Profiling the eu-west4 finalize put 10/10 samples in that
+    flush block and none in the merge: 46 min on one depth that should take ~2.
+    Coalescing here (one copy per row) keeps consumers seeing normal batches.
+    """
+    import pyarrow as pa
+    buf: list = []
+    rows = 0
+    for rb in stream:
+        if rb.num_rows == 0:
+            continue
+        buf.append(rb)
+        rows += rb.num_rows
+        if rows >= min_rows:
+            yield buf[0] if len(buf) == 1 else pa.concat_batches(buf)
+            buf, rows = [], 0
+    if buf:
+        yield buf[0] if len(buf) == 1 else pa.concat_batches(buf)
+
+
 def _depth_stream(parts_dir: str, kinds: dict[str, list[dict]], batch_rows: int, prime_rows: int = _PRIME_ROWS):
     """One depth's merged, path-ordered record-batch stream (dirs before files
-    on equal path)."""
+    on equal path), in consumer-sized batches (see :func:`_coalesce`)."""
     import os
 
     def kind_stream(parts_list: list[dict]):
@@ -1104,7 +1130,10 @@ def _depth_stream(parts_dir: str, kinds: dict[str, list[dict]], batch_rows: int,
 
     if len(kinds) == 1:
         return kind_stream(next(iter(kinds.values())))
-    return _merge_batches(kind_stream(kinds['dir']), kind_stream(kinds['file']))
+    return _coalesce(
+        _merge_batches(kind_stream(kinds['dir']), kind_stream(kinds['file'])),
+        batch_rows,
+    )
 
 
 def _finalize_depth_worker(

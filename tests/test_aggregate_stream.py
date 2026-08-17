@@ -323,6 +323,40 @@ def test_finalize_jobs_byte_identical(tmp_path: Path):
     assert open(outs[0], 'rb').read() == open(outs[1], 'rb').read()
 
 
+def test_depth_stream_coalesces_alternation_slices(tmp_path: Path):
+    """The dir↔file merge emits one slice per alternation. Consumers turn each
+    into a chunk, so an uncoalesced stream made every flush walk ~10^5 chunks
+    per column — 10/10 profiler samples in the flush block, 46 min on one
+    eu-west4 depth. `_depth_stream` must hand out ~batch_rows-sized batches,
+    not per-alternation slivers."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq_
+    from disk_tree.find.aggregate_stream import _depth_stream, _merge_batches, _part_batches
+    n = 300
+    dirs = [f'd{i:04d}' for i in range(n)]
+    files = [f'd{i:04d}!' for i in range(n)]  # '!' < '/': alternates every row
+    for kind, paths in (('dir', dirs), ('file', files)):
+        pq_.write_table(
+            pa.table({'path': paths, 'size': [1] * len(paths)}),
+            str(tmp_path / f'0001-{kind}.parquet'),
+        )
+    kinds = {
+        'dir': [{'file': '0001-dir.parquet', 'sorted': True}],
+        'file': [{'file': '0001-file.parquet', 'sorted': True}],
+    }
+    # The raw merge shreds into ~1 batch per row...
+    raw = list(_merge_batches(
+        _part_batches(str(tmp_path / '0001-dir.parquet'), True, 1 << 16),
+        _part_batches(str(tmp_path / '0001-file.parquet'), True, 1 << 16),
+    ))
+    assert len(raw) >= 2 * n - 1
+    # ...but the depth stream coalesces to batch_rows-sized batches.
+    out = list(_depth_stream(str(tmp_path), kinds, batch_rows=256))
+    assert [rb.num_rows for rb in out] == [256, 256, 88]
+    got = [v for rb in out for v in rb.column('path').to_pylist()]
+    assert got == sorted(dirs + files)
+
+
 def test_part_flush_size_does_not_reach_output(tmp_path: Path, monkeypatch):
     """`_PART_FLUSH_ROWS` is a pure memory knob: a worker holds one buffer per
     open (depth, kind) writer, so it multiplies by ~44 on a deep tree. It must
