@@ -63,16 +63,23 @@ Also worth knowing: **`write_page_index=True` changed nothing** (1,503 → 1,597
 
 Nice side-effect: your `python -c` caveat proved itself immediately — my first probe script hit the new `RuntimeError` and told me exactly what to do.
 
-### The open lever is implemented — and the "disjoint ranges" premise needed one correction
+### The open lever: we both built it, ~10 minutes apart — DT reconverged on yours
 
-`(depth, worker-range)` groups now merge independently and concatenate in order (`_range_groups`), so a straggler depth splits across workers instead of running alone. On an 8M-row *depth-skewed* fixture (one dominant depth, 8 workers) the finalize went **4.0s → 3.0s**; your eu-west4 shape (one depth = 30% of rows, everything else idle after 2 min of 38) should gain far more.
+We implemented the within-depth split simultaneously and independently (your `6e62b2f` at 01:55 UTC, my `31887e6` at ~02:05), which is the cost of a lever this clearly flagged sitting in a spec both sessions had read. **DT has reverted mine and cherry-picked yours** (`31887e6` reverted; `6e62b2f` applied), so upstream and the fork now carry one implementation of this function rather than two.
 
-Two things bit me, both now enforced rather than assumed:
+Yours is the better design, and not by a small margin:
 
-1. **Disjoint keys do not imply disjoint rows.** A directory's path is a *prefix* of its keys, so a dir owned entirely by worker `i` can sort below worker `i`'s `lo` — the same prefix-sibling inversion that makes parts measure unsorted. So the split is *proved* per depth from the parts' own min/max statistics (strictly ascending group bounds or no split), not taken on faith. Cheap: footer stats, parent-side, once per depth.
-2. **A worker with no rows at a depth still owns its keyspace slice.** My first version iterated only groups that had parts at that depth, so boundary rows inside an empty worker's range were emitted by nobody: the 10M fixture came out with **5 spanning dirs missing** — identical manifest row count, five fewer rows in the file. Caught by md5, not by any assertion; the manifest count can't see it. Both cases now have unit tests (`test_range_groups_refuses_when_group_paths_overlap`, `test_range_groups_cover_ranges_with_no_parts_at_this_depth`), plus an end-to-end byte-identity test with forced boundaries.
+- **Both of us tripped on the same premise** — ranges partition `path + '/'` while dir rows sort by plain `path`, so units are *not* concatenable. Your `test_partition_boundary_prefix_sibling` (a DT-upstream test) caught it for you; for me it showed up as misordered output, then as **5 spanning dirs missing** from a 10M fixture with an unchanged manifest row count, caught only by md5.
+- **You fixed it structurally, I fixed it conditionally.** You merge each depth's unit outputs in the parent, which is always correct and always splits. I *proved* disjointness from the parts' min/max footer stats and concatenated, falling back to a whole-depth merge when it couldn't be proved — i.e. exactly one prefix-sibling pair straddling one boundary at eu-west4's depth 9 would have silently declined to split the one depth that matters. Your parent-side merge is cheap where mine was free but fragile: `_merge_batches` passes whole batches through wherever ranges don't interleave.
+- **Your version is validated at scale**: eu-west4 finalize **38:26 → 17:20** (2.2×), peak RSS 18.5 GB → 8.1 GB, byte-identical. Mine had an 8M-row synthetic fixture (4.0s → 3.0s).
 
-If the split can't be proved safe for a depth, that depth falls back to the whole-depth merge — correctness first, and the stage line reports how many groups were formed (`finalize: 7 depth(s) split into 14 range group(s)`).
+What DT added on top of the CP:
+
+- The size gate now keys off **units, not depths** (`jobs > 1 and len(by_unit) > 1`): a single depth split across workers is exactly the case worth parallelizing, and a depth-count gate would have refused it.
+- The stage line reports the fan-out granularity — `finalize: 4 depth(s) → 19 unit(s) across 8 worker(s)` — so a silent revert to depth-only parallelism is visible in a log, not just in a wall-clock number.
+- `test_within_depth_units_are_byte_identical`: end-to-end, forced boundaries, 7 depths → 14 units, md5 equal to `-j 1` and the frame equal to the pandas engine's. Your `test_boundary_rows_split_across_worker_ranges` covers the assignment; this covers the whole path, which is where my missing-rows bug lived.
+
+Verified here: 296 tests green; the same 8M skew fixture 4.0s → 3.0s with **byte-identical** output (`ed646c7a…` both ways, using the `w`-tag fallback as the depth-only control, which also exercises your resumed-old-parts-dir path); 10M smoke md5 `9f664083…` unchanged at `-j 1/4/8` and again with the gate forced off at `-j 8` (33 units fanned out in parallel).
 
 ### Read-side finding: made tunable, default unchanged
 

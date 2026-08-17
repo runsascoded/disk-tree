@@ -34,7 +34,6 @@ source, so the stack only ever sees globally canonical-sorted rows.
 
 from __future__ import annotations
 
-import os as _os
 import re
 import sys
 from bisect import bisect_left
@@ -56,30 +55,9 @@ def _stage(msg: str) -> None:
 # keys something is pathological — the pre-scan diversion isn't the right tool.
 _DIRTY_MAX = 10_000_000
 
-# Rows per row group in the *final* layer-2 parquet. Contractual *within a
-# build*: the finalize slices at exactly this, which is what makes output bytes
-# independent of `jobs`. It is not a cross-version guarantee — changing it
-# changes the bytes (not the content) of every future scan.
-#
-# It is the read-side's dominant knob. Layer-2 is sorted by (depth, path), so a
-# directory's children are contiguous and a browse fetches whole row groups.
-# Measured on an 8.27GB layer-2 (mgu, 40 random directory browses):
-#
-#     rows/group   fetched per browse   footer (whole file)
-#     8,192        1,503 KiB            ~74 MiB
-#     65,536       2,882 KiB            ~9.5 MiB
-#     262,144      8,140 KiB            2.6 MiB   ← default
-#
-# Smaller groups fetch far less per browse but inflate the footer, which a
-# reader pays on every open unless it caches it. File-size cost is very
-# data-dependent: +4.8% on that real layer-2, but +29.6% on a synthetic
-# fixture of near-identical paths, where per-group overhead dominates —
-# measure your own before tuning. The default stays at 1<<18 because
-# disk-tree's own server reads local files (footer cost is real, page cache
-# absorbs the rest); range-request readers over object storage should lower
-# it. `write_page_index` did not help: pyarrow 22 writes the index but
-# exposes no way to exploit it on this path.
-_FLUSH_ROWS = int(_os.environ.get('DISK_TREE_FLUSH_ROWS', str(1 << 18)))
+# Rows per row group in the *final* layer-2 parquet. Contractual: the finalize
+# slices at exactly this, which is what makes output bytes independent of `jobs`.
+_FLUSH_ROWS = 1 << 18
 
 # Rows buffered per open part writer before flushing a row group. Deliberately
 # smaller than `_FLUSH_ROWS`: a worker keeps one writer open per (depth, kind)
@@ -157,6 +135,7 @@ _MAX_RUNS = 100_000
 # balance (± one batch) and the intra-run seek granularity. Env-overridable so
 # tests can force multi-batch shards on tiny fixtures even in spawned pass-1
 # workers (module constants don't survive spawn; the environment does).
+import os as _os
 _SCAN_BATCH_ROWS = int(_os.environ.get('DISK_TREE_SCAN_BATCH_ROWS', str(1 << 16)))
 
 
@@ -599,17 +578,13 @@ class _PartWriters:
     `suffix` disambiguates parallel workers' part files (``.w{idx:03d}``).
     """
 
-    def __init__(self, parts_dir: str, cols: list[str], mean_mtime: bool, suffix: str = '', group: int = 0):
+    def __init__(self, parts_dir: str, cols: list[str], mean_mtime: bool, suffix: str = '', widx: int = 0):
         import os
         self._dir = parts_dir
         self._cols = cols
         self._mean_mtime = mean_mtime
         self._suffix = suffix
-        # Which keyspace range this writer's rows came from. Worker `i` only
-        # ever emits rows in `[boundaries[i-1], boundaries[i])`, so same-depth
-        # parts from different workers are disjoint *and* ordered by group —
-        # which is what lets the finalize split a depth across workers.
-        self._group = group
+        self._widx = widx
         self._writers: dict[tuple[int, str], _Writer] = {}
         self._last: dict[tuple[int, str], str] = {}
         self._unsorted: set[tuple[int, str]] = set()
@@ -642,7 +617,11 @@ class _PartWriters:
                 'file': f'{depth:04d}-{kind}{self._suffix}.parquet',
                 'rows': w.n_rows,
                 'sorted': (depth, kind) not in self._unsorted,
-                'group': self._group,
+                # Keyspace-partition ordinal. Worker `w` only ever emits keys in
+                # its own `[lo, hi)` (spanning dirs leave as partials instead),
+                # so parts with the same depth are disjoint and ordered by `w`
+                # — which is what lets the finalize split a depth across workers.
+                'w': self._widx,
             })
         return parts
 
@@ -698,7 +677,7 @@ def _run_partition(
             run_srcs.sort(key=itemgetter(0))
         merged = _merge_runs(run_srcs, hw)
 
-    parts = _PartWriters(parts_dir, out_cols, mean_mtime, suffix=suffix, group=widx)
+    parts = _PartWriters(parts_dir, out_cols, mean_mtime, suffix=suffix, widx=widx)
     partials: list[tuple] = []
     n_files_total = 0
     stack: list[_Acc] = [_Acc('', n_pivot)]
@@ -839,12 +818,21 @@ def _write_boundary_parts(
     scan_root: str,
     pivot_names: list[str],
     mean_mtime: bool,
+    ranges: list[tuple[str | None, str | None]] | None = None,
 ) -> tuple[list[dict], list]:
     """Roll the merged boundary-spanning dirs up their (also-spanning) parent
     chain, deepest first — the exact `pop_emit` rollup, run once in the parent
     — and write their rows as per-depth path-sorted parts
     (``{depth:04d}-dir.b.parquet``). The root row (depth 0) always lands here.
-    Returns (part descriptors, merged root stats)."""
+    Returns (part descriptors, merged root stats).
+
+    With `ranges` (the workers' `[lo, hi)` keyspace partitions), each depth's
+    rows are split across them into ``{depth:04d}-dir.b.w{idx:03d}.parquet``.
+    These are the only rows not already range-scoped — they come from dirs whose
+    subtree spanned a boundary — so splitting them is what makes *every* part
+    attributable to one worker range, and hence lets the finalize parallelize
+    within a depth rather than only across depths. They are few (single digits
+    per depth on the marin fleet), so the split is cheap."""
     import os
     from .agg_ext import MTIME_MEAN, mean_of
     out_cols = [*_COLS, *pivot_names, *([MTIME_MEAN] if mean_mtime else [])]
@@ -872,20 +860,41 @@ def _write_boundary_parts(
         '.', r[0], r[1], 'dir', '', scan_root, r[2], r[3], r[4], 0,
         *r[5], *([mean_of(r[6], r[0])] if mean_mtime else []),
     )))
+    def _widx_of(path: str) -> int:
+        """Worker range owning `path`. Ranges are contiguous and ordered, so
+        the first whose `hi` exceeds the key owns it (last range has hi=None)."""
+        for i, (_, hi) in enumerate(ranges):
+            if hi is None or path < hi:
+                return i
+        return len(ranges) - 1
+
     parts = []
     for depth in sorted(rows_by_depth):
         rows = sorted(rows_by_depth[depth])
-        fname = f'{depth:04d}-dir.b.parquet'
-        w = _Writer(os.path.join(parts_dir, fname), out_cols, mean_mtime)
-        for _, row in rows:
-            w.write(row)
-        w.close()
-        # Spanning dirs cross range boundaries, so this part belongs to no
-        # single group; the finalize splits it by key at read time.
-        parts.append({
-            'depth': depth, 'kind': 'dir', 'file': fname, 'rows': len(rows),
-            'sorted': True, 'group': None,
-        })
+        if not ranges:
+            fname = f'{depth:04d}-dir.b.parquet'
+            w = _Writer(os.path.join(parts_dir, fname), out_cols, mean_mtime)
+            for _, row in rows:
+                w.write(row)
+            w.close()
+            parts.append({
+                'depth': depth, 'kind': 'dir', 'file': fname,
+                'rows': len(rows), 'sorted': True, 'w': 0,
+            })
+            continue
+        by_w: dict[int, list[tuple]] = {}
+        for key, row in rows:
+            by_w.setdefault(_widx_of(key), []).append(row)
+        for widx in sorted(by_w):
+            fname = f'{depth:04d}-dir.b.w{widx:03d}.parquet'
+            w = _Writer(os.path.join(parts_dir, fname), out_cols, mean_mtime)
+            for row in by_w[widx]:
+                w.write(row)
+            w.close()
+            parts.append({
+                'depth': depth, 'kind': 'dir', 'file': fname,
+                'rows': len(by_w[widx]), 'sorted': True, 'w': widx,
+            })
     return parts, r
 
 
@@ -1145,51 +1154,16 @@ def _coalesce(stream, min_rows: int):
         yield buf[0] if len(buf) == 1 else pa.concat_batches(buf)
 
 
-def _clip_batches(it, lo: str | None, hi: str | None):
-    """Restrict a path-sorted batch stream to `[lo, hi)`.
-
-    Only the boundary part needs this: worker parts are already range-confined
-    by construction, and the boundary part is tiny (single-digit rows per
-    depth), so a filter per range group costs nothing.
-    """
-    import pyarrow.compute as pc
-    for rb in it:
-        if rb.num_rows == 0:
-            continue
-        mask = None
-        if lo is not None:
-            mask = pc.greater_equal(rb.column('path'), lo)
-        if hi is not None:
-            m = pc.less(rb.column('path'), hi)
-            mask = m if mask is None else pc.and_(mask, m)
-        out = rb if mask is None else rb.filter(mask)
-        if out.num_rows:
-            yield out
-
-
-def _depth_stream(
-    parts_dir: str,
-    kinds: dict[str, list[dict]],
-    batch_rows: int,
-    prime_rows: int = _PRIME_ROWS,
-    lo: str | None = None,
-    hi: str | None = None,
-):
+def _depth_stream(parts_dir: str, kinds: dict[str, list[dict]], batch_rows: int, prime_rows: int = _PRIME_ROWS):
     """One depth's merged, path-ordered record-batch stream (dirs before files
-    on equal path), in consumer-sized batches (see :func:`_coalesce`).
-
-    `lo`/`hi` restrict *unranged* parts (the boundary part) to one keyspace
-    range group; ranged parts are passed through untouched.
-    """
+    on equal path), in consumer-sized batches (see :func:`_coalesce`)."""
     import os
 
     def kind_stream(parts_list: list[dict]):
-        its = []
-        for p in sorted(parts_list, key=itemgetter('file')):
-            it = _part_batches(os.path.join(parts_dir, p['file']), p['sorted'], batch_rows, prime_rows)
-            if p.get('group', 0) is None and (lo is not None or hi is not None):
-                it = _clip_batches(it, lo, hi)
-            its.append(it)
+        its = [
+            _part_batches(os.path.join(parts_dir, p['file']), p['sorted'], batch_rows, prime_rows)
+            for p in sorted(parts_list, key=itemgetter('file'))
+        ]
         s = its[0]
         for it in its[1:]:
             s = _merge_batches(s, it)
@@ -1203,123 +1177,12 @@ def _depth_stream(
     )
 
 
-def _part_path_bounds(path: str) -> tuple[str, str] | None:
-    """(min, max) of a part's `path` column from its parquet statistics."""
-    import pyarrow.parquet as pq
-    md = pq.ParquetFile(path).metadata
-    if md.num_rows == 0:
-        return None
-    col = md.schema.names.index('path')
-    lo = hi = None
-    for rg in range(md.num_row_groups):
-        st = md.row_group(rg).column(col).statistics
-        if st is None or not st.has_min_max:
-            return None
-        lo = st.min if lo is None or st.min < lo else lo
-        hi = st.max if hi is None or st.max > hi else hi
-    return (lo, hi) if lo is not None else None
-
-
-def _range_groups(
-    kinds: dict[str, list[dict]],
-    boundaries: list[str],
-    parts_dir: str,
-) -> list[tuple[dict[str, list[dict]], str | None, str | None]] | None:
-    """Split one depth's parts into independently-mergeable keyspace ranges.
-
-    A depth's `.wNNN` parts come from workers that each owned a contiguous,
-    disjoint *key* range, so their merges are independent and — when their
-    *row* ranges are also disjoint — their outputs simply concatenate in group
-    order. That is the difference between a depth costing one worker's time
-    and `1/N` of it: eu-west4's 38-minute finalize was essentially its depth 9
-    (92M of 369M rows) running alone while every other worker idled.
-
-    **Disjoint keys do not imply disjoint rows.** A directory's path is a
-    *prefix* of its keys, so a dir owned entirely by worker `i` can sort below
-    worker `i`'s `lo` — the same prefix-sibling inversion that makes parts
-    measure unsorted. Concatenating then emits rows out of order (a real 10M
-    fixture caught this: same rows, different bytes). So the split is *proved*
-    per depth from the parts' own min/max statistics — strictly ascending
-    group bounds or no split — rather than assumed.
-
-    The boundary part spans ranges, so each group re-reads it clipped to its
-    own `[lo, hi)` (it holds single-digit rows per depth).
-
-    Returns `None` when the split doesn't apply or can't be proved safe: one
-    group, no boundaries, missing statistics, overlapping groups, or a
-    manifest predating group tags (resume compatibility).
-    """
-    import os
-
-    if not boundaries:
-        return None
-    ranged: dict[int, dict[str, list[dict]]] = {}
-    unranged: dict[str, list[dict]] = {}
-    for kind, plist in kinds.items():
-        for part in plist:
-            if 'group' not in part:
-                return None  # pre-`group` manifest: fall back to whole-depth
-            g = part['group']
-            if g is None:
-                unranged.setdefault(kind, []).append(part)
-            else:
-                ranged.setdefault(g, {}).setdefault(kind, []).append(part)
-    if len(ranged) < 2:
-        return None
-
-    # Boundary rows are few; read their paths so they count toward the bounds
-    # of whichever group's range contains them.
-    boundary_paths: list[str] = []
-    for plist in unranged.values():
-        for part in plist:
-            import pyarrow.parquet as pq
-            tbl = pq.read_table(os.path.join(parts_dir, part['file']), columns=['path'])
-            boundary_paths.extend(tbl.column('path').to_pylist())
-
-    out = []
-    prev_max: str | None = None
-    # Every range must be visited, not just the ones holding parts at this
-    # depth: a worker with no rows here still *owns* its slice of the
-    # keyspace, and the boundary rows inside that slice are emitted by nobody
-    # else. Skipping such groups silently dropped 5 spanning dirs on a 10M
-    # fixture — same manifest row count, five fewer rows in the file.
-    for g in range(len(boundaries) + 1):
-        merged = {k: list(v) for k, v in ranged.get(g, {}).items()}
-        for kind, plist in unranged.items():
-            merged.setdefault(kind, []).extend(plist)
-        lo = boundaries[g - 1] if g > 0 else None
-        hi = boundaries[g] if g < len(boundaries) else None
-
-        bounds = [
-            _part_path_bounds(os.path.join(parts_dir, p['file']))
-            for ps in ranged.get(g, {}).values() for p in ps
-        ]
-        if any(b is None for b in bounds):
-            return None  # no statistics ⇒ cannot prove disjointness
-        mins = [b[0] for b in bounds if b]
-        maxs = [b[1] for b in bounds if b]
-        for bp in boundary_paths:
-            if (lo is None or bp >= lo) and (hi is None or bp < hi):
-                mins.append(bp)
-                maxs.append(bp)
-        if not mins:
-            continue  # genuinely empty range: no parts, no boundary rows
-        gmin, gmax = min(mins), max(maxs)
-        if prev_max is not None and gmin <= prev_max:
-            return None  # groups overlap ⇒ concatenation would misorder
-        prev_max = gmax
-        out.append((merged, lo, hi))
-    return out if len(out) > 1 else None
-
-
 def _finalize_depth_worker(
     parts_dir: str,
     kinds: dict[str, list[dict]],
     batch_rows: int,
     tmp_path: str,
     prime_rows: int = _PRIME_ROWS,
-    lo: str | None = None,
-    hi: str | None = None,
 ) -> str:
     """Parallel-finalize worker: merge one depth's parts → temp parquet.
 
@@ -1343,7 +1206,7 @@ def _finalize_depth_worker(
     buf: list = []
     buf_rows = 0
     try:
-        for rb in _depth_stream(parts_dir, kinds, batch_rows, prime_rows, lo, hi):
+        for rb in _depth_stream(parts_dir, kinds, batch_rows, prime_rows):
             if rb.num_rows == 0:
                 continue
             if writer is None:
@@ -1411,6 +1274,28 @@ def _finalize_parts(
     for part in manifest['parts']:
         by_depth.setdefault(part['depth'], {}).setdefault(part['kind'], []).append(part)
 
+    # Finer fan-out unit: (depth, keyspace-partition). Splitting only by depth
+    # left the finalize Amdahl-bound on the biggest depth — eu-west4 depth 9
+    # holds 92.2M of 369M rows and took 38 min while every other depth finished
+    # in ~2 and then idled.
+    #
+    # A worker only emits keys inside its own `[lo, hi)` (spanning dirs leave as
+    # partials, and boundary rows are split across the same ranges at write
+    # time), so units are disjoint *in subtree order*. They are NOT
+    # concatenable, because dir rows sort by plain `path` while the ranges
+    # partition `path + '/'`, and the two orders disagree exactly for
+    # prefix-siblings: with a boundary between them, `store` lands in a later
+    # unit than `store-backup` yet sorts before it. So the parent merges each
+    # depth's unit outputs (cheap — `_merge_batches` passes whole batches
+    # through wherever ranges don't interleave, which is everywhere except
+    # those siblings). Parts predating the `w` tag (a resumed older parts dir)
+    # fall back to whole-depth units.
+    partitioned = all('w' in p for p in manifest['parts'])
+    by_unit: dict[tuple[int, int], dict[str, list[dict]]] = {}
+    for part in manifest['parts']:
+        unit = (part['depth'], part['w'] if partitioned else 0)
+        by_unit.setdefault(unit, {}).setdefault(part['kind'], []).append(part)
+
     writer = pq.ParquetWriter(out_parquet, schema)
     buf: list = []
     buf_rows = 0
@@ -1441,71 +1326,61 @@ def _finalize_parts(
         buf_rows = 0
 
     total_rows = sum(p['rows'] for kinds in by_depth.values() for ps in kinds.values() for p in ps)
-    parallel = jobs > 1 and len(by_depth) > 1 and total_rows >= _PARALLEL_FINALIZE_MIN_ROWS
+    parallel = jobs > 1 and len(by_unit) > 1 and total_rows >= _PARALLEL_FINALIZE_MIN_ROWS
+    units = f"{len(by_depth)} depth(s) → {len(by_unit)} unit(s)"
     if parallel:
-        _stage(f"finalize: {len(by_depth)} depth(s) across {jobs} worker(s)")
-    elif jobs > 1 and len(by_depth) > 1:
+        _stage(f"finalize: {units} across {jobs} worker(s)")
+    elif jobs > 1 and len(by_unit) > 1:
         _stage(
-            f"finalize: {len(by_depth)} depth(s), serial "
+            f"finalize: {units}, serial "
             f"({total_rows:,} rows < {_PARALLEL_FINALIZE_MIN_ROWS:,} parallel threshold)"
         )
     else:
         _stage(f"finalize: {len(by_depth)} depth(s), serial")
     try:
         if parallel:
-            # Depth merges are independent — fan them out to worker processes
-            # (biggest depths first to kill the straggler tail), each writing
-            # a per-depth temp; the parent consumes temps in depth order
-            # through emit(), so row-group edges (and bytes) match jobs=1.
+            # Units are independent — fan them out to worker processes (biggest
+            # first to kill the straggler tail), each writing a temp; the parent
+            # consumes temps in (depth, w) order through emit(), so row-group
+            # edges (and bytes) match jobs=1.
             import multiprocessing as mp
             from concurrent.futures import ProcessPoolExecutor
             tmp_dir = os.path.join(parts_dir, 'finalize-tmp')
             os.makedirs(tmp_dir, exist_ok=True)
             weights = {
-                d: sum(p['rows'] for ps in kinds.values() for p in ps)
-                for d, kinds in by_depth.items()
+                u: sum(p['rows'] for ps in kinds.values() for p in ps)
+                for u, kinds in by_unit.items()
             }
-            # Depth workers share one priming budget: each unsorted-part
+            # Unit workers share one priming budget: each unsorted-part
             # run-merge may hold `prime_rows` rows across its run readers, so
             # divide the global budget by the worker count.
             prime_rows = max(1 << 16, _PRIME_ROWS // jobs)
-            # Within a depth, split further by keyspace range when the parts
-            # allow it: a single depth can hold a third of the rows, and
-            # depth-only fan-out leaves every other worker idle behind it.
-            boundaries = manifest.get('boundaries') or []
-            units: list[tuple[int, int, dict, str | None, str | None]] = []
-            for d, kinds in by_depth.items():
-                groups = _range_groups(kinds, boundaries, parts_dir)
-                if groups is None:
-                    units.append((d, 0, kinds, None, None))
-                else:
-                    for gi, (gk, lo, hi) in enumerate(groups):
-                        units.append((d, gi, gk, lo, hi))
-            unit_weight = {
-                (d, gi): sum(p['rows'] for ps in gk.values() for p in ps)
-                for d, gi, gk, _, _ in units
-            }
-            n_split = len(units) - len(by_depth)
-            if n_split:
-                _stage(f"finalize: {len(by_depth)} depth(s) split into {len(units)} range group(s)")
             with ProcessPoolExecutor(max_workers=jobs, mp_context=mp.get_context('spawn')) as ex:
                 futs = {
-                    (d, gi): ex.submit(
-                        _finalize_depth_worker, parts_dir, gk, batch_rows,
-                        os.path.join(tmp_dir, f'depth-{d}-g{gi:03d}.parquet'), prime_rows,
-                        lo, hi,
+                    u: ex.submit(
+                        _finalize_depth_worker, parts_dir, by_unit[u], batch_rows,
+                        os.path.join(tmp_dir, f'unit-{u[0]}-{u[1]}.parquet'), prime_rows,
                     )
-                    # Biggest units first, to kill the straggler tail.
-                    for d, gi, gk, lo, hi in sorted(units, key=lambda u: -unit_weight[(u[0], u[1])])
+                    for u in sorted(by_unit, key=lambda u: -weights[u])
                 }
-                # Depth ascending, then range group ascending — the same order
-                # a serial merge would emit, so the bytes match `jobs=1`.
-                for depth, gi in sorted(futs):
-                    tmp = futs[(depth, gi)].result()
-                    if tmp:
-                        for rb in pq.ParquetFile(tmp).iter_batches(batch_size=batch_rows):
-                            emit(rb)
-                        os.remove(tmp)
+                for depth in sorted(by_depth):
+                    ws = sorted(w for (d, w) in by_unit if d == depth)
+                    temps = [t for t in (futs[(depth, w)].result() for w in ws) if t]
+                    if not temps:
+                        continue
+                    streams = [
+                        pq.ParquetFile(t).iter_batches(batch_size=batch_rows)
+                        for t in temps
+                    ]
+                    s = streams[0]
+                    for st in streams[1:]:
+                        s = _merge_batches(s, st)
+                    if len(streams) > 1:
+                        s = _coalesce(s, batch_rows)
+                    for rb in s:
+                        emit(rb)
+                    for t in temps:
+                        os.remove(t)
             flush()
         else:
             for depth in sorted(by_depth):
@@ -1708,7 +1583,10 @@ def aggregate_stream(
                 results = [f.result() for f in futs]
 
             segs = _reduce_partials([r['partials'] for r in results])
-            b_parts, root = _write_boundary_parts(parts_dir, segs, scan_root, pivot_names, mean_mtime)
+            b_parts, root = _write_boundary_parts(
+                parts_dir, segs, scan_root, pivot_names, mean_mtime,
+                ranges=ranges if n_parts_w > 1 else None,
+            )
         except BaseException:
             # Mid-stream failure: partial parts (no manifest) are unusable.
             shutil.rmtree(parts_dir, ignore_errors=True)
@@ -1724,8 +1602,6 @@ def aggregate_stream(
         manifest = {
             'pivot_names': pivot_names,
             'mean_mtime': mean_mtime,
-            # Ascending split keys; group `i` covers [boundaries[i-1], boundaries[i]).
-            'boundaries': boundaries,
             'rows': n_rows_total,
             'files': n_files_total,
             'max_open_sources': max_open,
