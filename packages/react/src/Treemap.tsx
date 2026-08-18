@@ -111,6 +111,18 @@ export interface TreemapProps<T> {
   className?: string
   /** Style overrides on the map area. */
   mapStyle?: CSSProperties
+  /**
+   * Opacity applied to every nested (depth > 0) cell. Default: 0.82.
+   *
+   * Cells are nested DOM nodes, so this *compounds*: at the default a depth-5
+   * cell renders at 0.92 × 0.82⁴ ≈ 0.42, which reads as progressively washed
+   * out the deeper you go. That is the intended "recede into the background"
+   * effect for shallow trees, but a deep one loses its colors entirely — pass
+   * `1` to keep saturation constant and lean on borders for structure.
+   */
+  depthFade?: number
+  /** Opacity of the outermost (depth 0) cells. Default: 0.92. */
+  rootFade?: number
 }
 
 export interface CellStyle {
@@ -187,6 +199,8 @@ export function Treemap<T>({
   showLabels = true,
   className,
   mapStyle,
+  depthFade = 0.82,
+  rootFade = 0.92,
 }: TreemapProps<T>) {
   const [path, setPath] = useState<T[]>([root])
   const [tip, setTip] = useState<TipState<T> | null>(null)
@@ -380,7 +394,7 @@ export function Treemap<T>({
           height: Math.max(0, r.h - (dust ? 1 : 2)),
           background: style.bg,
           color: style.ink,
-          opacity: (depth > 0 ? 0.82 : 0.92) * (style.opacity ?? 1),
+          opacity: (depth > 0 ? depthFade : rootFade) * (style.opacity ?? 1),
           ...(style.hatch && { backgroundImage: style.hatch }),
           borderRadius: dust ? 1.5 : 3,
           overflow: 'hidden',
