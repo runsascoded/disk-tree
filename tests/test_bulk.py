@@ -155,6 +155,37 @@ def test_prefix_weights_from_listing_parquet(tmp_path: Path):
     }
 
 
+# ---------- _write_shard row groups ----------
+
+def test_write_shard_bounds_row_group_size(tmp_path: Path):
+    # Layer-2's merge opens one source per sorted run and relies on row-group
+    # skipping to avoid decoding a whole shard per run. pyarrow's default
+    # writes one group for the entire frame, which makes the skip a no-op.
+    import pyarrow.parquet as pq
+
+    n = bulk._ROW_GROUP_ROWS + 1000
+    frame = pd.DataFrame({
+        'bucket': ['b'] * n,
+        'name': [f'{i:012d}' for i in range(n)],
+        'size_bytes': range(n),
+    })
+    bulk._write_shard(str(tmp_path), 'shard-00', frame)
+
+    md = pq.ParquetFile(tmp_path / 'shard-00.parquet').metadata
+    assert [md.row_group(i).num_rows for i in range(md.num_row_groups)] == [
+        bulk._ROW_GROUP_ROWS, 1000,
+    ]
+
+
+def test_write_shard_single_row_group_when_under_bound(tmp_path: Path):
+    frame = pd.DataFrame({'bucket': ['b'] * 10, 'name': [f'{i:03d}' for i in range(10)]})
+    bulk._write_shard(str(tmp_path), 'shard-00', frame)
+
+    import pyarrow.parquet as pq
+    md = pq.ParquetFile(tmp_path / 'shard-00.parquet').metadata
+    assert [md.row_group(i).num_rows for i in range(md.num_row_groups)] == [10]
+
+
 # ---------- resolve_existing ----------
 
 def test_resolve_existing_returns_none_when_empty(tmp_path: Path):

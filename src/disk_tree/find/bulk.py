@@ -294,12 +294,28 @@ def entries_to_frame(
     )
 
 
+# A shard holds one sorted run per listing range it collected, and layer-2's
+# merge opens a source per run. `_shard_rows` skips row groups that miss a
+# run's ordinals — but pyarrow's default writes the whole frame as ONE group,
+# so the skip is inert and every source decodes the full ~900K-row group.
+# At 3 runs/shard that is merely wasteful; at 153 (a 58K-range adaptive
+# listing of `marin-us-east-02a`) it OOM-killed the merge at both -j 8 and
+# -j 14 on a 61 GB node. Bounding the group makes the skip real: a ~6K-row
+# run touches one 64K group instead of all 900K rows.
+_ROW_GROUP_ROWS = 1 << 16
+
+
 def _write_shard(out_dir: str, name: str, frame: pd.DataFrame) -> None:
     import fsspec
 
     out_fs, out_root = fsspec.core.url_to_fs(out_dir)
     out_fs.makedirs(out_root, exist_ok=True)
-    frame.to_parquet(f"{out_root}/{name}.parquet", index=False, filesystem=out_fs)
+    frame.to_parquet(
+        f"{out_root}/{name}.parquet",
+        index=False,
+        filesystem=out_fs,
+        row_group_size=_ROW_GROUP_ROWS,
+    )
 
 
 def resolve_existing(out_fs, out_root: str, exists: str) -> Optional[dict]:
