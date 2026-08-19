@@ -297,3 +297,63 @@ describe('<Treemap> lazy children', () => {
     expect(container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell.branch').length).toBe(0)
   })
 })
+
+describe('<Treemap> depth fade', () => {
+  // Single-child spine: root → d1 → d2 → d3 → leaf, so each level nests one
+  // cell inside the last and cumulative CSS opacity is the product of the
+  // spine's local values.
+  const spine: Node = {
+    n: 'root',
+    size: 100,
+    children: [{
+      n: 'd1',
+      size: 100,
+      children: [{
+        n: 'd2',
+        size: 100,
+        children: [{
+          n: 'd3',
+          size: 100,
+          children: [{ n: 'leaf', size: 100 }],
+        }],
+      }],
+    }],
+  }
+
+  it('floors the cumulative fade at fadeFloor so deep labels stay readable', () => {
+    const restore = withLayout()
+    try {
+      const { container } = render(<Treemap root={spine} {...accessors} minCellArea={null} />)
+      const locals: number[] = []
+      let el = container.querySelector('.dt-treemap-map > .dt-treemap-cell') as HTMLElement | null
+      while (el) {
+        locals.push(Number(el.style.opacity))
+        el = el.querySelector(':scope > .dt-treemap-inner > .dt-treemap-cell')
+      }
+      // Cumulative target is max(rootFade × depthFade^d, fadeFloor):
+      //   d0 0.92, d1 0.7544, d2 floored to 0.75, d3 held at 0.75 —
+      // so the local values are rootFade, depthFade, floor/prev, then 1.
+      expect(locals).toEqual([0.92, 0.82, 0.75 / (0.92 * 0.82), 1])
+    } finally {
+      restore()
+    }
+  })
+
+  it('depthFade={1} keeps every level at rootFade', () => {
+    const restore = withLayout()
+    try {
+      const { container } = render(
+        <Treemap root={spine} {...accessors} minCellArea={null} depthFade={1} />,
+      )
+      const locals: number[] = []
+      let el = container.querySelector('.dt-treemap-map > .dt-treemap-cell') as HTMLElement | null
+      while (el) {
+        locals.push(Number(el.style.opacity))
+        el = el.querySelector(':scope > .dt-treemap-inner > .dt-treemap-cell')
+      }
+      expect(locals).toEqual([0.92, 1, 1, 1])
+    } finally {
+      restore()
+    }
+  })
+})

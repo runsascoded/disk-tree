@@ -142,17 +142,23 @@ export interface TreemapProps<T> {
   /** Style overrides on the map area. */
   mapStyle?: CSSProperties
   /**
-   * Opacity applied to every nested (depth > 0) cell. Default: 0.82.
+   * Per-level fade applied to nested (depth > 0) cells. Default: 0.82.
    *
-   * Cells are nested DOM nodes, so this *compounds*: at the default a depth-5
-   * cell renders at 0.92 × 0.82⁴ ≈ 0.42, which reads as progressively washed
-   * out the deeper you go. That is the intended "recede into the background"
-   * effect for shallow trees, but a deep one loses its colors entirely — pass
-   * `1` to keep saturation constant and lean on borders for structure.
+   * Cells are nested DOM nodes, so CSS opacity would naturally *compound*
+   * without bound; the renderer instead targets a cumulative opacity of
+   * `max(rootFade × depthFade^depth, fadeFloor)` — the shallow levels recede
+   * gently, but labels deep in the tree stay readable. Pass `1` to keep
+   * saturation constant and lean on borders for structure.
    */
   depthFade?: number
   /** Opacity of the outermost (depth 0) cells. Default: 0.92. */
   rootFade?: number
+  /**
+   * Floor on the cumulative depth fade. Without one, compounding washes out
+   * deep cells entirely (depth 4 at the defaults would render at ~0.5, its
+   * label barely legible). Default: 0.75.
+   */
+  fadeFloor?: number
 }
 
 export interface CellStyle {
@@ -252,6 +258,7 @@ export function Treemap<T>({
   mapStyle,
   depthFade = 0.82,
   rootFade = 0.92,
+  fadeFloor = 0.75,
 }: TreemapProps<T>) {
   const [path, setPath] = useState<T[]>([root])
   const [tip, setTip] = useState<TipState<T> | null>(null)
@@ -419,6 +426,11 @@ export function Treemap<T>({
     [children, size, getSize],
   )
 
+  // Target cumulative opacity at a given nesting depth (fadeAt(-1) = 1 so the
+  // depth-0 local value comes out to rootFade).
+  const fadeAt = (d: number) =>
+    d < 0 ? 1 : Math.max(rootFade * depthFade ** d, fadeFloor)
+
   const cell = (
     kid: T | FoldedNode<T>,
     kidPath: T[],
@@ -506,7 +518,10 @@ export function Treemap<T>({
           height: Math.max(0, r.h - (dust ? 1 : 2)),
           background: style.bg,
           color: style.ink,
-          opacity: (depth > 0 ? depthFade : rootFade) * (style.opacity ?? 1),
+          // Nested cells compound their ancestors' opacity, so pick each
+          // cell's local value such that the cumulative product lands on
+          // fadeAt(depth) exactly (floored — see `fadeFloor`).
+          opacity: (fadeAt(depth) / fadeAt(depth - 1)) * (style.opacity ?? 1),
           ...(style.hatch && { backgroundImage: style.hatch }),
           borderRadius: dust ? 1.5 : 3,
           overflow: 'hidden',
