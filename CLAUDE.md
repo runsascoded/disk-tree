@@ -49,6 +49,7 @@ Key goals:
 - `GET /api/scans/progress/stream` — SSE stream for real-time progress
 - `GET /api/compare?uri=<path>&scan1=&scan2=[&recursive=1&budget=N&max_depth=N]` — per-child Δ table; `recursive=1` walks changed spines best-first (|Δsize| priority) and returns the delta frontier across depths (added/removed dirs not descended; stats-equal dirs pruned)
 - `GET /api/filter?uri=<path>&q=<query>&depth=N` — recursive filter with true re-aggregation (matched bytes only, outermost matches, rolled up to a depth-N slice)
+- `GET /api/filter/stream` — SSE variant: one cumulative snapshot per depth (iterative deepening), final event `done: true`
 - `GET /api/histogram?uri=<path>&bins=N&limit=N` — Byte-weighted mtime histogram per child
   - Loads every descendant file row (no depth pushdown possible; path-prefix pushdown prunes sibling subtrees); response cached, UI fetches lazily
 - `POST /api/delete` — Delete a file/directory and update scan parquets
@@ -99,6 +100,8 @@ Vite + React + TypeScript with Material-UI, TanStack Query, and `@disk-tree/reac
 - Viz panel with a `View:` toggle — Treemap (+ age lens), Staleness scatter, Age histograms
 - Treemap drills past the response's depth: unloaded dirs fetch their subtree
   (`<Treemap hasChildren/loadChildren>`), one request per drill, cached per node
+- Filter box: display-only dimming by default; the footer label toggles **re-aggregate**
+  mode (`/api/filter`) — treemap shows matched bytes only, matched dirs stay drillable
 - Pagination and search/filter
 - S3 bucket list with treemap visualization
 

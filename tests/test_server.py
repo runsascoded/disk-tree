@@ -1,4 +1,5 @@
 """Tests for the Flask API server."""
+import json
 import os
 import shutil
 import sqlite3
@@ -1080,3 +1081,30 @@ class TestFilterEndpoint:
         assert data['total_size'] == 730
         assert data['n_matches'] == 1
         assert data['max_depth_scanned'] == 3
+
+    def test_filter_stream_sse(self, test_client):
+        """`/api/filter/stream` — one cumulative snapshot per depth; the final
+        `done` event equals the plain endpoint's response."""
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        plain = client.get('/api/filter?uri=/test&q=demo').json
+
+        response = client.get('/api/filter/stream?uri=/test&q=demo')
+        assert response.status_code == 200
+        assert response.mimetype == 'text/event-stream'
+        events = [
+            json.loads(line[len('data: '):])
+            for line in response.get_data(as_text=True).splitlines()
+            if line.startswith('data: ')
+        ]
+        assert events[0] == {'phase': 'loading'}
+        depth_events = events[1:-1]
+        assert [(e['depth'], e['n_matches'], e['total_size'], e['done']) for e in depth_events] == [
+            (1, 0, 0, False),
+            (2, 1, 500, False),      # a/demo lands
+            (3, 2, 1230, False),     # b/x/demo.dat lands
+        ]
+        final = events[-1]
+        assert final['done'] is True
+        assert {k: v for k, v in final.items() if k != 'done'} == plain

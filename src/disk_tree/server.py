@@ -1175,6 +1175,15 @@ def filter_route():
         relative_path = uri[len(scan_prefix):] if uri.startswith(scan_prefix) else '.'
 
     effective_blob, rebased_path = resolve_chunk_for_path(scan['blob'], relative_path)
+    df = _load_filter_frame(effective_blob, rebased_path)
+    result = filter_scan(df, q, display_depth=display_depth, case_sensitive=case_sensitive)
+
+    response = _filter_payload(uri, scan, q, result)
+    _cache[cache_key] = (now, response)
+    return jsonify(response)
+
+
+def _load_filter_frame(effective_blob: str, rebased_path: str) -> pd.DataFrame:
     # follow_refs: a search must not silently miss chunked subtrees. No depth
     # pushdown (matches live at any depth); the prefix prunes sibling subtrees.
     df = load_scan_data(
@@ -1182,11 +1191,11 @@ def filter_route():
         follow_refs=True,
         path_prefix=rebased_path if rebased_path != '.' else None,
     )
-    df = rebase_frame(df, rebased_path)
+    return rebase_frame(df, rebased_path)
 
-    result = filter_scan(df, q, display_depth=display_depth, case_sensitive=case_sensitive)
 
-    response = {
+def _filter_payload(uri: str, scan: dict, q: str, result) -> dict:
+    return {
         'uri': uri,
         'scan_path': scan['path'],
         'time': scan['time'],
@@ -1207,8 +1216,55 @@ def filter_route():
             for n in result.nodes
         ],
     }
-    _cache[cache_key] = (now, response)
-    return jsonify(response)
+
+
+@app.route('/api/filter/stream')
+def filter_stream():
+    """SSE variant of `/api/filter`: one cumulative snapshot per depth.
+
+    Depth-major layout makes shallow-first iterative deepening plain iteration
+    order — the display-depth slice arrives for a few % of the scan cost and
+    deepens as scanning proceeds. Events are JSON: `{phase: 'loading'}` first,
+    then `/api/filter`-shaped payloads plus `depth`/`done`; the final event has
+    `done: true` and equals the plain endpoint's response.
+    """
+    uri = request.args.get('uri', '/').rstrip('/') or '/'
+    q = request.args.get('q', '')
+    scan_id = request.args.get('scan_id')
+    case_sensitive = request.args.get('case', '').lower() in ('1', 'true')
+    try:
+        display_depth = int(request.args.get('depth', DEFAULT_DISPLAY_DEPTH))
+    except ValueError as e:
+        return jsonify({'error': f'invalid parameter: {e}'}), 400
+
+    search_path = uri if ('://' in uri or uri.startswith('/')) else f'/{uri}'
+    scan = freshest_scan_covering(get_db(), search_path, scan_id)
+    if not scan:
+        return jsonify({'error': 'No scan found for path', 'uri': uri}), 404
+
+    if scan['path'] == uri:
+        relative_path = '.'
+    else:
+        scan_prefix = scan['path'].rstrip('/') + '/'
+        relative_path = uri[len(scan_prefix):] if uri.startswith(scan_prefix) else '.'
+    # Resolve before entering the generator — get_db() is request-scoped.
+    effective_blob, rebased_path = resolve_chunk_for_path(scan['blob'], relative_path)
+
+    def generate():
+        yield f"data: {json.dumps({'phase': 'loading'})}\n\n"
+        df = _load_filter_frame(effective_blob, rebased_path)
+        from disk_tree.filter import iter_filter_scan
+        last = None
+        for d, snap in iter_filter_scan(df, q, display_depth=display_depth, case_sensitive=case_sensitive):
+            last = snap
+            payload = {**_filter_payload(uri, scan, q, snap), 'depth': d, 'done': False}
+            yield f"data: {json.dumps(payload)}\n\n"
+        if last is None:
+            from disk_tree.filter import FilterResult
+            last = FilterResult(nodes=[], total_size=0, n_matches=0, max_depth_scanned=0)
+        yield f"data: {json.dumps({**_filter_payload(uri, scan, q, last), 'done': True})}\n\n"
+
+    return Response(generate(), mimetype='text/event-stream')
 
 
 @app.route('/api/compare')

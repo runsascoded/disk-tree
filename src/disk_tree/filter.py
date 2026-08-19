@@ -114,9 +114,25 @@ def filter_scan(
 ) -> FilterResult:
     """Filter a scan frame (paths relative to the viewed root, `.` = root).
 
-    `on_depth(depth, snapshot)` fires after each depth completes — the
-    progressive/SSE hook; snapshots are cumulative.
+    `on_depth(depth, snapshot)` fires after each depth completes — snapshots
+    are cumulative. (Convenience wrapper over `iter_filter_scan`, the SSE seam.)
     """
+    result = FilterResult(nodes=[], total_size=0, n_matches=0, max_depth_scanned=0)
+    for d, result in iter_filter_scan(df, query, display_depth=display_depth, case_sensitive=case_sensitive):
+        if on_depth is not None:
+            on_depth(d, result)
+    return result
+
+
+def iter_filter_scan(
+    df: pd.DataFrame,
+    query: str,
+    display_depth: int = DEFAULT_DISPLAY_DEPTH,
+    case_sensitive: bool = False,
+):
+    """Yield `(depth, cumulative FilterResult)` after each depth completes —
+    depth-major layout makes shallow-first iterative deepening plain iteration
+    order, so partial results stream for free."""
     match = parse_query(query, case_sensitive=case_sensitive)
 
     # ALWAYS derive depth from `path` — stored depth columns can be stale
@@ -135,6 +151,7 @@ def filter_scan(
     for d in range(1, max_d + 1):
         level = levels.get(d)
         if level is None or level.empty:
+            yield d, _snapshot(agg, matched_nodes, total_size, n_matches, d)
             continue
         paths = level['path']
         # Drop rows inside an already-matched dir: their bytes are already in
@@ -159,6 +176,7 @@ def filter_scan(
             level = level[keep]
             paths = level['path']
             if level.empty:
+                yield d, _snapshot(agg, matched_nodes, total_size, n_matches, d)
                 continue
 
         hits = level[match(paths)]
@@ -182,10 +200,7 @@ def filter_scan(
                 a.size += size
                 a.n_matches += 1
 
-        if on_depth is not None:
-            on_depth(d, _snapshot(agg, matched_nodes, total_size, n_matches, d))
-
-    return _snapshot(agg, matched_nodes, total_size, n_matches, max_d)
+        yield d, _snapshot(agg, matched_nodes, total_size, n_matches, d)
 
 
 def _snapshot(

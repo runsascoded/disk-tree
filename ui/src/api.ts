@@ -324,3 +324,42 @@ export async function fetchAvailableBackends(): Promise<AvailableBackendsRespons
   if (!res.ok) throw new Error('Failed to fetch available backends')
   return res.json()
 }
+
+export type FilterRow = {
+  path: string
+  uri: string
+  depth: number
+  kind: string
+  /** Matched bytes at-or-under this node — true re-aggregation. */
+  size: number
+  /** Outermost matches at-or-under this node. */
+  n_matches: number
+  /** This node itself is an outermost match. */
+  matched: boolean
+}
+
+export type FilterResult = {
+  uri: string
+  scan_path: string
+  time: string
+  query: string
+  total_size: number
+  n_matches: number
+  max_depth_scanned: number
+  rows: FilterRow[]
+}
+
+/** Recursive server-side filter (`/api/filter`): sizes count matched bytes
+ * only, outermost matches — never double-counted. */
+export async function fetchFilter(uri: string, q: string, scanId?: number, depth: number = 4): Promise<FilterResult> {
+  const params = new URLSearchParams({ uri, q, depth: String(depth) })
+  if (scanId !== undefined) {
+    params.set('scan_id', String(scanId))
+  }
+  const res = await fetch(`/api/filter?${params}`)
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.error || 'Failed to fetch filter results')
+  }
+  return res.json()
+}

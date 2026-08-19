@@ -6,8 +6,8 @@ import { useAction } from 'use-kbd'
 import { AgeHistograms, age01, ageDomain, ageFade, BytesOverTime, dimUnmatched, parseQuery, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
 import { useQuery } from '@tanstack/react-query'
-import { fetchScanDetails, fetchScanHistory, fetchHistogram, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
-import type { HistogramChild, Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
+import { fetchScanDetails, fetchScanHistory, fetchHistogram, fetchFilter, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
+import type { FilterResult, HistogramChild, Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { VoronoiTreemap } from '@disk-tree/react/voronoi'
 import { VizBoundary } from './VizBoundary'
 import { useScanProgress } from '../hooks/useScanProgress'
@@ -546,6 +546,15 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
  * don't sum to its own — that "unaccounted" area is what the row-limit or
  * depth-limit dropped, and it deserves visible surface, not silent absorption.
  */
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms)
+    return () => clearTimeout(t)
+  }, [value, ms])
+  return v
+}
+
 interface DTNode {
   path: string
   label: string
@@ -561,6 +570,10 @@ interface DTNode {
   expandable?: boolean
   /** True for synthetic "…" placeholders — kept clickless. */
   isPlaceholder?: boolean
+  /** Re-aggregated filter view: this node itself is an outermost match. */
+  matched?: boolean
+  /** Re-aggregated filter view: outermost matches at-or-under this node. */
+  nMatches?: number
 }
 
 /**
@@ -622,18 +635,58 @@ function buildDTNodes(rows: Row[], parentPath: string, parentSize: number | null
   return build(parentPath, parentSize)
 }
 
+/**
+ * `/api/filter` rows (a depth-bounded rollup slice, sorted (depth, path) so
+ * parents precede children) → the nested shape `<DTTreemap>` walks. Sizes are
+ * *matched bytes only* — true re-aggregation. A matched dir is a frontier
+ * leaf here: its contents are wholly matched, so lazily drilling it through
+ * the normal scan endpoint shows correct sizes. An unmatched ancestor whose
+ * matches sit *below* the slice depth stays unexpandable — a normal drill
+ * would mix unfiltered children into filtered sizes.
+ */
+function buildFilterTree(result: FilterResult, rootLabel: string, rootUri?: string): DTNode {
+  const rootNode: DTNode = {
+    path: '.',
+    label: rootLabel,
+    size: result.total_size,
+    uri: rootUri,
+    nMatches: result.n_matches,
+    children: [],
+  }
+  const byPath = new Map<string, DTNode>([['.', rootNode]])
+  for (const r of result.rows) {
+    const node: DTNode = {
+      path: r.path,
+      label: r.path.split('/').pop() || r.path,
+      size: r.size,
+      uri: r.uri,
+      matched: r.matched,
+      nMatches: r.n_matches,
+      expandable: r.matched && r.kind === 'dir',
+    }
+    byPath.set(r.path, node)
+    const i = r.path.lastIndexOf('/')
+    const parent = byPath.get(i < 0 ? '.' : r.path.slice(0, i)) ?? rootNode
+    ;(parent.children ??= []).push(node)
+  }
+  return rootNode
+}
+
 function Treemap({
   root,
   rows,
   ageLens,
   query,
   scanId,
+  filterResult,
 }: {
   root: Row
   rows: Row[]
   ageLens: boolean
   query: string
   scanId?: number
+  /** When set, render the re-aggregated filter slice instead of the scan rows. */
+  filterResult?: FilterResult
 }) {
   const tree = useMemo(
     () => ({
@@ -667,12 +720,19 @@ function Treemap({
   // Filter is a *display* lens at this level: it dims non-matching cells and
   // stacks on whatever the palette/age lens resolved. Sizes keep counting
   // hidden children — this is highlight, not re-aggregation (spec §5 v0).
+  // With `filterResult` set (re-aggregate mode), the tree below IS the
+  // matched slice, so no dimming applies.
   const matches = useMemo(() => parseQuery(query), [query])
+
+  const filterTree = useMemo(
+    () => (filterResult ? buildFilterTree(filterResult, root.path.split('/').pop() || '.', root.uri) : null),
+    [filterResult, root],
+  )
 
   return (
     <Box sx={{ height: 400 }}>
       <DTTreemap<DTNode>
-        root={tree}
+        root={filterTree ?? tree}
         getSize={n => n.size}
         getChildren={n => n.children}
         hasChildren={n => !!n.expandable && !n.isPlaceholder}
@@ -686,7 +746,7 @@ function Treemap({
           n.isPlaceholder ? { bg: '#4a4a52', ink: '#d0d0d8' } : null
         }
         lens={
-          ageLens || query.trim()
+          !filterTree && (ageLens || query.trim())
             ? (n, _path, _depth, _ctx, style) => {
                 let out = style
                 const age = nodeAge(n)
@@ -706,7 +766,14 @@ function Treemap({
           <>
             <div style={{ fontWeight: 500 }}>{n.label}</div>
             <div style={{ opacity: 0.75, fontSize: '0.85em' }}>{formatSize(n.size)}</div>
-            {ageLens && nodeAge(n) != null && (
+            {filterTree && n.nMatches != null && (
+              <div style={{ opacity: 0.6, fontSize: '0.75em', marginTop: 2 }}>
+                {n.matched
+                  ? 'matched — size is its full aggregate'
+                  : `${n.nMatches.toLocaleString()} match${n.nMatches === 1 ? '' : 'es'} below; size counts matched bytes only`}
+              </div>
+            )}
+            {!filterTree && ageLens && nodeAge(n) != null && (
               <div style={{ opacity: 0.6, fontSize: '0.75em', marginTop: 2 }}>
                 {n.mtimeMean != null ? `mean mtime ${timeAgo(n.mtimeMean)}` : `modified ${timeAgo(n.mtime!)}`}
               </div>
@@ -1014,6 +1081,18 @@ export function ScanDetails() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
   const [filter, setFilter] = useState('')
+  // Re-aggregate mode: the treemap shows the recursive `/api/filter` slice —
+  // sizes count matched bytes only — instead of dimming the current level.
+  const [reagg, setReagg] = useState(false)
+  const debouncedFilter = useDebounced(filter, 300)
+  const filterActive = reagg && !!debouncedFilter.trim()
+  const { data: filterResult, isFetching: filterFetching } = useQuery({
+    queryKey: ['filter', uri, debouncedFilter, selectedScanId],
+    queryFn: () => fetchFilter(uri, debouncedFilter, selectedScanId),
+    enabled: filterActive,
+    placeholderData: prev => prev, // keep the last slice on screen while typing
+    staleTime: 60 * 1000,
+  })
   // Selection model (Superhuman-style):
   // - hoveredIndex: keyboard cursor position (moving end of range)
   // - rangeAnchor: fixed end of range selection
@@ -1672,7 +1751,14 @@ export function ScanDetails() {
         <Box sx={{ mt: 2 }}>
           <VizBoundary label={VIZ_LABELS[viz]}>
             {viz === 'treemap' ? (
-              <Treemap root={root} rows={rows} ageLens={ageLens} query={filter} scanId={selectedScanId} />
+              <Treemap
+                root={root}
+                rows={rows}
+                ageLens={ageLens}
+                query={filter}
+                scanId={selectedScanId}
+                filterResult={filterActive ? filterResult : undefined}
+              />
             ) : viz === 'scatter' ? (
               <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
             ) : viz === 'histograms' ? (
@@ -1684,8 +1770,21 @@ export function ScanDetails() {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{viz === 'treemap' ? `${rows.length} items` : `${filteredChildren.length} children`}</span>
             {filter.trim() && (
-              <Tooltip title="The filter highlights and re-lays-out what's shown at this level; directory sizes still include children the filter hides (no re-aggregation).">
-                <span style={{ fontStyle: 'italic' }}>filtered (display only)</span>
+              <Tooltip
+                title={reagg
+                  ? 'Recursive server-side filter: sizes count matched bytes only, and a match inside a matched dir never double-counts. Click to switch back to display-only dimming.'
+                  : "The filter highlights and re-lays-out what's shown at this level; directory sizes still include children the filter hides. Click to re-aggregate: sizes count only what matches, recursively."}
+              >
+                <span
+                  onClick={() => setReagg(r => !r)}
+                  style={{ fontStyle: 'italic', cursor: 'pointer', textDecoration: 'underline dotted' }}
+                >
+                  {reagg
+                    ? filterResult
+                      ? `filtered (re-aggregated): ${formatSize(filterResult.total_size)} in ${filterResult.n_matches.toLocaleString()} match${filterResult.n_matches === 1 ? '' : 'es'}${filterFetching ? ' …' : ''}`
+                      : 'filtered (re-aggregating…)'
+                    : 'filtered (display only)'}
+                </span>
               </Tooltip>
             )}
             <label>
