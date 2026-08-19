@@ -15,8 +15,8 @@ import {
 import { FaArrowRight, FaFolder, FaFile, FaSortUp, FaSortDown, FaSync, FaList } from 'react-icons/fa'
 import { Treemap as DTTreemap, divergingColor, divergingInk } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
-import { compareScans, fetchScanHistory, startScan } from '../api'
-import type { CompareResult, CompareRow, ScanHistoryItem } from '../api'
+import { compareScans, compareScansRecursive, fetchScanHistory, startScan } from '../api'
+import type { CompareRecResult, CompareResult, CompareRow, ScanHistoryItem } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo } from '../utils/format'
@@ -65,51 +65,168 @@ type AreaMode = 'max' | 'delta'
 interface CompareTMNode {
   key: string
   label: string
-  /** what the widget sizes by — `max(old, new)` or `|size_delta|` per mode */
+  /** what the widget sizes by — `max(old, new)` or `|size_delta|` per mode;
+   * parents take `max(own, Σ children)` so children can never overflow
+   * (delete-X-add-Y churn makes Σ children max exceed the parent's max). */
   weight: number
   /** signed delta for coloring */
   delta: number
-  status: CompareRow['status']
+  status: CompareRow['status'] | 'filler'
   size_old: number
   size_new: number
   n_desc_delta: number
-  kind: CompareRow['kind']
+  kind: CompareRow['kind'] | 'filler'
   uri: string
+  /** Frontier dir with unexplored change below (budget/depth cut the walk). */
+  pruned?: boolean
+  children?: CompareTMNode[]
+}
+
+/**
+ * Recursive-diff frontier rows + the depth-1 unchanged rows (from the plain
+ * compare, for labeled grey context at the top level) → a nested tree.
+ *
+ * Weights are bottom-up: a leaf is `max(old, new)` (or `|Δ|` in Δ mode); a
+ * parent is `max(its own max, Σ children)` — churn (delete X + add Y) makes
+ * children sum past either side's bytes, and the parent honestly grows to
+ * hold them. Where children under-fill a parent (unchanged bytes the walk
+ * never enumerated), a grey `(unchanged)` filler cell absorbs the gap, so
+ * areas stay truthful without shipping every unchanged row.
+ *
+ * Children order is signed: biggest adds first, unchanged middle, biggest
+ * shrinks last (sort by -Δ).
+ */
+function buildCompareTree(
+  flat: CompareResult,
+  rec: CompareRecResult | undefined,
+  areaMode: AreaMode,
+): { cells: CompareTMNode[]; maxAbsDelta: number } {
+  const uriPrefix = flat.uri.replace(/\/$/, '') + '/'
+  const byPath = new Map<string, CompareTMNode>()
+  const roots: CompareTMNode[] = []
+  const attach = (node: CompareTMNode, path: string) => {
+    byPath.set(path, node)
+    const i = path.lastIndexOf('/')
+    if (i < 0) {
+      roots.push(node)
+      return
+    }
+    const parentPath = path.slice(0, i)
+    let parent = byPath.get(parentPath)
+    if (!parent) {
+      // Expanded-but-unchanged dir (e.g. a net-zero rename inside it): its
+      // children were emitted without it. Synthesize the intermediate.
+      parent = {
+        key: uriPrefix + parentPath,
+        label: parentPath.split('/').pop()!,
+        weight: 0,
+        delta: 0,
+        status: 'unchanged',
+        size_old: 0,
+        size_new: 0,
+        n_desc_delta: 0,
+        kind: 'dir',
+        uri: uriPrefix + parentPath,
+        children: [],
+      }
+      attach(parent, parentPath)
+    }
+    ;(parent.children ??= []).push(node)
+  }
+
+  const recRows = [...(rec?.rows ?? [])].sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path))
+  for (const r of recRows) {
+    attach({
+      key: r.uri,
+      label: r.path.split('/').pop() || r.path,
+      weight: 0,
+      delta: r.size_delta,
+      status: r.status,
+      size_old: r.size_a,
+      size_new: r.size_b,
+      n_desc_delta: r.n_desc_delta,
+      kind: r.kind,
+      uri: r.uri,
+      pruned: r.pruned,
+      children: undefined,
+    }, r.path)
+  }
+  // Labeled grey context at the top level (the recursive walk doesn't emit
+  // unchanged rows; the plain depth-1 compare does).
+  for (const r of flat.rows) {
+    if (r.status === 'unchanged' && !byPath.has(r.path)) {
+      attach({
+        key: r.uri,
+        label: r.path,
+        weight: 0,
+        delta: 0,
+        status: 'unchanged',
+        size_old: r.size_old ?? r.size ?? 0,
+        size_new: r.size ?? 0,
+        n_desc_delta: 0,
+        kind: r.kind,
+        uri: r.uri,
+      }, r.path)
+    }
+  }
+
+  let maxAbs = 0
+  const finalize = (node: CompareTMNode): number => {
+    maxAbs = Math.max(maxAbs, Math.abs(node.delta))
+    const own = areaMode === 'max'
+      ? Math.max(node.size_old, node.size_new)
+      : Math.abs(node.delta)
+    if (!node.children?.length) {
+      node.weight = own
+      return node.weight
+    }
+    let kidSum = 0
+    for (const k of node.children) {
+      kidSum += finalize(k)
+    }
+    node.weight = Math.max(own, kidSum)
+    const gap = node.weight - kidSum
+    if (areaMode === 'max' && gap > Math.max(1_000_000, node.weight * 0.002)) {
+      node.children.push({
+        key: `${node.key}/__unchanged__`,
+        label: '(unchanged)',
+        weight: gap,
+        delta: 0,
+        status: 'filler',
+        size_old: gap,
+        size_new: gap,
+        n_desc_delta: 0,
+        kind: 'filler',
+        uri: node.uri,
+      })
+    }
+    node.children.sort((a, b) => (b.delta - a.delta) || (b.weight - a.weight))
+    return node.weight
+  }
+  for (const r of roots) {
+    finalize(r)
+  }
+
+  const cells = roots.filter(r => r.weight > 0)
+  cells.sort(areaMode === 'max'
+    ? (a, b) => (b.delta - a.delta) || (b.weight - a.weight)
+    : (a, b) => b.weight - a.weight)
+  return { cells, maxAbsDelta: maxAbs }
 }
 
 function CompareTreemap({
   result,
+  rec,
   onDrill,
 }: {
   result: CompareResult
+  rec?: CompareRecResult
   onDrill: (uri: string) => void
 }) {
   const [areaMode, setAreaMode] = useState<AreaMode>('max')
   const { root, maxAbsDelta } = useMemo(() => {
-    const nodes: CompareTMNode[] = result.rows.map(r => ({
-      key: r.uri,
-      label: r.path,
-      weight: 0, // per-mode, below
-      delta: r.size_delta,
-      status: r.status,
-      size_old: r.size_old ?? r.size ?? 0,
-      size_new: r.status === 'removed' ? 0 : r.size ?? 0,
-      n_desc_delta: r.n_desc_delta ?? 0,
-      kind: r.kind,
-      uri: r.uri,
-    }))
-    const cells: CompareTMNode[] = areaMode === 'max'
-      ? nodes
-          .map(n => ({ ...n, weight: Math.max(n.size_old, n.size_new) }))
-          .filter(n => n.weight > 0)
-          // Signed order: biggest adds first, unchanged in the middle,
-          // biggest shrinks last — sorting by -Δ does exactly that.
-          .sort((a, b) => (b.delta - a.delta) || (b.weight - a.weight))
-      : nodes
-          .filter(n => n.status !== 'unchanged' && n.delta !== 0)
-          .map(n => ({ ...n, weight: Math.abs(n.delta) || 1 }))
+    const { cells, maxAbsDelta: maxAbs } = buildCompareTree(result, rec, areaMode)
     const totalWeight = cells.reduce((s, c) => s + c.weight, 0)
-    const maxAbs = cells.reduce((m, c) => Math.max(m, Math.abs(c.delta)), 0)
     // Root aggregates its cells so the widget's crumbs line reads correctly.
     const root: CompareTMNode & { children: CompareTMNode[] } = {
       key: result.uri,
@@ -125,7 +242,7 @@ function CompareTreemap({
       children: cells,
     }
     return { root, maxAbsDelta: maxAbs }
-  }, [result, areaMode])
+  }, [result, rec, areaMode])
 
   if (root.children.length === 0) {
     return (
@@ -152,6 +269,13 @@ function CompareTreemap({
           formatSize={formatSize}
           colorForCell={n => {
             if (areaMode === 'max') {
+              if (n.children?.length) {
+                // Parent: children tile its interior, so only the title strip
+                // and gutters show — tint them by the net trend Δ/weight (a
+                // summary cue; magnitude lives in the leaf bands).
+                const t = n.weight === 0 ? 0 : n.delta / n.weight
+                return { bg: deltaColor(t), ink: divergingInk(t) }
+              }
               // Sub-rect encoding: a grey rect of min(old, new) bytes plus a
               // full-strength colored band of |Δ| bytes, filling from the
               // bottom — magnitude by *area*, not saturation.
@@ -172,8 +296,9 @@ function CompareTreemap({
           renderCellExtra={areaMode === 'max' ? (n, _path, { w, h }) => {
             // Per-sub-rect size labels: Δ centered in the colored band, the
             // unchanged min(old, new) bytes centered in the grey rect above it.
-            // Skip narrow slivers — a clipped "+128.0KB" is worse than none.
-            if (w < 56) return null
+            // Leaves only (a parent's interior belongs to its children), and
+            // skip narrow slivers — a clipped "+128.0KB" is worse than none.
+            if (n.children?.length || w < 56) return null
             const f = n.weight === 0 ? 0 : Math.min(1, Math.abs(n.delta) / n.weight)
             if (f === 0) return null
             const bandH = h * f
@@ -208,8 +333,9 @@ function CompareTreemap({
                 </div>
               )}
               <div style={{ opacity: 0.5, fontSize: '0.75em', marginTop: 2 }}>
-                {n.status}
-                {n.kind === 'dir' && ' · click to drill into /compare'}
+                {n.status === 'filler' ? 'unchanged bytes the diff never needed to enumerate' : n.status}
+                {n.pruned && ' · more change below (walk budget) — click to compare here'}
+                {!n.pruned && n.kind === 'dir' && !n.children?.length && ' · click to drill into /compare'}
               </div>
             </>
           )}
@@ -248,8 +374,10 @@ function CompareTreemap({
             </span>
           )}
           onCellClick={(n) => {
+            // Cells with in-tree children drill inside the widget (return
+            // false); frontier/unchanged dirs navigate to /compare there.
+            if (n.children?.length) return false
             if (n.kind !== 'dir') return false // let the widget pin the tooltip
-            // Drill into the sub-compare view — reuses Item E's scheme routing.
             onDrill(n.uri)
             return true
           }}
@@ -863,6 +991,7 @@ export function CompareView() {
   const [history, setHistory] = useState<ScanHistoryItem[]>([])
   const [historyLoading, setHistoryLoading] = useState(true)
   const [result, setResult] = useState<CompareResult | null>(null)
+  const [recResult, setRecResult] = useState<CompareRecResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -932,6 +1061,12 @@ export function CompareView() {
       .then(setResult)
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
+    // The recursive frontier feeds the nested treemap; the table stays on the
+    // depth-1 rows. Best-effort — the flat view stands alone without it.
+    setRecResult(null)
+    compareScansRecursive(uri, scan1 as number, scan2 as number)
+      .then(setRecResult)
+      .catch(() => setRecResult(null))
   }, [uri, scan1, scan2])
 
   // Get scan_path for selected scans (for breadcrumb coverage highlighting)
@@ -1202,6 +1337,7 @@ export function CompareView() {
               <Summary result={result} />
               <CompareTreemap
                 result={result}
+                rec={recResult ?? undefined}
                 onDrill={childUri => {
                   // Preserve scan1/scan2 query params on drill so the sub-view
                   // shows the same snapshot pair.

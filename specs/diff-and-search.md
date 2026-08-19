@@ -50,9 +50,14 @@ One-level-at-a-time (the current `/api/compare`) answers "what changed in *this*
 
 Surfaced as `dt diff -r/--recursive [-b/--budget N]` and `recursive=1` (+`budget`, `max_depth`) on `/api/compare`, returning the delta *frontier* across depths: rows carry `depth`, `expanded` (descended into) and `pruned` (differing stats below, unexplored — budget/depth cut it), summary carries `expansions`/`truncated`. Implementation: `src/disk_tree/diff.py` — `ScanSource` (per-dir children loader: uri rebase into ancestor scans + hybrid chunk resolution + item-1 pushdown per load; correctness never relies on pushdown fidelity, an exactness mask enforces "one level under one prefix") + `recursive_diff` (heap on `|Δsize|`). `resolve_blob`/`resolve_chunk_for_path` moved here from `server.py` so the CLI shares them without importing Flask. Totals sum depth-1 rows only — a frontier row's Δ is already inside its ancestors'. `mtime` is in the descend-trigger (not the reported status), so a same-size rename surfaces as `added`+`removed` rows under a dir whose own Δ is zero.
 
-### 3b. Materialized delta scans ("a diff is a scan")
+### 3b. Materialized delta scans ("a diff is a scan") — **demoted: on-the-fly is the primary path**
 
-For the batch case: streaming merge-join of two layer-2 parquets (both sorted `(depth, path)` — same shape as `_merge_batches` in `aggregate_stream.py`; no memory ceiling), emitting a delta table with the same schema plus `size_a/size_b/delta/status`, registered as a normal scan blob. Then depth pushdown, drilling, lazy subtrees, and Δ-treemaps all work on diffs for free — no new read path. Nightly cron materializes `scan(A,B)` once; every query hits the artifact.
+Owner question (2026-08-19): do we need these at all, given on-the-fly recursive diff? Mostly no — 3a computes any pair, any depth, interactively, and precomputing every pair is O(N²) snapshots. Materialization survives for exactly two cases, both deferred until a consumer asks:
+
+1. **Static-hosting consumers** — mgu's site is CF-hosted static JSON with *no server to compute on the fly*; a nightly artifact (adjacent pair only: yesterday→today, N−1 diffs, never all pairs) is how a diff view reaches it.
+2. **Audit trail / repeated heavy pairs** — a much-revisited pair of huge scans where even the pruned walk is minutes; cache the walk's output as a blob (which is just 3a's result persisted, not a separate merge-join engine).
+
+The original design (streaming merge-join of two layer-2 parquets → delta table registered as a scan blob) stays here as the implementation sketch for whenever (1) lands.
 
 ### 3c. Diff treemap: area = max(a, b) — **DONE**
 
@@ -63,6 +68,7 @@ Current `<CompareTreemap>` sizes cells by `|Δ|` (churn-only: unchanged/Δ=0 row
 - **Polarity = git convention**: green = added/grew, red = removed/shrank — the view is a *diff*, and the summary chips and row tints already used it (the Δ colors previously used the opposite "growth = red" cost lens; that can return as a toggle if a consumer wants it). Applied across treemap, Δ text, bars, and Total Delta.
 - Caveat to label: Σmax over cells exceeds either side's true total (an area metric, not a byte total). Keep `|Δ|`-area as the alternate churn view.
 - Landed: `max`/`Δ` toggle in the treemap legend, `max` default; unchanged rows render as neutral context in max mode only; Δ mode tints the full cell by `Δ/max|Δ|`.
+- **Nested (depth-2+), landed 2026-08-19**: the treemap consumes the recursive frontier (`recursive=1`, budget 200) alongside the flat depth-1 rows (which contribute the labeled grey context). Weights are bottom-up — leaf `max(a,b)`, parent `max(own, Σ children)`, so delete-X-add-Y churn honestly grows the parent instead of overflowing it; where children under-fill a parent, a grey `(unchanged)` filler cell absorbs the gap (no need to ship every unchanged row). Parent title strips tint by net `Δ/weight` (trend cue; magnitude stays in leaf bands). Children order by signed Δ at every level. Cells with in-tree children drill in-widget; frontier (`pruned`) and unchanged dirs navigate to `/compare` there. Expanded-but-unchanged intermediates (net-zero renames) get synthesized so their children still nest.
 
 ### 3d. Later, earned by measurement: `digest` column
 

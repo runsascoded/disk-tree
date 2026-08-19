@@ -363,3 +363,50 @@ export async function fetchFilter(uri: string, q: string, scanId?: number, depth
   }
   return res.json()
 }
+
+export type CompareRecRow = {
+  path: string
+  uri: string
+  depth: number
+  kind: 'file' | 'dir'
+  status: 'added' | 'removed' | 'changed' | 'unchanged'
+  size_a: number
+  size_b: number
+  size_delta: number
+  n_desc_a: number
+  n_desc_b: number
+  n_desc_delta: number
+  /** This dir's children were loaded and merged into the frontier. */
+  expanded: boolean
+  /** Stats differ below but the walk stopped here (budget/depth). */
+  pruned: boolean
+}
+
+export type CompareRecResult = {
+  uri: string
+  recursive: true
+  scan1: CompareResult['scan1']
+  scan2: CompareResult['scan2']
+  rows: CompareRecRow[]
+  summary: CompareResult['summary'] & { expansions: number; truncated: boolean }
+}
+
+/** Best-first pruned recursive diff (`/api/compare?recursive=1`): the delta
+ * frontier across depths — added/removed dirs are not descended, stats-equal
+ * dirs are pruned. */
+export async function compareScansRecursive(
+  uri: string,
+  scan1: number,
+  scan2: number,
+  budget: number = 200,
+): Promise<CompareRecResult> {
+  const params = new URLSearchParams({
+    uri, scan1: String(scan1), scan2: String(scan2), recursive: '1', budget: String(budget),
+  })
+  const res = await fetch(`/api/compare?${params}`)
+  if (!res.ok) {
+    const err = await res.json()
+    throw new Error(err.error || 'Failed to compare scans')
+  }
+  return res.json()
+}
