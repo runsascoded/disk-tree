@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pandas as pd
 
-from .base import StorageBackend, PathStats
+from .base import StorageBackend, PathStats, path_prefix_bounds
 from ..config import ROOT_DIR
 
 
@@ -96,8 +96,9 @@ class SQLiteBackend(StorageBackend):
         max_depth: int | None = None,
         min_depth: int | None = None,
         follow_refs: bool = False,
+        path_prefix: str | None = None,
     ) -> pd.DataFrame:
-        """Load scan data with optional depth filtering.
+        """Load scan data with optional depth/path-prefix filtering.
 
         Args:
             follow_refs: Ignored (SQLite doesn't use chunked refs)
@@ -111,6 +112,12 @@ class SQLiteBackend(StorageBackend):
         if min_depth is not None:
             query += " AND depth >= ?"
             params.append(min_depth)
+        if path_prefix:
+            # Exact: the prefix row itself, or descendants (the range
+            # [pfx+'/', pfx+'0') is exactly the strings starting with pfx+'/').
+            lo, hi = path_prefix_bounds(path_prefix)
+            query += " AND (path = ? OR (path >= ? AND path < ?))"
+            params += [path_prefix, lo, hi]
 
         cursor = self.conn.execute(query, params)
         rows = cursor.fetchall()

@@ -48,7 +48,7 @@ Key goals:
 - `GET /api/scans/progress` — Current progress of active scans
 - `GET /api/scans/progress/stream` — SSE stream for real-time progress
 - `GET /api/histogram?uri=<path>&bins=N&limit=N` — Byte-weighted mtime histogram per child
-  - Loads every descendant file row (no depth pushdown possible); response cached, UI fetches lazily
+  - Loads every descendant file row (no depth pushdown possible; path-prefix pushdown prunes sibling subtrees); response cached, UI fetches lazily
 - `POST /api/delete` — Delete a file/directory and update scan parquets
 - Static file serving for bundled UI (SPA with catch-all routing)
 
@@ -181,6 +181,7 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet).
 
 - `/api/scan?uri=/` optimized from ~4s to ~26ms (154x speedup)
 - Depth column enables parquet predicate pushdown (only load needed rows)
+- `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning / SQL range predicates (rows sorted `(depth, path)`); wired into scan/compare/histogram/path-stats reads — see `specs/diff-and-search.md`
 - Denormalized stats avoid parquet reads for scan list and fresher child patching
 
 ## TODOs / Known Issues

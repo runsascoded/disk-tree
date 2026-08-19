@@ -13,8 +13,9 @@ from os.path import exists, isabs, join
 from uuid import uuid4
 
 import pandas as pd
+import pyarrow.parquet as pq
 
-from .base import StorageBackend, PathStats
+from .base import StorageBackend, PathStats, path_prefix_bounds
 from .. import config as _config
 from ..config import ROOT_DIR
 
@@ -195,26 +196,63 @@ class HybridBackend(StorageBackend):
         max_depth: int | None = None,
         min_depth: int | None = None,
         follow_refs: bool = False,
+        path_prefix: str | None = None,
     ) -> pd.DataFrame:
-        """Load scan data with optional depth filtering.
+        """Load scan data with optional depth/path-prefix filtering.
 
         Args:
-            follow_refs: If True, recursively load child chunks and merge
+            follow_refs: If True, recursively load child chunks and merge.
+                With `path_prefix` this loads the full parquet (a chunk
+                placeholder that is an *ancestor* of the prefix wouldn't
+                survive a range pushdown), expands refs, then applies the
+                prefix as an exact mask.
         """
         # Check cache
-        cache_key = f"{blob_ref}:{min_depth}:{max_depth}:{follow_refs}"
+        cache_key = f"{blob_ref}:{min_depth}:{max_depth}:{follow_refs}:{path_prefix}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        # Load parquet
-        df = pd.read_parquet(self._resolve(blob_ref))
+        # Load parquet with predicate pushdown (depth and, when not following
+        # refs, path-prefix — rows are sorted (depth, path), so row-group
+        # min/max stats on both columns prune effectively).
+        df = None
+        pushdown_prefix = path_prefix if not follow_refs else None
+        if max_depth is not None or min_depth is not None or pushdown_prefix:
+            try:
+                schema = pq.read_schema(self._resolve(blob_ref))
+                conds = []
+                if 'depth' in schema.names:
+                    if max_depth is not None:
+                        conds.append(('depth', '<=', max_depth))
+                    if min_depth is not None:
+                        conds.append(('depth', '>=', min_depth))
+                if pushdown_prefix:
+                    # Exact DNF: the prefix row itself, OR descendants — see
+                    # path_prefix_bounds for why the range is exact.
+                    lo, hi = path_prefix_bounds(pushdown_prefix)
+                    filters = [
+                        conds + [('path', '==', pushdown_prefix)],
+                        conds + [('path', '>=', lo), ('path', '<', hi)],
+                    ]
+                elif conds:
+                    filters = conds
+                else:
+                    filters = None
+                if filters is not None:
+                    df = pd.read_parquet(self._resolve(blob_ref), filters=filters)
+            except Exception:
+                pass  # Fall back to full load + pandas masks
 
-        # Apply depth filter
-        if 'depth' in df.columns:
-            if max_depth is not None:
-                df = df[df['depth'] <= max_depth]
-            if min_depth is not None:
-                df = df[df['depth'] >= min_depth]
+        if df is None:
+            df = pd.read_parquet(self._resolve(blob_ref))
+            if 'depth' in df.columns:
+                if max_depth is not None:
+                    df = df[df['depth'] <= max_depth]
+                if min_depth is not None:
+                    df = df[df['depth'] >= min_depth]
+            if pushdown_prefix:
+                lo, hi = path_prefix_bounds(pushdown_prefix)
+                df = df[(df['path'] == pushdown_prefix) | ((df['path'] >= lo) & (df['path'] < hi))]
 
         # Optionally follow child_scan_id references
         if follow_refs and 'child_scan_id' in df.columns:
@@ -229,6 +267,11 @@ class HybridBackend(StorageBackend):
                     # Remove the placeholder row and add expanded children
                     df = df[df['path'] != child_path]
                     df = pd.concat([df, child_df], ignore_index=True)
+
+        if follow_refs and path_prefix:
+            # Prefix wasn't pushed down (see docstring); apply it post-expansion.
+            lo, hi = path_prefix_bounds(path_prefix)
+            df = df[(df['path'] == path_prefix) | ((df['path'] >= lo) & (df['path'] < hi))]
 
         self._cache[cache_key] = df
         return df

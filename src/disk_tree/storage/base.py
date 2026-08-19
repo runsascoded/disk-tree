@@ -7,6 +7,15 @@ from uuid import uuid4
 import pandas as pd
 
 
+def path_prefix_bounds(prefix: str) -> tuple[str, str]:
+    """Half-open range `[lo, hi)` containing *exactly* the strings that start
+    with `prefix + '/'` — `'0' == chr(ord('/') + 1)`, so nothing sorts between
+    `pfx/…` and `pfx0`. Lets SQL backends express "descendant of" as a pure
+    range predicate and parquet prune row groups on `path` min/max stats.
+    """
+    return prefix + '/', prefix + chr(ord('/') + 1)
+
+
 @dataclass
 class PathStats:
     """Stats for a single path in a scan."""
@@ -74,6 +83,7 @@ class StorageBackend(ABC):
         max_depth: int | None = None,
         min_depth: int | None = None,
         follow_refs: bool = False,
+        path_prefix: str | None = None,
     ) -> pd.DataFrame:
         """Load scan data with optional depth filtering.
 
@@ -82,6 +92,11 @@ class StorageBackend(ABC):
             max_depth: Only return rows with depth <= max_depth
             min_depth: Only return rows with depth >= min_depth
             follow_refs: If True, recursively load child chunks (hybrid backend only)
+            path_prefix: Only return the row with `path == path_prefix` and rows
+                with `path.startswith(path_prefix + '/')` (exact semantics, not a
+                superset). Rows are sorted `(depth, path)`, so within each depth
+                a prefix is a contiguous run — parquet prunes row groups via
+                min/max stats on `path`; SQL backends use a range predicate.
 
         Returns:
             DataFrame with scan data

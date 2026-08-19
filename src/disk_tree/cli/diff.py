@@ -66,7 +66,7 @@ def _children_at(blob: str, uri: str, scan_path: str, depth: int) -> pd.DataFram
         rel_prefix = uri[len(scan_path):].lstrip('/')
         depth_offset = rel_prefix.count('/') + 1
     target_depth = depth_offset + depth
-    df = backend.load(blob, max_depth=target_depth, min_depth=target_depth)
+    df = backend.load(blob, max_depth=target_depth, min_depth=target_depth, path_prefix=rel_prefix or None)
     if scan_path == uri:
         # Root: dirs have parent='.', root-level files have parent='' — match /api/compare fix.
         children = df[(df['parent'] == '.') | ((df['parent'] == '') & (df['path'] != '.'))].copy()
@@ -80,24 +80,30 @@ def _children_at(blob: str, uri: str, scan_path: str, depth: int) -> pd.DataFram
 def _delta_rows(children1: pd.DataFrame, children2: pd.DataFrame) -> list[dict]:
     p1 = set(children1['rel_path']) if len(children1) else set()
     p2 = set(children2['rel_path']) if len(children2) else set()
+    # Index by rel_path: a boolean mask per child inside the loops is O(C²)
+    # total — ruinous on 100k-wide cloud prefixes.
+    by_rel1 = children1.set_index('rel_path', drop=False) if len(children1) else children1
+    by_rel2 = children2.set_index('rel_path', drop=False) if len(children2) else children2
+    by_rel1 = by_rel1[~by_rel1.index.duplicated()] if len(by_rel1) else by_rel1
+    by_rel2 = by_rel2[~by_rel2.index.duplicated()] if len(by_rel2) else by_rel2
     out: list[dict] = []
     for rp in p2 - p1:
-        row = children2[children2['rel_path'] == rp].iloc[0]
+        row = by_rel2.loc[rp]
         out.append({
             'path': rp, 'status': 'added',
             'size_a': 0, 'size_b': int(row['size'] or 0),
             'n_desc_a': 0, 'n_desc_b': int(row.get('n_desc', 0) or 0),
         })
     for rp in p1 - p2:
-        row = children1[children1['rel_path'] == rp].iloc[0]
+        row = by_rel1.loc[rp]
         out.append({
             'path': rp, 'status': 'removed',
             'size_a': int(row['size'] or 0), 'size_b': 0,
             'n_desc_a': int(row.get('n_desc', 0) or 0), 'n_desc_b': 0,
         })
     for rp in p1 & p2:
-        r1 = children1[children1['rel_path'] == rp].iloc[0]
-        r2 = children2[children2['rel_path'] == rp].iloc[0]
+        r1 = by_rel1.loc[rp]
+        r2 = by_rel2.loc[rp]
         sa, sb = int(r1['size'] or 0), int(r2['size'] or 0)
         na, nb = int(r1.get('n_desc', 0) or 0), int(r2.get('n_desc', 0) or 0)
         out.append({

@@ -7,7 +7,7 @@ from uuid import uuid4
 import pandas as pd
 import pyarrow.parquet as pq
 
-from .base import StorageBackend, PathStats
+from .base import StorageBackend, PathStats, path_prefix_bounds
 from .. import config as _config
 
 
@@ -56,13 +56,14 @@ class ParquetBackend(StorageBackend):
         max_depth: int | None = None,
         min_depth: int | None = None,
         follow_refs: bool = False,
+        path_prefix: str | None = None,
     ) -> pd.DataFrame:
-        """Load parquet with optional depth filtering via predicate pushdown.
+        """Load parquet with optional depth/path-prefix filtering via predicate pushdown.
 
         Args:
             follow_refs: Ignored (parquet doesn't use chunked refs)
         """
-        cache_key = f"{blob_ref}:{min_depth}:{max_depth}"
+        cache_key = f"{blob_ref}:{min_depth}:{max_depth}:{path_prefix}"
         now = time.time()
 
         # Check cache
@@ -73,22 +74,39 @@ class ParquetBackend(StorageBackend):
 
         blob_path = self._resolve(blob_ref)
         df = None
-        if max_depth is not None or min_depth is not None:
+        if max_depth is not None or min_depth is not None or path_prefix:
             # Check if parquet has 'depth' column for predicate pushdown
             try:
                 schema = pq.read_schema(blob_path)
+                conds = []
                 if 'depth' in schema.names:
-                    filters = []
                     if max_depth is not None:
-                        filters.append(('depth', '<=', max_depth))
+                        conds.append(('depth', '<=', max_depth))
                     if min_depth is not None:
-                        filters.append(('depth', '>=', min_depth))
+                        conds.append(('depth', '>=', min_depth))
+                if path_prefix:
+                    # Exact DNF: the prefix row itself, OR descendants — see
+                    # path_prefix_bounds for why the range is exact.
+                    lo, hi = path_prefix_bounds(path_prefix)
+                    filters = [
+                        conds + [('path', '==', path_prefix)],
+                        conds + [('path', '>=', lo), ('path', '<', hi)],
+                    ]
+                elif conds:
+                    filters = conds
+                else:
+                    filters = None
+                if filters is not None:
                     df = pd.read_parquet(blob_path, filters=filters)
             except Exception:
                 pass  # Fall back to full load
 
         if df is None:
             df = pd.read_parquet(blob_path)
+            if path_prefix:
+                # Fallback load must still honor the exact-semantics contract.
+                lo, hi = path_prefix_bounds(path_prefix)
+                df = df[(df['path'] == path_prefix) | ((df['path'] >= lo) & (df['path'] < hi))]
 
         # Update cache (simple LRU)
         if len(_cache) >= CACHE_MAX_SIZE:
@@ -101,7 +119,8 @@ class ParquetBackend(StorageBackend):
     def get_path_stats(self, blob_ref: str, rel_path: str) -> PathStats | None:
         """Get stats for a path by loading just that depth level."""
         target_depth = rel_path.count('/') + 1 if rel_path else 0
-        df = self.load(blob_ref, max_depth=target_depth, min_depth=target_depth)
+        prefix = rel_path if rel_path and rel_path != '.' else None
+        df = self.load(blob_ref, max_depth=target_depth, min_depth=target_depth, path_prefix=prefix)
         match = df[df['path'] == rel_path]
         if match.empty:
             return None

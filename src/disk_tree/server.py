@@ -111,10 +111,11 @@ def load_scan_data(
     max_depth: int | None = None,
     min_depth: int | None = None,
     follow_refs: bool = False,
+    path_prefix: str | None = None,
 ) -> pd.DataFrame:
-    """Load scan data via the storage backend with optional depth filtering."""
+    """Load scan data via the storage backend with optional depth/path-prefix filtering."""
     backend = get_backend()
-    return backend.load(blob_ref, max_depth=max_depth, min_depth=min_depth, follow_refs=follow_refs)
+    return backend.load(blob_ref, max_depth=max_depth, min_depth=min_depth, follow_refs=follow_refs, path_prefix=path_prefix)
 
 
 def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
@@ -680,8 +681,11 @@ def get_scan():
     viewed_path_depth = 0 if rebased_path == '.' else rebased_path.count('/') + 1
     max_depth = viewed_path_depth + depth
 
-    # Load parquet with depth filter (only loads rows up to max_depth)
-    df = load_scan_data(effective_blob, max_depth)
+    # Load parquet with depth filter (only loads rows up to max_depth) and,
+    # when viewing a subdir, a path-prefix filter (only that subtree's rows —
+    # row-group pruning via min/max stats on the sorted path column).
+    prefix_filter = rebased_path if rebased_path not in ('.', '') else None
+    df = load_scan_data(effective_blob, max_depth, path_prefix=prefix_filter)
 
     # Filter to requested URI prefix
     prefix = uri.rstrip('/') + '/'
@@ -1186,7 +1190,9 @@ def get_histogram():
         relative_path = uri[len(scan_prefix):] if uri.startswith(scan_prefix) else '.'
 
     effective_blob, rebased_path = resolve_chunk_for_path(scan['blob'], relative_path)
-    df = load_scan_data(effective_blob)
+    # No *depth* pushdown possible (needs every descendant file row), but the
+    # path-prefix filter still prunes sibling subtrees when viewing a subdir.
+    df = load_scan_data(effective_blob, path_prefix=rebased_path if rebased_path != '.' else None)
 
     from disk_tree.histogram import age_histograms
     hist = age_histograms(df, rel_path=rebased_path, bins=bins, limit=limit)
@@ -1261,9 +1267,10 @@ def compare_scans():
             depth_offset = rel_prefix.count('/') + 1
 
         # Load with EXACT depth filter - we only need children at depth_offset + 1
-        # This avoids loading millions of rows at other depths
+        # This avoids loading millions of rows at other depths. For ancestor
+        # scans, the path-prefix filter also skips every sibling subtree.
         target_depth = depth_offset + depth_limit
-        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth)
+        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth, path_prefix=rel_prefix or None)
 
         if scan_path == uri:
             # Direct match: dirs at root have parent='.', but root-level files retain
@@ -1308,11 +1315,20 @@ def compare_scans():
     # Build URI prefix for drill-down links
     uri_prefix = uri.rstrip('/') + '/'
 
+    # Index by rel_path for O(1) lookups — a boolean mask per child inside the
+    # loops below is O(C) each, i.e. O(C²) total, which a 100k-wide cloud
+    # prefix turns into 10^10 comparisons. drop=False keeps rel_path in the
+    # row dicts (the response shape predates this).
+    by_rel1 = children1.set_index('rel_path', drop=False) if len(children1) else children1
+    by_rel2 = children2.set_index('rel_path', drop=False) if len(children2) else children2
+    by_rel1 = by_rel1[~by_rel1.index.duplicated()] if len(by_rel1) else by_rel1
+    by_rel2 = by_rel2[~by_rel2.index.duplicated()] if len(by_rel2) else by_rel2
+
     results = []
 
     # Added rows
     for rel_path in added:
-        row = children2[children2['rel_path'] == rel_path].iloc[0]
+        row = by_rel2.loc[rel_path]
         d = row_to_dict(row)
         d['path'] = rel_path  # Use rel_path as display path
         d['uri'] = uri_prefix + rel_path  # Build full URI for linking
@@ -1322,7 +1338,7 @@ def compare_scans():
 
     # Removed rows
     for rel_path in removed:
-        row = children1[children1['rel_path'] == rel_path].iloc[0]
+        row = by_rel1.loc[rel_path]
         d = row_to_dict(row)
         d['path'] = rel_path  # Use rel_path as display path
         d['uri'] = uri_prefix + rel_path  # Build full URI for linking
@@ -1332,8 +1348,8 @@ def compare_scans():
 
     # Changed rows
     for rel_path in common:
-        row1 = children1[children1['rel_path'] == rel_path].iloc[0]
-        row2 = children2[children2['rel_path'] == rel_path].iloc[0]
+        row1 = by_rel1.loc[rel_path]
+        row2 = by_rel2.loc[rel_path]
         d = row_to_dict(row2)
         d['path'] = rel_path  # Use rel_path as display path
         d['uri'] = uri_prefix + rel_path  # Build full URI for linking
@@ -1370,10 +1386,11 @@ def compare_scans():
                 'size': to_native(scan['size']),
                 'n_desc': to_native(scan['n_desc']) if 'n_desc' in scan.keys() else None,
             }
-        # Load the parquet with depth filtering and find the row for the target URI
+        # Load the parquet with depth + path-prefix filtering and find the row
+        # for the target URI (the prefix filter narrows to exactly that row).
         rel_path = uri[len(scan_path):].lstrip('/')
         target_depth = rel_path.count('/') + 1
-        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth)
+        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth, path_prefix=rel_path or None)
         row = df[df['path'] == rel_path]
         if not row.empty:
             r = row.iloc[0]
