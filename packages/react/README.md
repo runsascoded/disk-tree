@@ -84,6 +84,33 @@ Built-in interaction: click a branch to drill in, click a leaf to pin
 its tooltip, Backspace/Escape pops the drill stack, Escape/outside-click
 unpins.
 
+### Lazy subtrees
+
+A tree that arrives one page at a time — disk-tree's
+`/api/scan?uri=…&depth=N`, a pruned static `tree.json` — can't say "this
+node has children" through `getChildren`, because nothing in hand and
+genuinely a leaf look identical. Two slots close that gap:
+
+```tsx
+<Treemap<Node>
+  root={root}
+  getSize={n => n.size}
+  getChildren={n => n.children}          // what this page carried
+  hasChildren={n => n.n_children > 0}    // what the server says exists
+  loadChildren={async n => fetchChildren(n.uri)}
+  renderLoading={n => `Loading ${n.name}…`}
+  renderLoadError={(n, path, err, retry) => <button onClick={retry}>{err.message} — retry</button>}
+  onChildrenLoaded={(n, path, kids) => cache(n, kids)}
+/>
+```
+
+A node is drillable when it has children *or* can fetch them. Only the
+**viewed** node loads — one request per drill, not one per cell on
+screen — and results are cached per node for as long as `root` is
+unchanged, so drilling back in is free. Rejections render with a retry;
+without `loadChildren`, `hasChildren` is ignored entirely, so eagerly
+materialized consumers are unaffected.
+
 ## `<TimeSeries>`
 
 Multi-series line/area with hover-follow crosshair:

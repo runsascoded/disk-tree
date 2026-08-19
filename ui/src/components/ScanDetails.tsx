@@ -550,64 +550,112 @@ interface DTNode {
   path: string
   label: string
   size: number
+  /** Absolute URI — what `loadChildren` asks the server about. */
+  uri?: string
   /** Newest descendant mtime (epoch s) — age-lens fallback when no mean is available. */
   mtime?: number | null
   /** Size-weighted mean mtime (epoch s) — preferred age signal (`--mean-mtime` scans). */
   mtimeMean?: number | null
   children?: DTNode[]
+  /** Directory with children the server knows about, loaded here or not. */
+  expandable?: boolean
   /** True for synthetic "…" placeholders — kept clickless. */
   isPlaceholder?: boolean
 }
 
-function Treemap({ root, rows, ageLens, query }: { root: Row; rows: Row[]; ageLens: boolean; query: string }) {
-  const tree = useMemo(() => {
-    const childrenByParent = new Map<string, Row[]>()
-    for (const row of rows) {
-      const parent = row.parent || '.'
-      let arr = childrenByParent.get(parent)
-      if (!arr) {
-        arr = []
-        childrenByParent.set(parent, arr)
-      }
-      arr.push(row)
+/**
+ * Flat rows (relative paths, parented by relative path) → the nested shape
+ * `<DTTreemap>` walks.
+ *
+ * A dir with *no* children in these rows is left `children: undefined` rather
+ * than filled with a full-size "…": the rows stop at the response's depth, and
+ * "we haven't asked yet" is what `loadChildren` exists to resolve. The
+ * placeholder is still inserted for *partial* coverage, where children came
+ * back but don't sum to the parent — that gap is real, dropped by the row
+ * limit, and deserves visible surface.
+ */
+function buildDTNodes(rows: Row[], parentPath: string, parentSize: number | null): DTNode[] {
+  const childrenByParent = new Map<string, Row[]>()
+  for (const row of rows) {
+    const parent = row.parent || '.'
+    let arr = childrenByParent.get(parent)
+    if (!arr) {
+      arr = []
+      childrenByParent.set(parent, arr)
     }
+    arr.push(row)
+  }
 
-    const build = (parentPath: string, parentSize: number | null): DTNode[] => {
-      const kids = childrenByParent.get(parentPath) ?? []
-      const nodes: DTNode[] = kids.map(r => ({
+  const build = (path: string, size: number | null): DTNode[] => {
+    const kids = childrenByParent.get(path) ?? []
+    const nodes: DTNode[] = kids.map(r => {
+      const sub = r.kind === 'dir' ? build(r.path, r.size ?? 0) : undefined
+      return {
         path: r.path,
         label: r.path.split('/').pop() || r.path,
         size: r.size ?? 0,
+        uri: r.uri,
         mtime: r.mtime,
         mtimeMean: r.mtime_mean,
-        children: r.kind === 'dir' ? build(r.path, r.size ?? 0) : undefined,
-      }))
-      // Add "…" placeholder for unaccounted area (dropped rows / depth limits).
-      const shown = nodes.reduce((s, n) => s + n.size, 0)
-      const unaccounted = (parentSize ?? 0) - shown
-      if (parentSize != null && unaccounted > 1_000_000) {
-        nodes.push({
-          path: `${parentPath}/__other__`,
-          label: '…',
-          size: unaccounted,
-          isPlaceholder: true,
-        })
+        expandable: r.kind === 'dir' && (r.n_children ?? 0) > 0,
+        children: sub && sub.length > 0 ? sub : undefined,
       }
-      nodes.sort((a, b) => {
-        if (a.isPlaceholder && !b.isPlaceholder) return 1
-        if (!a.isPlaceholder && b.isPlaceholder) return -1
-        return b.size - a.size
+    })
+    const shown = nodes.reduce((s, n) => s + n.size, 0)
+    const unaccounted = (size ?? 0) - shown
+    if (nodes.length > 0 && size != null && unaccounted > 1_000_000) {
+      nodes.push({
+        path: `${path}/__other__`,
+        label: '…',
+        size: unaccounted,
+        isPlaceholder: true,
       })
-      return nodes
     }
+    nodes.sort((a, b) => {
+      if (a.isPlaceholder && !b.isPlaceholder) return 1
+      if (!a.isPlaceholder && b.isPlaceholder) return -1
+      return b.size - a.size
+    })
+    return nodes
+  }
 
-    return {
+  return build(parentPath, parentSize)
+}
+
+function Treemap({
+  root,
+  rows,
+  ageLens,
+  query,
+  scanId,
+}: {
+  root: Row
+  rows: Row[]
+  ageLens: boolean
+  query: string
+  scanId?: number
+}) {
+  const tree = useMemo(
+    () => ({
       path: '.',
       label: root.path.split('/').pop() || '.',
       size: root.size ?? 0,
-      children: build('.', root.size ?? null),
-    } satisfies DTNode
-  }, [root, rows])
+      uri: root.uri,
+      children: buildDTNodes(rows, '.', root.size ?? null),
+    } satisfies DTNode),
+    [root, rows],
+  )
+
+  // Drilling past the depth the response carried fetches that subtree, so the
+  // treemap recurses as far as the scan does instead of stopping at depth 2.
+  const loadChildren = useCallback(
+    async (n: DTNode) => {
+      if (!n.uri) return []
+      const details = await fetchScanDetails(n.uri, scanId)
+      return buildDTNodes(details.rows, '.', details.root?.size ?? n.size)
+    },
+    [scanId],
+  )
 
   // Age-lens domain over all rows (not just the drill level), so a cell's
   // fade is stable as you drill instead of renormalizing per level. Prefer
@@ -627,6 +675,9 @@ function Treemap({ root, rows, ageLens, query }: { root: Row; rows: Row[]; ageLe
         root={tree}
         getSize={n => n.size}
         getChildren={n => n.children}
+        hasChildren={n => !!n.expandable && !n.isPlaceholder}
+        loadChildren={loadChildren}
+        renderLoading={n => `Loading ${n.label}…`}
         getLabel={n => n.label}
         formatSize={formatSize}
         colorForCell={n =>
@@ -1621,7 +1672,7 @@ export function ScanDetails() {
         <Box sx={{ mt: 2 }}>
           <VizBoundary label={VIZ_LABELS[viz]}>
             {viz === 'treemap' ? (
-              <Treemap root={root} rows={rows} ageLens={ageLens} query={filter} />
+              <Treemap root={root} rows={rows} ageLens={ageLens} query={filter} scanId={selectedScanId} />
             ) : viz === 'scatter' ? (
               <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
             ) : viz === 'histograms' ? (

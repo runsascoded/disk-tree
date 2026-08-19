@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Treemap } from '../src/Treemap'
 
@@ -115,5 +115,184 @@ describe('<Treemap>', () => {
       />,
     )
     expect(screen.getByText('rollup:root')).toBeInTheDocument()
+  })
+})
+
+/**
+ * jsdom has no layout, so every `clientWidth`/`clientHeight` is 0 and the map
+ * renders no cells. Stub the prototype getters *before* mount — the component
+ * measures synchronously in `useLayoutEffect`, so post-mount stubbing (what
+ * `mountWithSize` does) is already too late.
+ */
+function withLayout(w = 400, h = 300) {
+  const saved = (['clientWidth', 'clientHeight'] as const).map(
+    k => [k, Object.getOwnPropertyDescriptor(HTMLElement.prototype, k)] as const,
+  )
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => w })
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => h })
+  return () => {
+    for (const [k, d] of saved) {
+      if (d) Object.defineProperty(HTMLElement.prototype, k, d)
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[k]
+    }
+  }
+}
+
+/** Labels of the top-level cells, in render order (label text only, no size). */
+function cellLabels(container: HTMLElement): string[] {
+  return [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell > .dt-treemap-lbl')]
+    .map(el => el.childNodes[0]?.textContent ?? '')
+}
+
+describe('<Treemap> lazy children', () => {
+  // `paged` mirrors a depth-bounded server response: `dir` says it has
+  // children, but none came down with this page.
+  interface Paged {
+    n: string
+    size: number
+    kids?: Paged[]
+    n_children?: number
+  }
+  const pagedAccessors = {
+    getSize: (n: Paged) => n.size,
+    getChildren: (n: Paged) => n.kids,
+    getLabel: (n: Paged) => n.n,
+    hasChildren: (n: Paged) => (n.n_children ?? 0) > 0,
+  }
+  const paged: Paged = {
+    n: 'root',
+    size: 300,
+    n_children: 2,
+    kids: [
+      { n: 'deep', size: 200, n_children: 2 },
+      { n: 'leaf.txt', size: 100 },
+    ],
+  }
+  const deepKids: Paged[] = [
+    { n: 'x.bin', size: 120 },
+    { n: 'y.bin', size: 80 },
+  ]
+
+  let restore: () => void
+  beforeEach(() => { restore = withLayout() })
+  afterEach(() => restore())
+
+  it('marks a node with unloaded children drillable, and a true leaf not', () => {
+    const { container } = render(
+      <Treemap root={paged} {...pagedAccessors} loadChildren={async () => []} minCellArea={null} />,
+    )
+    const drillable = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')]
+      .map(el => [el.querySelector('.dt-treemap-lbl')?.childNodes[0]?.textContent, el.classList.contains('branch')])
+    expect(drillable).toEqual([['deep', true], ['leaf.txt', false]])
+  })
+
+  it('fetches once per drill — not once per visible cell', async () => {
+    const loadChildren = vi.fn(async () => deepKids)
+    const { container } = render(
+      <Treemap root={paged} {...pagedAccessors} loadChildren={loadChildren} minCellArea={null} />,
+    )
+    // Root's children came with the page, so nothing loads until we drill.
+    expect(loadChildren).toHaveBeenCalledTimes(0)
+
+    fireEvent.click(container.querySelector('.dt-treemap-cell.branch')!)
+    await screen.findByText('x.bin')
+    expect(loadChildren.mock.calls.length).toBe(1)
+    expect(loadChildren.mock.calls[0][0]).toEqual(paged.kids![0])
+    expect(loadChildren.mock.calls[0][1]).toEqual([paged, paged.kids![0]])
+    expect(cellLabels(container)).toEqual(['x.bin', 'y.bin'])
+  })
+
+  it('shows the loading state until the fetch resolves', async () => {
+    let release: (kids: Paged[]) => void = () => {}
+    const { container } = render(
+      <Treemap
+        root={paged}
+        {...pagedAccessors}
+        loadChildren={() => new Promise<Paged[]>(res => { release = res })}
+        renderLoading={n => <span>loading:{n.n}</span>}
+        minCellArea={null}
+      />,
+    )
+    fireEvent.click(container.querySelector('.dt-treemap-cell.branch')!)
+    expect(screen.getByText('loading:deep')).toBeInTheDocument()
+    expect(cellLabels(container)).toEqual([])
+
+    release(deepKids)
+    await screen.findByText('x.bin')
+    expect(container.querySelector('.dt-treemap-status')).toBeNull()
+  })
+
+  it('caches per node — drilling back in does not refetch', async () => {
+    const loadChildren = vi.fn(async () => deepKids)
+    const { container } = render(
+      <Treemap root={paged} {...pagedAccessors} loadChildren={loadChildren} minCellArea={null} />,
+    )
+    fireEvent.click(container.querySelector('.dt-treemap-cell.branch')!)
+    await screen.findByText('x.bin')
+
+    fireEvent.keyDown(document, { key: 'Backspace' })     // pop back to root
+    await screen.findByText('leaf.txt')
+    fireEvent.click(container.querySelector('.dt-treemap-cell.branch')!)
+    await screen.findByText('x.bin')
+
+    expect(loadChildren).toHaveBeenCalledTimes(1)
+    expect(cellLabels(container)).toEqual(['x.bin', 'y.bin'])
+  })
+
+  it('surfaces a rejection and refetches on retry', async () => {
+    const loadChildren = vi.fn()
+      .mockRejectedValueOnce(new Error('502 upstream'))
+      .mockResolvedValueOnce(deepKids)
+    const { container } = render(
+      <Treemap root={paged} {...pagedAccessors} loadChildren={loadChildren} minCellArea={null} />,
+    )
+    fireEvent.click(container.querySelector('.dt-treemap-cell.branch')!)
+    const err = await screen.findByText(/502 upstream/)
+    expect(err.textContent).toBe('Couldn’t load deep: 502 upstream')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByText('x.bin')
+    expect(loadChildren).toHaveBeenCalledTimes(2)
+    expect(cellLabels(container)).toEqual(['x.bin', 'y.bin'])
+  })
+
+  it('calls onChildrenLoaded with the node, its path, and the children', async () => {
+    const onChildrenLoaded = vi.fn()
+    const { container } = render(
+      <Treemap
+        root={paged}
+        {...pagedAccessors}
+        loadChildren={async () => deepKids}
+        onChildrenLoaded={onChildrenLoaded}
+        minCellArea={null}
+      />,
+    )
+    fireEvent.click(container.querySelector('.dt-treemap-cell.branch')!)
+    await screen.findByText('x.bin')
+    expect(onChildrenLoaded.mock.calls).toEqual([[paged.kids![0], [paged, paged.kids![0]], deepKids]])
+  })
+
+  it('drops the cache when root changes — a new root is a different tree', async () => {
+    const loadChildren = vi.fn(async () => deepKids)
+    const { container, rerender } = render(
+      <Treemap root={paged} {...pagedAccessors} loadChildren={loadChildren} minCellArea={null} />,
+    )
+    fireEvent.click(container.querySelector('.dt-treemap-cell.branch')!)
+    await screen.findByText('x.bin')
+
+    // Same shape, different object: a rescan of the same path.
+    rerender(
+      <Treemap root={{ ...paged }} {...pagedAccessors} loadChildren={loadChildren} minCellArea={null} />,
+    )
+    fireEvent.click(container.querySelector('.dt-treemap-cell.branch')!)
+    await screen.findByText('x.bin')
+    expect(loadChildren).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores hasChildren without a loader, so eager consumers are unaffected', () => {
+    const { container } = render(<Treemap root={paged} {...pagedAccessors} minCellArea={null} />)
+    // Both cells render; neither is drillable, since nothing can fetch `deep`.
+    expect(cellLabels(container)).toEqual(['deep', 'leaf.txt'])
+    expect(container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell.branch').length).toBe(0)
   })
 })

@@ -34,6 +34,36 @@ export interface TreemapProps<T> {
   getSize: (n: T) => number
   /** Extract children; return `undefined` or `[]` for leaves. */
   getChildren: (n: T) => T[] | undefined
+  /**
+   * Whether this node has children *that may not be loaded yet*. Only
+   * consulted alongside `loadChildren`; without it, "has children" is just
+   * `getChildren(n)?.length`.
+   *
+   * This is the distinction a lazily-loaded tree needs and `getChildren`
+   * can't express: no children in hand means "leaf" to a fully-materialized
+   * tree but "not fetched yet" to a paged one. A server that answers with a
+   * bounded depth (disk-tree's `/api/scan?uri=…&depth=N`) knows the
+   * difference and usually says so — `n_children > 0`, `kind === 'dir'`.
+   */
+  hasChildren?: (n: T) => boolean
+  /**
+   * Fetch a node's children on demand. Called when the *viewed* node's
+   * children aren't in hand and `hasChildren` says it has some — one fetch
+   * per drill, never per rendered cell, so drilling costs one request rather
+   * than fanning out over everything on screen.
+   *
+   * Resolved children are cached inside the component (keyed by `getId`) for
+   * as long as `root` is unchanged; `onChildrenLoaded` lets a consumer that
+   * owns its own tree persist them too. Rejections surface through
+   * `renderLoadError` with a retry.
+   */
+  loadChildren?: (n: T, path: T[]) => Promise<T[]>
+  /** Called after `loadChildren` resolves, before the cells render. */
+  onChildrenLoaded?: (n: T, path: T[], children: T[]) => void
+  /** Map-area content while the viewed node's children load. Default: "Loading…". */
+  renderLoading?: (n: T, path: T[]) => ReactNode
+  /** Map-area content when a load rejects. Default: the message + a Retry button. */
+  renderLoadError?: (n: T, path: T[], error: Error, retry: () => void) => ReactNode
   /** Human label shown in the cell (and in breadcrumbs). */
   getLabel: (n: T) => string
   /** Stable key for this node — defaults to the joined path label. */
@@ -174,10 +204,31 @@ function isFolded<T>(n: T | FoldedNode<T>): n is FoldedNode<T> {
   return typeof n === 'object' && n !== null && (n as FoldedNode<T>).__folded === true
 }
 
+/** Centered overlay for the lazy-load loading/error states. */
+const STATUS_STYLE: CSSProperties = {
+  position: 'absolute',
+  inset: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: 2,
+  textAlign: 'center',
+  padding: 12,
+  color: 'var(--dt-treemap-ink, #d0d0d8)',
+  background: 'var(--dt-treemap-status-bg, rgba(0,0,0,0.35))',
+  pointerEvents: 'auto',
+}
+
 export function Treemap<T>({
   root,
   getSize,
   getChildren,
+  hasChildren,
+  loadChildren,
+  onChildrenLoaded,
+  renderLoading,
+  renderLoadError,
   getLabel,
   getId,
   formatSize = defaultFormat,
@@ -254,16 +305,75 @@ export function Treemap<T>({
     return () => document.removeEventListener('keydown', onKey)
   }, [path.length])
 
-  // Categorical color slots by top-level index (used when no colorForCell is given).
-  const topLevelSlot = useMemo(() => {
-    const kids = getChildren(root) ?? []
-    return new Map(kids.map((k, i) => [getLabel(k), DEFAULT_SLOTS[i % DEFAULT_SLOTS.length]]))
-  }, [root, getChildren, getLabel])
-
   const idFor = useCallback(
     (n: T, p: T[]) => (getId ? getId(n, p) : defaultId(n, p, getLabel)),
     [getId, getLabel],
   )
+
+  // Lazily-fetched children, keyed by node id. Dropped when `root` changes,
+  // since a new root is a different tree (a different scan, in disk-tree's
+  // case) and its ids mean nothing here.
+  const [fetched, setFetched] = useState<Map<string, T[]>>(() => new Map())
+  const [pending, setPending] = useState<string | null>(null)
+  const [failed, setFailed] = useState<{ key: string; error: Error } | null>(null)
+  const [retries, setRetries] = useState(0)
+  useEffect(() => {
+    setFetched(new Map())
+    setPending(null)
+    setFailed(null)
+  }, [root])
+
+  const childrenOf = useCallback(
+    (n: T, p: T[]): T[] | undefined => getChildren(n) ?? fetched.get(idFor(n, p)),
+    [getChildren, fetched, idFor],
+  )
+  /** Drillable: has children in hand, or says it has some we can fetch. */
+  const expandable = useCallback(
+    (n: T, p: T[]): boolean =>
+      (childrenOf(n, p)?.length ?? 0) > 0 || (!!loadChildren && !!hasChildren?.(n)),
+    [childrenOf, loadChildren, hasChildren],
+  )
+
+  // One fetch per drill: only the *viewed* node loads, never the cells it
+  // renders. Nested tiles come from the depth the server already returned.
+  const viewKey = idFor(node, path)
+  const viewNeedsLoad =
+    !!loadChildren && !getChildren(node)?.length && !fetched.has(viewKey) && !!hasChildren?.(node)
+  useEffect(() => {
+    if (!viewNeedsLoad || !loadChildren) return
+    let live = true
+    setPending(viewKey)
+    setFailed(null)
+    loadChildren(node, path).then(
+      kids => {
+        if (!live) return
+        // Cache even a superseded load — the data is valid, and it spares a
+        // refetch if the user drills back in.
+        setFetched(m => (m.has(viewKey) ? m : new Map(m).set(viewKey, kids)))
+        setPending(p => (p === viewKey ? null : p))
+        onChildrenLoaded?.(node, path, kids)
+      },
+      (e: unknown) => {
+        if (!live) return
+        setPending(p => (p === viewKey ? null : p))
+        setFailed({ key: viewKey, error: e instanceof Error ? e : new Error(String(e)) })
+      },
+    )
+    return () => { live = false }
+    // `node`/`path` are pinned by `viewKey`; `retries` re-runs a failed load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey, viewNeedsLoad, retries])
+
+  const retry = useCallback(() => {
+    setFailed(null)
+    setRetries(r => r + 1)
+  }, [])
+
+  // Categorical color slots by top-level index (used when no colorForCell is given).
+  const topLevelSlot = useMemo(() => {
+    const kids = childrenOf(root, [root]) ?? []
+    return new Map(kids.map((k, i) => [getLabel(k), DEFAULT_SLOTS[i % DEFAULT_SLOTS.length]]))
+  }, [root, childrenOf, getLabel])
 
   // Fold small items at any level: consumer `mergeSmall` builds a first-class
   // T stand-in; the default builds a synthetic FoldedNode.
@@ -295,8 +405,8 @@ export function Treemap<T>({
 
   // Foldable children of the currently-viewed node.
   const children = useMemo(
-    () => fold((getChildren(node) ?? []).slice(), size.w, size.h),
-    [node, size, getChildren, fold],
+    () => fold((childrenOf(node, path) ?? []).slice(), size.w, size.h),
+    [node, path, size, childrenOf, fold],
   )
 
   const rects = useMemo(
@@ -318,7 +428,9 @@ export function Treemap<T>({
     const folded = isFolded(kid)
     const kidSize = folded ? kid.size : getSize(kid)
     const kidLabel = folded ? `(+${kid.count})` : getLabel(kid)
-    const kidChildren = folded ? undefined : getChildren(kid)
+    const kidChildren = folded ? undefined : childrenOf(kid, kidPath)
+    // Drillable even with nothing in hand, when a loader can go get it.
+    const kidDrillable = !folded && expandable(kid, kidPath)
     const showLbl = showLabels && r.w > 36 && r.h > 13
     const kw = r.w - 6
     const kh = r.h - (showLbl ? 23 : 6)
@@ -369,7 +481,7 @@ export function Treemap<T>({
       e.stopPropagation()
       if (folded) return
       if (onCellClick && onCellClick(kid, kidPath, e)) return
-      if (kidChildren && kidChildren.length > 0) {
+      if (kidDrillable) {
         setTip(null)
         pin.clearPin()
         setPath(kidPath)
@@ -385,7 +497,7 @@ export function Treemap<T>({
     return (
       <div
         key={cellKey}
-        className={'dt-treemap-cell' + (kidChildren && kidChildren.length ? ' branch' : '') + (dust ? ' dust' : '')}
+        className={'dt-treemap-cell' + (kidDrillable ? ' branch' : '') + (dust ? ' dust' : '')}
         style={{
           position: 'absolute',
           left: r.x,
@@ -399,7 +511,7 @@ export function Treemap<T>({
           borderRadius: dust ? 1.5 : 3,
           overflow: 'hidden',
           boxSizing: 'border-box',
-          cursor: kidChildren && kidChildren.length ? 'pointer' : 'default',
+          cursor: kidDrillable ? 'pointer' : 'default',
         }}
         tabIndex={folded ? -1 : 0}
         // Leaf cells hover their whole body; branch cells hover only their
@@ -539,6 +651,22 @@ export function Treemap<T>({
         }}
       >
         {rects.filter(r => r.w >= 3 && r.h >= 3).map(r => cell(r.it, isFolded(r.it) ? path : [...path, r.it as T], r, 0))}
+        {failed?.key === viewKey ? (
+          <div className="dt-treemap-status error" style={STATUS_STYLE}>
+            {renderLoadError
+              ? renderLoadError(node, path, failed.error, retry)
+              : (
+                <>
+                  <div>Couldn’t load {getLabel(node)}: {failed.error.message}</div>
+                  <button onClick={retry} style={{ marginTop: 6, cursor: 'pointer' }}>Retry</button>
+                </>
+              )}
+          </div>
+        ) : pending === viewKey ? (
+          <div className="dt-treemap-status loading" style={STATUS_STYLE}>
+            {renderLoading ? renderLoading(node, path) : 'Loading…'}
+          </div>
+        ) : null}
       </div>
       {(() => {
         const f = renderFooter?.(node, path)

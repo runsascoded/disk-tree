@@ -88,6 +88,8 @@ Vite + React + TypeScript with Material-UI, TanStack Query, and `@disk-tree/reac
 - Multi-select with keyboard navigation (Shift+arrows)
 - Bulk delete for selected items
 - Viz panel with a `View:` toggle — Treemap (+ age lens), Staleness scatter, Age histograms
+- Treemap drills past the response's depth: unloaded dirs fetch their subtree
+  (`<Treemap hasChildren/loadChildren>`), one request per drill, cached per node
 - Pagination and search/filter
 - S3 bucket list with treemap visualization
 
