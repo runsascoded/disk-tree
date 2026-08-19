@@ -446,6 +446,8 @@ def list_bucket_adaptive(
             w.join()
     ranges.sort(key=lambda r: (r[0] or ''))
 
+    _assert_no_duplicate_keys(out_dir)
+
     out_fs.pipe(
         f"{out_root}/{SUCCESS_MARKER}",
         json.dumps({
@@ -458,6 +460,49 @@ def list_bucket_adaptive(
     )
     err(f"{bucket}: {total:,} objects listed adaptively ({len(ranges)} final ranges) → {out_dir}")
     return total
+
+
+class DuplicateKeysError(Exception):
+    """A listing emitted the same object key more than once."""
+
+
+def _assert_no_duplicate_keys(out_dir: str) -> None:
+    """Fail the run if any key landed in the shard set twice.
+
+    Donation shrinks a worker's ``end`` to ``mid`` and only *then* records the
+    range, so ``_SUCCESS.json``'s ranges are disjoint by construction and prove
+    nothing about what was actually emitted. A 2026-08-18 run at 16 procs wrote
+    9,372,828 duplicate rows (34% of the listing) while reporting a correct
+    object count — ``objects`` counts distinct keys — and exited 0. Nothing
+    downstream noticed until the layer-2 rollup produced 1,156 TiB against a
+    910 TiB quota.
+
+    Deliberately does *not* delete the shards: the duplicates are the only
+    evidence of the race that produced them, and a listing this expensive is
+    not worth re-running blind. The missing ``_SUCCESS.json`` is what keeps a
+    corrupt listing from being consumed (`import -l` globs shards, but every
+    caller that resumes or warm-starts checks the marker).
+    """
+    import duckdb
+
+    glob = f"{out_dir.rstrip('/')}/shard-*.parquet"
+    con = duckdb.connect()
+    con.execute("SET threads TO 8")
+    rows, distinct = con.execute(
+        "SELECT count(*), count(DISTINCT name) FROM read_parquet(?)", [glob],
+    ).fetchone()
+    if rows == distinct:
+        return
+    sample = con.execute(
+        "SELECT name, count(*) n FROM read_parquet(?) GROUP BY name "
+        "HAVING count(*) > 1 ORDER BY n DESC, name LIMIT 5", [glob],
+    ).fetchall()
+    raise DuplicateKeysError(
+        f"{rows - distinct:,} duplicate rows ({100 * (rows - distinct) / rows:.1f}% of "
+        f"{rows:,}) in {glob} — shards left in place for debugging; no "
+        f"{SUCCESS_MARKER} written. Worst offenders: "
+        + ", ".join(f"{n}x {k}" for k, n in sample)
+    )
 
 
 def load_warm_ranges(warm_from: str) -> "list[tuple[Optional[str], Optional[str]]]":

@@ -14,6 +14,8 @@ import pandas as pd
 import pytest
 
 from disk_tree.find.bulk_adaptive import (
+    DuplicateKeysError,
+    _assert_no_duplicate_keys,
     key_midpoint,
     list_bucket_adaptive,
     load_warm_ranges,
@@ -205,3 +207,35 @@ def test_stream_import_over_adaptive_shards(tmp_path: Path):
     got_stream = _normalize(pd.read_parquet(out))
     got_pandas = _normalize(import_listing((glob,), bucket='b1', scheme='s3').df)
     pd.testing.assert_frame_equal(got_pandas, got_stream)
+
+
+def test_duplicate_keys_assert_fires_and_leaves_shards(tmp_path: Path):
+    """A shard set where one key appears twice must raise — and must leave the
+    shards on disk (they are the only evidence of the race that produced them;
+    see the 2026-08-18 -P16 run: 34% duplicates, correct `objects` count,
+    exit 0)."""
+    frame = pd.DataFrame({
+        'name': ['a/1', 'a/2', 'b/1'],
+        'size_bytes': [1, 2, 3],
+    })
+    frame.to_parquet(tmp_path / 'shard-00-0000.parquet', index=False)
+    pd.DataFrame({'name': ['b/1', 'c/1'], 'size_bytes': [3, 4]}).to_parquet(
+        tmp_path / 'shard-00-0001.parquet', index=False)
+
+    with pytest.raises(DuplicateKeysError) as exc:
+        _assert_no_duplicate_keys(str(tmp_path))
+    assert str(exc.value) == (
+        f'1 duplicate rows (20.0% of 5) in {tmp_path}/shard-*.parquet — shards '
+        'left in place for debugging; no _SUCCESS.json written. '
+        'Worst offenders: 2x b/1'
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        'shard-00-0000.parquet',
+        'shard-00-0001.parquet',
+    ]
+
+
+def test_duplicate_keys_assert_passes_clean(tmp_path: Path):
+    pd.DataFrame({'name': ['a/1', 'b/1'], 'size_bytes': [1, 2]}).to_parquet(
+        tmp_path / 'shard-00-0000.parquet', index=False)
+    _assert_no_duplicate_keys(str(tmp_path))  # no raise
