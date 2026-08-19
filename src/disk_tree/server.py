@@ -15,18 +15,8 @@ from flask_cors import CORS
 
 from disk_tree import config as _config
 from disk_tree.config import SQLITE_PATH
+from disk_tree.diff import ScanSource, recursive_diff, resolve_blob, resolve_chunk_for_path
 from disk_tree.storage import get_backend
-
-
-def resolve_blob(blob_ref: str) -> str:
-    """Resolve a parquet blob ref to its absolute path.
-
-    Honors legacy absolute refs and ignores DuckDB/SQLite opaque refs.
-    Reads SCANS_DIR via the config module so tests can monkeypatch it.
-    """
-    if not blob_ref or blob_ref.startswith(('ddb:', 'sqlite:')):
-        return blob_ref
-    return blob_ref if isabs(blob_ref) else join(_config.SCANS_DIR, blob_ref)
 
 app = Flask(__name__)
 CORS(app)
@@ -116,46 +106,6 @@ def load_scan_data(
     """Load scan data via the storage backend with optional depth/path-prefix filtering."""
     backend = get_backend()
     return backend.load(blob_ref, max_depth=max_depth, min_depth=min_depth, follow_refs=follow_refs, path_prefix=path_prefix)
-
-
-def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
-    """Resolve the actual blob_ref and rebased rel_path for a path that may be in a chunk.
-
-    If rel_path maps to a chunked subtree, returns (chunk_blob_ref, rebased_path).
-    Otherwise returns (blob_ref, rel_path) unchanged.
-
-    Note: Only hybrid backend uses chunked parquets. DuckDB/SQLite blob refs
-    (prefixed with 'ddb:' or 'sqlite:') don't have chunks.
-    """
-    if not rel_path or rel_path == '.':
-        return blob_ref, rel_path
-
-    # DuckDB and SQLite backends don't use chunking
-    if blob_ref.startswith('ddb:') or blob_ref.startswith('sqlite:'):
-        return blob_ref, rel_path
-
-    # Load the root parquet to check for child_scan_id
-    df = pd.read_parquet(resolve_blob(blob_ref))
-    if 'child_scan_id' not in df.columns:
-        return blob_ref, rel_path
-
-    # Check if any ancestor of rel_path has a child_scan_id
-    parts = rel_path.split('/')
-    for i in range(len(parts)):
-        ancestor = '/'.join(parts[:i+1])
-        match = df[df['path'] == ancestor]
-        if not match.empty:
-            row = match.iloc[0]
-            if pd.notna(row.get('child_scan_id')):
-                # This ancestor is chunked - resolve to the chunk
-                chunk_ref = row['child_scan_id']
-                if exists(resolve_blob(chunk_ref)):
-                    # Rebase the remaining path relative to chunk root
-                    remaining = '/'.join(parts[i+1:]) if i + 1 < len(parts) else '.'
-                    # Recursively resolve in case of nested chunks
-                    return resolve_chunk_for_path(chunk_ref, remaining)
-
-    return blob_ref, rel_path
 
 
 def cached(key: str, ttl: int = CACHE_TTL):
@@ -1216,6 +1166,13 @@ def compare_scans():
         scan1: ID of first (older) scan
         scan2: ID of second (newer) scan
         depth: Max depth of children to compare (default 1)
+        recursive: If truthy, walk changed spines best-first (|Δsize| priority)
+            and return the delta *frontier* across depths instead of one level.
+            `added`/`removed` dirs are not descended (their row is the whole
+            story); stats-equal dirs are pruned. Rows gain `depth`, `expanded`,
+            `pruned`; summary gains `expansions`, `truncated`.
+        budget: recursive only — max directory expansions (default 100)
+        max_depth: recursive only — deepest level to descend to
 
     Scans can be of the exact URI or ancestor paths. When comparing ancestor
     scans, we extract the relevant subtree for the requested URI.
@@ -1224,12 +1181,16 @@ def compare_scans():
     scan1_id = request.args.get('scan1')
     scan2_id = request.args.get('scan2')
     depth = int(request.args.get('depth', 1))
+    recursive = request.args.get('recursive', '').lower() in ('1', 'true')
+    budget = int(request.args.get('budget', 100))
+    rec_max_depth_arg = request.args.get('max_depth')
+    rec_max_depth = int(rec_max_depth_arg) if rec_max_depth_arg else None
 
     if not scan1_id or not scan2_id:
         return jsonify({'error': 'scan1 and scan2 parameters required'}), 400
 
     # Check response cache (compare results are expensive to compute)
-    cache_key = f"compare:{uri}:{scan1_id}:{scan2_id}:{depth}"
+    cache_key = f"compare:{uri}:{scan1_id}:{scan2_id}:{depth}:{recursive}:{budget}:{rec_max_depth}"
     now = time.time()
     if cache_key in _cache:
         cached_time, cached_result = _cache[cache_key]
@@ -1249,6 +1210,97 @@ def compare_scans():
     uri = uri.rstrip('/')
     if not uri:
         uri = '/'
+
+    # Helper to convert numpy types to native Python types
+    def to_native(v):
+        if v is None:
+            return None
+        if hasattr(v, 'item'):
+            return v.item()
+        return v
+
+    def get_subtree_stats(scan):
+        """Stats of the compared uri within a scan (rebasing into ancestor scans)."""
+        scan_path = scan['path']
+        if scan_path == uri:
+            return {
+                'size': to_native(scan['size']),
+                'n_desc': to_native(scan['n_desc']) if 'n_desc' in scan.keys() else None,
+            }
+        # Load the parquet with depth + path-prefix filtering and find the row
+        # for the target URI (the prefix filter narrows to exactly that row).
+        rel_path = uri[len(scan_path):].lstrip('/')
+        target_depth = rel_path.count('/') + 1
+        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth, path_prefix=rel_path or None)
+        row = df[df['path'] == rel_path]
+        if not row.empty:
+            r = row.iloc[0]
+            return {
+                'size': to_native(r['size']),
+                'n_desc': to_native(r.get('n_desc')),
+            }
+        return {'size': None, 'n_desc': None}
+
+    if recursive:
+        # Best-first pruned walk down changed spines (spec diff-and-search.md §3a).
+        # Rows span depths; totals come from the subtree stats, not row sums
+        # (a frontier row's Δ is already included in its ancestors').
+        src1 = ScanSource(scan1['blob'], scan1['path'], uri, load_scan_data, resolve=resolve_chunk_for_path)
+        src2 = ScanSource(scan2['blob'], scan2['path'], uri, load_scan_data, resolve=resolve_chunk_for_path)
+        result = recursive_diff(src1, src2, budget=budget, max_depth=rec_max_depth)
+        stats1 = get_subtree_stats(scan1)
+        stats2 = get_subtree_stats(scan2)
+        uri_prefix = uri.rstrip('/') + '/'
+        rows = [
+            {
+                'path': r.path,
+                'uri': uri_prefix + r.path,
+                'depth': r.depth,
+                'kind': r.kind,
+                'status': r.status,
+                'size_a': r.size_a,
+                'size_b': r.size_b,
+                'size_delta': r.size_delta,
+                'size_old': r.size_a,
+                'n_desc_a': r.n_desc_a,
+                'n_desc_b': r.n_desc_b,
+                'n_desc_delta': r.n_desc_delta,
+                'n_desc_old': r.n_desc_a,
+                'expanded': r.expanded,
+                'pruned': r.pruned,
+            }
+            for r in result.rows
+        ]
+        response = {
+            'uri': uri,
+            'recursive': True,
+            'scan1': {
+                'id': to_native(scan1['id']),
+                'time': scan1['time'],
+                'size': stats1['size'],
+                'n_desc': stats1['n_desc'],
+                'scan_path': scan1['path'],
+            },
+            'scan2': {
+                'id': to_native(scan2['id']),
+                'time': scan2['time'],
+                'size': stats2['size'],
+                'n_desc': stats2['n_desc'],
+                'scan_path': scan2['path'],
+            },
+            'rows': rows,
+            'summary': {
+                'added': sum(1 for r in rows if r['status'] == 'added'),
+                'removed': sum(1 for r in rows if r['status'] == 'removed'),
+                'changed': sum(1 for r in rows if r['status'] == 'changed'),
+                'unchanged': sum(1 for r in rows if r['status'] == 'unchanged'),
+                'total_delta': (stats2['size'] or 0) - (stats1['size'] or 0),
+                'expansions': result.expansions,
+                'truncated': result.truncated,
+            },
+        }
+        _cache[cache_key] = (time.time(), response)
+        return jsonify(response)
 
     def get_children(scan, depth_limit):
         """Get direct children of the target URI from a scan.
@@ -1297,14 +1349,6 @@ def compare_scans():
     added = paths2 - paths1
     removed = paths1 - paths2
     common = paths1 & paths2
-
-    # Helper to convert numpy types to native Python types
-    def to_native(v):
-        if v is None:
-            return None
-        if hasattr(v, 'item'):
-            return v.item()
-        return v
 
     def row_to_dict(row):
         d = row.to_dict()
@@ -1377,28 +1421,6 @@ def compare_scans():
 
     # Compute totals
     total_delta = sum(r.get('size_delta', 0) for r in results)
-
-    # Get the subtree stats if comparing ancestor scans
-    def get_subtree_stats(scan):
-        scan_path = scan['path']
-        if scan_path == uri:
-            return {
-                'size': to_native(scan['size']),
-                'n_desc': to_native(scan['n_desc']) if 'n_desc' in scan.keys() else None,
-            }
-        # Load the parquet with depth + path-prefix filtering and find the row
-        # for the target URI (the prefix filter narrows to exactly that row).
-        rel_path = uri[len(scan_path):].lstrip('/')
-        target_depth = rel_path.count('/') + 1
-        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth, path_prefix=rel_path or None)
-        row = df[df['path'] == rel_path]
-        if not row.empty:
-            r = row.iloc[0]
-            return {
-                'size': to_native(r['size']),
-                'n_desc': to_native(r.get('n_desc')),
-            }
-        return {'size': None, 'n_desc': None}
 
     stats1 = get_subtree_stats(scan1)
     stats2 = get_subtree_stats(scan2)

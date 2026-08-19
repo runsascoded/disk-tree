@@ -41,26 +41,27 @@ The enabling fix for everything else, and for plain browsing: `load()` takes onl
 
 ## Item 3 — diff
 
-### 3a. The 90/10: best-first pruned recursive diff
+### 3a. The 90/10: best-first pruned recursive diff — **DONE**
 
 One-level-at-a-time (the current `/api/compare`) answers "what changed in *this* dir"; at PB scale the question is "what changed *anywhere*, ranked". The 90/10 is a recursive descent with two cheap ideas:
 
 - **Prune on stats equality**: if a dir's `(size, n_desc, n_children, mtime)` match on both sides, don't descend. Overnight snapshots leave >99% of the tree untouched; the walk touches only changed spines. Heuristic (compensating changes can hide), so surface it as the fast default with an `--exact` escape hatch; the digest column (3d) later makes pruning exact.
 - **Best-first, not plain BFS**: priority queue on `|Δsize|` — pop the biggest-delta dir, merge-join its children (per-dir loads are cheap now via `path_prefix`), push differing subdirs. A row/time budget bounds the work; emit the frontier when it's spent. This subsumes "root children, then grandchildren if feasible" and spends the budget where the signal is.
 
-Surface as `dt diff -r/--recursive [--budget N]` and a `recursive=1` mode on `/api/compare`, returning a delta *tree* (matched-schema rows + `size_a/size_b/delta/status`, depth-tagged) rather than one level.
+Surfaced as `dt diff -r/--recursive [-b/--budget N]` and `recursive=1` (+`budget`, `max_depth`) on `/api/compare`, returning the delta *frontier* across depths: rows carry `depth`, `expanded` (descended into) and `pruned` (differing stats below, unexplored — budget/depth cut it), summary carries `expansions`/`truncated`. Implementation: `src/disk_tree/diff.py` — `ScanSource` (per-dir children loader: uri rebase into ancestor scans + hybrid chunk resolution + item-1 pushdown per load; correctness never relies on pushdown fidelity, an exactness mask enforces "one level under one prefix") + `recursive_diff` (heap on `|Δsize|`). `resolve_blob`/`resolve_chunk_for_path` moved here from `server.py` so the CLI shares them without importing Flask. Totals sum depth-1 rows only — a frontier row's Δ is already inside its ancestors'. `mtime` is in the descend-trigger (not the reported status), so a same-size rename surfaces as `added`+`removed` rows under a dir whose own Δ is zero.
 
 ### 3b. Materialized delta scans ("a diff is a scan")
 
 For the batch case: streaming merge-join of two layer-2 parquets (both sorted `(depth, path)` — same shape as `_merge_batches` in `aggregate_stream.py`; no memory ceiling), emitting a delta table with the same schema plus `size_a/size_b/delta/status`, registered as a normal scan blob. Then depth pushdown, drilling, lazy subtrees, and Δ-treemaps all work on diffs for free — no new read path. Nightly cron materializes `scan(A,B)` once; every query hits the artifact.
 
-### 3c. Diff treemap: area = max(a, b)
+### 3c. Diff treemap: area = max(a, b) — **DONE**
 
 Current `<CompareTreemap>` sizes cells by `|Δ|` (churn-only: unchanged/Δ=0 rows are dropped). Add the context-preserving mode as the default:
 
 - **Area = `max(size_a, size_b)`** — deleted subtrees still occupy their old area; added ones their new area; stable structure stays visible as context.
 - **Color**: sign → hue (grew = red, shrank = green — DT's existing disk-usage convention, `CompareView.tsx:553`), magnitude → saturation `|Δ|/max(a,b)`, so unchanged ≈ neutral, pure-add fully red, pure-delete fully green.
 - Caveat to label: Σmax over cells exceeds either side's true total (an area metric, not a byte total). Keep `|Δ|`-area as the alternate churn view.
+- Landed: `max`/`Δ` toggle in the treemap legend, `max` default; per-cell saturation is `Δ/max(a,b)` in max mode (pure-add saturates fully with no cross-cell normalization needed) vs `Δ/max|Δ|` in Δ mode; unchanged rows render as neutral context in max mode only.
 
 ### 3d. Later, earned by measurement: `digest` column
 
@@ -107,13 +108,13 @@ Guardrail: if candidate occurrences exceed a threshold, degrade to the progressi
 2. **Name → row-group block index** — the expensive step is names→rows, and this is what fixes it: 1e9 rows at 262k/group ≈ 4k row groups; most names hit a few, so a selective query reads ~10 row groups instead of ~4k. Block-level, not row-level, keeps it small. Covers file-name queries (extensions etc.) where vocab is weak.
 3. **Trigram postings over the vocabulary** — last mile, turns vocab-scan ms into µs and enables the regex compilation above. 100–1000× smaller than trigrams over paths (a path is a sequence of vocab entries), losing nothing.
 
-Before building any of these: run the vocabulary probe (`tmp/vocab-probe*.txt` methodology) on a real marin-scale scan — distinct-name ratios and per-name occurrence skew decide the shapes. Ask mgu for those numbers.
+The shapes themselves are content-agnostic — nothing gets fitted to one estate. What per-store stats decide is *which sidecars are worth building per scan* and default thresholds (e.g. when to degrade to the progressive scan): collect distinct-name ratios and occurrence skew at index time and choose adaptively per scan (skip the vocab tier where the distinct ratio ≈ 1, etc.). mgu's numbers are the first 1e9-scale *validation* of whether tiers 2/3 pay for themselves at all — ask them to run the vocabulary probe (`tmp/vocab-probe*.txt` methodology) on a real bucket.
 
 ## Sequencing
 
 1. ~~`path_prefix` pushdown~~ (done, landed alongside this spec)
 2. ~~O(C²) diff join fix~~ (done, landed alongside this spec)
-3. 3a best-first recursive diff (endpoint + `dt diff -r`) and 3c max-area diff treemap — interactive wins, no new formats
+3. ~~3a best-first recursive diff (endpoint + `dt diff -r`) and 3c max-area diff treemap~~ (done)
 4. v1 progressive filter (`/api/filter` + SSE + UI wiring; retires the "display only" label)
 5. 3b materialized delta scans (merge-join engine work)
 6. Measure at mgu scale → 3d `digest`, vocab + block index + trigrams as the numbers justify

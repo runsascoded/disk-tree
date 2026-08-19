@@ -123,13 +123,15 @@ def _fmt_signed(n: int) -> str:
 
 
 @cli.command('diff')
-@option('-d', '--depth', default=1, help='Compare depth (children at this level; default 1)')
+@option('-b', '--budget', default=100, help='Recursive mode: max directory expansions (default 100)')
+@option('-d', '--depth', default=1, help='Compare depth (children at this level; default 1). In recursive mode: deepest level to descend to (0 = unlimited)')
 @option('-H', '--no-human', is_flag=True, help='Print raw bytes / counts instead of human-readable sizes')
 @option('-n', '--top', default=30, help='Show top-N rows by |Δsize|')
 @option('-p', '--path', 'path_override', default=None, help='Path within the scans to compare (default: scan root)')
+@option('-r', '--recursive', is_flag=True, help='Walk changed spines best-first (|Δsize| priority) and print the delta frontier; added/removed dirs are not descended, stats-equal dirs are pruned')
 @option('-u', '--unchanged', is_flag=True, help='Include unchanged rows')
 @argument('args', nargs=-1, required=True)
-def diff_cmd(depth: int, no_human: bool, top: int, path_override: str | None, unchanged: bool, args: tuple[str, ...]):
+def diff_cmd(budget: int, depth: int, no_human: bool, top: int, path_override: str | None, recursive: bool, unchanged: bool, args: tuple[str, ...]):
     """Print a per-path Δ table between two scans.
 
     Args: `<URI>` (picks the two most-recent scans) or `<SCAN1_ID> <SCAN2_ID>`.
@@ -139,15 +141,38 @@ def diff_cmd(depth: int, no_human: bool, top: int, path_override: str | None, un
     if path_override:
         uri = path_override.rstrip('/') or '/'
 
-    children_a = _children_at(scan_a['blob'], uri, scan_a['path'], depth)
-    children_b = _children_at(scan_b['blob'], uri, scan_b['path'], depth)
-    rows = _delta_rows(children_a, children_b)
-    if not unchanged:
-        rows = [r for r in rows if r['status'] != 'unchanged']
+    truncated = False
+    if recursive:
+        from disk_tree.diff import ScanSource, recursive_diff, resolve_chunk_for_path
+        from disk_tree.storage import get_backend
+        backend = get_backend()
+        src_a = ScanSource(scan_a['blob'], scan_a['path'], uri, backend.load, resolve=resolve_chunk_for_path)
+        src_b = ScanSource(scan_b['blob'], scan_b['path'], uri, backend.load, resolve=resolve_chunk_for_path)
+        # -d 1 is the non-recursive default, not a meaningful recursion cap
+        max_depth = depth if depth > 1 else None
+        result = recursive_diff(src_a, src_b, budget=budget, max_depth=max_depth, include_unchanged=unchanged)
+        truncated = result.truncated
+        rows = [
+            {
+                'path': r.path + (' …' if r.pruned else ''),
+                'depth': r.depth,
+                'status': r.status,
+                'size_a': r.size_a, 'size_b': r.size_b,
+                'size_delta': r.size_delta, 'n_desc_delta': r.n_desc_delta,
+            }
+            for r in result.rows
+        ]
+    else:
+        children_a = _children_at(scan_a['blob'], uri, scan_a['path'], depth)
+        children_b = _children_at(scan_b['blob'], uri, scan_b['path'], depth)
+        rows = _delta_rows(children_a, children_b)
+        if not unchanged:
+            rows = [r for r in rows if r['status'] != 'unchanged']
 
     err(f"a: scan {scan_a['id']} @ {scan_a['time']}  ({scan_a['path']})")
     err(f"b: scan {scan_b['id']} @ {scan_b['time']}  ({scan_b['path']})")
-    err(f"uri={uri}  depth={depth}  {len(rows)} rows")
+    mode = f"recursive budget={budget}" if recursive else f"depth={depth}"
+    err(f"uri={uri}  {mode}  {len(rows)} rows" + ("  (truncated: '…' rows have unexplored change below)" if truncated else ""))
 
     def sz(n: int) -> str:
         return naturalsize(n, binary=True, format='%.3g') if not no_human else f'{n:,}'
@@ -167,6 +192,9 @@ def diff_cmd(depth: int, no_human: bool, top: int, path_override: str | None, un
         print(f"{r['path']:{w}}  {r['status']:8}  {sz(r['size_a']):>10}  {sz(r['size_b']):>10}  {dsz(r['size_delta']):>11}  {_fmt_signed(r['n_desc_delta']):>10}")
     if len(rows) > top:
         print(f"(… {len(rows) - top} more rows)")
-    total = sum(r['size_delta'] for r in rows)
+    # Recursive rows span depths, and a frontier row's Δ is already included in
+    # its ancestors' — sum only depth-1 rows there (deltas propagate up, so
+    # they carry the whole subtree total).
+    total = sum(r['size_delta'] for r in rows if r.get('depth', 1) == 1)
     print('-' * len(hdr))
     print(f"{'TOTAL':{w}}  {'':8}  {'':>10}  {'':>10}  {dsz(total):>11}")

@@ -31,16 +31,25 @@ function formatDelta(bytes: number): string {
 }
 
 /**
- * Δ-recolor treemap: one cell per compare row, sized by |Δbytes|, colored by
- * signed Δbytes on a diverging red-grew / green-shrank scale. Unchanged rows
- * are dropped (no delta = no signal). Clicking a directory drills into
- * `/compare/<scheme>/<subpath>` so the exploration matches the deep-link
- * scheme.
+ * Δ-recolor treemap with two area modes:
+ *
+ * - `max` (default): one cell per row, sized by `max(old, new)` — deleted
+ *   subtrees keep their old area, added ones their new area, and unchanged
+ *   structure stays visible as neutral context. Color encodes Δ/max per cell:
+ *   pure-add is fully red, pure-delete fully green, unchanged neutral.
+ *   Caveat (labeled): cell areas sum to more than either side's true total.
+ * - `Δ`: the churn view — only changed rows, sized by `|Δbytes|`, colored by
+ *   Δ relative to the largest |Δ|.
+ *
+ * Clicking a directory drills into `/compare/<scheme>/<subpath>` so the
+ * exploration matches the deep-link scheme.
  */
+type AreaMode = 'max' | 'delta'
+
 interface CompareTMNode {
   key: string
   label: string
-  /** what the widget sizes by — `|size_delta|` */
+  /** what the widget sizes by — `max(old, new)` or `|size_delta|` per mode */
   weight: number
   /** signed delta for coloring */
   delta: number
@@ -59,21 +68,27 @@ function CompareTreemap({
   result: CompareResult
   onDrill: (uri: string) => void
 }) {
+  const [areaMode, setAreaMode] = useState<AreaMode>('max')
   const { root, maxAbsDelta } = useMemo(() => {
-    const cells: CompareTMNode[] = result.rows
-      .filter(r => r.status !== 'unchanged' && r.size_delta !== 0)
-      .map(r => ({
-        key: r.uri,
-        label: r.path,
-        weight: Math.abs(r.size_delta) || 1,
-        delta: r.size_delta,
-        status: r.status,
-        size_old: r.size_old ?? r.size ?? 0,
-        size_new: r.status === 'removed' ? 0 : r.size ?? 0,
-        n_desc_delta: r.n_desc_delta ?? 0,
-        kind: r.kind,
-        uri: r.uri,
-      }))
+    const nodes: CompareTMNode[] = result.rows.map(r => ({
+      key: r.uri,
+      label: r.path,
+      weight: 0, // per-mode, below
+      delta: r.size_delta,
+      status: r.status,
+      size_old: r.size_old ?? r.size ?? 0,
+      size_new: r.status === 'removed' ? 0 : r.size ?? 0,
+      n_desc_delta: r.n_desc_delta ?? 0,
+      kind: r.kind,
+      uri: r.uri,
+    }))
+    const cells: CompareTMNode[] = areaMode === 'max'
+      ? nodes
+          .map(n => ({ ...n, weight: Math.max(n.size_old, n.size_new) }))
+          .filter(n => n.weight > 0)
+      : nodes
+          .filter(n => n.status !== 'unchanged' && n.delta !== 0)
+          .map(n => ({ ...n, weight: Math.abs(n.delta) || 1 }))
     const totalWeight = cells.reduce((s, c) => s + c.weight, 0)
     const maxAbs = cells.reduce((m, c) => Math.max(m, Math.abs(c.delta)), 0)
     // Root aggregates its cells so the widget's crumbs line reads correctly.
@@ -91,13 +106,15 @@ function CompareTreemap({
       children: cells,
     }
     return { root, maxAbsDelta: maxAbs }
-  }, [result])
+  }, [result, areaMode])
 
   if (root.children.length === 0) {
     return (
       <Paper sx={{ p: 3, textAlign: 'center' }}>
         <Typography color="text.secondary" variant="body2">
-          No size deltas to plot — every row is unchanged.
+          {areaMode === 'max'
+            ? 'Nothing to plot — no row has any bytes on either side.'
+            : 'No size deltas to plot — every row is unchanged.'}
         </Typography>
       </Paper>
     )
@@ -115,7 +132,11 @@ function CompareTreemap({
           // encoded by the cell color; exact old/new/Δ lives in the tooltip.
           formatSize={formatSize}
           colorForCell={n => {
-            const t = maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta
+            // max mode: per-cell Δ/max — pure-add saturates red, pure-delete
+            // green, unchanged neutral. Δ mode: relative to the largest |Δ|.
+            const t = areaMode === 'max'
+              ? (n.weight === 0 ? 0 : n.delta / n.weight)
+              : (maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta)
             return { bg: divergingColor(t), ink: divergingInk(t) }
           }}
           renderTooltip={n => (
@@ -142,6 +163,28 @@ function CompareTreemap({
               shrank
               <span style={{ display: 'inline-block', width: 12, height: 12, background: divergingColor(1), borderRadius: 2 }} />
               grew
+              <span style={{ opacity: 0.6, marginLeft: 4 }}>
+                {areaMode === 'max' ? 'area = max(old, new) — areas sum past either side’s total' : 'area = |Δ|'}
+              </span>
+              <span style={{ display: 'inline-flex', gap: 2, marginLeft: 6 }}>
+                {(['max', 'delta'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={e => { e.stopPropagation(); setAreaMode(m) }}
+                    title={m === 'max'
+                      ? 'Size cells by max(old, new): deleted subtrees keep their old area; stable structure stays visible'
+                      : 'Size cells by |Δbytes|: churn only, unchanged rows dropped'}
+                    style={{
+                      cursor: 'pointer', fontSize: '0.75rem', padding: '1px 7px', borderRadius: 3,
+                      border: '1px solid var(--dt-border, #444)',
+                      background: areaMode === m ? 'var(--dt-accent-bg, #30363d)' : 'transparent',
+                      color: 'inherit', fontWeight: areaMode === m ? 600 : 400,
+                    }}
+                  >
+                    {m === 'max' ? 'max' : 'Δ'}
+                  </button>
+                ))}
+              </span>
             </span>
           )}
           onCellClick={(n) => {

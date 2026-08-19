@@ -207,3 +207,26 @@ def test_series_empty_uri(tmp_path: Path):
     r = _run_dt(root, 'series', 'gcs://nothing-here')
     assert r.returncode == 0
     assert '(no scans of gcs://nothing-here found)' in r.stdout
+
+
+def test_diff_recursive_frontier(tmp_path: Path):
+    """`-r` walks changed spines: `sub`'s changes surface without `-p` drilling."""
+    root = tmp_path / 'dt'
+    listings_dir = tmp_path / 'listings'
+    listings_dir.mkdir()
+    _import_two_snapshots(root, listings_dir)
+
+    r = _run_dt(root, 'diff', '-r', 'gcs://b1', '-H')
+    assert r.returncode == 0, r.stderr
+    rows = {row.path: row for row in parse_diff_rows(r.stdout)}
+    # Frontier: both depth-1 changed dirs/files AND sub's own added/removed
+    assert {p: (row.status, row.size_delta) for p, row in rows.items()} == {
+        'a.txt': ('changed', '+400'),
+        'sub': ('changed', '+400'),
+        'sub/c.txt': ('removed', '-300'),
+        'sub/d.txt': ('added', '+700'),
+    }
+    # TOTAL sums depth-1 only (sub's children are already inside sub's +400)
+    total_line = [l for l in r.stdout.splitlines() if l.startswith('TOTAL')]
+    assert len(total_line) == 1
+    assert total_line[0].split()[-1] == '+800'

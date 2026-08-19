@@ -936,3 +936,77 @@ class TestGetHistogram:
         response = client.get('/api/histogram?uri=/test&bins=0')
         assert response.status_code == 400
         assert response.json == {'error': 'bins must be >= 1; got 0'}
+
+
+class TestCompareRecursive:
+    """`/api/compare?recursive=1` — best-first frontier across depths."""
+
+    def _seed(self, db_path, scans_dir):
+        base = [
+            {'path': '.', 'size': 1000, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 4, 'n_children': 2, 'depth': 0},
+            {'path': 'a', 'size': 400, 'mtime': 90, 'kind': 'dir', 'parent': '.', 'uri': '/test/a', 'n_desc': 1, 'n_children': 1, 'depth': 1},
+            {'path': 'b', 'size': 600, 'mtime': 100, 'kind': 'dir', 'parent': '.', 'uri': '/test/b', 'n_desc': 1, 'n_children': 1, 'depth': 1},
+            {'path': 'a/f.txt', 'size': 400, 'mtime': 90, 'kind': 'file', 'parent': 'a', 'uri': '/test/a/f.txt', 'n_desc': 0, 'n_children': 0, 'depth': 2},
+            {'path': 'b/g.bin', 'size': 600, 'mtime': 100, 'kind': 'file', 'parent': 'b', 'uri': '/test/b/g.bin', 'n_desc': 0, 'n_children': 0, 'depth': 2},
+        ]
+        changed = [dict(r) for r in base]
+        for r in changed:
+            if r['path'] in ('.', 'b', 'b/g.bin'):
+                r['size'] += 1000
+                r['mtime'] = 110
+        p1 = create_test_parquet(scans_dir, 'rec1', base)
+        p2 = create_test_parquet(scans_dir, 'rec2', changed)
+        conn = sqlite3.connect(db_path)
+        conn.execute('INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+                     ('/test', '2025-01-01T12:00:00', p1, 1000, 2, 4))
+        conn.execute('INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+                     ('/test', '2025-01-02T12:00:00', p2, 2000, 2, 4))
+        conn.commit()
+        conn.close()
+
+    def test_recursive_returns_frontier_across_depths(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/compare?uri=/test&scan1=1&scan2=2&recursive=1')
+        assert response.status_code == 200
+        data = response.json
+        assert data['recursive'] is True
+        assert [
+            (r['path'], r['depth'], r['status'], r['size_delta'], r['expanded'], r['pruned'])
+            for r in data['rows']
+        ] == [
+            ('b', 1, 'changed', 1000, True, False),
+            ('b/g.bin', 2, 'changed', 1000, False, False),
+        ]
+        assert data['rows'][0]['uri'] == '/test/b'
+        assert data['summary'] == {
+            'added': 0, 'removed': 0, 'changed': 2, 'unchanged': 0,
+            'total_delta': 1000, 'expansions': 2, 'truncated': False,
+        }
+
+    def test_recursive_budget_prunes(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/compare?uri=/test&scan1=1&scan2=2&recursive=1&budget=1')
+        assert response.status_code == 200
+        data = response.json
+        assert [
+            (r['path'], r['status'], r['expanded'], r['pruned'])
+            for r in data['rows']
+        ] == [('b', 'changed', False, True)]
+        assert data['summary']['truncated'] is True
+
+    def test_non_recursive_shape_unchanged(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/compare?uri=/test&scan1=1&scan2=2')
+        assert response.status_code == 200
+        data = response.json
+        assert 'recursive' not in data
+        assert [(r['path'], r['status'], r['size_delta']) for r in data['rows']] == [
+            ('b', 'changed', 1000),
+            ('a', 'unchanged', 0),
+        ]
