@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
@@ -26,7 +26,7 @@ type SortColumn = 'size_old' | 'size_new' | 'size_delta' | 'desc_old' | 'desc_ne
 type SortDirection = 'asc' | 'desc'
 
 function formatDelta(bytes: number): string {
-  const sign = bytes >= 0 ? '+' : ''
+  const sign = bytes < 0 ? '-' : '+'
   return sign + formatSize(Math.abs(bytes)).replace(' ', '')
 }
 
@@ -39,6 +39,10 @@ function formatDelta(bytes: number): string {
 const GREW_GREEN = '#3fb950'
 const SHRANK_RED = '#f85149'
 const NEUTRAL = '#8b949e'
+/** Unchanged-bytes fill: translucent dark grey (not `divergingColor(0)`'s mid
+ * grey, which left the light ink low-contrast) — the colored bands pop and
+ * labels read. */
+const UNCHANGED_GREY = 'rgba(110, 118, 129, 0.28)'
 const deltaColor = (t: number) => divergingColor(-t)
 const deltaTextColor = (d: number) => (d > 0 ? GREW_GREEN : d < 0 ? SHRANK_RED : NEUTRAL)
 
@@ -98,6 +102,9 @@ function CompareTreemap({
       ? nodes
           .map(n => ({ ...n, weight: Math.max(n.size_old, n.size_new) }))
           .filter(n => n.weight > 0)
+          // Signed order: biggest adds first, unchanged in the middle,
+          // biggest shrinks last — sorting by -Δ does exactly that.
+          .sort((a, b) => (b.delta - a.delta) || (b.weight - a.weight))
       : nodes
           .filter(n => n.status !== 'unchanged' && n.delta !== 0)
           .map(n => ({ ...n, weight: Math.abs(n.delta) || 1 }))
@@ -149,11 +156,11 @@ function CompareTreemap({
               // full-strength colored band of |Δ| bytes, filling from the
               // bottom — magnitude by *area*, not saturation.
               const f = n.weight === 0 ? 0 : Math.min(1, Math.abs(n.delta) / n.weight)
-              if (f === 0) return { bg: divergingColor(0), ink: divergingInk(0) }
+              if (f === 0) return { bg: UNCHANGED_GREY, ink: divergingInk(0) }
               const pct = `${(f * 100).toFixed(2)}%`
               const band = deltaColor(Math.sign(n.delta))
               return {
-                bg: `linear-gradient(to top, ${band} ${pct}, ${divergingColor(0)} ${pct})`,
+                bg: `linear-gradient(to top, ${band} ${pct}, ${UNCHANGED_GREY} ${pct})`,
                 // The label sits at the top, over grey, unless the band covers ~everything.
                 ink: divergingInk(f > 0.85 ? 1 : 0),
               }
@@ -162,6 +169,32 @@ function CompareTreemap({
             const t = maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta
             return { bg: deltaColor(t), ink: divergingInk(t) }
           }}
+          renderCellExtra={areaMode === 'max' ? (n, _path, { w, h }) => {
+            // Per-sub-rect size labels: Δ centered in the colored band, the
+            // unchanged min(old, new) bytes centered in the grey rect above it.
+            // Skip narrow slivers — a clipped "+128.0KB" is worse than none.
+            if (w < 56) return null
+            const f = n.weight === 0 ? 0 : Math.min(1, Math.abs(n.delta) / n.weight)
+            if (f === 0) return null
+            const bandH = h * f
+            const greyH = h - bandH
+            const minBytes = Math.min(n.size_old, n.size_new)
+            const lbl = (top: string, height: number, text: string, style: CSSProperties) => (
+              <div style={{
+                position: 'absolute', top, left: 0, right: 0, height,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                pointerEvents: 'none', fontSize: '0.75rem', ...style,
+              }}>{text}</div>
+            )
+            return (
+              <>
+                {bandH >= 16 && lbl(`${(100 - f * 100).toFixed(2)}%`, bandH,
+                  formatDelta(n.delta), { color: '#fff', fontWeight: 600 })}
+                {f < 1 && greyH >= 44 && minBytes > 0 && lbl('0', greyH,
+                  formatSize(minBytes), { color: 'var(--dt-treemap-ink, #d0d0d8)', opacity: 0.65 })}
+              </>
+            )
+          } : undefined}
           renderTooltip={n => (
             <>
               <div style={{ fontWeight: 500 }}>{n.label}</div>
@@ -186,6 +219,10 @@ function CompareTreemap({
               grew
               <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(-1), borderRadius: 2 }} />
               shrank
+              {areaMode === 'max' && <>
+                <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_GREY, borderRadius: 2 }} />
+                unchanged
+              </>}
               <span style={{ opacity: 0.6, marginLeft: 4 }}>
                 {areaMode === 'max' ? 'area = max(old, new), band = |Δ|' : 'area = |Δ|'}
               </span>
