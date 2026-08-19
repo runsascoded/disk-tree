@@ -1,6 +1,6 @@
 {
   "name": "@disk-tree/react",
-  "version": "0.1.0",
+  "version": "0.1.0-dist.d429b7a",
   "description": "Reusable React widgets (Treemap, TimeSeries, StalenessScatter, AgeHistograms) for disk-tree consumers. Accessor-based, chart-lib-free.",
   "type": "module",
   "main": "./src/index.ts",
@@ -17,12 +17,6 @@
   "sideEffects": [
     "*.css"
   ],
-  "scripts": {
-    "build": "pnpm run typecheck",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit"
-  },
   "peerDependencies": {
     "react": ">=18",
     "react-dom": ">=18",
@@ -49,5 +43,11 @@
     "d3-voronoi-treemap": {
       "optional": true
     }
+  },
+  "scripts": {
+    "build": "pnpm run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --noEmit"
   }
 }
