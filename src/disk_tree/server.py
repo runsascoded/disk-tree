@@ -16,6 +16,8 @@ from flask_cors import CORS
 from disk_tree import config as _config
 from disk_tree.config import SQLITE_PATH
 from disk_tree.diff import ScanSource, recursive_diff, resolve_blob, resolve_chunk_for_path
+from disk_tree.filter import DEFAULT_DISPLAY_DEPTH, filter_scan, rebase_frame
+from disk_tree.registry import freshest_scan_covering
 from disk_tree.storage import get_backend
 
 app = Flask(__name__)
@@ -1067,34 +1069,6 @@ def get_scan_history():
     return jsonify(results)
 
 
-def freshest_scan_covering(db, uri: str, scan_id: str | None = None) -> dict | None:
-    """Newest scan whose path is `uri` or an ancestor of it (or `scan_id`, verified)."""
-    from disk_tree.backends import url_parent
-    if scan_id:
-        row = db.execute('SELECT * FROM scan WHERE id = ?', (scan_id,)).fetchone()
-        if not row:
-            return None
-        scan = dict(row)
-        if uri == scan['path'] or uri.startswith(scan['path'].rstrip('/') + '/'):
-            return scan
-        return None
-    candidates = []
-    test_path = uri
-    while test_path:
-        row = db.execute(
-            'SELECT * FROM scan WHERE path = ? ORDER BY time DESC LIMIT 1', (test_path,)
-        ).fetchone()
-        if row:
-            candidates.append(dict(row))
-        parent = url_parent(test_path)
-        if parent is None or parent == test_path:
-            break
-        test_path = parent
-    if not candidates:
-        return None
-    return max(candidates, key=lambda s: s['time'])
-
-
 @app.route('/api/histogram')
 def get_histogram():
     """Byte-weighted mtime histograms for each child of a URI (spec: viz-widgets.md §4).
@@ -1152,6 +1126,86 @@ def get_histogram():
         'scan_path': scan['path'],
         'time': scan['time'],
         **hist.to_dict(),
+    }
+    _cache[cache_key] = (now, response)
+    return jsonify(response)
+
+
+@app.route('/api/filter')
+def filter_route():
+    """Recursive filter: matched rows *re-aggregated* to ancestors (spec:
+    diff-and-search.md §4 v1) — unlike the UI's v0 display-only dimming, a
+    dir's size here counts only matched bytes. Matches are outermost-only
+    (a match inside a matched dir is already in its aggregate), so totals
+    never double-count.
+
+    Query params:
+        uri: Root to filter under
+        q: Query — `/…/flags` regex, else substring; case-insensitive default
+        depth: Display depth of the returned slice (default 4); totals always
+            cover every depth
+        scan_id: Optional specific scan
+        case: 1/true for case-sensitive matching
+    """
+    uri = request.args.get('uri', '/').rstrip('/') or '/'
+    q = request.args.get('q', '')
+    scan_id = request.args.get('scan_id')
+    case_sensitive = request.args.get('case', '').lower() in ('1', 'true')
+    try:
+        display_depth = int(request.args.get('depth', DEFAULT_DISPLAY_DEPTH))
+    except ValueError as e:
+        return jsonify({'error': f'invalid parameter: {e}'}), 400
+
+    cache_key = f"filter:{uri}:{scan_id}:{q}:{display_depth}:{case_sensitive}"
+    now = time.time()
+    if cache_key in _cache:
+        cached_time, cached_result = _cache[cache_key]
+        if now - cached_time < CACHE_TTL:
+            return jsonify(cached_result)
+
+    search_path = uri if ('://' in uri or uri.startswith('/')) else f'/{uri}'
+    scan = freshest_scan_covering(get_db(), search_path, scan_id)
+    if not scan:
+        return jsonify({'error': 'No scan found for path', 'uri': uri}), 404
+
+    if scan['path'] == uri:
+        relative_path = '.'
+    else:
+        scan_prefix = scan['path'].rstrip('/') + '/'
+        relative_path = uri[len(scan_prefix):] if uri.startswith(scan_prefix) else '.'
+
+    effective_blob, rebased_path = resolve_chunk_for_path(scan['blob'], relative_path)
+    # follow_refs: a search must not silently miss chunked subtrees. No depth
+    # pushdown (matches live at any depth); the prefix prunes sibling subtrees.
+    df = load_scan_data(
+        effective_blob,
+        follow_refs=True,
+        path_prefix=rebased_path if rebased_path != '.' else None,
+    )
+    df = rebase_frame(df, rebased_path)
+
+    result = filter_scan(df, q, display_depth=display_depth, case_sensitive=case_sensitive)
+
+    response = {
+        'uri': uri,
+        'scan_path': scan['path'],
+        'time': scan['time'],
+        'query': q,
+        'total_size': result.total_size,
+        'n_matches': result.n_matches,
+        'max_depth_scanned': result.max_depth_scanned,
+        'rows': [
+            {
+                'path': n.path,
+                'uri': uri.rstrip('/') + '/' + n.path,
+                'depth': n.depth,
+                'kind': n.kind,
+                'size': n.size,
+                'n_matches': n.n_matches,
+                'matched': n.matched,
+            }
+            for n in result.nodes
+        ],
     }
     _cache[cache_key] = (now, response)
     return jsonify(response)

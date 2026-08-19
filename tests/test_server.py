@@ -1010,3 +1010,73 @@ class TestCompareRecursive:
             ('b', 'changed', 1000),
             ('a', 'unchanged', 0),
         ]
+
+
+class TestFilterEndpoint:
+    """`/api/filter` — recursive filter with true re-aggregation."""
+
+    def _seed(self, db_path, scans_dir):
+        rows = [
+            {'path': '.', 'size': 1450, 'mtime': 100, 'kind': 'dir', 'parent': '', 'uri': '/test', 'n_desc': 9, 'n_children': 3, 'depth': 0},
+            {'path': 'a', 'size': 700, 'mtime': 100, 'kind': 'dir', 'parent': '.', 'uri': '/test/a', 'n_desc': 4, 'n_children': 2, 'depth': 1},
+            {'path': 'b', 'size': 730, 'mtime': 100, 'kind': 'dir', 'parent': '.', 'uri': '/test/b', 'n_desc': 3, 'n_children': 1, 'depth': 1},
+            {'path': 'other.txt', 'size': 20, 'mtime': 100, 'kind': 'file', 'parent': '', 'uri': '/test/other.txt', 'n_desc': 0, 'n_children': 0, 'depth': 1},
+            {'path': 'a/demo', 'size': 500, 'mtime': 100, 'kind': 'dir', 'parent': 'a', 'uri': '/test/a/demo', 'n_desc': 1, 'n_children': 1, 'depth': 2},
+            {'path': 'a/noise.txt', 'size': 200, 'mtime': 100, 'kind': 'file', 'parent': 'a', 'uri': '/test/a/noise.txt', 'n_desc': 0, 'n_children': 0, 'depth': 2},
+            {'path': 'b/x', 'size': 730, 'mtime': 100, 'kind': 'dir', 'parent': 'b', 'uri': '/test/b/x', 'n_desc': 2, 'n_children': 1, 'depth': 2},
+            {'path': 'a/demo/demo.txt', 'size': 500, 'mtime': 100, 'kind': 'file', 'parent': 'a/demo', 'uri': '/test/a/demo/demo.txt', 'n_desc': 0, 'n_children': 0, 'depth': 3},
+            {'path': 'b/x/demo.dat', 'size': 730, 'mtime': 100, 'kind': 'file', 'parent': 'b/x', 'uri': '/test/b/x/demo.dat', 'n_desc': 0, 'n_children': 0, 'depth': 3},
+        ]
+        p = create_test_parquet(scans_dir, 'filt', rows)
+        conn = sqlite3.connect(db_path)
+        conn.execute('INSERT INTO scan (path, time, blob, size, n_children, n_desc) VALUES (?, ?, ?, ?, ?, ?)',
+                     ('/test', '2025-01-01T12:00:00', p, 1450, 3, 9))
+        conn.commit()
+        conn.close()
+
+    def test_filter_reaggregates_outermost_matches(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/filter?uri=/test&q=demo')
+        assert response.status_code == 200
+        data = response.json
+        # a/demo (dir) matches outermost — demo.txt inside it must not re-count.
+        assert [(r['path'], r['size'], r['n_matches'], r['matched']) for r in data['rows']] == [
+            ('a', 500, 1, False),
+            ('b', 730, 1, False),
+            ('a/demo', 500, 1, True),
+            ('b/x', 730, 1, False),
+            ('b/x/demo.dat', 730, 1, True),
+        ]
+        assert data['total_size'] == 1230
+        assert data['n_matches'] == 2
+        assert data['rows'][0]['uri'] == '/test/a'
+
+    def test_filter_under_subdir_uri(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/filter?uri=/test/b&q=demo')
+        assert response.status_code == 200
+        data = response.json
+        assert [(r['path'], r['size'], r['matched']) for r in data['rows']] == [
+            ('x', 730, False),
+            ('x/demo.dat', 730, True),
+        ]
+        assert data['total_size'] == 730
+        assert data['n_matches'] == 1
+
+    def test_filter_regex_and_display_depth(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        response = client.get('/api/filter?uri=/test&q=' + r'/\.dat$/' + '&depth=1')
+        assert response.status_code == 200
+        data = response.json
+        assert [(r['path'], r['size'], r['matched']) for r in data['rows']] == [
+            ('b', 730, False),
+        ]
+        assert data['total_size'] == 730
+        assert data['n_matches'] == 1
+        assert data['max_depth_scanned'] == 3

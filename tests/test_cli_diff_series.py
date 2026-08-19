@@ -230,3 +230,25 @@ def test_diff_recursive_frontier(tmp_path: Path):
     total_line = [l for l in r.stdout.splitlines() if l.startswith('TOTAL')]
     assert len(total_line) == 1
     assert total_line[0].split()[-1] == '+800'
+
+
+def test_filter_reaggregates(tmp_path: Path):
+    """`dt filter` — matched dirs count once via their aggregates."""
+    root = tmp_path / 'dt'
+    listings_dir = tmp_path / 'listings'
+    listings_dir.mkdir()
+    _import_two_snapshots(root, listings_dir)
+
+    r = _run_dt(root, 'filter', 'gcs://b1', 'txt', '-H')
+    assert r.returncode == 0, r.stderr
+    lines = [l for l in r.stdout.splitlines() if l and not l.startswith('-')]
+    # Snapshot b: a.txt(500), sub/{b.txt(200), d.txt(700)} all match 'txt';
+    # 'sub' itself does not match, so it appears as a rollup ancestor.
+    assert lines == [
+        f"{'path':11}  {'size':>10}  {'matches':>8}",
+        f"{'a.txt *':11}  {500:>10,}  {1:>8}",
+        f"{'sub':11}  {900:>10,}  {2:>8}",
+        f"{'sub/b.txt *':11}  {200:>10,}  {1:>8}",
+        f"{'sub/d.txt *':11}  {700:>10,}  {1:>8}",
+        f"{'TOTAL':11}  {1400:>10,}  {3:>8}",
+    ]

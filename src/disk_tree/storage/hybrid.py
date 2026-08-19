@@ -280,20 +280,20 @@ class HybridBackend(StorageBackend):
         """Inverse of _rebase_paths - expand '.' back to parent_path."""
         df = df.copy()
 
-        def unbase_path(p):
-            if p == '.':
-                return parent_path
-            return f"{parent_path}/{p}"
-
-        def unbase_parent(p):
-            if not p or p == '':
-                return parent_path.rsplit('/', 1)[0] if '/' in parent_path else '.'
-            if p == '.':
-                return parent_path
-            return f"{parent_path}/{p}"
-
-        df['path'] = df['path'].apply(unbase_path)
-        df['parent'] = df['parent'].apply(unbase_parent)
+        # Vectorized (a per-row .apply here cost ~10s per million rows when a
+        # follow_refs load expanded a large chunk).
+        path = df['path']
+        df['path'] = (parent_path + '/' + path).mask(path == '.', parent_path)
+        parent = df['parent'].fillna('')
+        grandparent = parent_path.rsplit('/', 1)[0] if '/' in parent_path else '.'
+        df['parent'] = (
+            (parent_path + '/' + parent)
+            .mask(parent == '', grandparent)
+            .mask(parent == '.', parent_path)
+        )
+        if 'depth' in df.columns:
+            # Chunk-relative depths are stale once paths are re-rooted.
+            df['depth'] = df['path'].str.count('/') + 1
 
         return df
 

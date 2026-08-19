@@ -70,13 +70,15 @@ Hash of child digests, computed in the bottom-up pass that already computes `siz
 
 ## Item 4 — recursive filter/search
 
-### v1: progressive brute force — no new indexes
+### v1: progressive brute force — no new indexes — **core + endpoint + CLI DONE** (SSE + UI wiring open)
 
 Depth-major layout means shallow-first **is file order**: no extra index is needed for iterative deepening — stream row groups in order, match paths (regex or substring; `parseQuery` semantics from `filter.ts`), roll matches up to their depth ≤ N ancestors (N≈4, the treemap display depth), and push partial rollups over SSE (machinery exists for scan progress). Depth ≤ 4 arrives for ~3% of the scan cost; the deep tail fills in behind a progress indicator.
 
 Honest display semantics: under a filter, the shallow treemap is *not final* until deep rows are scanned — a depth-12 match rolls up into its depth-1..4 ancestors, so cells grow as matches stream in. That is exactly iterative-deepening semantics and the UI should show scan progress rather than pretending completeness. This replaces the v0 "filtered (display only)" label with true re-aggregation.
 
 Server side: `GET /api/filter?uri=&q=&depth=N` (+ `/stream` SSE variant); `dt filter <uri> <query>` CLI. Restriction to a subtree = `path_prefix` pushdown from item 1 — prefix and query compose for free.
+
+Landed (`src/disk_tree/filter.py` + `/api/filter` + `dt filter`): outermost-only matching (a match inside a matched dir is already in its aggregate — property 1 made real), depth-major per-level walk with an `on_depth` cumulative-snapshot hook (the SSE seam), and covered-subtree exclusion via **binary search**: level paths are sorted, so each covered prefix is a contiguous `[pfx+'/', pfx+'0')` range — two `searchsorted`s per prefix instead of a vector pass (35s → 5.7s at 150 covered dirs / 4M rows). Real-scan smoke: `dt filter /Users/ryan/c '/node_modules$/'` → 33 GiB across 152 `node_modules`, 5.7s end-to-end. Depth is *always* derived from `path`, never trusted from the column — the smoke exposed that hybrid's chunk expansion (`_unbase_paths`) re-rooted paths while leaving chunk-relative depths (fixed + vectorized; the stale column made 'hccs' match 999k descendants instead of 1 outermost dir). `freshest_scan_covering` moved to `registry.py` so the CLI shares it Flask-free.
 
 ### The (prefix × query) product space: don't precompute results, precompute two 1-D indexes
 

@@ -48,6 +48,7 @@ Key goals:
 - `GET /api/scans/progress` — Current progress of active scans
 - `GET /api/scans/progress/stream` — SSE stream for real-time progress
 - `GET /api/compare?uri=<path>&scan1=&scan2=[&recursive=1&budget=N&max_depth=N]` — per-child Δ table; `recursive=1` walks changed spines best-first (|Δsize| priority) and returns the delta frontier across depths (added/removed dirs not descended; stats-equal dirs pruned)
+- `GET /api/filter?uri=<path>&q=<query>&depth=N` — recursive filter with true re-aggregation (matched bytes only, outermost matches, rolled up to a depth-N slice)
 - `GET /api/histogram?uri=<path>&bins=N&limit=N` — Byte-weighted mtime histogram per child
   - Loads every descendant file row (no depth pushdown possible; path-prefix pushdown prunes sibling subtrees); response cached, UI fetches lazily
 - `POST /api/delete` — Delete a file/directory and update scan parquets
@@ -67,6 +68,9 @@ disk-tree scans           # List cached scans (JSON)
 disk-tree diff ARGS       # Per-path Δ table between two scans (URI → two most recent, or two scan ids)
   -r, --recursive         # Best-first walk down changed spines → delta frontier across depths
   -b, --budget N          # Recursive mode: max directory expansions (default 100)
+
+disk-tree filter URI QUERY  # Recursive filter, true re-aggregation: sizes of everything matching QUERY
+                            # (`/…/` regex or substring); outermost matches only — never double-counts
 
 disk-tree histogram URI   # Byte-weighted mtime distribution per child (sparklines; -j for JSON)
 

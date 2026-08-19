@@ -391,3 +391,23 @@ def test_hybrid_follow_refs_prefix_inside_chunk():
         assert summary.loc[summary['path'] == 'big', 'child_scan_id'].notna().all()
         loaded = backend.load(blob_ref, follow_refs=True, path_prefix='big')
         assert sorted(loaded['path'].tolist()) == ['big'] + [f'big/f{i:02d}.txt' for i in range(20)]
+
+
+def test_hybrid_follow_refs_recomputes_depth():
+    """Chunk expansion re-roots paths; a stale chunk-relative `depth` column
+    made depth-trusting consumers (filter, ScanSource) mis-level every
+    expanded row."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        backend = HybridBackend(scans_dir=tmpdir, chunk_threshold=5)
+        rows = [
+            {'path': '.', 'size': 500, 'mtime': 1.0, 'kind': 'dir', 'parent': '', 'uri': '/t', 'n_desc': 11, 'n_children': 1, 'depth': 0},
+            {'path': 'big', 'size': 500, 'mtime': 1.0, 'kind': 'dir', 'parent': '.', 'uri': '/t/big', 'n_desc': 10, 'n_children': 1, 'depth': 1},
+            {'path': 'big/sub', 'size': 500, 'mtime': 1.0, 'kind': 'dir', 'parent': 'big', 'uri': '/t/big/sub', 'n_desc': 9, 'n_children': 9, 'depth': 2},
+        ] + [
+            {'path': f'big/sub/f{i}.txt', 'size': 50, 'mtime': 1.0, 'kind': 'file', 'parent': 'big/sub', 'uri': f'/t/big/sub/f{i}.txt', 'n_desc': 0, 'n_children': 0, 'depth': 3}
+            for i in range(9)
+        ]
+        blob_ref = backend.save(pd.DataFrame(rows), '/t')
+        loaded = backend.load(blob_ref, follow_refs=True)
+        expected = loaded['path'].map(lambda p: 0 if p == '.' else p.count('/') + 1)
+        assert loaded['depth'].tolist() == expected.tolist()
