@@ -187,7 +187,8 @@ describe('<Treemap> lazy children', () => {
   })
 
   it('fetches once per drill — not once per visible cell', async () => {
-    const loadChildren = vi.fn(async () => deepKids)
+    // Typed params so `mock.calls[0]` is a 2-tuple, not `[]`.
+    const loadChildren = vi.fn(async (_n: Paged, _path: Paged[]) => deepKids)
     const { container } = render(
       <Treemap root={paged} {...pagedAccessors} loadChildren={loadChildren} minCellArea={null} />,
     )
