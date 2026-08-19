@@ -19,6 +19,7 @@ start / exclusive-end contract:
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from dataclasses import dataclass
@@ -67,6 +68,17 @@ class S3BulkLister:
                 kw["endpoint_url"] = self.endpoint_url
             if self.region_name:
                 kw["region_name"] = self.region_name
+            # boto's `auto` addressing degrades to path-style for custom
+            # endpoints, and CoreWeave's CAIOS rejects that outright
+            # (PathStyleRequestNotAllowed). A workstation profile can carry
+            # `s3.addressing_style = virtual` in ~/.aws/config, but containers
+            # have no such file — honor an env override so headless runs (GCP
+            # Batch) can match. Values: virtual | path | auto.
+            style = os.environ.get("DT_S3_ADDRESSING_STYLE")
+            if style:
+                from botocore.config import Config
+
+                kw["config"] = Config(s3={"addressing_style": style})
             client = local.client = boto3.client("s3", **kw)
         return client
 
