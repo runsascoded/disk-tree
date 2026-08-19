@@ -1,0 +1,123 @@
+# Snapshot diff + recursive filter/search, at 1e9 rows
+
+Two features with a lot of runway, designed together because they are the same primitive underneath: **select a subset of layer-2 rows, roll their sizes up to ancestors, emit a nested slice.** Diff selects "rows that changed between scans A and B"; filter selects "rows whose path matches a query"; the age lens, storage-class views, and future attribution overlays are the same shape. Build the subset→rollup→slice machinery once.
+
+Target scale: marin's GCP estate (~588M objects → ~1e9 layer-2 rows including dirs). Everything here lands generically in DT and cherry-picks to mgu as the first large-scale consumer.
+
+## Two properties that make this cheap
+
+Both fall out of the existing layer-2 format (`path,size,…,n_desc,n_children,depth`, sorted depth-major then by path):
+
+1. **A matched directory needs no descendant scan.** Its `size`/`n_desc` are already aggregates. "Recursively include everything under a match" costs one row, not a subtree — total cost is dominated by *finding* matches, never by re-aggregating them.
+2. **Sorted-by-path makes nested-match dedup a linear pass.** A match inside a match (dir `foo` containing file `foo.txt`, both matching) is skipped by tracking the last included prefix while walking matches in path order.
+
+## Measured baselines (2026-08-19, largest local scan: 4.02M rows, 153MB parquet)
+
+| target | strings | regex match | throughput |
+|---|---:|---:|---:|
+| full paths, all rows | 4,019,754 | 167 ms | 24M str/s |
+| distinct basenames (vocab) | 811,530 (20.2% of rows) | 22 ms | 37M str/s |
+| distinct **dir** names | 49,957 (1.2% of rows) | 1.4 ms | 36M str/s |
+
+Depth cumulative: depth ≤ 4 = 2.7% of rows, ≤ 6 = 11.9%, ≤ 12 = 87%.
+
+Takeaways: RE2-style regex is not the bottleneck — **string count is** (throughput is flat across tiers). Dir-name vocabulary is 80× smaller than the path column and is what people actually search ("a project name across buckets" is a directory query). File basenames are high-cardinality (`part-00042-….parquet`), so the vocab trick is weak for files — they need the block index (below) instead.
+
+Extrapolating to 1e9 rows: brute-force full-path regex ≈ 40s single-threaded / ~5s at 8 threads; dir-name vocab (even at 10× the distinct-ratio) ≈ tens of ms. The tiers below exist to close that gap interactively.
+
+## Item 1 — path-range pushdown (`path_prefix` on `StorageBackend.load`) — **DONE**
+
+The enabling fix for everything else, and for plain browsing: `load()` takes only `min_depth`/`max_depth`, so viewing/diffing one subdir loads *every row in the tree* at those depths. Layer-2 is sorted `(depth, path)`, so within each depth a prefix is a contiguous run and parquet row-group min/max stats on `path` prune it.
+
+- Semantics (exact, not superset): `path == prefix OR path.startswith(prefix + '/')`.
+- The identity that makes the range exact: `{p : p.startswith(pfx + '/')} == {p : pfx+'/' <= p < pfx+'0'}` since `'0' == chr(ord('/')+1)` — no post-filter needed in SQL backends; parquet uses DNF filters `[[…, path==pfx], […, path>=pfx+'/', path<pfx+'0']]`.
+- All 4 backends; hybrid previously did **no pushdown at all** (full `pd.read_parquet` then pandas masks — depth included), so it gains depth *and* prefix pushdown here. With `follow_refs=True` hybrid expands chunks first, then applies the prefix as an exact mask (no pushdown; chunk-placeholder ancestors wouldn't survive a range filter).
+- Wired into: `/api/scan` (subdir views), `/api/compare` `get_children` + `get_subtree_stats`, `cli/diff._children_at`, `ParquetBackend.get_path_stats` (fresher-child patching), `/api/histogram` (no depth pushdown possible there, but the prefix prunes sibling subtrees).
+- Measured on the 4.02M-row scan above (hybrid backend, which previously full-read **2.55s for every request**): root browse (depth≤2) 50ms, subdir browse (prefix + depth≤3) 40ms, single-path stats 53ms, subdir histogram (prefix, all depths) 0.56s — 4.5–64×, and the factor grows with tree size since post-fix cost tracks the *slice*, not the scan.
+
+## Item 2 — fix the accidental O(C²) in diff — **DONE**
+
+`/api/compare` (`server.py`) and `cli/diff.py::_delta_rows` did `children[children['rel_path'] == rp].iloc[0]` *inside the loop over children* — a full boolean mask per child; a 100k-wide prefix is 10¹⁰ comparisons. Replaced with `set_index('rel_path', drop=False)` hash lookups. Output unchanged. Measured: a 50k-child dir diff went from ~145s (extrapolated from the old code on 5k) to 0.95s.
+
+## Item 3 — diff
+
+### 3a. The 90/10: best-first pruned recursive diff
+
+One-level-at-a-time (the current `/api/compare`) answers "what changed in *this* dir"; at PB scale the question is "what changed *anywhere*, ranked". The 90/10 is a recursive descent with two cheap ideas:
+
+- **Prune on stats equality**: if a dir's `(size, n_desc, n_children, mtime)` match on both sides, don't descend. Overnight snapshots leave >99% of the tree untouched; the walk touches only changed spines. Heuristic (compensating changes can hide), so surface it as the fast default with an `--exact` escape hatch; the digest column (3d) later makes pruning exact.
+- **Best-first, not plain BFS**: priority queue on `|Δsize|` — pop the biggest-delta dir, merge-join its children (per-dir loads are cheap now via `path_prefix`), push differing subdirs. A row/time budget bounds the work; emit the frontier when it's spent. This subsumes "root children, then grandchildren if feasible" and spends the budget where the signal is.
+
+Surface as `dt diff -r/--recursive [--budget N]` and a `recursive=1` mode on `/api/compare`, returning a delta *tree* (matched-schema rows + `size_a/size_b/delta/status`, depth-tagged) rather than one level.
+
+### 3b. Materialized delta scans ("a diff is a scan")
+
+For the batch case: streaming merge-join of two layer-2 parquets (both sorted `(depth, path)` — same shape as `_merge_batches` in `aggregate_stream.py`; no memory ceiling), emitting a delta table with the same schema plus `size_a/size_b/delta/status`, registered as a normal scan blob. Then depth pushdown, drilling, lazy subtrees, and Δ-treemaps all work on diffs for free — no new read path. Nightly cron materializes `scan(A,B)` once; every query hits the artifact.
+
+### 3c. Diff treemap: area = max(a, b)
+
+Current `<CompareTreemap>` sizes cells by `|Δ|` (churn-only: unchanged/Δ=0 rows are dropped). Add the context-preserving mode as the default:
+
+- **Area = `max(size_a, size_b)`** — deleted subtrees still occupy their old area; added ones their new area; stable structure stays visible as context.
+- **Color**: sign → hue (grew = red, shrank = green — DT's existing disk-usage convention, `CompareView.tsx:553`), magnitude → saturation `|Δ|/max(a,b)`, so unchanged ≈ neutral, pure-add fully red, pure-delete fully green.
+- Caveat to label: Σmax over cells exceeds either side's true total (an area metric, not a byte total). Keep `|Δ|`-area as the alternate churn view.
+
+### 3d. Later, earned by measurement: `digest` column
+
+Hash of child digests, computed in the bottom-up pass that already computes `size`/`n_desc` — near-free at index time. Buys (1) exact merge-join pruning (row groups whose path range falls inside an equal-digest prefix are skipped — coarse at 262k-row groups but effective when big subtrees are untouched, since depth-major layout scatters a subtree across every depth), and (2) **rename/move detection**: `removed X + added Y` with equal digests is one move — the difference between "40 TB deleted + 40 TB added, investigate" and "one directory was renamed".
+
+## Item 4 — recursive filter/search
+
+### v1: progressive brute force — no new indexes
+
+Depth-major layout means shallow-first **is file order**: no extra index is needed for iterative deepening — stream row groups in order, match paths (regex or substring; `parseQuery` semantics from `filter.ts`), roll matches up to their depth ≤ N ancestors (N≈4, the treemap display depth), and push partial rollups over SSE (machinery exists for scan progress). Depth ≤ 4 arrives for ~3% of the scan cost; the deep tail fills in behind a progress indicator.
+
+Honest display semantics: under a filter, the shallow treemap is *not final* until deep rows are scanned — a depth-12 match rolls up into its depth-1..4 ancestors, so cells grow as matches stream in. That is exactly iterative-deepening semantics and the UI should show scan progress rather than pretending completeness. This replaces the v0 "filtered (display only)" label with true re-aggregation.
+
+Server side: `GET /api/filter?uri=&q=&depth=N` (+ `/stream` SSE variant); `dt filter <uri> <query>` CLI. Restriction to a subtree = `path_prefix` pushdown from item 1 — prefix and query compose for free.
+
+### The (prefix × query) product space: don't precompute results, precompute two 1-D indexes
+
+Precomputing treemaps for a dense query trie (even just 3–4 literal chars ≈ 26³–26⁴ nodes × a treemap each) is dominated by storing **postings** instead: the same refinement power, less storage, exact at query time. The two tries considered (query-trie with our current index at the empty-query root; inverted path-prefix/segment trie) **collapse into one structure each**:
+
+- **Occurrence postings sorted by path** — `name → [locations]`. Subtree restriction is a binary-searched path range over a posting list; that *is* the segment-prefix trie, flattened.
+- **Trigram postings over the name vocabulary** — `tri → [name ids]`. Query restriction is trigram-set intersection/union; that *is* the query trie, with the monotonicity handled properly (next point).
+
+The 2-D product space is served by intersecting two orthogonal 1-D structures — nothing quadratic gets precomputed, and both are cheap sidecars a scan cron can emit.
+
+### Monotonicity: substring yes, regex no — but regex doesn't need it
+
+- **Substring queries are monotone under extension**: any name containing `abcde` contains `abc`, so R(`abcde`) ⊆ R(`abc`) — a longer query's results are always a subset of its prefix's, and trigram postings give a guaranteed superset to verify.
+- **Raw regex is not** (`abc|def`, anchors, classes) — the user's suspicion is right. But Cox's regex→trigram compilation ([Google Code Search][cox]) turns *any* regex into a monotone boolean formula over trigrams that over-approximates it: `abc|def` → `tri(abc) OR tri(def)`; survivors are verified with the real regex engine. So there is **no need to relax to segment-substring for tractability** — substring is just the trivially-compilable case, and full regex keeps its power.
+- Degenerate regexes (< 3 extractable literal chars, e.g. `a.`) fall back to a brute vocab scan — which the baseline table shows is ms-scale even without trigrams, because the vocab is tiny. The fallback is fine.
+
+### The many-match union (and why it's not scary)
+
+A query matching many names (worst case: single common letter) yields a union of occurrence lists. Cost is O(total occurrences of matched names), not O(rows):
+
+1. matched **dir** occurrences carry aggregates — no descent (property 1);
+2. concatenate posting lists, sort by path (or k-way merge — each list is pre-sorted), dedup nested matches in one linear pass (property 2);
+3. roll up to depth ≤ N ancestors in the same pass — that's the treemap shape.
+
+Guardrail: if candidate occurrences exceed a threshold, degrade to the progressive v1 scan with the same SSE surface — a query matching most of the tree isn't a useful filter anyway.
+
+### Index tiers (v2, in order of leverage)
+
+1. **Vocabulary sidecar** — distinct segment names, dirs first-class (1.2% of rows here), plus file basenames (20%). Emitted during the finalize pass that already streams every row.
+2. **Name → row-group block index** — the expensive step is names→rows, and this is what fixes it: 1e9 rows at 262k/group ≈ 4k row groups; most names hit a few, so a selective query reads ~10 row groups instead of ~4k. Block-level, not row-level, keeps it small. Covers file-name queries (extensions etc.) where vocab is weak.
+3. **Trigram postings over the vocabulary** — last mile, turns vocab-scan ms into µs and enables the regex compilation above. 100–1000× smaller than trigrams over paths (a path is a sequence of vocab entries), losing nothing.
+
+Before building any of these: run the vocabulary probe (`tmp/vocab-probe*.txt` methodology) on a real marin-scale scan — distinct-name ratios and per-name occurrence skew decide the shapes. Ask mgu for those numbers.
+
+## Sequencing
+
+1. ~~`path_prefix` pushdown~~ (done, landed alongside this spec)
+2. ~~O(C²) diff join fix~~ (done, landed alongside this spec)
+3. 3a best-first recursive diff (endpoint + `dt diff -r`) and 3c max-area diff treemap — interactive wins, no new formats
+4. v1 progressive filter (`/api/filter` + SSE + UI wiring; retires the "display only" label)
+5. 3b materialized delta scans (merge-join engine work)
+6. Measure at mgu scale → 3d `digest`, vocab + block index + trigrams as the numbers justify
+
+1–5 need no on-disk format changes and apply to scans that already exist — they CP to mgu without re-indexing. 6 changes the index format and wants mgu's real cardinalities first.
+
+[cox]: https://swtch.com/~rsc/regexp/regexp4.html
