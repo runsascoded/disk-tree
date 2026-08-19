@@ -59,9 +59,10 @@ For the batch case: streaming merge-join of two layer-2 parquets (both sorted `(
 Current `<CompareTreemap>` sizes cells by `|Δ|` (churn-only: unchanged/Δ=0 rows are dropped). Add the context-preserving mode as the default:
 
 - **Area = `max(size_a, size_b)`** — deleted subtrees still occupy their old area; added ones their new area; stable structure stays visible as context.
-- **Color**: sign → hue (grew = red, shrank = green — DT's existing disk-usage convention, `CompareView.tsx:553`), magnitude → saturation `|Δ|/max(a,b)`, so unchanged ≈ neutral, pure-add fully red, pure-delete fully green.
+- **Sub-rect encoding** (owner feedback, 2026-08-19): each cell splits into a grey rect of `min(a,b)` bytes plus a full-strength colored band of `|Δ|` bytes filling from the bottom — magnitude by *area*, not saturation (a `linear-gradient` background; `CellStyle.bg` already accepts gradients).
+- **Polarity = git convention**: green = added/grew, red = removed/shrank — the view is a *diff*, and the summary chips and row tints already used it (the Δ colors previously used the opposite "growth = red" cost lens; that can return as a toggle if a consumer wants it). Applied across treemap, Δ text, bars, and Total Delta.
 - Caveat to label: Σmax over cells exceeds either side's true total (an area metric, not a byte total). Keep `|Δ|`-area as the alternate churn view.
-- Landed: `max`/`Δ` toggle in the treemap legend, `max` default; per-cell saturation is `Δ/max(a,b)` in max mode (pure-add saturates fully with no cross-cell normalization needed) vs `Δ/max|Δ|` in Δ mode; unchanged rows render as neutral context in max mode only.
+- Landed: `max`/`Δ` toggle in the treemap legend, `max` default; unchanged rows render as neutral context in max mode only; Δ mode tints the full cell by `Δ/max|Δ|`.
 
 ### 3d. Later, earned by measurement: `digest` column
 

@@ -33,7 +33,8 @@ export function divergingColor(t: number): string {
   const c = Math.max(-1, Math.min(1, t))
   if (c === 0) return 'rgb(139, 148, 158)' // neutral gray
   if (c > 0) {
-    // grew (positive) → red gradient, brightening with magnitude
+    // positive → red, brightening with magnitude (polarity is the caller's:
+    // negate `t` for a green-positive/git-diff reading)
     const a = 0.15 + 0.85 * c
     return `rgba(248, 81, 73, ${a.toFixed(3)})`
   }

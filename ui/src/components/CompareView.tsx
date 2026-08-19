@@ -31,6 +31,18 @@ function formatDelta(bytes: number): string {
 }
 
 /**
+ * Diff polarity (git convention): green = added/grew, red = removed/shrank —
+ * matching the added/removed row tints and the summary chips. This is a diff
+ * view, not a cost alarm; a "growth = red" cost lens can be a toggle later.
+ * `divergingColor` is red-positive, so negate on the way in.
+ */
+const GREW_GREEN = '#3fb950'
+const SHRANK_RED = '#f85149'
+const NEUTRAL = '#8b949e'
+const deltaColor = (t: number) => divergingColor(-t)
+const deltaTextColor = (d: number) => (d > 0 ? GREW_GREEN : d < 0 ? SHRANK_RED : NEUTRAL)
+
+/**
  * Δ-recolor treemap with two area modes:
  *
  * - `max` (default): one cell per row, sized by `max(old, new)` — deleted
@@ -132,12 +144,23 @@ function CompareTreemap({
           // encoded by the cell color; exact old/new/Δ lives in the tooltip.
           formatSize={formatSize}
           colorForCell={n => {
-            // max mode: per-cell Δ/max — pure-add saturates red, pure-delete
-            // green, unchanged neutral. Δ mode: relative to the largest |Δ|.
-            const t = areaMode === 'max'
-              ? (n.weight === 0 ? 0 : n.delta / n.weight)
-              : (maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta)
-            return { bg: divergingColor(t), ink: divergingInk(t) }
+            if (areaMode === 'max') {
+              // Sub-rect encoding: a grey rect of min(old, new) bytes plus a
+              // full-strength colored band of |Δ| bytes, filling from the
+              // bottom — magnitude by *area*, not saturation.
+              const f = n.weight === 0 ? 0 : Math.min(1, Math.abs(n.delta) / n.weight)
+              if (f === 0) return { bg: divergingColor(0), ink: divergingInk(0) }
+              const pct = `${(f * 100).toFixed(2)}%`
+              const band = deltaColor(Math.sign(n.delta))
+              return {
+                bg: `linear-gradient(to top, ${band} ${pct}, ${divergingColor(0)} ${pct})`,
+                // The label sits at the top, over grey, unless the band covers ~everything.
+                ink: divergingInk(f > 0.85 ? 1 : 0),
+              }
+            }
+            // Δ mode: full cell tinted by Δ relative to the largest |Δ|.
+            const t = maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta
+            return { bg: deltaColor(t), ink: divergingInk(t) }
           }}
           renderTooltip={n => (
             <>
@@ -159,12 +182,12 @@ function CompareTreemap({
           )}
           renderLegend={() => (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', opacity: 0.85 }}>
-              <span style={{ display: 'inline-block', width: 12, height: 12, background: divergingColor(-1), borderRadius: 2 }} />
-              shrank
-              <span style={{ display: 'inline-block', width: 12, height: 12, background: divergingColor(1), borderRadius: 2 }} />
+              <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(1), borderRadius: 2 }} />
               grew
+              <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(-1), borderRadius: 2 }} />
+              shrank
               <span style={{ opacity: 0.6, marginLeft: 4 }}>
-                {areaMode === 'max' ? 'area = max(old, new) — areas sum past either side’s total' : 'area = |Δ|'}
+                {areaMode === 'max' ? 'area = max(old, new), band = |Δ|' : 'area = |Δ|'}
               </span>
               <span style={{ display: 'inline-flex', gap: 2, marginLeft: 6 }}>
                 {(['max', 'delta'] as const).map(m => (
@@ -215,7 +238,7 @@ const statusColors = {
 function DeltaBar({ delta, maxDelta }: { delta: number; maxDelta: number }) {
   if (maxDelta === 0) return <div style={{ width: '50px' }} />
   const pct = Math.min(Math.abs(delta) / maxDelta * 100, 100)
-  const color = delta > 0 ? '#f85149' : delta < 0 ? '#3fb950' : 'transparent'
+  const color = delta === 0 ? 'transparent' : deltaTextColor(delta)
   return (
     <div style={{
       width: '50px',
@@ -398,8 +421,8 @@ function ParentSummaryRow({
   const sizeDelta = (scan2.size ?? 0) - (scan1.size ?? 0)
   const descDelta = (scan2.n_desc ?? 0) - (scan1.n_desc ?? 0)
 
-  const sizeDeltaColor = sizeDelta > 0 ? '#f85149' : sizeDelta < 0 ? '#3fb950' : '#8b949e'
-  const descDeltaColor = descDelta > 0 ? '#f85149' : descDelta < 0 ? '#3fb950' : '#8b949e'
+  const sizeDeltaColor = deltaTextColor(sizeDelta)
+  const descDeltaColor = deltaTextColor(descDelta)
 
   const td: React.CSSProperties = { padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: '0.85em', whiteSpace: 'nowrap' }
   const dim: React.CSSProperties = { color: '#8b949e' }
@@ -593,9 +616,9 @@ function CompareRowComponent({
   const Icon = row.kind === 'dir' ? FaFolder : FaFile
   const iconColor = row.kind === 'dir' ? '#54aeff' : '#8b949e'
 
-  const sizeDeltaColor = row.size_delta > 0 ? '#f85149' : row.size_delta < 0 ? '#3fb950' : '#8b949e'
+  const sizeDeltaColor = deltaTextColor(row.size_delta)
   const descDelta = row.n_desc_delta ?? 0
-  const descDeltaColor = descDelta > 0 ? '#f85149' : descDelta < 0 ? '#3fb950' : '#8b949e'
+  const descDeltaColor = deltaTextColor(descDelta)
 
   // Build link URL for drilling into subdirectory (preserving scan params)
   const childUri = row.uri
@@ -733,7 +756,7 @@ function Summary({ result }: { result: CompareResult }) {
             sx={{
               fontWeight: 'bold',
               fontFamily: 'monospace',
-              color: summary.total_delta > 0 ? '#f85149' : summary.total_delta < 0 ? '#3fb950' : '#8b949e',
+              color: deltaTextColor(summary.total_delta),
             }}
           >
             {formatDelta(summary.total_delta)}
