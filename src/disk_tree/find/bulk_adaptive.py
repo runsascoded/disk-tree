@@ -202,6 +202,23 @@ def next_prefix(p: str) -> Optional[str]:
 
 # --- worker bodies -------------------------------------------------------------
 
+def _orphan_guard():
+    """Return a callable that is True once this process's parent has died.
+
+    `pkill` of the CLI does not touch spawn-context children — their cmdline is
+    `spawn_main`, not the CLI name — so a killed run leaves workers listing and
+    *writing shards* for minutes. A relaunch into the same out_dir then
+    interleaves two runs' output: the 2026-08-18b scan collected 9.37M
+    duplicate rows (34%) exactly this way, and the run looked healthy (exit 0,
+    correct distinct-key count). Death of the parent is detected as a ppid
+    change (reparenting), which also works under subreapers where the new
+    parent isn't pid 1.
+    """
+    import os
+    ppid0 = os.getppid()
+    return lambda: os.getppid() != ppid0
+
+
 def _range_loop(
     lister: PagedLister,
     bucket: str,
@@ -211,6 +228,7 @@ def _range_loop(
     outstanding,
     emit,
     record,
+    orphaned=None,
 ) -> None:
     """One worker: pull ranges, stream them, donate the upper half of the
     remainder whenever peers are idle. Exits when no range is outstanding
@@ -224,6 +242,9 @@ def _range_loop(
         except Empty:
             with idle.get_lock():
                 idle.value -= 1
+            if orphaned is not None and orphaned():
+                import os
+                os._exit(1)  # parent is gone; die before writing anything else
             with outstanding.get_lock():
                 if outstanding.value == 0:
                     return
@@ -247,6 +268,9 @@ def _range_loop(
             gen = lister.stream_pages(bucket, prefix, start, end)
             try:
                 for page in gen:
+                    if orphaned is not None and orphaned():
+                        import os
+                        os._exit(1)
                     pages_since_split += 1
                     if not page:
                         continue
@@ -301,6 +325,7 @@ def _adaptive_proc(
     idle,
     outstanding,
     results_q,
+    watch_parent: bool = True,
 ) -> None:
     """Process body: ``threads`` range-loop workers → single shard writer
     (same bounded-queue / single-writer shape as the planned path)."""
@@ -314,9 +339,13 @@ def _adaptive_proc(
     def emit(rows: "list[tuple]") -> None:
         q.put(entries_to_frame(bucket, list(rows)))
 
+    # Only armed in spawned children: with procs<=1 this body runs in the CLI
+    # process, where a ppid change is legitimate (nohup/disown reparenting).
+    orphaned = _orphan_guard() if watch_parent else None
+
     def one_worker() -> None:
         try:
-            _range_loop(lister, bucket, prefix, range_q, idle, outstanding, emit, records.append)
+            _range_loop(lister, bucket, prefix, range_q, idle, outstanding, emit, records.append, orphaned=orphaned)
         except BaseException as e:  # re-raised by the writer loop below
             errors.append(e)
 
@@ -417,7 +446,7 @@ def list_bucket_adaptive(
     total = 0
     ranges: list = []
     if procs <= 1:
-        _adaptive_proc(*proc_args(0))
+        _adaptive_proc(*proc_args(0), watch_parent=False)
         t, records = results_q.get()
         total += t
         ranges.extend(records)

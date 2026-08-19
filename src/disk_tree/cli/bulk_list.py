@@ -13,6 +13,8 @@ Feed the result into ``disk-tree import`` to get canonical per-path scans
 
 from __future__ import annotations
 
+import os
+
 from click import Choice, argument, option
 from utz import err
 
@@ -24,9 +26,9 @@ from disk_tree.cli.base import cli
 @option('-E', '--endpoint-url', default=None, help='S3-compatible endpoint URL (required for r2://; also usable for MinIO / non-AWS S3)')
 @option('-o', '--out', 'out_dir', required=True, help='Output dir for listing shards (local path or fsspec URL such as `gs://...`)')
 @option('-p', '--prefix', default=None, help='Restrict listing to this bucket-relative prefix')
-@option('-P', '--procs', default=6, help='Worker processes (default 6). Marin measured 32 vCPU / 24 procs / 10 threads as the sweet spot for GCS.')
+@option('-P', '--procs', default=None, type=int, help='Worker processes (default: os.cpu_count()). LIST throughput is GIL-bound, not endpoint-bound: a single process saturates at ~8K keys/s no matter how many threads it runs, while processes scale ~linearly (measured on CoreWeave: 1/2/4/8/16 procs -> 8.3K/17.1K/34.5K/68.1K/89.8K keys/s). Scale this with cores, not -w.')
 @option('-r', '--region', default=None, help='AWS region name (S3 backend only)')
-@option('-w', '--threads', default=8, help='Threads per worker (default 8)')
+@option('-w', '--threads', default=3, help='Threads per worker (default 3). Only enough to hide per-request latency (~0.1s) while the GIL is released on network I/O; beyond that threads contend for the GIL with parquet/pandas work on the same process and add nothing.')
 @option('-W', '--weights-from', default=None, help='Glob to a prior listing parquet used to bin-pack + range-split hot prefixes (planned mode only)')
 @option('-x', '--exists', type=Choice(['error', 'clear', 'reuse']), default='error', help='Behavior when --out already has shards: error/clear/reuse')
 @option('--warm-from', default=None, help="Prior adaptive listing dir whose _SUCCESS.json range boundaries seed this run (adaptive mode only)")
@@ -36,7 +38,7 @@ def bulk_list_cmd(
     endpoint_url: str | None,
     out_dir: str,
     prefix: str | None,
-    procs: int,
+    procs: int | None,
     region: str | None,
     threads: int,
     weights_from: str | None,
@@ -45,6 +47,9 @@ def bulk_list_cmd(
     uri: str,
 ):
     """Bulk-list `URI` (e.g. `gcs://bucket`) to sharded listing parquet at `--out`."""
+    # Default to one process per core: listing is GIL-bound per interpreter, so
+    # cores — not the endpoint — set the ceiling (see -P's help for the numbers).
+    procs = procs or os.cpu_count() or 6
     if adaptive:
         if weights_from:
             raise ValueError("--weights-from is the planned-mode input; adaptive mode warm-starts via --warm-from")
@@ -70,7 +75,7 @@ def bulk_list_adaptive_uri(
     uri: str,
     out_dir: str,
     prefix: str | None = None,
-    procs: int = 6,
+    procs: int | None = None,
     threads: int = 8,
     exists: str = 'error',
     warm_from: str | None = None,
@@ -105,7 +110,7 @@ def bulk_list_uri(
     uri: str,
     out_dir: str,
     prefix: str | None = None,
-    procs: int = 6,
+    procs: int | None = None,
     threads: int = 8,
     exists: str = 'error',
     weights_from: str | None = None,
