@@ -91,6 +91,12 @@ export interface TreemapProps<T> {
    * synthetic folded tiles.
    */
   lens?: (n: T, path: T[], depth: number, ctx: CellCtx, style: CellStyle) => CellStyle | null | undefined
+  /**
+   * Collapse single-child wrapper chains into one cell labeled `a/…/z` (the
+   * cell is the deepest node; the chain is recorded in the drill path).
+   * Off by default — chains carry real information in some trees.
+   */
+  collapseChains?: boolean
   /** Optional extra content rendered inside the cell after the label. */
   renderCellExtra?: (n: T, path: T[], dims: CellDims) => ReactNode
   /** Tooltip body; return null to suppress the tooltip. */
@@ -238,6 +244,7 @@ export function Treemap<T>({
   getLabel,
   getId,
   formatSize = defaultFormat,
+  collapseChains = false,
   colorForCell,
   lens,
   renderCellExtra,
@@ -432,17 +439,45 @@ export function Treemap<T>({
     d < 0 ? 1 : Math.max(rootFade * depthFade ** d, fadeFloor)
 
   const cell = (
-    kid: T | FoldedNode<T>,
-    kidPath: T[],
+    kid0: T | FoldedNode<T>,
+    kidPath0: T[],
     r: { x: number; y: number; w: number; h: number },
     depth: number,
   ): ReactNode => {
-    const folded = isFolded(kid)
-    const kidSize = folded ? kid.size : getSize(kid)
-    const kidLabel = folded ? `(+${kid.count})` : getLabel(kid)
-    const kidChildren = folded ? undefined : childrenOf(kid, kidPath)
+    const folded = isFolded(kid0)
+    // Single-child wrapper chains render as ONE cell labeled `a/…/z`: each
+    // wrapper level otherwise costs a title strip + gutter, so a deep
+    // single-child spine eats area and reads as noise (five nested boxes
+    // all holding the same bytes). The cell *is* the deepest node — its
+    // children, drill target, and id — with the chain recorded in the path,
+    // so crumbs and tooltips still show every level.
+    const chained = collapseChains && !folded
+      ? (() => {
+          let cur = kid0 as T
+          let p = kidPath0
+          const labels = [getLabel(cur)]
+          for (;;) {
+            const only = childrenOf(cur, p)
+            if (!only || only.length !== 1) break
+            cur = only[0]
+            p = [...p, cur]
+            labels.push(getLabel(cur))
+          }
+          return labels.length > 1 ? { node: cur, path: p, labels } : null
+        })()
+      : null
+    const kid: T | FoldedNode<T> = chained ? chained.node : kid0
+    const kidPath = chained ? chained.path : kidPath0
+    const chainLabels = chained?.labels ?? null
+    const kidSize = isFolded(kid) ? kid.size : getSize(kid)
+    const kidLabel = folded
+      ? `(+${(kid as FoldedNode<T>).count})`
+      : chainLabels
+        ? (chainLabels.length > 3 ? `${chainLabels[0]}/…/${chainLabels[chainLabels.length - 1]}` : chainLabels.join('/'))
+        : getLabel(kid as T)
+    const kidChildren = folded ? undefined : childrenOf(kid as T, kidPath)
     // Drillable even with nothing in hand, when a loader can go get it.
-    const kidDrillable = !folded && expandable(kid, kidPath)
+    const kidDrillable = !folded && expandable(kid as T, kidPath)
     const showLbl = showLabels && r.w > 36 && r.h > 13
     const kw = r.w - 6
     const kh = r.h - (showLbl ? 23 : 6)
@@ -462,7 +497,7 @@ export function Treemap<T>({
     // the rest.
     const explicit = folded
       ? null
-      : colorForCell?.(kid, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 })
+      : colorForCell?.(kid as T, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 })
     let style: CellStyle
     if (explicit) {
       style = explicit
@@ -476,23 +511,23 @@ export function Treemap<T>({
         : { bg: slot ?? DEFAULT_SLOTS[0], ink: '#fff' }
     }
     if (lens && !folded) {
-      style = lens(kid, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 }, style) ?? style
+      style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 }, style) ?? style
     }
 
     const cellKey = folded
       ? `__folded_${depth}_${r.x}_${r.y}`
-      : idFor(kid, kidPath)
+      : idFor(kid as T, kidPath)
 
     const showTip = (e: React.MouseEvent) => {
       e.stopPropagation()
       if (folded) return
       pin.hover(cellKey)
-      setTip({ x: e.clientX, y: e.clientY, key: cellKey, node: kid, path: kidPath })
+      setTip({ x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath })
     }
     const onClick = (e: React.MouseEvent) => {
       e.stopPropagation()
       if (folded) return
-      if (onCellClick && onCellClick(kid, kidPath, e)) return
+      if (onCellClick && onCellClick(kid as T, kidPath, e)) return
       if (kidDrillable) {
         setTip(null)
         pin.clearPin()
@@ -500,7 +535,7 @@ export function Treemap<T>({
       } else {
         pin.togglePin(cellKey)
         setPinnedTip(p =>
-          p?.key === cellKey ? null : { x: e.clientX, y: e.clientY, key: cellKey, node: kid, path: kidPath },
+          p?.key === cellKey ? null : { x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath },
         )
       }
     }
@@ -509,7 +544,7 @@ export function Treemap<T>({
     return (
       <div
         key={cellKey}
-        className={'dt-treemap-cell' + (kidDrillable ? ' branch' : '') + (dust ? ' dust' : '')}
+        className={'dt-treemap-cell' + (kidDrillable ? ' branch' : '') + (dust ? ' dust' : '') + (chainLabels ? ' chain' : '')}
         style={{
           position: 'absolute',
           left: r.x,
@@ -562,13 +597,13 @@ export function Treemap<T>({
               <span style={{ opacity: 0.75, marginLeft: 6 }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
-                  <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid, kidPath)}</span>
+                  <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
                 )}
               </span>
             )}
           </div>
         )}
-        {!folded && renderCellExtra && renderCellExtra(kid, kidPath, { w: r.w, h: r.h })}
+        {!folded && renderCellExtra && renderCellExtra(kid as T, kidPath, { w: r.w, h: r.h })}
         {kids.length > 0 && kidChildren && (
           <div
             className="dt-treemap-inner"
