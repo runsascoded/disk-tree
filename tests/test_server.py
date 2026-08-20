@@ -1108,3 +1108,47 @@ class TestFilterEndpoint:
         final = events[-1]
         assert final['done'] is True
         assert {k: v for k, v in final.items() if k != 'done'} == plain
+
+    def test_filter_indexed_parity(self, test_client):
+        """With a vocab sidecar next to the blob, `/api/filter` takes the
+        indexed path (`indexed: true`) and returns exactly the brute rows."""
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+
+        brute = client.get('/api/filter?uri=/test&q=demo').json
+        assert brute['indexed'] is False
+
+        from disk_tree.server import clear_cache
+        from disk_tree.sidecar import build_vocab_sidecar
+        build_vocab_sidecar(os.path.join(scans_dir, 'filt.parquet'))
+        clear_cache()
+
+        indexed = client.get('/api/filter?uri=/test&q=demo').json
+        assert indexed['indexed'] is True
+        assert indexed['rows'] == brute['rows']
+        assert (indexed['total_size'], indexed['n_matches']) == (brute['total_size'], brute['n_matches'])
+
+    def test_filter_indexed_subdir_and_path_mode(self, test_client):
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+        from disk_tree.sidecar import build_vocab_sidecar
+        build_vocab_sidecar(os.path.join(scans_dir, 'filt.parquet'))
+
+        data = client.get('/api/filter?uri=/test/b&q=demo').json
+        assert data['indexed'] is True
+        assert [(r['path'], r['size'], r['matched']) for r in data['rows']] == [
+            ('x', 730, False),
+            ('x/demo.dat', 730, True),
+        ]
+        assert (data['total_size'], data['n_matches']) == (730, 1)
+
+        # A query containing '/' matches full paths — the name index can't
+        # serve it, so the endpoint falls back to the brute scan.
+        pm = client.get('/api/filter?uri=/test&q=x/demo').json
+        assert pm['indexed'] is False
+        assert [(r['path'], r['matched']) for r in pm['rows']] == [
+            ('b', False),
+            ('b/x', False),
+            ('b/x/demo.dat', True),
+        ]
+        assert (pm['total_size'], pm['n_matches']) == (730, 1)

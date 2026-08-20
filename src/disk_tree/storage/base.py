@@ -6,6 +6,14 @@ from uuid import uuid4
 
 import pandas as pd
 
+# Rows are sorted (depth, path), so bounded row groups give parquet min/max
+# stats real pruning power for both the depth and path-prefix pushdowns — a
+# single whole-file row group (pandas' default at these sizes) makes every
+# pushdown a full read. Also the grain of the vocab sidecar's block index
+# (`sidecar.py`): 1e9 rows / 262k ≈ 4k groups, so a selective name reads a
+# handful of groups instead of the file.
+BLOB_ROW_GROUP_SIZE = 262_144
+
 
 def path_prefix_bounds(prefix: str) -> tuple[str, str]:
     """Half-open range `[lo, hi)` containing *exactly* the strings that start

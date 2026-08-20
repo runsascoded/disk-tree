@@ -7,7 +7,7 @@ from uuid import uuid4
 import pandas as pd
 import pyarrow.parquet as pq
 
-from .base import StorageBackend, PathStats, path_prefix_bounds
+from .base import BLOB_ROW_GROUP_SIZE, StorageBackend, PathStats, path_prefix_bounds
 from .. import config as _config
 
 
@@ -47,7 +47,7 @@ class ParquetBackend(StorageBackend):
         blob_path = join(self.scans_dir, blob_ref)
         if exists(blob_path):
             raise RuntimeError(f"Blob path already exists: {blob_path}")
-        df.to_parquet(blob_path, index=False)
+        df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
         return blob_ref
 
     def load(

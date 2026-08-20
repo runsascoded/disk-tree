@@ -15,7 +15,7 @@ from uuid import uuid4
 import pandas as pd
 import pyarrow.parquet as pq
 
-from .base import StorageBackend, PathStats, path_prefix_bounds
+from .base import BLOB_ROW_GROUP_SIZE, StorageBackend, PathStats, path_prefix_bounds
 from .. import config as _config
 from ..config import ROOT_DIR
 
@@ -144,7 +144,7 @@ class HybridBackend(StorageBackend):
         """Save a single parquet file, return basename blob_ref."""
         blob_ref = f'{uuid4()}.parquet'
         blob_path = join(self.scans_dir, blob_ref)
-        df.to_parquet(blob_path, index=False)
+        df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
         return blob_ref
 
     def _save_parquet_arrow(self, table: 'pa.Table') -> str:
@@ -375,7 +375,7 @@ class HybridBackend(StorageBackend):
                             df = df[df['path'] != chunk_root]
                             # Add 1 because the deleted item itself counts as a descendant
                             self._update_ancestors(df, chunk_root, stats.size, stats.n_desc + 1)
-                            df.to_parquet(blob_path, index=False)
+                            df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
                             self._cache.clear()
                             return stats
                         else:
@@ -389,7 +389,7 @@ class HybridBackend(StorageBackend):
                                 df.loc[df['path'] == chunk_root, 'n_desc'] -= (stats.n_desc + 1)
                                 # Update root ancestors
                                 self._update_ancestors(df, chunk_root, stats.size, stats.n_desc + 1)
-                                df.to_parquet(blob_path, index=False)
+                                df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
                                 self._cache.clear()
                             return stats
 
@@ -412,7 +412,7 @@ class HybridBackend(StorageBackend):
         # Update ancestors - add 1 because the deleted item itself counts as a descendant
         self._update_ancestors(df, rel_path, stats.size, stats.n_desc + 1)
 
-        df.to_parquet(blob_path, index=False)
+        df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
         self._cache.clear()
         return stats
 

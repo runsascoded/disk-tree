@@ -346,6 +346,8 @@ export type FilterResult = {
   total_size: number
   n_matches: number
   max_depth_scanned: number
+  /** True when the vocab sidecar answered the query (segment-local + fresh index). */
+  indexed?: boolean
   rows: FilterRow[]
 }
 

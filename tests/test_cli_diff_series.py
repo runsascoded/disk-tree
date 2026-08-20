@@ -252,3 +252,28 @@ def test_filter_reaggregates(tmp_path: Path):
         f"{'sub/d.txt *':11}  {700:>10,}  {1:>8}",
         f"{'TOTAL':11}  {1400:>10,}  {3:>8}",
     ]
+
+
+def test_vocab_build_and_indexed_filter(tmp_path: Path):
+    """`dt vocab` builds the sidecar; `dt filter` then takes the indexed path
+    and returns exactly the brute table (`-B` forces brute for the baseline)."""
+    root = tmp_path / 'dt'
+    listings_dir = tmp_path / 'listings'
+    listings_dir.mkdir()
+    _import_two_snapshots(root, listings_dir)
+
+    r = _run_dt(root, 'vocab', 'gcs://b1')
+    assert r.returncode == 0, r.stderr
+    out_lines = r.stdout.splitlines()
+    assert out_lines[0].endswith('.vocab.parquet')
+    # 4 names (a.txt, b.txt, d.txt, sub) over snapshot b's 5 rows (incl. root).
+    assert out_lines[1].split(' names over ')[0] == '4'
+
+    brute = _run_dt(root, 'filter', 'gcs://b1', 'txt', '-H', '-B')
+    assert brute.returncode == 0, brute.stderr
+    assert 'index: vocab sidecar' not in brute.stderr
+
+    indexed = _run_dt(root, 'filter', 'gcs://b1', 'txt', '-H')
+    assert indexed.returncode == 0, indexed.stderr
+    assert 'index: vocab sidecar (3 matched rows)' in indexed.stderr
+    assert indexed.stdout == brute.stdout

@@ -19,6 +19,7 @@ from disk_tree.diff import ScanSource, recursive_diff, resolve_blob, resolve_chu
 from disk_tree.filter import DEFAULT_DISPLAY_DEPTH, filter_scan, rebase_frame
 from disk_tree.registry import freshest_scan_covering
 from disk_tree.storage import get_backend
+from disk_tree.storage.base import BLOB_ROW_GROUP_SIZE
 
 app = Flask(__name__)
 CORS(app)
@@ -1175,10 +1176,10 @@ def filter_route():
         relative_path = uri[len(scan_prefix):] if uri.startswith(scan_prefix) else '.'
 
     effective_blob, rebased_path = resolve_chunk_for_path(scan['blob'], relative_path)
-    df = _load_filter_frame(effective_blob, rebased_path)
-    result = filter_scan(df, q, display_depth=display_depth, case_sensitive=case_sensitive)
+    df, effective_q, indexed = _filter_inputs(effective_blob, rebased_path, q, case_sensitive)
+    result = filter_scan(df, effective_q, display_depth=display_depth, case_sensitive=case_sensitive)
 
-    response = _filter_payload(uri, scan, q, result)
+    response = {**_filter_payload(uri, scan, q, result), 'indexed': indexed}
     _cache[cache_key] = (now, response)
     return jsonify(response)
 
@@ -1192,6 +1193,23 @@ def _load_filter_frame(effective_blob: str, rebased_path: str) -> pd.DataFrame:
         path_prefix=rebased_path if rebased_path != '.' else None,
     )
     return rebase_frame(df, rebased_path)
+
+
+def _filter_inputs(effective_blob: str, rebased_path: str, q: str, case_sensitive: bool):
+    """Pick the filter's input frame: the vocab-sidecar fast path when a fresh
+    sidecar covers this blob and the query is segment-local, else the brute
+    full-frame load. Returns `(frame, effective_query, indexed)` — the indexed
+    frame holds *matched rows only*, so the effective query is `''` (matches
+    everything) and the shared dedup/rollup machinery runs unchanged."""
+    if not effective_blob.startswith(('ddb:', 'sqlite:')):
+        from disk_tree.sidecar import indexed_filter_frame
+        matched = indexed_filter_frame(
+            resolve_blob(effective_blob), q,
+            case_sensitive=case_sensitive, rel_path=rebased_path,
+        )
+        if matched is not None:
+            return matched, '', True
+    return _load_filter_frame(effective_blob, rebased_path), q, False
 
 
 def _filter_payload(uri: str, scan: dict, q: str, result) -> dict:
@@ -1252,17 +1270,17 @@ def filter_stream():
 
     def generate():
         yield f"data: {json.dumps({'phase': 'loading'})}\n\n"
-        df = _load_filter_frame(effective_blob, rebased_path)
+        df, effective_q, indexed = _filter_inputs(effective_blob, rebased_path, q, case_sensitive)
         from disk_tree.filter import iter_filter_scan
         last = None
-        for d, snap in iter_filter_scan(df, q, display_depth=display_depth, case_sensitive=case_sensitive):
+        for d, snap in iter_filter_scan(df, effective_q, display_depth=display_depth, case_sensitive=case_sensitive):
             last = snap
-            payload = {**_filter_payload(uri, scan, q, snap), 'depth': d, 'done': False}
+            payload = {**_filter_payload(uri, scan, q, snap), 'depth': d, 'done': False, 'indexed': indexed}
             yield f"data: {json.dumps(payload)}\n\n"
         if last is None:
             from disk_tree.filter import FilterResult
             last = FilterResult(nodes=[], total_size=0, n_matches=0, max_depth_scanned=0)
-        yield f"data: {json.dumps({**_filter_payload(uri, scan, q, last), 'done': True})}\n\n"
+        yield f"data: {json.dumps({**_filter_payload(uri, scan, q, last), 'done': True, 'indexed': indexed})}\n\n"
 
     return Response(generate(), mimetype='text/event-stream')
 
@@ -1951,7 +1969,7 @@ def delete_path():
                                 df.loc[mask, 'n_children'] = df.loc[mask, 'n_children'] - 1
 
                     # Rewrite parquet (this is the expensive part)
-                    df.to_parquet(resolve_blob(blob_ref), index=False)
+                    df.to_parquet(resolve_blob(blob_ref), index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
 
                     # Update denormalized stats in SQLite scan metadata
                     root_row = df[df['path'] == '.']

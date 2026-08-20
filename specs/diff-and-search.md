@@ -115,9 +115,20 @@ Guardrail: if candidate occurrences exceed a threshold, degrade to the progressi
 
 ### Index tiers (v2, in order of leverage)
 
-1. **Vocabulary sidecar** — distinct segment names, dirs first-class (1.2% of rows here), plus file basenames (20%). Emitted during the finalize pass that already streams every row.
-2. **Name → row-group block index** — the expensive step is names→rows, and this is what fixes it: 1e9 rows at 262k/group ≈ 4k row groups; most names hit a few, so a selective query reads ~10 row groups instead of ~4k. Block-level, not row-level, keeps it small. Covers file-name queries (extensions etc.) where vocab is weak.
-3. **Trigram postings over the vocabulary** — last mile, turns vocab-scan ms into µs and enables the regex compilation above. 100–1000× smaller than trigrams over paths (a path is a sequence of vocab entries), losing nothing.
+1. **Vocabulary sidecar** — distinct segment names, dirs first-class (1.2% of rows here), plus file basenames (20%). Emitted during the finalize pass that already streams every row. — **DONE** (see below)
+2. **Name → row-group block index** — the expensive step is names→rows, and this is what fixes it: 1e9 rows at 262k/group ≈ 4k row groups; most names hit a few, so a selective query reads ~10 row groups instead of ~4k. Block-level, not row-level, keeps it small. Covers file-name queries (extensions etc.) where vocab is weak. — **DONE** (folded into the sidecar as a `row_groups` list column)
+3. **Trigram postings over the vocabulary** — last mile, turns vocab-scan ms into µs and enables the regex compilation above. 100–1000× smaller than trigrams over paths (a path is a sequence of vocab entries), losing nothing. — not yet needed: unindexed vocab matching is ~1s at 1e9 (probe), so build this when a consumer feels that second.
+
+### Tiers 1–2 implementation (landed 2026-08-20)
+
+`src/disk_tree/sidecar.py` + `disk-tree vocab URI` + auto-use in `dt filter` / `/api/filter` / `/api/filter/stream` (`-B/--brute` and the `indexed` response field for observability).
+
+- **One artifact, both tiers**: `<blob-stem>.vocab.parquet` — `name` (sorted), `n_dirs`, `n_files`, `row_groups` (list<int32> of layer-2 row-group ordinals). Sorted names + 64k-row groups make it range-prunable for static consumers (DuckDB-wasm / HTTP range reads — mgu's lakehouse arc); the server/CLI scan the vocab, union matched names' `row_groups`, read only those groups, exact-rematch basenames, and feed the matched rows through the existing dedup/rollup with an empty query (`filter_scan(matched, '')`) — no second rollup engine.
+- **Matching semantics keyed on the query, not the index** (PoLS): a query containing `/` matches full paths (brute only); slash-free queries match path *segments* (basenames) — identical to path-matching for substrings after outermost-dedup (a slash-free substring can't span a separator), and the intuitive reading for regexes (`/foo.bar/` stays within one name). `query_mode()` in `filter.py`; the brute path applies the same rule, so results never depend on sidecar presence.
+- **Safety**: builds refuse blobs with `child_scan_id` refs (the index can't see inside chunks; silently missing matches is worse than no index) — per-chunk sidecars are the follow-up if hybrid-local wants the speedup. Freshness is mtime-based: `/api/delete` rewrites blobs in place, so a sidecar older than its blob is ignored.
+- **Blob row groups now bounded** (`BLOB_ROW_GROUP_SIZE = 262_144`, all save sites): pandas' default wrote whole-file row groups, which quietly nullified the depth/prefix pushdown's row-group pruning *and* the block index. Old blobs still work (correctness never depends on pruning), just prune coarsely.
+- Measured (4.02M-row scan, 16 RGs): build 7s → 13MB sidecar (811k names); selective queries (`juq`, `ctbk`) hit 5–6/16 RGs → **4–5× vs brute** with exact node parity; the everywhere-name (`node_modules`, 15/16 RGs) converges to brute (1.3×) — the many-match guardrail case, no regression. Wins scale with RG count: at mgu's ~4k groups a selective name reads ~10 groups instead of the file.
+- Follow-ups: out-of-core builder for 1e9-row blobs (DuckDB group-by; the pandas accumulator is fine to ~50M), per-chunk sidecars for hybrid, emit-during-finalize (build currently reads the blob back), trigram tier when a consumer needs sub-second on the vocab scan itself.
 
 The shapes themselves are content-agnostic — nothing gets fitted to one estate. What per-store stats decide is *which sidecars are worth building per scan* and default thresholds (e.g. when to degrade to the progressive scan): collect distinct-name ratios and occurrence skew at index time and choose adaptively per scan (skip the vocab tier where the distinct ratio ≈ 1, etc.).
 

@@ -16,6 +16,15 @@ it cheap (spec "Two properties"):
 Query semantics mirror `@disk-tree/react`'s `parseQuery` (`filter.ts`):
 `/…/flags` is a regex, anything else a substring, case-insensitive by
 default; an invalid regex degrades to a substring match instead of raising.
+
+Matching is keyed on the query, not on index availability (`query_mode`): a
+query containing `/` matches full paths; a slash-free query matches path
+*segments* (basenames). For substrings the two are provably identical after
+outermost-dedup (a slash-free substring cannot span a separator; any ancestor
+-name hit is that ancestor's own row, which covers its subtree). For regexes
+they differ only when a wildcard would span `/` — and segment-local is both
+the intuitive reading (`/foo.bar/` means within one name) and what the vocab
+sidecar (`sidecar.py`) accelerates.
 """
 
 from __future__ import annotations
@@ -69,6 +78,30 @@ def parse_query(query: str, case_sensitive: bool = False) -> Callable[[pd.Series
     if case_sensitive:
         return lambda s: s.str.contains(q, regex=False, na=False)
     return lambda s: s.str.lower().str.contains(q.lower(), regex=False, na=False)
+
+
+def query_mode(query: str) -> str:
+    """`'segment'` (match basenames) or `'path'` (match full paths).
+
+    Mirrors `parse_query`'s parse exactly — including the invalid-regex
+    degradation, whose effective matcher is the *raw* query, slashes included.
+    """
+    q = query.strip()
+    if not q:
+        return 'segment'
+    m = _REGEX_QUERY.match(q)
+    if m:
+        pattern = m.group(1)
+        try:
+            re.compile(pattern)
+        except re.error:
+            return 'path' if '/' in q else 'segment'
+        return 'path' if '/' in pattern else 'segment'
+    return 'path' if '/' in q else 'segment'
+
+
+def basenames(paths: pd.Series) -> pd.Series:
+    return paths.str.rsplit('/', n=1).str[-1]
 
 
 def rebase_frame(df: pd.DataFrame, rel_path: str) -> pd.DataFrame:
@@ -134,6 +167,7 @@ def iter_filter_scan(
     depth-major layout makes shallow-first iterative deepening plain iteration
     order, so partial results stream for free."""
     match = parse_query(query, case_sensitive=case_sensitive)
+    mode = query_mode(query)
 
     # ALWAYS derive depth from `path` — stored depth columns can be stale
     # (chunk-expanded frames carried chunk-relative depths until the
@@ -179,7 +213,7 @@ def iter_filter_scan(
                 yield d, _snapshot(agg, matched_nodes, total_size, n_matches, d)
                 continue
 
-        hits = level[match(paths)]
+        hits = level[match(paths if mode == 'path' else basenames(paths))]
         for row in hits.itertuples():
             size = 0 if pd.isna(row.size) else int(row.size)
             kind = row.kind

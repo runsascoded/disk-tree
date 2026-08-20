@@ -17,6 +17,7 @@ from disk_tree.config import SQLITE_PATH
 
 
 @cli.command('filter')
+@option('-B', '--brute', is_flag=True, help='Skip the vocab sidecar even when one exists (full-scan match)')
 @option('-c', '--case-sensitive', is_flag=True, help='Match case-sensitively')
 @option('-d', '--depth', default=4, help='Display depth of the rollup slice (default 4); totals always cover every depth')
 @option('-H', '--no-human', is_flag=True, help='Print raw bytes instead of human-readable sizes')
@@ -25,15 +26,16 @@ from disk_tree.config import SQLITE_PATH
 @option('-s', '--scan-id', default=None, help='Use a specific scan id (default: freshest covering URI)')
 @argument('uri')
 @argument('query')
-def filter_cmd(case_sensitive: bool, depth: int, no_human: bool, as_json: bool, top: int, scan_id: str | None, uri: str, query: str):
+def filter_cmd(brute: bool, case_sensitive: bool, depth: int, no_human: bool, as_json: bool, top: int, scan_id: str | None, uri: str, query: str):
     """Recursively filter a scan: sizes of everything under URI matching QUERY.
 
     QUERY: `/…/flags` is a regex, anything else a substring (case-insensitive
     by default; an invalid regex degrades to a substring match).
     """
-    from disk_tree.diff import resolve_chunk_for_path
+    from disk_tree.diff import resolve_blob, resolve_chunk_for_path
     from disk_tree.filter import filter_scan, rebase_frame
     from disk_tree.registry import freshest_scan_covering
+    from disk_tree.sidecar import indexed_filter_frame
     from disk_tree.storage import get_backend
 
     uri = uri.rstrip('/') or '/'
@@ -54,9 +56,16 @@ def filter_cmd(case_sensitive: bool, depth: int, no_human: bool, as_json: bool, 
     # chunks nested inside the resolved subtree — a search must not silently
     # miss them.
     blob, rebased = resolve_chunk_for_path(scan['blob'], rel)
-    df = backend.load(blob, follow_refs=True, path_prefix=rebased if rebased != '.' else None)
-    df = rebase_frame(df, rebased)
-    result = filter_scan(df, query, display_depth=depth, case_sensitive=case_sensitive)
+    matched = None
+    if not brute and not blob.startswith(('ddb:', 'sqlite:')):
+        matched = indexed_filter_frame(resolve_blob(blob), query, case_sensitive=case_sensitive, rel_path=rebased)
+    if matched is not None:
+        err(f"index: vocab sidecar ({len(matched)} matched rows)")
+        result = filter_scan(matched, '', display_depth=depth)
+    else:
+        df = backend.load(blob, follow_refs=True, path_prefix=rebased if rebased != '.' else None)
+        df = rebase_frame(df, rebased)
+        result = filter_scan(df, query, display_depth=depth, case_sensitive=case_sensitive)
 
     if as_json:
         print(json.dumps({
