@@ -119,7 +119,29 @@ Guardrail: if candidate occurrences exceed a threshold, degrade to the progressi
 2. **Name → row-group block index** — the expensive step is names→rows, and this is what fixes it: 1e9 rows at 262k/group ≈ 4k row groups; most names hit a few, so a selective query reads ~10 row groups instead of ~4k. Block-level, not row-level, keeps it small. Covers file-name queries (extensions etc.) where vocab is weak.
 3. **Trigram postings over the vocabulary** — last mile, turns vocab-scan ms into µs and enables the regex compilation above. 100–1000× smaller than trigrams over paths (a path is a sequence of vocab entries), losing nothing.
 
-The shapes themselves are content-agnostic — nothing gets fitted to one estate. What per-store stats decide is *which sidecars are worth building per scan* and default thresholds (e.g. when to degrade to the progressive scan): collect distinct-name ratios and occurrence skew at index time and choose adaptively per scan (skip the vocab tier where the distinct ratio ≈ 1, etc.). mgu's numbers are the first 1e9-scale *validation* of whether tiers 2/3 pay for themselves at all — ask them to run the vocabulary probe (`tmp/vocab-probe*.txt` methodology) on a real bucket.
+The shapes themselves are content-agnostic — nothing gets fitted to one estate. What per-store stats decide is *which sidecars are worth building per scan* and default thresholds (e.g. when to degrade to the progressive scan): collect distinct-name ratios and occurrence skew at index time and choose adaptively per scan (skip the vocab tier where the distinct ratio ≈ 1, etc.).
+
+### mgu probe results (2026-08-19, 594M object rows — `tmp/vocab-probe-mgu-1e9.txt`)
+
+mgu ran the probe over their raw `listing-2026-08-15` shards (6 marin-* buckets, DuckDB on a 61GB box). The vocab tier is decisively validated; two laptop-derived assumptions needed correction:
+
+| metric | laptop (4.02M rows) | mgu (594M rows) |
+|---|---:|---:|
+| distinct basenames / rows | 20.2% | **17.0%** (100.8M) — ratio holds |
+| distinct dir-segment names | 50k (1.2%) | **15.5M (2.6%)** — 38× smaller than rows |
+| distinct dir paths (parents) | — | 165M (layer-2 ≈ 759M rows total) |
+| vocab substring vs full-path | — | 0.4s vs 5.5s (**14×**, unindexed) |
+| vocab regex vs full-path | — | 1.0s vs 9.4s (**9×**, unindexed) |
+| rows at depth ≤ 4 | 2.7% | **30.3%** — wide, shallow tree |
+
+Takeaways:
+
+- **Tier 1 (vocab sidecar) pays for itself before any tier-2/3 index exists**: a plain vocab scan is already ~1s at 1e9 vs ~10s brute force, and it's the artifact a *static* consumer can ship (mgu's sites are CF-Pages static — the server-side `/api/filter` doesn't reach them; the sidecar does).
+- **Tier 2 (block index) is required for file-name queries**: 100.8M basenames is too many to brute-scan interactively; names→row-groups is the fix, as designed.
+- **Trigrams (tier 3) remain the last mile** — 15.5M dir names is small enough that even unindexed matching is ~1s; trigrams take it to ms but aren't the gating step.
+- **Correction — the depth histogram does not transfer**: mgu's tree is wide and shallow (depth ≤ 4 = 30% of rows, vs 2.7% locally; median object depth ≈ 5–6). "Iterative deepening gets depth ≤ 4 for ~3% of the cost" is a laptop fact, not a law — at mgu, prefix pushdown dominates depth pushdown, and the progressive scan's early snapshots cost ~⅓ of a full pass, not ~3%.
+- **The many-match guardrail is load-bearing, not theoretical**: `checkpoints` as a substring matches 103M full paths (17% of rows). Occurrence-postings unions for common names must degrade to the progressive scan.
+- Consumer note: the first consumer wants the sidecar consumable **statically** (pre-sharded, range-requestable — e.g. vocab sorted + trigram postings as separate blobs a browser can binary-search via HTTP range requests, DuckDB-wasm optional). Design the artifact layout for that from the start; the server just gets a faster backend for free.
 
 ## Sequencing
 
@@ -128,8 +150,8 @@ The shapes themselves are content-agnostic — nothing gets fitted to one estate
 3. ~~3a best-first recursive diff (endpoint + `dt diff -r`) and 3c max-area diff treemap~~ (done)
 4. v1 progressive filter (`/api/filter` + SSE + UI wiring; retires the "display only" label)
 5. 3b materialized delta scans (merge-join engine work)
-6. Measure at mgu scale → 3d `digest`, vocab + block index + trigrams as the numbers justify
+6. ~~Measure at mgu scale~~ (done — probe results above) → 3d `digest`, vocab + block index + trigrams as the numbers justify. Vocab sidecar is next: validated, and the first consumer (mgu's static sites) is waiting on it.
 
-1–5 need no on-disk format changes and apply to scans that already exist — they CP to mgu without re-indexing. 6 changes the index format and wants mgu's real cardinalities first.
+1–5 need no on-disk format changes and apply to scans that already exist — they CP to mgu without re-indexing. 6 changes the index format and wanted mgu's real cardinalities first (now in hand).
 
 [cox]: https://swtch.com/~rsc/regexp/regexp4.html
