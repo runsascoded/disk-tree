@@ -282,8 +282,13 @@ export function Treemap<T>({
 
   const node = path[path.length - 1]
 
-  // Reset drill path when root changes.
+  // Reset drill path when root changes. Skipped on mount: `useState` already
+  // seeded the path, and re-seeding it there would hand `onPathChange` a
+  // second, identical `[root]` before the consumer has done anything.
+  const mountedRoot = useRef(root)
   useEffect(() => {
+    if (mountedRoot.current === root) return
+    mountedRoot.current = root
     setPath([root])
     setTip(null)
   }, [root])

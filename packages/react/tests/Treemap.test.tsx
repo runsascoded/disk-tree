@@ -30,20 +30,6 @@ const tree: Node = {
   ],
 }
 
-/**
- * jsdom's layout engine is a stub — the ResizeObserver mock never fires, so
- * the map is 0×0 and no cells render. Force a non-zero container size by
- * dispatching a synthetic ResizeObserver-triggered update via clientWidth/Height
- * getters on the map element after mount.
- */
-function mountWithSize<T>(props: Parameters<typeof Treemap<T>>[0], size = { w: 400, h: 300 }) {
-  const { container, ...rest } = render(<Treemap {...props} />)
-  const map = container.querySelector('.dt-treemap-map') as HTMLElement
-  Object.defineProperty(map, 'clientWidth', { value: size.w, configurable: true })
-  Object.defineProperty(map, 'clientHeight', { value: size.h, configurable: true })
-  return { container, map, ...rest }
-}
-
 describe('<Treemap>', () => {
   it('renders the root label in the breadcrumbs bar', () => {
     render(<Treemap root={tree} {...accessors} />)
@@ -64,22 +50,41 @@ describe('<Treemap>', () => {
     expect(lastCall).toEqual([tree])
   })
 
-  it('drill-in click on a branch pushes to onPathChange', async () => {
-    const onPathChange = vi.fn()
-    const { container } = mountWithSize({ root: tree, ...accessors, onPathChange, minCellArea: null })
-    // Trigger a resize event so the observer fallback re-reads clientWidth/Height.
-    // We can't easily trigger ResizeObserver here — instead simulate it by
-    // re-rendering with a fresh callback. Skip this specific interaction test
-    // if the map has no cells yet.
-    const cells = container.querySelectorAll('.dt-treemap-cell.branch')
-    if (cells.length === 0) {
-      // Layout didn't run in jsdom; skip the click-drill assertion but still
-      // confirm the initial callback fired (covered above).
-      return
+  it('drill-in click on a branch pushes to onPathChange', () => {
+    const restore = withLayout()
+    try {
+      // Typed param so `mock.calls` is `[Node[]][]`, not `any[][]`.
+      const onPathChange = vi.fn((_p: Node[]) => {})
+      const { container } = render(
+        <Treemap root={tree} {...accessors} onPathChange={onPathChange} minCellArea={null} />,
+      )
+      fireEvent.click(container.querySelector('.dt-treemap-map > .dt-treemap-cell.branch')!)
+      expect(onPathChange.mock.calls.map(([p]) => p.map(n => n.n))).toEqual([
+        ['root'],
+        ['root', 'foo'],
+      ])
+    } finally {
+      restore()
     }
-    fireEvent.click(cells[0])
-    const lastCall = onPathChange.mock.calls[onPathChange.mock.calls.length - 1][0]
-    expect(lastCall.length).toBeGreaterThan(1)
+  })
+
+  it('reports the reset path exactly once when root changes', () => {
+    const restore = withLayout()
+    try {
+      const onPathChange = vi.fn((_p: Node[]) => {})
+      const props = { ...accessors, onPathChange, minCellArea: null }
+      const { container, rerender } = render(<Treemap root={tree} {...props} />)
+      fireEvent.click(container.querySelector('.dt-treemap-map > .dt-treemap-cell.branch')!)
+      // A rescan of the same path: same shape, different object identity.
+      rerender(<Treemap root={{ ...tree, n: 'root2' }} {...props} />)
+      expect(onPathChange.mock.calls.map(([p]) => p.map(n => n.n))).toEqual([
+        ['root'],
+        ['root', 'foo'],
+        ['root2'],
+      ])
+    } finally {
+      restore()
+    }
   })
 
   it('breadcrumb bar shows a single non-link segment for the current node', () => {
