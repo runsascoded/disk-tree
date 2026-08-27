@@ -617,6 +617,10 @@ export function Treemap<T>({
           // toward the container color, and ancestor bg never shows through
           // descendants — it surfaces only in title bars and gutters.
           background: 'var(--dt-treemap-container-bg, #202024)',
+          // Outer ring in the gutter; transparent by default so dark-palette
+          // consumers can opt into brighter sibling separation via the var.
+          // (boxShadow, not outline — :focus owns the outline.)
+          boxShadow: '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
           color: style.ink,
           borderRadius: dust ? 1.5 : 3,
           overflow: 'hidden',
