@@ -13,7 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import { FaArrowRight, FaFolder, FaFile, FaSortUp, FaSortDown, FaSync, FaList } from 'react-icons/fa'
-import { Treemap as DTTreemap, divergingColor, divergingInk } from '@disk-tree/react'
+import { Treemap as DTTreemap, divergingColor } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
 import { compareScans, compareScansRecursive, fetchScanHistory, startScan } from '../api'
 import type { CompareRecResult, CompareResult, CompareRow, ScanHistoryItem } from '../api'
@@ -278,13 +278,13 @@ function CompareTreemap({
                 // and gutters show — tint them by the net trend Δ/weight (a
                 // summary cue; magnitude lives in the leaf bands).
                 const t = n.weight === 0 ? 0 : n.delta / n.weight
-                return { bg: deltaColor(t), ink: divergingInk(t) }
+                return { bg: deltaColor(t), ink: '#fff' }
               }
               // Sub-rect encoding: a grey rect of min(old, new) bytes plus a
               // full-strength colored band of |Δ| bytes, filling from the
               // bottom — magnitude by *area*, not saturation.
               const f = n.weight === 0 ? 0 : Math.min(1, Math.abs(n.delta) / n.weight)
-              if (f === 0) return { bg: UNCHANGED_GREY, ink: divergingInk(0) }
+              if (f === 0) return { bg: UNCHANGED_GREY, ink: '#fff' }
               const pct = `${(f * 100).toFixed(2)}%`
               const band = deltaColor(Math.sign(n.delta))
               return {
@@ -297,7 +297,7 @@ function CompareTreemap({
             }
             // Δ mode: full cell tinted by Δ relative to the largest |Δ|.
             const t = maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta
-            return { bg: deltaColor(t), ink: divergingInk(t) }
+            return { bg: deltaColor(t), ink: '#fff' }
           }}
           renderCellExtra={areaMode === 'max' ? (n, _path, { w, h }) => {
             // Per-sub-rect size labels: Δ centered in the colored band, the
