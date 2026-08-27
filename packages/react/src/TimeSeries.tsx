@@ -41,6 +41,9 @@ export interface TimeSeriesProps<T> {
   /** Approximate tick counts. */
   xTicks?: number
   yTicks?: number
+  /** Explicit y-tick values (bypasses auto nice-ticks) — e.g. to align to a
+   *  binary display unit (1000 TiB, not a base-10-nice 909 TiB). */
+  yTickValues?: number[]
   /** Show area fill under each line (default true). */
   area?: boolean
   /** Extra CSS on the outer wrapper. */
@@ -86,6 +89,7 @@ export function TimeSeries<T>({
   yLabel,
   xTicks = 5,
   yTicks = 4,
+  yTickValues,
   area = true,
   className,
   style,
@@ -141,7 +145,9 @@ export function TimeSeries<T>({
   }
 
   const xTickVals = niceTicks(xMin, xMax, xTicks)
-  const yTickVals = niceTicks(yMin, yMax, yTicks, yScale === 'log')
+  const yTickVals = yTickValues
+    ? yTickValues.filter(v => v >= yMin - 1e-9 && v <= yMax + 1e-9)
+    : niceTicks(yMin, yMax, yTicks, yScale === 'log')
 
   // Collect all distinct x's across series for hover snapping.
   const allXs = useMemo(() => {

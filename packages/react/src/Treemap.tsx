@@ -30,6 +30,20 @@ import { useHoverPin } from './useHoverPin'
 
 export interface TreemapProps<T> {
   root: T
+  /**
+   * Start drilled to this path (must begin with `root`). Applied on mount and
+   * whenever `root`'s identity changes — crumbs still show the full ancestry,
+   * so a store with one meaningful top-level container can open inside it.
+   */
+  initialPath?: T[]
+  /**
+   * Controlled drill path (must begin with `root`). When given, the component
+   * renders this path and reports every drill/crumb/Backspace gesture through
+   * `onPathChange` instead of keeping its own state — so a consumer can put
+   * the path in the URL, or command a drill from outside (a table row, a
+   * search hit). Mutually exclusive with `initialPath`.
+   */
+  path?: T[]
   /** Extract this node's *own* aggregated size (bytes, count, whatever). */
   getSize: (n: T) => number
   /** Extract children; return `undefined` or `[]` for leaves. */
@@ -176,6 +190,16 @@ export interface CellStyle {
   hatch?: string
   /** opacity multiplier (0–1). Combined with the built-in depth fade. */
   opacity?: number
+  /**
+   * Proportional makeup stripes for a leaf-rendered cell (no nested tiles at
+   * the current depth — folds and max-depth leaves): instead of one dominant
+   * color, the cell renders these as inset slices along its longer axis,
+   * proportional to `frac`. The inset frame (painted `bg`) plus the shared
+   * outer border distinguish a composition breakdown from real child tiles.
+   * Ignored when fewer than 2 segments, when the cell renders children, or
+   * when the cell is too small to read.
+   */
+  segments?: { color: string; frac: number }[]
 }
 
 export interface CellDims {
@@ -234,6 +258,8 @@ const STATUS_STYLE: CSSProperties = {
 
 export function Treemap<T>({
   root,
+  initialPath,
+  path: pathProp,
   getSize,
   getChildren,
   hasChildren,
@@ -267,12 +293,22 @@ export function Treemap<T>({
   rootFade = 0.92,
   fadeFloor = 0.75,
 }: TreemapProps<T>) {
-  const [path, setPath] = useState<T[]>([root])
+  const [pathState, setPathState] = useState<T[]>(initialPath?.[0] === root ? initialPath : [root])
+  const controlled = pathProp !== undefined
+  const path = controlled && pathProp[0] === root ? pathProp : pathState
   const [tip, setTip] = useState<TipState<T> | null>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const mapRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const tipRef = useRef<HTMLDivElement>(null)
+  // Grace timer so the hover tip survives the cell→tip gap: leaving the map
+  // schedules a clear, entering the tip cancels it. Lets you move into the tip
+  // and use its controls/links without pinning (the tip is anchored, not
+  // mouse-following, so it stays put while you reach for it).
+  const tipClear = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const cancelTipClear = () => {
+    if (tipClear.current) { clearTimeout(tipClear.current); tipClear.current = undefined }
+  }
 
   const pin = useHoverPin<string>({ excludeRefs: [tipRef] })
   const [pinnedTip, setPinnedTip] = useState<TipState<T> | null>(null)
@@ -282,22 +318,39 @@ export function Treemap<T>({
 
   const node = path[path.length - 1]
 
-  // Reset drill path when root changes. Skipped on mount: `useState` already
-  // seeded the path, and re-seeding it there would hand `onPathChange` a
-  // second, identical `[root]` before the consumer has done anything.
+  // Every drill/crumb/Backspace gesture routes through here: controlled mode
+  // only reports (the consumer renders the new `path` prop back); uncontrolled
+  // keeps its own state and reports from the effect below, so the mount and
+  // root-reset paths — which no gesture produces — report too.
+  const go = useCallback(
+    (p: T[]) => {
+      if (!controlled) setPathState(p)
+      setTip(null)
+      if (controlled) onPathChange?.(p)
+    },
+    [controlled, onPathChange],
+  )
+
+  // Reset drill path when root changes (respecting `initialPath` when it
+  // belongs to the new root). Controlled mode skips this — the consumer's
+  // `path` prop is recomputed against the new root by the consumer. Skipped on
+  // mount too: `useState` already seeded `path`, and re-seeding it here would
+  // report a second, identical `[root]` through the effect below.
   const mountedRoot = useRef(root)
   useEffect(() => {
-    if (mountedRoot.current === root) return
+    if (controlled || mountedRoot.current === root) return
     mountedRoot.current = root
-    setPath([root])
+    setPathState(initialPath?.[0] === root ? initialPath : [root])
     setTip(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialPath applies per-root, not on its own changes
   }, [root])
 
-  // Notify consumer on path change.
+  // Report the path this component owns: mount (incl. `initialPath`), drills,
+  // and the root-change reset. Controlled mode reports from `go` instead, where
+  // no local state changes and this effect would never fire.
   useEffect(() => {
-    onPathChange?.(path)
-    // path is a fresh array on every drill — safe to depend on it
-  }, [path, onPathChange])
+    if (!controlled) onPathChange?.(path)
+  }, [controlled, path, onPathChange])
 
   // Track container size: measure synchronously, then observe for changes.
   // The initial ResizeObserver delivery is not guaranteed to arrive — in a
@@ -315,14 +368,15 @@ export function Treemap<T>({
   // Backspace/Escape pops the drill stack.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
       if ((e.key === 'Backspace' || e.key === 'Escape') && path.length > 1) {
-        setPath(p => p.slice(0, -1))
-        setTip(null)
+        go(path.slice(0, -1))
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [path.length])
+  }, [path, go])
 
   const idFor = useCallback(
     (n: T, p: T[]) => (getId ? getId(n, p) : defaultId(n, p, getLabel)),
@@ -526,17 +580,19 @@ export function Treemap<T>({
     const showTip = (e: React.MouseEvent) => {
       e.stopPropagation()
       if (folded) return
+      cancelTipClear()
       pin.hover(cellKey)
-      setTip({ x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath })
+      // Anchor to the cell (frozen once per cell) instead of chasing the cursor:
+      // a mouse-following tip can't be hovered into to click its contents.
+      setTip(prev => (prev?.key === cellKey ? prev : { x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath }))
     }
     const onClick = (e: React.MouseEvent) => {
       e.stopPropagation()
       if (folded) return
       if (onCellClick && onCellClick(kid as T, kidPath, e)) return
       if (kidDrillable) {
-        setTip(null)
         pin.clearPin()
-        setPath(kidPath)
+        go(kidPath)
       } else {
         pin.togglePin(cellKey)
         setPinnedTip(p =>
@@ -579,32 +635,91 @@ export function Treemap<T>({
         onClick={onClick}
         onKeyDown={e => e.key === 'Enter' && onClick(e as unknown as React.MouseEvent)}
       >
+        {/* Makeup stripes: a leaf/fold cell with a mixed composition renders
+            proportional inset slices (longer axis) instead of one dominant
+            blob. The `bg` frame showing through the inset + the single outer
+            border reads as "one blob, split by share" — visibly distinct from
+            real child tiles (separate bordered cells with their own labels). */}
+        {style.segments && style.segments.length > 1 && kids.length === 0 && !dust
+          && Math.min(r.w, r.h) >= 18 && (() => {
+            const inset = 3
+            const gap = 1
+            const horiz = r.w >= r.h // slice along the longer axis
+            const span = (horiz ? r.w : r.h) - 2 * inset - gap * (style.segments!.length - 1)
+            if (span < style.segments!.length * 2) return null
+            const total = style.segments!.reduce((s, x) => s + x.frac, 0) || 1
+            let at = inset
+            return style.segments!.map((s, i) => {
+              const len = (s.frac / total) * span
+              const rect = horiz
+                ? { left: at, top: inset, width: len, height: Math.max(0, r.h - 2 * inset - 2) }
+                : { left: inset, top: at, width: Math.max(0, r.w - 2 * inset - 2), height: len }
+              at += len + gap
+              return (
+                <div key={i} style={{
+                  position: 'absolute', ...rect, background: s.color,
+                  borderRadius: 2, pointerEvents: 'none',
+                }} />
+              )
+            })
+          })()}
         {showLbl && (
           <div
             className={'dt-treemap-lbl' + (r.w < 64 ? ' sm' : '')}
             style={{
+              position: 'relative',
+              zIndex: 1, // above makeup stripes (positioned siblings)
               padding: 'var(--dt-treemap-lbl-pad, 2px 4px)',
               fontSize: r.w < 64
                 ? 'var(--dt-treemap-lbl-fs-sm, 0.72rem)'
                 : 'var(--dt-treemap-lbl-fs, 0.85rem)',
               lineHeight: 1.2,
-              whiteSpace: 'nowrap',
+              // Flex, not one nowrap run: a long name ellipsizes while the
+              // size span keeps its width, instead of pushing it out of view.
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 6,
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
               // branch title bar is the parent's own hover target (leaf labels
               // stay pointer-events:none so the body handles them)
               pointerEvents: kids.length > 0 ? 'auto' : 'none',
             }}
             onMouseMove={kids.length > 0 ? showTip : undefined}
           >
-            {kidLabel}
-            {r.w > 90 && (
-              <span style={{ opacity: 0.75, marginLeft: 6 }}>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{kidLabel}</span>
+            {/* Inline size only for branch title-bars and short leaves; a tall
+                leaf drops it to a 2nd line (below) so the name gets the full
+                first line and isn't crowded by the size. */}
+            {(kids.length > 0 || r.h <= 34) && r.w > 90 && (
+              <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none' }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
                   <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
                 )}
               </span>
+            )}
+          </div>
+        )}
+        {/* Size on a second line for any leaf tall enough to hold one — the
+            first line then belongs entirely to the (possibly long) name. */}
+        {showLbl && kids.length === 0 && r.h > 34 && (
+          <div
+            className="dt-treemap-lbl2"
+            style={{
+              position: 'relative',
+              zIndex: 1,
+              padding: '0 4px',
+              fontSize: 'var(--dt-treemap-lbl-fs-sm, 0.72rem)',
+              lineHeight: 1.2,
+              opacity: 0.75,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              pointerEvents: 'none',
+            }}
+          >
+            {formatSize(kidSize)}
+            {!folded && renderCellSubtitle && (
+              <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
             )}
           </div>
         )}
@@ -665,7 +780,7 @@ export function Treemap<T>({
                   tabIndex={0}
                   role="link"
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={() => setPath(path.slice(0, i + 1))}
+                  onClick={() => go(path.slice(0, i + 1))}
                 >
                   {getLabel(n)}
                 </a>
@@ -701,8 +816,10 @@ export function Treemap<T>({
         aria-label="Treemap"
         style={{ position: 'relative', flex: 1, minHeight: 0, ...mapStyle }}
         onMouseLeave={() => {
-          pin.hover(null)
-          setTip(null)
+          // Don't clear immediately — give the pointer time to reach the tip
+          // (cancelled by the tip's onMouseEnter).
+          cancelTipClear()
+          tipClear.current = setTimeout(() => { pin.hover(null); setTip(null) }, 180)
         }}
       >
         {rects.filter(r => r.w >= 3 && r.h >= 3).map(r => cell(r.it, isFolded(r.it) ? path : [...path, r.it as T], r, 0))}
@@ -731,6 +848,8 @@ export function Treemap<T>({
         <div
           ref={tipRef}
           className={'dt-treemap-tip' + (pinnedTip ? ' pinned' : '')}
+          onMouseEnter={cancelTipClear}
+          onMouseLeave={() => { if (!pinnedTip) { pin.hover(null); setTip(null) } }}
           style={{
             position: 'fixed',
             left: Math.min(tipToShow.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1600) - 320),
@@ -743,7 +862,9 @@ export function Treemap<T>({
             fontSize: '0.85rem',
             zIndex: 1000,
             maxWidth: 320,
-            pointerEvents: pinnedTip ? 'auto' : 'none',
+            // Interactive whether hovered or pinned — you can move into it and
+            // click its links/controls (the grace timer keeps it alive en route).
+            pointerEvents: 'auto',
             boxShadow: '0 4px 10px rgba(0,0,0,0.35)',
           }}
         >
