@@ -33,6 +33,35 @@ describe('<TimeSeries>', () => {
     expect(container.querySelector('.dt-timeseries')).toBeInTheDocument()
   })
 
+  it('yTickValues overrides nice-ticks, dropping values outside the domain', () => {
+    // Stub the prototype getters *before* mount — the component measures
+    // synchronously, so post-mount stubbing (forceSize) never renders ticks.
+    const saved = (['clientWidth', 'clientHeight'] as const).map(
+      k => [k, Object.getOwnPropertyDescriptor(HTMLElement.prototype, k)] as const,
+    )
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 400 })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 200 })
+    try {
+      const { container } = render(
+        <TimeSeries
+          series={[{ key: 'a', points: [{ t: 0, y: 10 }, { t: 1, y: 90 }] }]}
+          getX={p => p.t}
+          getY={p => p.y}
+          yTickValues={[16, 64, 256]}  // 256 > yMax → dropped
+        />,
+      )
+      const yLabels = [...container.querySelectorAll('svg g[class] text, svg g text')]
+        .filter(t => t.getAttribute('text-anchor') === 'end')
+        .map(t => t.textContent)
+      expect(yLabels).toEqual(['16', '64'])
+    } finally {
+      for (const [k, d] of saved) {
+        if (d) Object.defineProperty(HTMLElement.prototype, k, d)
+        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[k]
+      }
+    }
+  })
+
   it('handles empty series without crashing', () => {
     interface P { t: number; y: number }
     const { container } = render(
