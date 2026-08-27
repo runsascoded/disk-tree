@@ -190,6 +190,16 @@ export interface CellStyle {
   hatch?: string
   /** opacity multiplier (0–1). Combined with the built-in depth fade. */
   opacity?: number
+  /**
+   * Proportional makeup stripes for a leaf-rendered cell (no nested tiles at
+   * the current depth — folds and max-depth leaves): instead of one dominant
+   * color, the cell renders these as inset slices along its longer axis,
+   * proportional to `frac`. The inset frame (painted `bg`) plus the shared
+   * outer border distinguish a composition breakdown from real child tiles.
+   * Ignored when fewer than 2 segments, when the cell renders children, or
+   * when the cell is too small to read.
+   */
+  segments?: { color: string; frac: number }[]
 }
 
 export interface CellDims {
@@ -625,10 +635,40 @@ export function Treemap<T>({
         onClick={onClick}
         onKeyDown={e => e.key === 'Enter' && onClick(e as unknown as React.MouseEvent)}
       >
+        {/* Makeup stripes: a leaf/fold cell with a mixed composition renders
+            proportional inset slices (longer axis) instead of one dominant
+            blob. The `bg` frame showing through the inset + the single outer
+            border reads as "one blob, split by share" — visibly distinct from
+            real child tiles (separate bordered cells with their own labels). */}
+        {style.segments && style.segments.length > 1 && kids.length === 0 && !dust
+          && Math.min(r.w, r.h) >= 18 && (() => {
+            const inset = 3
+            const gap = 1
+            const horiz = r.w >= r.h // slice along the longer axis
+            const span = (horiz ? r.w : r.h) - 2 * inset - gap * (style.segments!.length - 1)
+            if (span < style.segments!.length * 2) return null
+            const total = style.segments!.reduce((s, x) => s + x.frac, 0) || 1
+            let at = inset
+            return style.segments!.map((s, i) => {
+              const len = (s.frac / total) * span
+              const rect = horiz
+                ? { left: at, top: inset, width: len, height: Math.max(0, r.h - 2 * inset - 2) }
+                : { left: inset, top: at, width: Math.max(0, r.w - 2 * inset - 2), height: len }
+              at += len + gap
+              return (
+                <div key={i} style={{
+                  position: 'absolute', ...rect, background: s.color,
+                  borderRadius: 2, pointerEvents: 'none',
+                }} />
+              )
+            })
+          })()}
         {showLbl && (
           <div
             className={'dt-treemap-lbl' + (r.w < 64 ? ' sm' : '')}
             style={{
+              position: 'relative',
+              zIndex: 1, // above makeup stripes (positioned siblings)
               padding: 'var(--dt-treemap-lbl-pad, 2px 4px)',
               fontSize: r.w < 64
                 ? 'var(--dt-treemap-lbl-fs-sm, 0.72rem)'
@@ -666,6 +706,8 @@ export function Treemap<T>({
           <div
             className="dt-treemap-lbl2"
             style={{
+              position: 'relative',
+              zIndex: 1,
               padding: '0 4px',
               fontSize: 'var(--dt-treemap-lbl-fs-sm, 0.72rem)',
               lineHeight: 1.2,

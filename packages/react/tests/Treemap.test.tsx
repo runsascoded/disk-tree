@@ -174,6 +174,29 @@ describe('<Treemap>', () => {
     }
   })
 
+  it('segments render proportional makeup stripes on leaves, never on branches', () => {
+    const restore = withLayout()
+    try {
+      const segments = [{ color: 'red', frac: 3 }, { color: 'blue', frac: 1 }]
+      const { container } = render(
+        <Treemap root={tree} {...accessors} minCellArea={null} colorForCell={() => ({ segments })} />,
+      )
+      const [foo, bar] = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')]
+      // `foo` renders child tiles — no stripes despite the style.
+      expect([...foo.querySelectorAll(':scope > div:not([class])')]).toEqual([])
+      // `bar` (leaf, 133.33×300 → vertical slicing): span = 300 − 2·3 − 1 = 293,
+      // split 3:1 → 219.75 / 73.25, stacked below the 3px inset with a 1px gap.
+      const stripes = [...bar.querySelectorAll(':scope > div:not([class])')] as HTMLElement[]
+      const round2 = (v: string) => Math.round(parseFloat(v) * 100) / 100
+      expect(stripes.map(s => [s.style.background, round2(s.style.top), round2(s.style.height)])).toEqual([
+        ['red', 3, 219.75],
+        ['blue', 223.75, 73.25],
+      ])
+    } finally {
+      restore()
+    }
+  })
+
   it('breadcrumb bar shows a single non-link segment for the current node', () => {
     const { container } = render(<Treemap root={tree} {...accessors} />)
     // Root is the current node — no interactive anchor around it
