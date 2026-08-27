@@ -289,10 +289,7 @@ function CompareTreemap({
               const band = deltaColor(Math.sign(n.delta))
               return {
                 bg: `linear-gradient(to top, ${band} ${pct}, ${UNCHANGED_GREY} ${pct})`,
-                // White, like the parent strips: the grey under the label is
-                // translucent, so nested cells tint it with their ancestors'
-                // band colors — the neutral ink goes muddy there.
-                ink: '#fff',
+                ink: '#fff', // uniform with every other label
               }
             }
             // Δ mode: full cell tinted by Δ relative to the largest |Δ|.

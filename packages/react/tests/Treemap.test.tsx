@@ -442,6 +442,9 @@ describe('<Treemap> depth fade', () => {
     let el = container.querySelector('.dt-treemap-map > .dt-treemap-cell') as HTMLElement | null
     while (el) {
       expect(el.style.opacity).toBe('')
+      // Opaque container-color base: the faded paint layer composites over
+      // this, never over an ancestor's bg.
+      expect(el.style.background).toBe('var(--dt-treemap-container-bg, #202024)')
       const bg = el.querySelector(':scope > .dt-treemap-bg') as HTMLElement
       fades.push(Number(bg.style.opacity))
       el = el.querySelector(':scope > .dt-treemap-inner > .dt-treemap-cell')

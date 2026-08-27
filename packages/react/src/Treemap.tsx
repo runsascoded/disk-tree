@@ -613,6 +613,10 @@ export function Treemap<T>({
           top: r.y,
           width: Math.max(0, r.w - (dust ? 1 : 2)),
           height: Math.max(0, r.h - (dust ? 1 : 2)),
+          // Opaque base under the faded paint layer: a cell's fade recedes
+          // toward the container color, and ancestor bg never shows through
+          // descendants — it surfaces only in title bars and gutters.
+          background: 'var(--dt-treemap-container-bg, #202024)',
           color: style.ink,
           borderRadius: dust ? 1.5 : 3,
           overflow: 'hidden',
