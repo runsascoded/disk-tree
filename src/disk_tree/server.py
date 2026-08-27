@@ -1317,13 +1317,16 @@ def compare_scans():
     if not scan1_id or not scan2_id:
         return jsonify({'error': 'scan1 and scan2 parameters required'}), 400
 
-    # Check response cache (compare results are expensive to compute)
+    # Check response cache. No TTL: a compare is keyed by two scan *ids*, whose
+    # blobs are immutable — the result can only change via a delete rewriting
+    # parquets, and the delete path clears `_cache` wholesale. (The recursive
+    # walk can take tens of seconds on a big hybrid scan; expiring it every
+    # CACHE_TTL forced that recompute on nearly every page load.)
     cache_key = f"compare:{uri}:{scan1_id}:{scan2_id}:{depth}:{recursive}:{budget}:{rec_max_depth}"
     now = time.time()
     if cache_key in _cache:
-        cached_time, cached_result = _cache[cache_key]
-        if now - cached_time < CACHE_TTL:
-            return jsonify(cached_result)
+        _, cached_result = _cache[cache_key]
+        return jsonify(cached_result)
 
     db = get_db()
 

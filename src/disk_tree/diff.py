@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import heapq
 from dataclasses import dataclass
-from os.path import exists, isabs, join
+from functools import lru_cache
+from os.path import exists, getmtime, isabs, join
 from typing import Callable, Protocol
 
 import pandas as pd
+import pyarrow.parquet as pq
 
 from . import config as _config
 
@@ -39,6 +41,22 @@ def resolve_blob(blob_ref: str) -> str:
     if not blob_ref or blob_ref.startswith(('ddb:', 'sqlite:')):
         return blob_ref
     return blob_ref if isabs(blob_ref) else join(_config.SCANS_DIR, blob_ref)
+
+
+def _chunk_map(parquet_path: str) -> dict[str, str] | None:
+    """path → child_scan_id for the chunk-pointer rows of a hybrid parquet
+    (None when the blob has no `child_scan_id` column). Keyed on mtime because
+    delete updates rewrite blobs in place."""
+    return _chunk_map_cached(parquet_path, getmtime(parquet_path))
+
+
+@lru_cache(maxsize=64)
+def _chunk_map_cached(parquet_path: str, mtime: float) -> dict[str, str] | None:
+    if 'child_scan_id' not in pq.read_schema(parquet_path).names:
+        return None
+    df = pd.read_parquet(parquet_path, columns=['path', 'child_scan_id'])
+    df = df[df['child_scan_id'].notna()]
+    return dict(zip(df['path'], df['child_scan_id']))
 
 
 def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
@@ -57,26 +75,19 @@ def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
     if blob_ref.startswith('ddb:') or blob_ref.startswith('sqlite:'):
         return blob_ref, rel_path
 
-    # Load the root parquet to check for child_scan_id
-    df = pd.read_parquet(resolve_blob(blob_ref))
-    if 'child_scan_id' not in df.columns:
+    chunks = _chunk_map(resolve_blob(blob_ref))
+    if chunks is None:
         return blob_ref, rel_path
 
     # Check if any ancestor of rel_path has a child_scan_id
     parts = rel_path.split('/')
     for i in range(len(parts)):
-        ancestor = '/'.join(parts[:i+1])
-        match = df[df['path'] == ancestor]
-        if not match.empty:
-            row = match.iloc[0]
-            if pd.notna(row.get('child_scan_id')):
-                # This ancestor is chunked - resolve to the chunk
-                chunk_ref = row['child_scan_id']
-                if exists(resolve_blob(chunk_ref)):
-                    # Rebase the remaining path relative to chunk root
-                    remaining = '/'.join(parts[i+1:]) if i + 1 < len(parts) else '.'
-                    # Recursively resolve in case of nested chunks
-                    return resolve_chunk_for_path(chunk_ref, remaining)
+        chunk_ref = chunks.get('/'.join(parts[:i+1]))
+        if chunk_ref is not None and exists(resolve_blob(chunk_ref)):
+            # Rebase the remaining path relative to chunk root
+            remaining = '/'.join(parts[i+1:]) if i + 1 < len(parts) else '.'
+            # Recursively resolve in case of nested chunks
+            return resolve_chunk_for_path(chunk_ref, remaining)
 
     return blob_ref, rel_path
 
