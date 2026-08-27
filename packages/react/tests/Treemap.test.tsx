@@ -87,6 +87,71 @@ describe('<Treemap>', () => {
     }
   })
 
+  it('initialPath mounts drilled and reports that path', () => {
+    const restore = withLayout()
+    try {
+      const onPathChange = vi.fn((_p: Node[]) => {})
+      const { container } = render(
+        <Treemap
+          root={tree}
+          initialPath={[tree, tree.children![0]]}
+          {...accessors}
+          onPathChange={onPathChange}
+          minCellArea={null}
+        />,
+      )
+      // Drilled into `foo`: its children are the top-level cells.
+      expect(cellLabels(container)).toEqual(['a.txt', 'b.txt'])
+      expect(onPathChange.mock.calls.map(([p]) => p.map(n => n.n))).toEqual([['root', 'foo']])
+    } finally {
+      restore()
+    }
+  })
+
+  it('controlled `path` renders the prop; gestures report without changing it', () => {
+    const restore = withLayout()
+    try {
+      const onPathChange = vi.fn((_p: Node[]) => {})
+      const props = { ...accessors, onPathChange, minCellArea: null }
+      const { container, rerender } = render(<Treemap root={tree} path={[tree]} {...props} />)
+      expect(cellLabels(container)).toEqual(['foo', 'bar'])
+
+      // A drill gesture only reports — the display follows the prop.
+      fireEvent.click(container.querySelector('.dt-treemap-map > .dt-treemap-cell.branch')!)
+      expect(onPathChange.mock.calls.map(([p]) => p.map(n => n.n))).toEqual([['root', 'foo']])
+      expect(cellLabels(container)).toEqual(['foo', 'bar'])
+
+      // Consumer renders the reported path back: now the drill shows.
+      rerender(<Treemap root={tree} path={[tree, tree.children![0]]} {...props} />)
+      expect(cellLabels(container)).toEqual(['a.txt', 'b.txt'])
+    } finally {
+      restore()
+    }
+  })
+
+  it('Backspace is inert while typing in an input', () => {
+    const restore = withLayout()
+    try {
+      const onPathChange = vi.fn((_p: Node[]) => {})
+      const { container } = render(
+        <Treemap root={tree} {...accessors} onPathChange={onPathChange} minCellArea={null} />,
+      )
+      fireEvent.click(container.querySelector('.dt-treemap-map > .dt-treemap-cell.branch')!)
+      const input = document.createElement('input')
+      document.body.appendChild(input)
+      try {
+        fireEvent.keyDown(input, { key: 'Backspace' })
+        expect(cellLabels(container)).toEqual(['a.txt', 'b.txt'])  // still drilled
+        fireEvent.keyDown(document.body, { key: 'Backspace' })
+        expect(cellLabels(container)).toEqual(['foo', 'bar'])      // popped
+      } finally {
+        input.remove()
+      }
+    } finally {
+      restore()
+    }
+  })
+
   it('breadcrumb bar shows a single non-link segment for the current node', () => {
     const { container } = render(<Treemap root={tree} {...accessors} />)
     // Root is the current node — no interactive anchor around it

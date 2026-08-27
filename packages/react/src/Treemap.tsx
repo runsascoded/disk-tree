@@ -30,6 +30,20 @@ import { useHoverPin } from './useHoverPin'
 
 export interface TreemapProps<T> {
   root: T
+  /**
+   * Start drilled to this path (must begin with `root`). Applied on mount and
+   * whenever `root`'s identity changes — crumbs still show the full ancestry,
+   * so a store with one meaningful top-level container can open inside it.
+   */
+  initialPath?: T[]
+  /**
+   * Controlled drill path (must begin with `root`). When given, the component
+   * renders this path and reports every drill/crumb/Backspace gesture through
+   * `onPathChange` instead of keeping its own state — so a consumer can put
+   * the path in the URL, or command a drill from outside (a table row, a
+   * search hit). Mutually exclusive with `initialPath`.
+   */
+  path?: T[]
   /** Extract this node's *own* aggregated size (bytes, count, whatever). */
   getSize: (n: T) => number
   /** Extract children; return `undefined` or `[]` for leaves. */
@@ -234,6 +248,8 @@ const STATUS_STYLE: CSSProperties = {
 
 export function Treemap<T>({
   root,
+  initialPath,
+  path: pathProp,
   getSize,
   getChildren,
   hasChildren,
@@ -267,7 +283,9 @@ export function Treemap<T>({
   rootFade = 0.92,
   fadeFloor = 0.75,
 }: TreemapProps<T>) {
-  const [path, setPath] = useState<T[]>([root])
+  const [pathState, setPathState] = useState<T[]>(initialPath?.[0] === root ? initialPath : [root])
+  const controlled = pathProp !== undefined
+  const path = controlled && pathProp[0] === root ? pathProp : pathState
   const [tip, setTip] = useState<TipState<T> | null>(null)
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
   const mapRef = useRef<HTMLDivElement>(null)
@@ -282,22 +300,39 @@ export function Treemap<T>({
 
   const node = path[path.length - 1]
 
-  // Reset drill path when root changes. Skipped on mount: `useState` already
-  // seeded the path, and re-seeding it there would hand `onPathChange` a
-  // second, identical `[root]` before the consumer has done anything.
+  // Every drill/crumb/Backspace gesture routes through here: controlled mode
+  // only reports (the consumer renders the new `path` prop back); uncontrolled
+  // keeps its own state and reports from the effect below, so the mount and
+  // root-reset paths — which no gesture produces — report too.
+  const go = useCallback(
+    (p: T[]) => {
+      if (!controlled) setPathState(p)
+      setTip(null)
+      if (controlled) onPathChange?.(p)
+    },
+    [controlled, onPathChange],
+  )
+
+  // Reset drill path when root changes (respecting `initialPath` when it
+  // belongs to the new root). Controlled mode skips this — the consumer's
+  // `path` prop is recomputed against the new root by the consumer. Skipped on
+  // mount too: `useState` already seeded `path`, and re-seeding it here would
+  // report a second, identical `[root]` through the effect below.
   const mountedRoot = useRef(root)
   useEffect(() => {
-    if (mountedRoot.current === root) return
+    if (controlled || mountedRoot.current === root) return
     mountedRoot.current = root
-    setPath([root])
+    setPathState(initialPath?.[0] === root ? initialPath : [root])
     setTip(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- initialPath applies per-root, not on its own changes
   }, [root])
 
-  // Notify consumer on path change.
+  // Report the path this component owns: mount (incl. `initialPath`), drills,
+  // and the root-change reset. Controlled mode reports from `go` instead, where
+  // no local state changes and this effect would never fire.
   useEffect(() => {
-    onPathChange?.(path)
-    // path is a fresh array on every drill — safe to depend on it
-  }, [path, onPathChange])
+    if (!controlled) onPathChange?.(path)
+  }, [controlled, path, onPathChange])
 
   // Track container size: measure synchronously, then observe for changes.
   // The initial ResizeObserver delivery is not guaranteed to arrive — in a
@@ -315,14 +350,15 @@ export function Treemap<T>({
   // Backspace/Escape pops the drill stack.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
       if ((e.key === 'Backspace' || e.key === 'Escape') && path.length > 1) {
-        setPath(p => p.slice(0, -1))
-        setTip(null)
+        go(path.slice(0, -1))
       }
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [path.length])
+  }, [path, go])
 
   const idFor = useCallback(
     (n: T, p: T[]) => (getId ? getId(n, p) : defaultId(n, p, getLabel)),
@@ -534,9 +570,8 @@ export function Treemap<T>({
       if (folded) return
       if (onCellClick && onCellClick(kid as T, kidPath, e)) return
       if (kidDrillable) {
-        setTip(null)
         pin.clearPin()
-        setPath(kidPath)
+        go(kidPath)
       } else {
         pin.togglePin(cellKey)
         setPinnedTip(p =>
@@ -665,7 +700,7 @@ export function Treemap<T>({
                   tabIndex={0}
                   role="link"
                   style={{ cursor: 'pointer', textDecoration: 'underline' }}
-                  onClick={() => setPath(path.slice(0, i + 1))}
+                  onClick={() => go(path.slice(0, i + 1))}
                 >
                   {getLabel(n)}
                 </a>
