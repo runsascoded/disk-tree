@@ -291,6 +291,14 @@ export function Treemap<T>({
   const mapRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const tipRef = useRef<HTMLDivElement>(null)
+  // Grace timer so the hover tip survives the cell→tip gap: leaving the map
+  // schedules a clear, entering the tip cancels it. Lets you move into the tip
+  // and use its controls/links without pinning (the tip is anchored, not
+  // mouse-following, so it stays put while you reach for it).
+  const tipClear = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const cancelTipClear = () => {
+    if (tipClear.current) { clearTimeout(tipClear.current); tipClear.current = undefined }
+  }
 
   const pin = useHoverPin<string>({ excludeRefs: [tipRef] })
   const [pinnedTip, setPinnedTip] = useState<TipState<T> | null>(null)
@@ -562,8 +570,11 @@ export function Treemap<T>({
     const showTip = (e: React.MouseEvent) => {
       e.stopPropagation()
       if (folded) return
+      cancelTipClear()
       pin.hover(cellKey)
-      setTip({ x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath })
+      // Anchor to the cell (frozen once per cell) instead of chasing the cursor:
+      // a mouse-following tip can't be hovered into to click its contents.
+      setTip(prev => (prev?.key === cellKey ? prev : { x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath }))
     }
     const onClick = (e: React.MouseEvent) => {
       e.stopPropagation()
@@ -763,8 +774,10 @@ export function Treemap<T>({
         aria-label="Treemap"
         style={{ position: 'relative', flex: 1, minHeight: 0, ...mapStyle }}
         onMouseLeave={() => {
-          pin.hover(null)
-          setTip(null)
+          // Don't clear immediately — give the pointer time to reach the tip
+          // (cancelled by the tip's onMouseEnter).
+          cancelTipClear()
+          tipClear.current = setTimeout(() => { pin.hover(null); setTip(null) }, 180)
         }}
       >
         {rects.filter(r => r.w >= 3 && r.h >= 3).map(r => cell(r.it, isFolded(r.it) ? path : [...path, r.it as T], r, 0))}
@@ -793,6 +806,8 @@ export function Treemap<T>({
         <div
           ref={tipRef}
           className={'dt-treemap-tip' + (pinnedTip ? ' pinned' : '')}
+          onMouseEnter={cancelTipClear}
+          onMouseLeave={() => { if (!pinnedTip) { pin.hover(null); setTip(null) } }}
           style={{
             position: 'fixed',
             left: Math.min(tipToShow.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1600) - 320),
@@ -805,7 +820,9 @@ export function Treemap<T>({
             fontSize: '0.85rem',
             zIndex: 1000,
             maxWidth: 320,
-            pointerEvents: pinnedTip ? 'auto' : 'none',
+            // Interactive whether hovered or pinned — you can move into it and
+            // click its links/controls (the grace timer keeps it alive en route).
+            pointerEvents: 'auto',
             boxShadow: '0 4px 10px rgba(0,0,0,0.35)',
           }}
         >
