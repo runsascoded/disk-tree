@@ -623,23 +623,50 @@ export function Treemap<T>({
                 ? 'var(--dt-treemap-lbl-fs-sm, 0.72rem)'
                 : 'var(--dt-treemap-lbl-fs, 0.85rem)',
               lineHeight: 1.2,
-              whiteSpace: 'nowrap',
+              // Flex, not one nowrap run: a long name ellipsizes while the
+              // size span keeps its width, instead of pushing it out of view.
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 6,
               overflow: 'hidden',
-              textOverflow: 'ellipsis',
               // branch title bar is the parent's own hover target (leaf labels
               // stay pointer-events:none so the body handles them)
               pointerEvents: kids.length > 0 ? 'auto' : 'none',
             }}
             onMouseMove={kids.length > 0 ? showTip : undefined}
           >
-            {kidLabel}
-            {r.w > 90 && (
-              <span style={{ opacity: 0.75, marginLeft: 6 }}>
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{kidLabel}</span>
+            {/* Inline size only for branch title-bars and short leaves; a tall
+                leaf drops it to a 2nd line (below) so the name gets the full
+                first line and isn't crowded by the size. */}
+            {(kids.length > 0 || r.h <= 34) && r.w > 90 && (
+              <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none' }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
                   <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
                 )}
               </span>
+            )}
+          </div>
+        )}
+        {/* Size on a second line for any leaf tall enough to hold one — the
+            first line then belongs entirely to the (possibly long) name. */}
+        {showLbl && kids.length === 0 && r.h > 34 && (
+          <div
+            className="dt-treemap-lbl2"
+            style={{
+              padding: '0 4px',
+              fontSize: 'var(--dt-treemap-lbl-fs-sm, 0.72rem)',
+              lineHeight: 1.2,
+              opacity: 0.75,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              pointerEvents: 'none',
+            }}
+          >
+            {formatSize(kidSize)}
+            {!folded && renderCellSubtitle && (
+              <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
             )}
           </div>
         )}

@@ -152,6 +152,28 @@ describe('<Treemap>', () => {
     }
   })
 
+  it('tall leaves put the size on a second line; branch bars keep it inline', () => {
+    const restore = withLayout()
+    try {
+      const { container } = render(
+        <Treemap root={tree} {...accessors} formatSize={n => `${n} B`} minCellArea={null} />,
+      )
+      const cells = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')]
+      const shape = cells.map(el => [
+        el.querySelector(':scope > .dt-treemap-lbl')?.textContent,
+        el.querySelector(':scope > .dt-treemap-lbl2')?.textContent ?? null,
+      ])
+      // `foo` is a branch: inline size in its title bar, no 2nd line of its own.
+      // `bar` is a tall leaf: name-only first line, size on the 2nd.
+      expect(shape).toEqual([
+        ['foo200 B', null],
+        ['bar', '100 B'],
+      ])
+    } finally {
+      restore()
+    }
+  })
+
   it('breadcrumb bar shows a single non-link segment for the current node', () => {
     const { container } = render(<Treemap root={tree} {...accessors} />)
     // Root is the current node — no interactive anchor around it
