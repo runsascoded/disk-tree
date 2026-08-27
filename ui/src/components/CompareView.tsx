@@ -71,12 +71,18 @@ interface CompareTMNode {
   weight: number
   /** signed delta for coloring */
   delta: number
-  status: CompareRow['status'] | 'filler'
+  /** Σ of positive / negative deltas across descendants (frontier-leaf
+   * granularity): `grew ≥ 0`, `shrank ≤ 0`, `grew + shrank ≈ delta`. */
+  grew: number
+  shrank: number
+  status: CompareRow['status'] | 'filler' | 'fold'
   size_old: number
   size_new: number
   n_desc_delta: number
-  kind: CompareRow['kind'] | 'filler'
+  kind: CompareRow['kind'] | 'filler' | 'fold'
   uri: string
+  /** fold cells: how many too-small-to-draw children were merged */
+  nFolded?: number
   /** Frontier dir with unexplored change below (budget/depth cut the walk). */
   pruned?: boolean
   children?: CompareTMNode[]
@@ -121,6 +127,8 @@ function buildCompareTree(
         label: parentPath.split('/').pop()!,
         weight: 0,
         delta: 0,
+        grew: 0,
+        shrank: 0,
         status: 'unchanged',
         size_old: 0,
         size_new: 0,
@@ -141,6 +149,8 @@ function buildCompareTree(
       label: r.path.split('/').pop() || r.path,
       weight: 0,
       delta: r.size_delta,
+      grew: 0,
+      shrank: 0,
       status: r.status,
       size_old: r.size_a,
       size_new: r.size_b,
@@ -160,6 +170,8 @@ function buildCompareTree(
         label: r.path,
         weight: 0,
         delta: 0,
+        grew: 0,
+        shrank: 0,
         status: 'unchanged',
         size_old: r.size_old ?? r.size ?? 0,
         size_new: r.size ?? 0,
@@ -177,21 +189,29 @@ function buildCompareTree(
       ? Math.max(node.size_old, node.size_new)
       : Math.abs(node.delta)
     if (!node.children?.length) {
+      node.grew = Math.max(node.delta, 0)
+      node.shrank = Math.min(node.delta, 0)
       node.weight = own
       return node.weight
     }
     let kidSum = 0
     for (const k of node.children) {
       kidSum += finalize(k)
+      node.grew += k.grew
+      node.shrank += k.shrank
     }
     node.weight = Math.max(own, kidSum)
     const gap = node.weight - kidSum
     if (areaMode === 'max' && gap > Math.max(1_000_000, node.weight * 0.002)) {
+      // No name: it aggregates children the walk never enumerated — the
+      // uniform grey (and the tooltip) do the talking.
       node.children.push({
         key: `${node.key}/__unchanged__`,
-        label: '(unchanged)',
+        label: '',
         weight: gap,
         delta: 0,
+        grew: 0,
+        shrank: 0,
         status: 'filler',
         size_old: gap,
         size_new: gap,
@@ -237,6 +257,8 @@ function CompareTreemap({
       label: result.uri,
       weight: totalWeight,
       delta: result.summary.total_delta,
+      grew: cells.reduce((s, c) => s + c.grew, 0),
+      shrank: cells.reduce((s, c) => s + c.shrank, 0),
       status: 'changed',
       size_old: result.scan1.size ?? 0,
       size_new: result.scan2.size ?? 0,
@@ -262,12 +284,33 @@ function CompareTreemap({
 
   return (
     <Paper sx={{ p: 0, mb: 3, overflow: 'hidden' }}>
-      <Box sx={{ height: 340 }}>
+      <Box sx={{ height: 340, position: 'relative' }}>
         <DTTreemap<CompareTMNode & { children?: CompareTMNode[] }>
           root={root}
           getSize={n => n.weight}
           getChildren={n => (n as { children?: CompareTMNode[] }).children}
           getLabel={n => n.label}
+          // First-class fold cells: aggregate the dust's Δ so a green parent
+          // whose change lives entirely in tiny children still shows where
+          // (band + tooltip), instead of an inert "(+N)" tile.
+          mergeSmall={small => ({
+            key: `${small[0].key}__fold${small.length}`,
+            label: `(+${small.length})`,
+            weight: small.reduce((s, c) => s + c.weight, 0),
+            delta: small.reduce((s, c) => s + c.delta, 0),
+            grew: small.reduce((s, c) => s + c.grew, 0),
+            shrank: small.reduce((s, c) => s + c.shrank, 0),
+            status: 'fold',
+            size_old: small.reduce((s, c) => s + c.size_old, 0),
+            size_new: small.reduce((s, c) => s + c.size_new, 0),
+            n_desc_delta: small.reduce((s, c) => s + c.n_desc_delta, 0),
+            kind: 'fold',
+            uri: small[0].uri,
+            nFolded: small.reduce((s, c) => s + (c.nFolded ?? 1), 0),
+          })}
+          // Brighter sibling separation: the compare palette's dark neutrals
+          // make the default (transparent) cell rings invisible.
+          mapStyle={{ '--dt-treemap-cell-border': 'rgba(255, 255, 255, 0.14)' } as CSSProperties}
           // Displayed inline with the label — the raw |Δ| magnitude. Sign is
           // encoded by the cell color; exact old/new/Δ lives in the tooltip.
           formatSize={formatSize}
@@ -276,7 +319,9 @@ function CompareTreemap({
               if (n.children?.length) {
                 // Parent: children tile its interior, so only the title strip
                 // and gutters show — tint them by the net trend Δ/weight (a
-                // summary cue; magnitude lives in the leaf bands).
+                // summary cue; magnitude lives in the leaf bands). Net-zero
+                // parents get the same grey as every other unchanged rect.
+                if (n.delta === 0) return { bg: UNCHANGED_GREY, ink: '#fff' }
                 const t = n.weight === 0 ? 0 : n.delta / n.weight
                 return { bg: deltaColor(t), ink: '#fff' }
               }
@@ -293,6 +338,7 @@ function CompareTreemap({
               }
             }
             // Δ mode: full cell tinted by Δ relative to the largest |Δ|.
+            if (n.delta === 0) return { bg: UNCHANGED_GREY, ink: '#fff' }
             const t = maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta
             return { bg: deltaColor(t), ink: '#fff' }
           }}
@@ -325,18 +371,35 @@ function CompareTreemap({
           } : undefined}
           renderTooltip={n => (
             <>
-              <div style={{ fontWeight: 500 }}>{n.label}</div>
+              <div style={{ fontWeight: 500 }}>
+                {n.status === 'fold'
+                  ? `${(n.nFolded ?? 0).toLocaleString()} smaller items`
+                  : n.label || 'unchanged'}
+              </div>
               <div style={{ opacity: 0.75, fontSize: '0.85em' }}>
                 {formatSize(n.size_old)} → {formatSize(n.size_new)}
                 {' '}({formatDelta(n.delta)})
               </div>
+              {/* Aggregates with churn in both directions: the net alone
+                  hides how much grew vs shrank among descendants. */}
+              {n.grew > 0 && n.shrank < 0 && (
+                <div style={{ fontSize: '0.8em' }}>
+                  <span style={{ color: GREW_GREEN }}>▲ {formatDelta(n.grew)}</span>
+                  {' · '}
+                  <span style={{ color: SHRANK_RED }}>▼ {formatDelta(n.shrank)}</span>
+                  {' · net '}
+                  <span style={{ color: deltaTextColor(n.delta) }}>{formatDelta(n.delta)}</span>
+                </div>
+              )}
               {n.n_desc_delta !== 0 && (
                 <div style={{ opacity: 0.6, fontSize: '0.8em' }}>
                   Δcount: {n.n_desc_delta > 0 ? '+' : ''}{formatCount(n.n_desc_delta)}
                 </div>
               )}
               <div style={{ opacity: 0.5, fontSize: '0.75em', marginTop: 2 }}>
-                {n.status === 'filler' ? 'unchanged bytes the diff never needed to enumerate' : n.status}
+                {n.status === 'filler' ? 'unchanged bytes the diff never needed to enumerate'
+                  : n.status === 'fold' ? 'children too small to draw, aggregated'
+                  : n.status}
                 {n.pruned && ' · more change below (walk budget) — click to compare here'}
                 {!n.pruned && n.kind === 'dir' && !n.children?.length && ' · click to drill into /compare'}
               </div>
@@ -344,26 +407,6 @@ function CompareTreemap({
           )}
           renderLegend={() => (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', opacity: 0.85 }}>
-              {/* The nested Δ cells come from the recursive frontier; without
-                  it only flat grey context renders — say so instead of
-                  leaving a silently-colorless map. */}
-              {recState === 'loading' && (
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginRight: 6, opacity: 0.8 }}>
-                  <CircularProgress size={11} thickness={5} color="inherit" />
-                  computing Δ detail…
-                </span>
-              )}
-              {recState === 'error' && (
-                <button
-                  onClick={onRecRetry}
-                  style={{
-                    background: 'transparent', border: '1px solid currentColor', borderRadius: 3,
-                    color: SHRANK_RED, cursor: 'pointer', fontSize: '0.75rem', marginRight: 6, padding: '1px 6px',
-                  }}
-                >
-                  Δ detail failed — retry
-                </button>
-              )}
               <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(1), borderRadius: 2 }} />
               grew
               <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(-1), borderRadius: 2 }} />
@@ -405,6 +448,30 @@ function CompareTreemap({
             return true
           }}
         />
+        {/* The colored Δ cells come from the recursive frontier; until it
+            lands, the flat grey context alone reads as a broken all-grey
+            map — put the state front and center, not in the legend. */}
+        {recState !== 'ready' && (
+          <Box
+            sx={{
+              position: 'absolute', inset: 0, zIndex: 2,
+              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              gap: 1.5, bgcolor: 'rgba(8, 10, 12, 0.55)',
+              pointerEvents: recState === 'error' ? 'auto' : 'none',
+            }}
+          >
+            {recState === 'loading' ? (
+              <>
+                <CircularProgress size={40} />
+                <Typography variant="body2" sx={{ opacity: 0.9 }}>computing Δ detail…</Typography>
+              </>
+            ) : (
+              <Button size="small" color="error" variant="outlined" onClick={onRecRetry}>
+                Δ detail failed — retry
+              </Button>
+            )}
+          </Box>
+        )}
       </Box>
     </Paper>
   )
