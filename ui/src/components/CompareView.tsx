@@ -217,10 +217,14 @@ function buildCompareTree(
 function CompareTreemap({
   result,
   rec,
+  recState,
+  onRecRetry,
   onDrill,
 }: {
   result: CompareResult
   rec?: CompareRecResult
+  recState: 'loading' | 'error' | 'ready'
+  onRecRetry: () => void
   onDrill: (uri: string) => void
 }) {
   const [areaMode, setAreaMode] = useState<AreaMode>('max')
@@ -343,6 +347,26 @@ function CompareTreemap({
           )}
           renderLegend={() => (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', opacity: 0.85 }}>
+              {/* The nested Δ cells come from the recursive frontier; without
+                  it only flat grey context renders — say so instead of
+                  leaving a silently-colorless map. */}
+              {recState === 'loading' && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginRight: 6, opacity: 0.8 }}>
+                  <CircularProgress size={11} thickness={5} color="inherit" />
+                  computing Δ detail…
+                </span>
+              )}
+              {recState === 'error' && (
+                <button
+                  onClick={onRecRetry}
+                  style={{
+                    background: 'transparent', border: '1px solid currentColor', borderRadius: 3,
+                    color: SHRANK_RED, cursor: 'pointer', fontSize: '0.75rem', marginRight: 6, padding: '1px 6px',
+                  }}
+                >
+                  Δ detail failed — retry
+                </button>
+              )}
               <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(1), borderRadius: 2 }} />
               grew
               <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(-1), borderRadius: 2 }} />
@@ -994,6 +1018,8 @@ export function CompareView() {
   const [historyLoading, setHistoryLoading] = useState(true)
   const [result, setResult] = useState<CompareResult | null>(null)
   const [recResult, setRecResult] = useState<CompareRecResult | null>(null)
+  const [recState, setRecState] = useState<'loading' | 'error' | 'ready'>('loading')
+  const [recAttempt, setRecAttempt] = useState(0)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -1063,13 +1089,24 @@ export function CompareView() {
       .then(setResult)
       .catch(err => setError(err.message))
       .finally(() => setLoading(false))
-    // The recursive frontier feeds the nested treemap; the table stays on the
-    // depth-1 rows. Best-effort — the flat view stands alone without it.
-    setRecResult(null)
-    compareScansRecursive(uri, scan1 as number, scan2 as number)
-      .then(setRecResult)
-      .catch(() => setRecResult(null))
   }, [uri, scan1, scan2])
+
+  // The recursive frontier feeds the nested treemap; the table stays on the
+  // depth-1 rows. The flat view stands alone without it, but its absence is
+  // surfaced (legend spinner / retry) — never a silently-grey map.
+  useEffect(() => {
+    if (scan1 === '' || scan2 === '' || scan1 === scan2) {
+      setRecResult(null)
+      return
+    }
+    let stale = false
+    setRecResult(null)
+    setRecState('loading')
+    compareScansRecursive(uri, scan1 as number, scan2 as number)
+      .then(r => { if (!stale) { setRecResult(r); setRecState('ready') } })
+      .catch(() => { if (!stale) setRecState('error') })
+    return () => { stale = true }
+  }, [uri, scan1, scan2, recAttempt])
 
   // Get scan_path for selected scans (for breadcrumb coverage highlighting)
   const scan1Item = history.find(h => h.id === scan1)
@@ -1340,6 +1377,8 @@ export function CompareView() {
               <CompareTreemap
                 result={result}
                 rec={recResult ?? undefined}
+                recState={recState}
+                onRecRetry={() => setRecAttempt(a => a + 1)}
                 onDrill={childUri => {
                   // Preserve scan1/scan2 query params on drill so the sub-view
                   // shows the same snapshot pair.
