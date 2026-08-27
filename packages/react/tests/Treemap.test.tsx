@@ -183,10 +183,10 @@ describe('<Treemap>', () => {
       )
       const [foo, bar] = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')]
       // `foo` renders child tiles — no stripes despite the style.
-      expect([...foo.querySelectorAll(':scope > div:not([class])')]).toEqual([])
+      expect([...foo.querySelectorAll(':scope > .dt-treemap-bg > div:not([class])')]).toEqual([])
       // `bar` (leaf, 133.33×300 → vertical slicing): span = 300 − 2·3 − 1 = 293,
       // split 3:1 → 219.75 / 73.25, stacked below the 3px inset with a 1px gap.
-      const stripes = [...bar.querySelectorAll(':scope > div:not([class])')] as HTMLElement[]
+      const stripes = [...bar.querySelectorAll(':scope > .dt-treemap-bg > div:not([class])')] as HTMLElement[]
       const round2 = (v: string) => Math.round(parseFloat(v) * 100) / 100
       expect(stripes.map(s => [s.style.background, round2(s.style.top), round2(s.style.height)])).toEqual([
         ['red', 3, 219.75],
@@ -435,20 +435,28 @@ describe('<Treemap> depth fade', () => {
     }],
   }
 
-  it('floors the cumulative fade at fadeFloor so deep labels stay readable', () => {
+  /** Walk the spine collecting each cell's bg-layer opacity, asserting the
+   * cell div itself never fades (label ink stays full-strength). */
+  function bgFades(container: HTMLElement): number[] {
+    const fades: number[] = []
+    let el = container.querySelector('.dt-treemap-map > .dt-treemap-cell') as HTMLElement | null
+    while (el) {
+      expect(el.style.opacity).toBe('')
+      const bg = el.querySelector(':scope > .dt-treemap-bg') as HTMLElement
+      fades.push(Number(bg.style.opacity))
+      el = el.querySelector(':scope > .dt-treemap-inner > .dt-treemap-cell')
+    }
+    return fades
+  }
+
+  it('fades backgrounds per depth, floored at fadeFloor; cell divs (and their labels) never fade', () => {
     const restore = withLayout()
     try {
       const { container } = render(<Treemap root={spine} {...accessors} minCellArea={null} />)
-      const locals: number[] = []
-      let el = container.querySelector('.dt-treemap-map > .dt-treemap-cell') as HTMLElement | null
-      while (el) {
-        locals.push(Number(el.style.opacity))
-        el = el.querySelector(':scope > .dt-treemap-inner > .dt-treemap-cell')
-      }
-      // Cumulative target is max(rootFade × depthFade^d, fadeFloor):
-      //   d0 0.92, d1 0.7544, d2 floored to 0.75, d3 held at 0.75 —
-      // so the local values are rootFade, depthFade, floor/prev, then 1.
-      expect(locals).toEqual([0.92, 0.82, 0.75 / (0.92 * 0.82), 1])
+      // Bg-layer opacity is max(rootFade × depthFade^d, fadeFloor) per cell —
+      // no compounding, since only the paint layer fades, not the subtree:
+      //   d0 0.92, d1 0.7544, d2 floored to 0.75, d3 held at 0.75.
+      expect(bgFades(container)).toEqual([0.92, 0.92 * 0.82, 0.75, 0.75])
     } finally {
       restore()
     }
@@ -460,13 +468,7 @@ describe('<Treemap> depth fade', () => {
       const { container } = render(
         <Treemap root={spine} {...accessors} minCellArea={null} depthFade={1} />,
       )
-      const locals: number[] = []
-      let el = container.querySelector('.dt-treemap-map > .dt-treemap-cell') as HTMLElement | null
-      while (el) {
-        locals.push(Number(el.style.opacity))
-        el = el.querySelector(':scope > .dt-treemap-inner > .dt-treemap-cell')
-      }
-      expect(locals).toEqual([0.92, 1, 1, 1])
+      expect(bgFades(container)).toEqual([0.92, 0.92, 0.92, 0.92])
     } finally {
       restore()
     }
