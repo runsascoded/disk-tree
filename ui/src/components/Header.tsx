@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { AppBar, Toolbar, Typography, Button, Box, Tooltip, Popover, List, ListItem, ListItemText, Chip, Alert } from '@mui/material'
+import { AppBar, Toolbar, Typography, Button, Box, Tooltip, Popover, List, ListItem, ListItemText, Chip, Alert, ToggleButton, ToggleButtonGroup } from '@mui/material'
 import { FaCloud, FaDatabase, FaFolder, FaHistory, FaCog } from 'react-icons/fa'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAvailableBackends } from '../api'
+import { useUnits } from '../utils/units'
 
 export function Header() {
   const location = useLocation()
@@ -12,6 +13,7 @@ export function Header() {
   const isLocalPage = path.startsWith('/file')
   const isS3Page = path.startsWith('/s3')
   const isRecentPage = path === '/recent'
+  const [units, setUnits] = useUnits()
 
   // Backend popover state
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null)
@@ -74,6 +76,20 @@ export function Header() {
             Recent
           </Button>
         </Box>
+
+        {/* Size units: SI (G = 10⁹) vs IEC (Gi = 2³⁰) */}
+        <Tooltip title={units === 'si' ? 'SI units: K/M/G = powers of 1000 (Finder, df -H)' : 'IEC units: Ki/Mi/Gi = powers of 1024 (du, ls -h)'}>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={units}
+            onChange={(_e, v) => { if (v) setUnits(v) }}
+            sx={{ mr: 1, '& .MuiToggleButton-root': { py: 0, px: 1, fontSize: '0.7rem', textTransform: 'none' } }}
+          >
+            <ToggleButton value="si">G</ToggleButton>
+            <ToggleButton value="iec">Gi</ToggleButton>
+          </ToggleButtonGroup>
+        </Tooltip>
 
         {/* Backend indicator */}
         {backendData && (

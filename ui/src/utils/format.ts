@@ -1,6 +1,7 @@
 /**
  * Shared formatting utilities for the UI
  */
+import { getUnits } from './units'
 
 /**
  * Format a timestamp (Date string, number, or null) as relative time
@@ -33,14 +34,17 @@ export function timeAgo(value: string | number | null | undefined): string {
 }
 
 /**
- * Format bytes as human-readable size (e.g., "1.5 GB")
+ * Format bytes compactly — `1.5 G` (SI, 10⁹) or `1.5 Gi` (IEC, 2³⁰) per the
+ * units preference (`utils/units.ts`); bare bytes as `512 B`.
  */
 export function formatSize(bytes: number | null | undefined): string {
   if (bytes == null) return '-'
-  if (bytes >= 1024 ** 4) return `${(bytes / 1024 ** 4).toFixed(1)} TB`
-  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`
-  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  const iec = getUnits() === 'iec'
+  const base = iec ? 1024 : 1000
+  const suffix = iec ? 'i' : ''
+  for (const [exp, letter] of [[4, 'T'], [3, 'G'], [2, 'M'], [1, 'K']] as const) {
+    if (bytes >= base ** exp) return `${(bytes / base ** exp).toFixed(1)} ${letter}${suffix}`
+  }
   return `${bytes} B`
 }
 
