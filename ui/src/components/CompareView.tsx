@@ -26,7 +26,7 @@ type SortColumn = 'size_old' | 'size_new' | 'size_delta' | 'desc_old' | 'desc_ne
 type SortDirection = 'asc' | 'desc'
 
 function formatDelta(bytes: number): string {
-  const sign = bytes < 0 ? '-' : '+'
+  const sign = bytes < 0 ? '−' : '+'  // U+2212: a hyphen reads as a dash at small sizes
   return sign + formatSize(Math.abs(bytes)).replace(' ', '')
 }
 
@@ -300,15 +300,17 @@ function churn(
     const shared = vals.every(v => v === 0 || unitOf(v) === unitOf(totalBytes))
     fmt = b => shared ? formatSize(b).split(' ')[0] : formatSize(b).replace(' ', '')
   }
-  const d = (n.delta > 0 ? '+' : n.delta < 0 ? '-' : '') + fmt(Math.abs(n.delta))
+  const d = (n.delta > 0 ? '+' : n.delta < 0 ? '−' : '±') + fmt(Math.abs(n.delta))
   const parts: [string, string, string][] = both
     ? [['▲', fmt(n.grew), GREW_GREEN], ['▼', fmt(-n.shrank), SHRANK_RED]]
     : []
-  if (net) parts.push(['Δ', d, deltaTextColor(n.delta)])
+  // Counts carry their sign, so the bare number is the net; bytes keep the
+  // `Δ` glyph in title strips where it's the only cue the number is a delta.
+  if (net) parts.push([totalBytes === null ? '' : 'Δ', d, deltaTextColor(n.delta)])
   return {
-    text: parts.map(([g, v]) => `${g} ${v}`).join(' '),
+    text: parts.map(([g, v]) => (g ? `${g} ${v}` : v)).join(' '),
     node: parts.map(([g, v, color], i) => (
-      <span key={g} style={{ color, marginLeft: i ? 6 : 0 }}>{g} {v}</span>
+      <span key={g || 'net'} style={{ color, marginLeft: i ? 6 : 0 }}>{g ? `${g} ${v}` : v}</span>
     )),
   }
 }
@@ -487,10 +489,10 @@ function CompareTreemap({
                   ? (n.nRest === undefined ? 'unchanged' : `${n.nRest.toLocaleString()} unchanged children`)
                   : n.label || 'unchanged'}
               </div>
-              <div style={{ opacity: 0.75, fontSize: '0.85em' }}>
+              <div style={{ color: 'rgba(255, 255, 255, 0.75)', fontSize: '0.85em' }}>
                 {n.delta === 0
                   ? formatSize(n.size_new)
-                  : <>{formatSize(n.size_old)} → {formatSize(n.size_new)} (<span style={{ color: deltaTextColor(n.delta) }}>{formatDelta(n.delta)}</span>)</>}
+                  : <>{formatSize(n.size_old)} → {formatSize(n.size_new)} (<span style={{ color: deltaTextColor(n.delta), fontWeight: 600, fontSize: '1.1em' }}>{formatDelta(n.delta)}</span>)</>}
                 {n.status === 'unchanged' && ' — unchanged'}
                 {n.status === 'touched' && ' — touched (same bytes & count, mtime moved)'}
                 {n.status === 'filler' && n.nDescRest !== undefined && n.nDescRest !== n.nRest && (
@@ -510,18 +512,18 @@ function CompareTreemap({
                 </div>
               )}
               {/* Only what the size line doesn't already say. */}
-              {(n.status === 'filler' || n.status === 'fold' || n.status === 'added' || n.status === 'removed' || n.pruned) && (
+              {(n.status === 'filler' || n.status === 'fold' || n.status === 'added' || n.status === 'removed' || (n.pruned && rec?.index?.status !== 'done')) && (
                 <div style={{ opacity: 0.5, fontSize: '0.75em', marginTop: 2 }}>
                   {n.status === 'filler' ? 'unchanged bytes the diff never needed to enumerate'
                     : n.status === 'fold' ? 'children too small to draw, aggregated'
                     : n.status === 'added' || n.status === 'removed' ? n.status
                     : null}
-                  {n.pruned && (n.status === 'added' || n.status === 'removed' ? ' · ' : '')}
-                  {n.pruned && (rec?.index?.status === 'done'
-                    ? 'more detail below than this view holds — click to compare here'
-                    : n.delta === 0 && n.n_desc_delta === 0
-                    ? 'not descended (walk budget): something inside moved — click to compare here'
-                    : 'Δ not localized (walk budget) — click to compare here')}
+                  {n.pruned && rec?.index?.status !== 'done' && <>
+                    {(n.status === 'added' || n.status === 'removed') && ' · '}
+                    {n.delta === 0 && n.n_desc_delta === 0
+                      ? 'not descended (walk budget): something inside moved — click to compare here'
+                      : 'Δ not localized (walk budget) — click to compare here'}
+                  </>}
                 </div>
               )}
             </>
