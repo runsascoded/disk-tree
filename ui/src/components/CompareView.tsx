@@ -75,6 +75,9 @@ interface CompareTMNode {
    * granularity): `grew ≥ 0`, `shrank ≤ 0`, `grew + shrank ≈ delta`. */
   grew: number
   shrank: number
+  /** same, for entry counts (`n_desc_delta`): `nGrew ≥ 0`, `nShrank ≤ 0` */
+  nGrew: number
+  nShrank: number
   status: CompareRow['status'] | 'filler' | 'fold'
   size_old: number
   size_new: number
@@ -139,6 +142,8 @@ function buildCompareTree(
         delta: 0,
         grew: 0,
         shrank: 0,
+        nGrew: 0,
+        nShrank: 0,
         status: 'unchanged',
         size_old: 0,
         size_new: 0,
@@ -165,6 +170,8 @@ function buildCompareTree(
       delta: r.size_delta,
       grew: 0,
       shrank: 0,
+      nGrew: 0,
+      nShrank: 0,
       status: r.status,
       size_old: r.size_a,
       size_new: r.size_b,
@@ -187,6 +194,8 @@ function buildCompareTree(
         delta: 0,
         grew: 0,
         shrank: 0,
+        nGrew: 0,
+        nShrank: 0,
         status: 'unchanged',
         size_old: r.size_old ?? r.size ?? 0,
         size_new: r.size ?? 0,
@@ -206,6 +215,8 @@ function buildCompareTree(
     if (!node.children?.length) {
       node.grew = Math.max(node.delta, 0)
       node.shrank = Math.min(node.delta, 0)
+      node.nGrew = Math.max(node.n_desc_delta, 0)
+      node.nShrank = Math.min(node.n_desc_delta, 0)
       node.weight = own
       return node.weight
     }
@@ -214,6 +225,8 @@ function buildCompareTree(
       kidSum += finalize(k)
       node.grew += k.grew
       node.shrank += k.shrank
+      node.nGrew += k.nGrew
+      node.nShrank += k.nShrank
     }
     // Hide-unchanged: a parent occupies only its changed children's bytes —
     // no filler for the unenumerated remainder, so areas compare *changes*,
@@ -233,6 +246,8 @@ function buildCompareTree(
         delta: 0,
         grew: 0,
         shrank: 0,
+        nGrew: 0,
+        nShrank: 0,
         status: 'filler',
         size_old: gap,
         size_new: gap,
@@ -265,15 +280,21 @@ function buildCompareTree(
  * Both directions when there's churn both ways, else just the Δ.
  */
 function churn(
-  n: Pick<CompareTMNode, 'grew' | 'shrank' | 'delta'>,
-  totalBytes: number,
+  n: { grew: number; shrank: number; delta: number },
+  /** bytes: the total the line follows (drives unit elision); counts: `null` */
+  totalBytes: number | null,
 ): { text: string; node: ReactNode } | null {
   const both = n.grew > 0 && n.shrank < 0
   if (!both && n.delta === 0) return null
-  const vals = both ? [n.grew, -n.shrank, Math.abs(n.delta)] : [Math.abs(n.delta)]
-  const unitOf = (b: number) => formatSize(b).split(' ')[1]
-  const shared = vals.every(v => v === 0 || unitOf(v) === unitOf(totalBytes))
-  const fmt = (b: number) => shared ? formatSize(b).split(' ')[0] : formatSize(b).replace(' ', '')
+  let fmt: (v: number) => string
+  if (totalBytes === null) {
+    fmt = formatCount
+  } else {
+    const vals = both ? [n.grew, -n.shrank, Math.abs(n.delta)] : [Math.abs(n.delta)]
+    const unitOf = (b: number) => formatSize(b).split(' ')[1]
+    const shared = vals.every(v => v === 0 || unitOf(v) === unitOf(totalBytes))
+    fmt = b => shared ? formatSize(b).split(' ')[0] : formatSize(b).replace(' ', '')
+  }
   const d = (n.delta > 0 ? '+' : n.delta < 0 ? '-' : '') + fmt(Math.abs(n.delta))
   const parts: [string, string, string][] = both
     ? [['▲', fmt(n.grew), GREW_GREEN], ['▼', fmt(-n.shrank), SHRANK_RED], ['Δ', d, deltaTextColor(n.delta)]]
@@ -312,6 +333,8 @@ function CompareTreemap({
       delta: result.summary.total_delta,
       grew: cells.reduce((s, c) => s + c.grew, 0),
       shrank: cells.reduce((s, c) => s + c.shrank, 0),
+      nGrew: cells.reduce((s, c) => s + c.nGrew, 0),
+      nShrank: cells.reduce((s, c) => s + c.nShrank, 0),
       status: 'changed',
       size_old: result.scan1.size ?? 0,
       size_new: result.scan2.size ?? 0,
@@ -358,6 +381,8 @@ function CompareTreemap({
             delta: small.reduce((s, c) => s + c.delta, 0),
             grew: small.reduce((s, c) => s + c.grew, 0),
             shrank: small.reduce((s, c) => s + c.shrank, 0),
+            nGrew: small.reduce((s, c) => s + c.nGrew, 0),
+            nShrank: small.reduce((s, c) => s + c.nShrank, 0),
             status: 'fold',
             size_old: small.reduce((s, c) => s + c.size_old, 0),
             size_new: small.reduce((s, c) => s + c.size_new, 0),
@@ -469,9 +494,11 @@ function CompareTreemap({
               {n.grew > 0 && n.shrank < 0 && (
                 <div style={{ fontSize: '0.8em' }}>{churn(n, n.size_new)?.node}</div>
               )}
-              {n.n_desc_delta !== 0 && (
-                <div style={{ opacity: 0.6, fontSize: '0.8em' }}>
-                  Δcount: {n.n_desc_delta > 0 ? '+' : ''}{formatCount(n.n_desc_delta)}
+              {/* Entry counts get the same ▲/▼/Δ treatment as bytes. */}
+              {(n.n_desc_delta !== 0 || n.nGrew > 0) && (
+                <div style={{ fontSize: '0.8em' }}>
+                  <span style={{ opacity: 0.6 }}>count </span>
+                  {churn({ grew: n.nGrew, shrank: n.nShrank, delta: n.n_desc_delta }, null)?.node}
                 </div>
               )}
               <div style={{ opacity: 0.5, fontSize: '0.75em', marginTop: 2 }}>
