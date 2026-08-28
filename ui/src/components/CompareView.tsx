@@ -982,6 +982,15 @@ function CompareTable({
             </td>
           </tr>
         )}
+        {/* The treemap draws unchanged children as grey context; the table
+            lists changes only — say what it's leaving out so they agree. */}
+        {result.summary.unchanged > 0 && (
+          <tr>
+            <td colSpan={10} style={{ padding: '6px 8px', color: '#8b949e', fontSize: '0.8em' }}>
+              {result.summary.unchanged.toLocaleString()} unchanged {result.summary.unchanged === 1 ? 'entry' : 'entries'} not listed
+            </td>
+          </tr>
+        )}
       </tbody>
     </table>
   )
@@ -1049,6 +1058,17 @@ function CompareRowComponent({
             </Link>
           ) : (
             <span style={{ fontFamily: 'monospace', fontSize: '0.9em' }}>{row.path}</span>
+          )}
+          {row.status === 'touched' && (
+            <span
+              title="same bytes & count, mtime moved (rename / net-zero churn / touch)"
+              style={{
+                fontSize: '0.7em', color: '#8b949e', padding: '0 6px', borderRadius: 3,
+                background: UNCHANGED_GREY, backgroundImage: TOUCHED_HATCH,
+              }}
+            >
+              touched
+            </span>
           )}
         </div>
       </td>
