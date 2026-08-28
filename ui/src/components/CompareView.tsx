@@ -83,6 +83,10 @@ interface CompareTMNode {
   uri: string
   /** fold cells: how many too-small-to-draw children were merged */
   nFolded?: number
+  /** filler cells: the unenumerated unchanged children it stands for
+   * (direct-child count and their descendants), when the server told us */
+  nRest?: number
+  nDescRest?: number
   /** Frontier dir with unexplored change below (budget/depth cut the walk). */
   pruned?: boolean
   children?: CompareTMNode[]
@@ -96,8 +100,11 @@ interface CompareTMNode {
  * parent is `max(its own max, Σ children)` — churn (delete X + add Y) makes
  * children sum past either side's bytes, and the parent honestly grows to
  * hold them. Where children under-fill a parent (unchanged bytes the walk
- * never enumerated), a grey `(unchanged)` filler cell absorbs the gap, so
- * areas stay truthful without shipping every unchanged row.
+ * never enumerated), a grey filler cell absorbs the gap, so areas stay
+ * truthful without shipping every unchanged row. The server ships each
+ * expanded dir's biggest unchanged children (`rec.unchanged.top`, named grey
+ * cells) and an aggregate of the rest (`rec.unchanged.rest`) — the filler's
+ * tooltip counts what it stands for.
  *
  * Children order is signed: biggest adds first, unchanged middle, biggest
  * shrinks last (sort by -Δ).
@@ -110,9 +117,11 @@ function buildCompareTree(
 ): { cells: CompareTMNode[]; maxAbsDelta: number } {
   const uriPrefix = flat.uri.replace(/\/$/, '') + '/'
   const byPath = new Map<string, CompareTMNode>()
+  const pathOf = new Map<CompareTMNode, string>()
   const roots: CompareTMNode[] = []
   const attach = (node: CompareTMNode, path: string) => {
     byPath.set(path, node)
+    pathOf.set(node, path)
     const i = path.lastIndexOf('/')
     if (i < 0) {
       roots.push(node)
@@ -143,7 +152,11 @@ function buildCompareTree(
     ;(parent.children ??= []).push(node)
   }
 
-  const recRows = [...(rec?.rows ?? [])].sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path))
+  const recRows = [
+    ...(rec?.rows ?? []),
+    ...(showUnchanged ? rec?.unchanged?.top ?? [] : []),
+  ].sort((a, b) => a.depth - b.depth || a.path.localeCompare(b.path))
+  const rest = rec?.unchanged?.rest ?? {}
   for (const r of recRows) {
     attach({
       key: r.uri,
@@ -210,7 +223,9 @@ function buildCompareTree(
     const gap = node.weight - kidSum
     if (areaMode === 'max' && showUnchanged && gap > Math.max(1_000_000, node.weight * 0.002)) {
       // No name: it aggregates children the walk never enumerated — the
-      // uniform grey (and the tooltip) do the talking.
+      // uniform grey (and the tooltip, with the server's count of what it
+      // stands for) do the talking.
+      const r = rest[pathOf.get(node) ?? '']
       node.children.push({
         key: `${node.key}/__unchanged__`,
         label: '',
@@ -224,6 +239,8 @@ function buildCompareTree(
         n_desc_delta: 0,
         kind: 'filler',
         uri: node.uri,
+        nRest: r?.count,
+        nDescRest: r === undefined ? undefined : r.count + r.n_desc,
       })
     }
     node.children.sort((a, b) => (b.delta - a.delta) || (b.weight - a.weight))
@@ -381,16 +398,45 @@ function CompareTreemap({
               </>
             )
           } : undefined}
+          // Branch title strips have room to spare: inline the ▲/▼/net
+          // (or just the net) when it fits after the name and size — a
+          // rough char-width estimate against the cell box, since the size
+          // span never shrinks and would crush the name otherwise.
+          renderCellSubtitle={(n, _path, { w }) => {
+            if (!n.children?.length || n.delta === 0) return null
+            const room = w - 8 - n.label.length * 7 - formatSize(n.weight).length * 6.5 - 12
+            const net = <span style={{ color: deltaTextColor(n.delta) }}>{formatDelta(n.delta)}</span>
+            if (n.grew > 0 && n.shrank < 0) {
+              const full = `▲ ${formatDelta(n.grew)} · ▼ ${formatDelta(n.shrank)} · net ${formatDelta(n.delta)}`
+              if (full.length * 6.5 <= room) {
+                return (
+                  <>
+                    <span style={{ color: GREW_GREEN }}>▲ {formatDelta(n.grew)}</span>
+                    {' · '}
+                    <span style={{ color: SHRANK_RED }}>▼ {formatDelta(n.shrank)}</span>
+                    {' · net '}{net}
+                  </>
+                )
+              }
+            }
+            return formatDelta(n.delta).length * 6.5 <= room ? net : null
+          }}
           renderTooltip={n => (
             <>
               <div style={{ fontWeight: 500 }}>
                 {n.status === 'fold'
                   ? `${(n.nFolded ?? 0).toLocaleString()} smaller items`
+                  : n.status === 'filler'
+                  ? (n.nRest === undefined ? 'unchanged' : `${n.nRest.toLocaleString()} unchanged children`)
                   : n.label || 'unchanged'}
               </div>
               <div style={{ opacity: 0.75, fontSize: '0.85em' }}>
-                {formatSize(n.size_old)} → {formatSize(n.size_new)}
-                {' '}({formatDelta(n.delta)})
+                {n.delta === 0
+                  ? formatSize(n.size_new)
+                  : <>{formatSize(n.size_old)} → {formatSize(n.size_new)} ({formatDelta(n.delta)})</>}
+                {n.status === 'filler' && n.nDescRest !== undefined && n.nDescRest !== n.nRest && (
+                  <> · {formatCount(n.nDescRest)} entries below</>
+                )}
               </div>
               {/* Aggregates with churn in both directions: the net alone
                   hides how much grew vs shrank among descendants. */}
