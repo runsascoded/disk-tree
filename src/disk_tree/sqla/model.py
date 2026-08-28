@@ -6,7 +6,7 @@ from os.path import join, exists
 from typing import Optional
 
 import pandas as pd
-from sqlalchemy import Integer, String, DateTime, Index
+from sqlalchemy import Integer, String, DateTime, Float, Index, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from utz import err, iec
 
@@ -76,6 +76,26 @@ class ScanProgress(Base):
         """Get all active scans."""
         from .db import db
         return db.session.query(cls).all()
+
+
+class Diff(Base):
+    """A persisted diff index for a scan pair (`diff_index.py`)."""
+    __tablename__ = "diff"
+    __table_args__ = (UniqueConstraint('scan_a', 'scan_b'),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, init=False)
+    scan_a: Mapped[int] = mapped_column(Integer, nullable=False)
+    scan_b: Mapped[int] = mapped_column(Integer, nullable=False)
+    time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    blob: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)
+    status: Mapped[str] = mapped_column(String, nullable=False, default='building')  # building, done, failed
+    n_rows: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    n_added: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    n_removed: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    n_changed: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    n_touched: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    seconds: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
+    error: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)
 
 
 class Scan(Base):

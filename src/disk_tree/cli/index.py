@@ -13,6 +13,7 @@ from utz import err, iec
 
 @cli.command
 @option('-C', '--no-cache-read', is_flag=True)
+@option('-D', '--no-diff', is_flag=True, help="Skip building the diff index against the path's previous scan")
 @option('-g', '--gc', is_flag=True)
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendants) per path')
 @option('-M', '--measure-memory', is_flag=True)
@@ -20,6 +21,7 @@ from utz import err, iec
 @argument('url', required=False)
 def index(
     no_cache_read: bool,
+    no_diff: bool,
     gc: bool,
     mean_mtime: bool,
     measure_memory: bool,
@@ -47,6 +49,16 @@ def index(
             scan, df = Scan.load_or_create(url, gc=gc, sudo=sudo, mean_mtime=mean_mtime)
 
     elapsed = time['scan']
+    if not no_diff and not gc:
+        # Overnight prep: the "what changed since last time" view is a slice,
+        # not a walk, by the time anyone asks. (`--gc` deleted the previous
+        # scan, so there's nothing to diff against.)
+        from disk_tree.diff_index import previous_scan
+        from disk_tree.cli.diff_index import _connect, build_pair
+        with _connect() as con:
+            prev = previous_scan(con, scan.id)
+        if prev is not None and prev['id'] != scan.id:
+            build_pair(prev['id'], scan.id)
     # Find root row: try 'path == "."', fallback to 'parent == ""'
     root_rows = df[df['path'] == '.']
     if root_rows.empty:

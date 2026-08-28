@@ -399,6 +399,28 @@ export type CompareRecResult = {
     rest: Record<string, { count: number; size: number; n_desc: number }>
   }
   summary: CompareResult['summary'] & { expansions: number; truncated: boolean }
+  /** Persisted full-diff index for the pair: `done` = this response is a
+   * slice of it (complete; any subpath is instant); `building` = the walk
+   * answered, refetch when it lands. */
+  index?: DiffIndexStatus
+}
+
+export type DiffIndexStatus = {
+  status: 'none' | 'building' | 'done' | 'failed'
+  time?: string
+  n_rows?: number
+  n_added?: number
+  n_removed?: number
+  n_changed?: number
+  n_touched?: number
+  seconds?: number
+  error?: string
+}
+
+export async function fetchDiffIndexStatus(scan1: number, scan2: number): Promise<DiffIndexStatus> {
+  const res = await fetch(`/api/diff/status?scan1=${scan1}&scan2=${scan2}`)
+  if (!res.ok) throw new Error('Failed to fetch diff index status')
+  return res.json()
 }
 
 /** Best-first pruned recursive diff (`/api/compare?recursive=1`): the delta

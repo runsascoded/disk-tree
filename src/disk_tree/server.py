@@ -4,6 +4,7 @@ from os.path import abspath, dirname, exists, isabs, isdir, isfile, join
 import shutil
 import sqlite3
 import subprocess
+import os
 import threading
 import time
 import uuid
@@ -16,6 +17,7 @@ from flask_cors import CORS
 from disk_tree import config as _config
 from disk_tree.config import SQLITE_PATH
 from disk_tree.diff import ScanSource, recursive_diff, resolve_blob, resolve_chunk_for_path
+from disk_tree.diff_index import DIFF_TABLE_SQL, build_and_record, get_index, load_index_slice, serve_slice
 from disk_tree.filter import DEFAULT_DISPLAY_DEPTH, filter_scan, rebase_frame
 from disk_tree.registry import freshest_scan_covering
 from disk_tree.storage import get_backend
@@ -58,6 +60,7 @@ def init_db():
         conn.execute('''
             CREATE INDEX IF NOT EXISTS ix_scan_path_time ON scan (path, time)
         ''')
+        conn.execute(DIFF_TABLE_SQL)
         conn.execute('''
             CREATE TABLE IF NOT EXISTS scan_progress (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1285,6 +1288,70 @@ def filter_stream():
     return Response(generate(), mimetype='text/event-stream')
 
 
+# Diff-index builds: one at a time (two full scans in memory), started by the
+# first recursive compare of a pair (spec diff-index.md). Keyed (scan_a, scan_b).
+_index_lock = threading.Lock()
+_index_building: set[tuple[int, int]] = set()
+# `DISK_TREE_AUTO_DIFF_INDEX=0` disables the first-request background build
+# (the CLI's `diff-index` / `index` still build explicitly).
+AUTO_INDEX = os.environ.get('DISK_TREE_AUTO_DIFF_INDEX', '1') != '0'
+
+
+def _index_status(scan_a: int, scan_b: int) -> dict:
+    """`{'status': none|building|done|failed, ...}` for a pair."""
+    with _index_lock:
+        if (scan_a, scan_b) in _index_building:
+            return {'status': 'building'}
+    row = get_index(scan_a, scan_b)
+    if row is None:
+        return {'status': 'none'}
+    out = {'status': row['status'], 'time': row['time']}
+    if row['status'] == 'done':
+        out.update({k: row[k] for k in ('n_rows', 'n_added', 'n_removed', 'n_changed', 'n_touched', 'seconds')})
+    elif row['status'] == 'failed':
+        out['error'] = row['error']
+    return out
+
+
+def _ensure_index_build(scan1, scan2) -> None:
+    """Kick off a background build for the pair unless one exists/is running."""
+    if not AUTO_INDEX:
+        return
+    key = (int(scan1['id']), int(scan2['id']))
+    with _index_lock:
+        if key in _index_building:
+            return
+        row = get_index(*key)
+        if row is not None and row['status'] in ('done', 'building'):
+            # `building` from another process (CLI) — or a crashed one; the
+            # CLI's own run will flip it, and a stale row can be forced via
+            # `disk-tree diff-index -f`.
+            return
+        _index_building.add(key)
+
+    def run():
+        try:
+            build_and_record(key[0], scan1['blob'], key[1], scan2['blob'])
+        except Exception as e:  # recorded as `failed` by build_and_record
+            print(f"diff index {key}: {type(e).__name__}: {e}")
+        finally:
+            with _index_lock:
+                _index_building.discard(key)
+
+    threading.Thread(target=run, name=f'diff-index-{key[0]}-{key[1]}', daemon=True).start()
+
+
+@app.route('/api/diff/status')
+def diff_index_status():
+    """Build state of the persisted diff index for a scan pair."""
+    try:
+        scan_a = int(request.args['scan1'])
+        scan_b = int(request.args['scan2'])
+    except (KeyError, ValueError):
+        return jsonify({'error': 'scan1 and scan2 (ints) required'}), 400
+    return jsonify(_index_status(scan_a, scan_b))
+
+
 # Single-flight for /api/compare: identical concurrent requests (React's
 # StrictMode double-fires effects in dev; two tabs; a double-click) share one
 # computation instead of each walking the scans.
@@ -1337,7 +1404,9 @@ def compare_scans():
     # parquets, and the delete path clears `_cache` wholesale. (The recursive
     # walk can take tens of seconds on a big hybrid scan; expiring it every
     # CACHE_TTL forced that recompute on nearly every page load.)
-    cache_key = f"compare:{uri}:{scan1_id}:{scan2_id}:{depth}:{recursive}:{budget}:{rec_max_depth}"
+    index_status = _index_status(int(scan1_id), int(scan2_id)) if recursive and scan1_id.isdigit() and scan2_id.isdigit() else None
+    indexed = bool(index_status and index_status['status'] == 'done')
+    cache_key = f"compare:{uri}:{scan1_id}:{scan2_id}:{depth}:{recursive}:{budget}:{rec_max_depth}:{'idx' if indexed else 'walk'}"
     now = time.time()
     if cache_key in _cache:
         _, cached_result = _cache[cache_key]
@@ -1354,7 +1423,7 @@ def compare_scans():
         with _inflight_lock:
             _inflight.setdefault(cache_key, threading.Event())
     try:
-        return _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now)
+        return _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now, index_status)
     finally:
         with _inflight_lock:
             ev = _inflight.pop(cache_key, None)
@@ -1362,7 +1431,7 @@ def compare_scans():
             ev.set()
 
 
-def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now):
+def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now, index_status=None):
 
     db = get_db()
 
@@ -1418,31 +1487,55 @@ def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_de
         # Best-first pruned walk down changed spines (spec diff-and-search.md §3a).
         # Rows span depths; totals come from the subtree stats, not row sums
         # (a frontier row's Δ is already included in its ancestors').
-        src1 = ScanSource(scan1['blob'], scan1['path'], uri, load_scan_data, resolve=resolve_chunk_for_path)
-        src2 = ScanSource(scan2['blob'], scan2['path'], uri, load_scan_data, resolve=resolve_chunk_for_path)
-        result = recursive_diff(src1, src2, budget=budget, max_depth=rec_max_depth)
+        served = None
+        same_root = scan1['path'] == scan2['path']
+        if index_status and index_status['status'] == 'done' and same_root:
+            # The persisted full diff: a parquet slice instead of a walk.
+            row = get_index(int(scan1_id), int(scan2_id))
+            if row is not None:
+                rel_prefix = '' if scan1['path'] == uri else uri[len(scan1['path']):].lstrip('/')
+                served = serve_slice(load_index_slice(row['blob'], rel_prefix))
+        if served is None:
+            src1 = ScanSource(scan1['blob'], scan1['path'], uri, load_scan_data, resolve=resolve_chunk_for_path)
+            src2 = ScanSource(scan2['blob'], scan2['path'], uri, load_scan_data, resolve=resolve_chunk_for_path)
+            result = recursive_diff(src1, src2, budget=budget, max_depth=rec_max_depth)
+            if same_root and index_status is not None and index_status['status'] in ('none', 'failed'):
+                _ensure_index_build(scan1, scan2)
         stats1 = get_subtree_stats(scan1)
         stats2 = get_subtree_stats(scan2)
         uri_prefix = uri.rstrip('/') + '/'
         def rec_row(r):
+            g = r.get if isinstance(r, dict) else (lambda k: getattr(r, k))
             return {
-                'path': r.path,
-                'uri': uri_prefix + r.path,
-                'depth': r.depth,
-                'kind': r.kind,
-                'status': r.status,
-                'size_a': r.size_a,
-                'size_b': r.size_b,
-                'size_delta': r.size_delta,
-                'size_old': r.size_a,
-                'n_desc_a': r.n_desc_a,
-                'n_desc_b': r.n_desc_b,
-                'n_desc_delta': r.n_desc_delta,
-                'n_desc_old': r.n_desc_a,
-                'expanded': r.expanded,
-                'pruned': r.pruned,
+                'path': g('path'),
+                'uri': uri_prefix + g('path'),
+                'depth': g('depth'),
+                'kind': g('kind'),
+                'status': g('status'),
+                'size_a': g('size_a'),
+                'size_b': g('size_b'),
+                'size_delta': g('size_b') - g('size_a'),
+                'size_old': g('size_a'),
+                'n_desc_a': g('n_desc_a'),
+                'n_desc_b': g('n_desc_b'),
+                'n_desc_delta': g('n_desc_b') - g('n_desc_a'),
+                'n_desc_old': g('n_desc_a'),
+                'expanded': g('expanded'),
+                'pruned': g('pruned'),
             }
-        rows = [rec_row(r) for r in result.rows]
+        if served is not None:
+            rows = [rec_row(r) for r in served['rows']]
+            unchanged_top = [rec_row(r) for r in served['unchanged']['top']]
+            unchanged_rest = served['unchanged']['rest']
+            expansions, truncated = served['expansions'], served['truncated']
+        else:
+            rows = [rec_row(r) for r in result.rows]
+            unchanged_top = [rec_row(r) for r in result.unchanged_top]
+            unchanged_rest = {
+                parent: {'count': u.count, 'size': u.size, 'n_desc': u.n_desc}
+                for parent, u in result.unchanged_rest.items()
+            }
+            expansions, truncated = result.expansions, result.truncated
         response = {
             'uri': uri,
             'recursive': True,
@@ -1465,13 +1558,12 @@ def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_de
             # expanding each dir, plus the aggregate of the rest (keyed by
             # parent path, '' = uri) — so the treemap can name its biggest
             # grey cells and count what its filler stands for.
-            'unchanged': {
-                'top': [rec_row(r) for r in result.unchanged_top],
-                'rest': {
-                    parent: {'count': u.count, 'size': u.size, 'n_desc': u.n_desc}
-                    for parent, u in result.unchanged_rest.items()
-                },
-            },
+            'unchanged': {'top': unchanged_top, 'rest': unchanged_rest},
+            # Persisted full-diff state for the pair: `done` means this
+            # response came from the index (complete, any subpath instant);
+            # `building` means the walk answered and the client should
+            # refetch when the index lands.
+            'index': _index_status(int(scan1_id), int(scan2_id)) if same_root else {'status': 'none'},
             'summary': {
                 'added': sum(1 for r in rows if r['status'] == 'added'),
                 'removed': sum(1 for r in rows if r['status'] == 'removed'),
@@ -1479,8 +1571,8 @@ def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_de
                 'touched': sum(1 for r in rows if r['status'] == 'touched'),
                 'unchanged': sum(1 for r in rows if r['status'] == 'unchanged'),
                 'total_delta': (stats2['size'] or 0) - (stats1['size'] or 0),
-                'expansions': result.expansions,
-                'truncated': result.truncated,
+                'expansions': expansions,
+                'truncated': truncated,
             },
         }
         _cache[cache_key] = (time.time(), response)

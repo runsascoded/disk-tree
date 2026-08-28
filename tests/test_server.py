@@ -48,8 +48,12 @@ def test_client(test_db_dir, monkeypatch):
     conn.commit()
     conn.close()
 
-    # Patch the DB_PATH
+    # Patch the DB_PATH (server) and the config paths the diff index reads
     monkeypatch.setattr('disk_tree.server.DB_PATH', db_path)
+    monkeypatch.setattr('disk_tree.config.SQLITE_PATH', db_path)
+    monkeypatch.setattr('disk_tree.config.ROOT_DIR', test_db_dir)
+    # no background index builds racing the tmp dir's teardown
+    monkeypatch.setattr('disk_tree.server.AUTO_INDEX', False)
 
     # Clear cache before each test
     from disk_tree.server import clear_cache
@@ -985,6 +989,8 @@ class TestCompareRecursive:
             'added': 0, 'removed': 0, 'changed': 2, 'touched': 0, 'unchanged': 0,
             'total_delta': 1000, 'expansions': 2, 'truncated': False,
         }
+        # no index (auto-build is off in tests): the walk answered
+        assert data['index'] == {'status': 'none'}
         # `a` was compared (and pruned) while expanding the root: it ships as
         # labeled grey context rather than vanishing.
         assert data['unchanged'] == {
@@ -1009,6 +1015,44 @@ class TestCompareRecursive:
             for r in data['rows']
         ] == [('b', 'changed', False, True)]
         assert data['summary']['truncated'] is True
+
+    def test_recursive_served_from_index_when_built(self, test_client):
+        """With a persisted diff index for the pair, the response is a slice
+        of it (`index.status == 'done'`): same frontier, plus the unchanged
+        sibling as context, no walk budget."""
+        client, db_path, scans_dir = test_client
+        self._seed(db_path, scans_dir)
+        conn = sqlite3.connect(db_path)
+        p1, p2 = [r[0] for r in conn.execute('SELECT blob FROM scan ORDER BY id')]
+        conn.close()
+        from disk_tree.diff_index import build_and_record
+        row = build_and_record(1, p1, 2, p2)
+        assert row['status'] == 'done'
+        # `.`, `b`, `b/g.bin` changed + `a` as context
+        assert (row['n_rows'], row['n_added'], row['n_removed'], row['n_changed'], row['n_touched']) == (4, 0, 0, 3, 0)
+
+        status = client.get('/api/diff/status?scan1=1&scan2=2').json
+        assert status['status'] == 'done' and status['n_rows'] == 4
+
+        data = client.get('/api/compare?uri=/test&scan1=1&scan2=2&recursive=1').json
+        assert data['index']['status'] == 'done'
+        assert [
+            (r['path'], r['depth'], r['status'], r['size_delta'], r['expanded'], r['pruned'])
+            for r in data['rows']
+        ] == [
+            ('b', 1, 'changed', 1000, True, False),
+            ('b/g.bin', 2, 'changed', 1000, False, False),
+        ]
+        assert [(r['path'], r['status'], r['size_b']) for r in data['unchanged']['top']] == [('a', 'unchanged', 400)]
+        assert data['summary'] == {
+            'added': 0, 'removed': 0, 'changed': 2, 'touched': 0, 'unchanged': 0,
+            'total_delta': 1000, 'expansions': 1, 'truncated': False,
+        }
+
+        # a subpath is a slice too
+        sub = client.get('/api/compare?uri=/test/b&scan1=1&scan2=2&recursive=1').json
+        assert sub['index']['status'] == 'done'
+        assert [(r['path'], r['depth'], r['status']) for r in sub['rows']] == [('g.bin', 1, 'changed')]
 
     def test_non_recursive_shape_unchanged(self, test_client):
         client, db_path, scans_dir = test_client

@@ -15,7 +15,7 @@ import {
 import { FaArrowRight, FaFolder, FaFile, FaSortUp, FaSortDown, FaSync, FaList } from 'react-icons/fa'
 import { Treemap as DTTreemap, divergingColor } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
-import { compareScans, compareScansRecursive, fetchScanHistory, startScan } from '../api'
+import { compareScans, compareScansRecursive, fetchDiffIndexStatus, fetchScanHistory, startScan } from '../api'
 import type { CompareRecResult, CompareResult, CompareRow, ScanHistoryItem } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
@@ -557,6 +557,16 @@ function CompareTreemap({
               <span style={{ opacity: 0.6, marginLeft: 4 }}>
                 {areaMode === 'max' ? 'area = max(old, new), band = |Δ|' : 'area = |Δ|'}
               </span>
+              {rec?.index && rec.index.status !== 'done' && (
+                <span
+                  title={rec.index.status === 'failed'
+                    ? `full diff index failed: ${rec.index.error ?? 'unknown error'} — showing the budgeted walk`
+                    : 'showing a budgeted walk while the full diff index builds; the map completes itself when it lands'}
+                  style={{ opacity: 0.6, marginLeft: 6, fontStyle: 'italic' }}
+                >
+                  {rec.index.status === 'failed' ? 'index failed' : 'indexing…'}
+                </span>
+              )}
               <span style={{ display: 'inline-flex', gap: 2, marginLeft: 6 }}>
                 {(['max', 'delta'] as const).map(m => (
                   <button
@@ -1324,12 +1334,38 @@ export function CompareView() {
       return
     }
     let stale = false
+    let timer: ReturnType<typeof setTimeout> | undefined
     setRecResult(null)
     setRecState('loading')
-    compareScansRecursive(uri, scan1 as number, scan2 as number)
-      .then(r => { if (!stale) { setRecResult(r); setRecState('ready') } })
+    const s1 = scan1 as number, s2 = scan2 as number
+    // While the server builds the pair's full diff index, the walk's answer
+    // stands in; poll, then refetch silently (no spinner — the map just gets
+    // complete) once it lands.
+    const pollIndex = () => {
+      timer = setTimeout(() => {
+        fetchDiffIndexStatus(s1, s2)
+          .then(st => {
+            if (stale) return
+            if (st.status === 'done') {
+              compareScansRecursive(uri, s1, s2)
+                .then(r => { if (!stale) setRecResult(r) })
+                .catch(() => { /* keep the walk result */ })
+            } else if (st.status === 'building' || st.status === 'none') {
+              pollIndex()
+            }
+          })
+          .catch(() => { if (!stale) pollIndex() })
+      }, 3000)
+    }
+    compareScansRecursive(uri, s1, s2)
+      .then(r => {
+        if (stale) return
+        setRecResult(r)
+        setRecState('ready')
+        if (r.index?.status === 'building' || r.index?.status === 'none') pollIndex()
+      })
       .catch(() => { if (!stale) setRecState('error') })
-    return () => { stale = true }
+    return () => { stale = true; if (timer) clearTimeout(timer) }
   }, [uri, scan1, scan2, recAttempt])
 
   // Get scan_path for selected scans (for breadcrumb coverage highlighting)

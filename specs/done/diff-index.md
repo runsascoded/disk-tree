@@ -56,4 +56,12 @@ Per-parent `unchanged` context (`unchanged: {top, rest}` in today's response) is
 
 ## Status
 
-Not started. Interim fixes landed alongside this spec (2026-08-28): `touched` status (mtime-only changes are reported instead of pruned as "more change below"), chunk-aware flat compare (drill pages inside hybrid chunks were empty), CLI `diff` falls back to ancestor scans.
+Implemented 2026-08-28 (`src/disk_tree/diff_index.py`, `cli/diff_index.py`, server `/api/diff/status` + index-backed `/api/compare?recursive=1`, UI poll-and-refetch):
+
+- Build is Arrow-native (scans loaded as Arrow tables with chunks expanded — ~1 GB each vs ~4 GB as pandas — then a full-outer join *per depth*, since rows only ever match at their own depth). Home dir, 6.8M ↔ 7.4M rows: load 1.1 s + 1.2 s, diff 7–9 s, 1.33M index rows, 59 MB. Peak RSS ~7 GB — the join outputs; a follow-up could stream depths to parquet as they finish.
+- Serving: root slice 1.5 s (row budget 20K by |Δ| + ancestor spines, `pruned` marks dirs with trimmed descendants), `c/oa` 0.3 s, a leaf dir 30 ms. Before: 45 s / 24 s / 2 s walks.
+- Unchanged context is stored in the index (`context=True` rows: unchanged siblings of changes), so the response shape is unchanged.
+- `disk-tree index` builds the index against the path's previous scan when the scan finishes (`-D` skips); `disk-tree diff-index -a` backfills every path's latest pair.
+- Not done: `sync` (S3 pulls) doesn't build indexes yet; GC of indexes whose scans are gone; the `max_depth`/`min_abs_delta` request filter (row budget only).
+
+Interim walk fixes that also landed: `touched` status, chunk-aware flat compare, ancestor-scan fallback in `disk-tree diff`, 64K-row parquet row groups (`migrate-row-groups`), Arrow-side chunk map, batched parallel walk, aligned-join child comparison, single-flight `/api/compare` — the walk itself went 45 s → 5 s at the root.

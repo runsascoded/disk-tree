@@ -47,7 +47,8 @@ Key goals:
 - `POST /api/scan/start` — Start a new scan (background thread)
 - `GET /api/scans/progress` — Current progress of active scans
 - `GET /api/scans/progress/stream` — SSE stream for real-time progress
-- `GET /api/compare?uri=<path>&scan1=&scan2=[&recursive=1&budget=N&max_depth=N]` — per-child Δ table; `recursive=1` walks changed spines best-first (|Δsize| priority) and returns the delta frontier across depths (added/removed dirs not descended; stats-equal dirs pruned)
+- `GET /api/compare?uri=<path>&scan1=&scan2=[&recursive=1&budget=N&max_depth=N]` — per-child Δ table; `recursive=1` returns the delta frontier across depths (added/removed dirs not descended). Served as a slice of the pair's persisted **diff index** when one exists (`index.status == 'done'`, complete, ~1 s at the root); otherwise a best-first walk (|Δsize| priority, `budget` expansions) answers and a background build starts — the UI polls and refetches when it lands. Statuses: `added | removed | changed | touched` (same size & count, mtime moved) `| unchanged`; `unchanged: {top, rest}` carries each expanded dir's biggest unchanged children + an aggregate of the rest
+- `GET /api/diff/status?scan1=&scan2=` — diff-index build state for a pair (`none | building | done | failed`, counts, seconds)
 - `GET /api/filter?uri=<path>&q=<query>&depth=N` — recursive filter with true re-aggregation (matched bytes only, outermost matches, rolled up to a depth-N slice). Slash-free queries match path segments; with a fresh vocab sidecar the query is answered from the index (`indexed: true` in the response)
 - `GET /api/filter/stream` — SSE variant: one cumulative snapshot per depth (iterative deepening), final event `done: true`
 - `GET /api/histogram?uri=<path>&bins=N&limit=N` — Byte-weighted mtime histogram per child
@@ -66,9 +67,18 @@ disk-tree index [URL]     # Scan directory or s3:// bucket
 
 disk-tree scans           # List cached scans (JSON)
 
-disk-tree diff ARGS       # Per-path Δ table between two scans (URI → two most recent, or two scan ids)
+disk-tree diff ARGS       # Per-path Δ table between two scans (URI → two most recent, or two scan ids;
+                          # a URI without its own scans falls back to the nearest ancestor's)
   -r, --recursive         # Best-first walk down changed spines → delta frontier across depths
   -b, --budget N          # Recursive mode: max directory expansions (default 100)
+
+disk-tree diff-index A B | PATH… | -a   # Persisted full diff of a scan pair (spec `diff-index.md`):
+                          # vectorized per-depth outer join → `~/.config/disk-tree/diffs/<a>-<b>.parquet`
+                          # (~8 s for two 7M-row home scans). `disk-tree index` builds it against the
+                          # path's previous scan automatically (`-D` to skip); `-f` rebuilds
+
+disk-tree migrate-row-groups  # Rewrite scan blobs to ≤64K-row parquet row groups (a directory listing
+                          # decodes every overlapping row group: ~4 ms vs ~40 ms at 1M rows)
 
 disk-tree filter URI QUERY  # Recursive filter, true re-aggregation: sizes of everything matching QUERY
                             # (`/…/` regex or substring); outermost matches only — never double-counts
