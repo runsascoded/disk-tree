@@ -401,7 +401,10 @@ function CompareTreemap({
           })}
           // Brighter sibling separation: the compare palette's dark neutrals
           // make the default (transparent) cell rings invisible.
-          mapStyle={{ '--dt-treemap-cell-border': 'rgba(255, 255, 255, 0.14)' } as CSSProperties}
+          // Shared-edge tiling: exact areas (gaps under-paint dense leaf
+          // fields by ~perimeter/area); the stroke is the visible boundary.
+          tiling="shared"
+          mapStyle={{ '--dt-treemap-edge': 'rgba(255, 255, 255, 0.18)' } as CSSProperties}
           // Displayed inline with the label — the raw |Δ| magnitude. Sign is
           // encoded by the cell color; exact old/new/Δ lives in the tooltip.
           formatSize={formatSize}
