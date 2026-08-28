@@ -285,9 +285,12 @@ function churn(
   n: { grew: number; shrank: number; delta: number },
   /** bytes: the total the line follows (drives unit elision); counts: `null` */
   totalBytes: number | null,
+  /** omit the `Δ` part (the caller already shows the net elsewhere) */
+  net: boolean = true,
 ): { text: string; node: ReactNode } | null {
   const both = n.grew > 0 && n.shrank < 0
   if (!both && n.delta === 0) return null
+  if (!both && !net) return null
   let fmt: (v: number) => string
   if (totalBytes === null) {
     fmt = formatCount
@@ -299,8 +302,9 @@ function churn(
   }
   const d = (n.delta > 0 ? '+' : n.delta < 0 ? '-' : '') + fmt(Math.abs(n.delta))
   const parts: [string, string, string][] = both
-    ? [['▲', fmt(n.grew), GREW_GREEN], ['▼', fmt(-n.shrank), SHRANK_RED], ['Δ', d, deltaTextColor(n.delta)]]
-    : [['Δ', d, deltaTextColor(n.delta)]]
+    ? [['▲', fmt(n.grew), GREW_GREEN], ['▼', fmt(-n.shrank), SHRANK_RED]]
+    : []
+  if (net) parts.push(['Δ', d, deltaTextColor(n.delta)])
   return {
     text: parts.map(([g, v]) => `${g} ${v}`).join(' '),
     node: parts.map(([g, v, color], i) => (
@@ -486,7 +490,7 @@ function CompareTreemap({
               <div style={{ opacity: 0.75, fontSize: '0.85em' }}>
                 {n.delta === 0
                   ? formatSize(n.size_new)
-                  : <>{formatSize(n.size_old)} → {formatSize(n.size_new)} ({formatDelta(n.delta)})</>}
+                  : <>{formatSize(n.size_old)} → {formatSize(n.size_new)} (<span style={{ color: deltaTextColor(n.delta) }}>{formatDelta(n.delta)}</span>)</>}
                 {n.status === 'unchanged' && ' — unchanged'}
                 {n.status === 'touched' && ' — touched (same bytes & count, mtime moved)'}
                 {n.status === 'filler' && n.nDescRest !== undefined && n.nDescRest !== n.nRest && (
@@ -496,7 +500,7 @@ function CompareTreemap({
               {/* Aggregates with churn in both directions: the net alone
                   hides how much grew vs shrank among descendants. */}
               {n.grew > 0 && n.shrank < 0 && (
-                <div style={{ fontSize: '0.8em' }}>{churn(n, n.size_new)?.node}</div>
+                <div style={{ fontSize: '0.8em' }}>{churn(n, n.size_new, false)?.node}</div>
               )}
               {/* Entry counts get the same ▲/▼/Δ treatment as bytes. */}
               {(n.n_desc_delta !== 0 || n.nGrew > 0) && (
