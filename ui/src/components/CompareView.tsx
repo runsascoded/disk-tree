@@ -517,7 +517,9 @@ function CompareTreemap({
                     : n.status === 'added' || n.status === 'removed' ? n.status
                     : null}
                   {n.pruned && (n.status === 'added' || n.status === 'removed' ? ' · ' : '')}
-                  {n.pruned && (n.delta === 0 && n.n_desc_delta === 0
+                  {n.pruned && (rec?.index?.status === 'done'
+                    ? 'more detail below than this view holds — click to compare here'
+                    : n.delta === 0 && n.n_desc_delta === 0
                     ? 'not descended (walk budget): something inside moved — click to compare here'
                     : 'Δ not localized (walk budget) — click to compare here')}
                 </div>
