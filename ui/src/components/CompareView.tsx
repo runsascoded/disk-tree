@@ -20,6 +20,7 @@ import type { CompareRecResult, CompareResult, CompareRow, ScanHistoryItem } fro
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo } from '../utils/format'
+import { getTiling } from '../utils/tiling'
 import { comparePathToUri, isSchemeRoot, uriToPath, type RouteType } from '../schemes'
 
 type SortColumn = 'size_old' | 'size_new' | 'size_delta' | 'desc_old' | 'desc_new' | 'desc_delta'
@@ -401,10 +402,14 @@ function CompareTreemap({
           })}
           // Brighter sibling separation: the compare palette's dark neutrals
           // make the default (transparent) cell rings invisible.
-          // Shared-edge tiling: exact areas (gaps under-paint dense leaf
-          // fields by ~perimeter/area); the stroke is the visible boundary.
-          tiling="shared"
-          mapStyle={{ '--dt-treemap-edge': 'rgba(255, 255, 255, 0.18)' } as CSSProperties}
+          // Tiling per the header toggle (shared: exact areas, the stroke is
+          // the boundary; gaps: classic gutters). The dark compare palette
+          // needs a light stroke/ring either way.
+          tiling={getTiling()}
+          mapStyle={{
+            '--dt-treemap-edge': 'rgba(255, 255, 255, 0.18)',
+            '--dt-treemap-cell-border': 'rgba(255, 255, 255, 0.14)',
+          } as CSSProperties}
           // Displayed inline with the label — the raw |Δ| magnitude. Sign is
           // encoded by the cell color; exact old/new/Δ lives in the tooltip.
           formatSize={formatSize}

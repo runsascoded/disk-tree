@@ -12,6 +12,7 @@ import { CompareView } from './components/CompareView'
 import './App.scss'
 import type { ReactNode } from 'react'
 import { useUnits } from './utils/units'
+import { useTiling } from './utils/tiling'
 
 // MUI Tooltip wrapper for use-kbd
 function MuiTooltip({ title, children }: { title: ReactNode; children: ReactNode }) {
@@ -26,6 +27,7 @@ function App() {
   // Re-render the whole tree when the SI/IEC preference flips: `formatSize`
   // reads the store directly, so every caller just needs a render.
   useUnits()
+  useTiling()
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />

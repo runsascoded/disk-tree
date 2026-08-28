@@ -5,6 +5,7 @@ import { FaCloud, FaDatabase, FaFolder, FaHistory, FaCog } from 'react-icons/fa'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAvailableBackends } from '../api'
 import { useUnits } from '../utils/units'
+import { useTiling } from '../utils/tiling'
 
 export function Header() {
   const location = useLocation()
@@ -14,6 +15,7 @@ export function Header() {
   const isS3Page = path.startsWith('/s3')
   const isRecentPage = path === '/recent'
   const [units, setUnits] = useUnits()
+  const [tiling, setTiling] = useTiling()
 
   // Backend popover state
   const [anchorEl, setAnchorEl] = useState<HTMLButtonElement | null>(null)
@@ -88,6 +90,22 @@ export function Header() {
           >
             <ToggleButton value="si">G</ToggleButton>
             <ToggleButton value="iec">Gi</ToggleButton>
+          </ToggleButtonGroup>
+        </Tooltip>
+
+        {/* Treemap tiling: gutters vs shared edges */}
+        <Tooltip title={tiling === 'shared'
+          ? 'Shared edges: cells abut, one stroke per boundary — areas exact (a 6×6px cell with 2px gutters paints only 4×4)'
+          : 'Gaps: 2px gutters and rounded corners — the classic look; dense leaf fields under-paint by ~perimeter/area'}>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={tiling}
+            onChange={(_e, v) => { if (v) setTiling(v) }}
+            sx={{ mr: 1, '& .MuiToggleButton-root': { py: 0, px: 1, fontSize: '0.7rem', textTransform: 'none' } }}
+          >
+            <ToggleButton value="gaps">gaps</ToggleButton>
+            <ToggleButton value="shared">shared</ToggleButton>
           </ToggleButtonGroup>
         </Tooltip>
 

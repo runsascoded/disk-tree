@@ -13,6 +13,7 @@ import { VizBoundary } from './VizBoundary'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
+import { getTiling } from '../utils/tiling'
 import {
   childLinkPrefix,
   detectRouteType,
@@ -733,6 +734,7 @@ function Treemap({
     <Box sx={{ height: 400 }}>
       <DTTreemap<DTNode>
         root={filterTree ?? tree}
+        tiling={getTiling()}
         getSize={n => n.size}
         getChildren={n => n.children}
         hasChildren={n => !!n.expandable && !n.isPlaceholder}
