@@ -229,11 +229,23 @@ class RecursiveDiffResult:
     unchanged_rest: dict[str, UnchangedRest] = field(default_factory=dict)
 
 
-def _ival(row, col: str) -> int:
-    if row is None:
-        return 0
-    v = row.get(col, 0)
-    return 0 if pd.isna(v) else int(v)
+def _isna(v) -> bool:
+    return v is None or (isinstance(v, float) and v != v)
+
+
+def _toint(v) -> int:
+    return 0 if _isna(v) else int(v)
+
+
+_CMP_COLS = ('kind', 'size', 'n_desc', 'n_children', 'mtime')
+
+
+def _aligned(ca: pd.DataFrame, cb: pd.DataFrame) -> pd.DataFrame:
+    """Outer-join two listings (indexed by child name) on `_CMP_COLS`, sorted
+    by name; missing columns/sides come through as NaN."""
+    a = ca.reindex(columns=_CMP_COLS).add_suffix('_a')
+    b = cb.reindex(columns=_CMP_COLS).add_suffix('_b')
+    return a.join(b, how='outer', sort=True)
 
 
 def recursive_diff(
@@ -291,26 +303,35 @@ def recursive_diff(
               by_path[rel].expanded = True
 
           unchanged_here: list[DeltaRow] = []
-          for name in sorted(set(ca.index) | set(cb.index)):
+          # One aligned outer join per expansion, then plain Python over
+          # column lists: per-name `.loc` access was ~50 µs a row, and a
+          # budget-200 home-dir walk compares ~300K children (16 s of 32).
+          j = _aligned(ca, cb)
+          for name, kind_a, kind_b, size_a, size_b, nd_a, nd_b, nc_a, nc_b, mt_a, mt_b in zip(
+              j.index.tolist(),
+              j['kind_a'].tolist(), j['kind_b'].tolist(),
+              j['size_a'].tolist(), j['size_b'].tolist(),
+              j['n_desc_a'].tolist(), j['n_desc_b'].tolist(),
+              j['n_children_a'].tolist(), j['n_children_b'].tolist(),
+              j['mtime_a'].tolist(), j['mtime_b'].tolist(),
+          ):
               child_rel = f"{rel}/{name}" if rel else name
-              ra = ca.loc[name] if name in ca.index else None
-              rb = cb.loc[name] if name in cb.index else None
-              kind_a = ra['kind'] if ra is not None else None
-              kind_b = rb['kind'] if rb is not None else None
+              in_a = not _isna(kind_a)
+              in_b = not _isna(kind_b)
               row = DeltaRow(
                   path=child_rel,
                   depth=d + 1,
-                  kind=kind_b or kind_a or '',
+                  kind=(kind_b if in_b else kind_a) or '',
                   status='',
-                  size_a=_ival(ra, 'size'),
-                  size_b=_ival(rb, 'size'),
-                  n_desc_a=_ival(ra, 'n_desc'),
-                  n_desc_b=_ival(rb, 'n_desc'),
+                  size_a=_toint(size_a),
+                  size_b=_toint(size_b),
+                  n_desc_a=_toint(nd_a),
+                  n_desc_b=_toint(nd_b),
               )
               descend = False
-              if ra is None:
+              if not in_a:
                   row.status = 'added'
-              elif rb is None:
+              elif not in_b:
                   row.status = 'removed'
               elif kind_a != kind_b:
                   # dir↔file swap: incomparable subtrees, report don't descend
@@ -318,15 +339,15 @@ def recursive_diff(
               else:
                   if row.size_delta or row.n_desc_delta:
                       row.status = 'changed'
-                  elif _neq(ra.get('mtime'), rb.get('mtime')):
+                  elif _neq(mt_a, mt_b):
                       row.status = 'touched'
                   else:
                       row.status = 'unchanged'
                   if kind_a == 'dir':
                       # mtime is in the trigger so net-zero renames are still found
-                      descend = any(
-                          _neq(ra.get(c), rb.get(c))
-                          for c in ('size', 'n_desc', 'n_children', 'mtime')
+                      descend = (
+                          row.status != 'unchanged'
+                          or _neq(nc_a, nc_b)
                       )
 
               by_path[child_rel] = row
