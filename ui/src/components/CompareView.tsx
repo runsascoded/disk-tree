@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
@@ -257,6 +257,35 @@ function buildCompareTree(
   return { cells, maxAbsDelta: maxAbs }
 }
 
+/**
+ * `▲ 32.4 ▼ 6.9 Δ +25.5` — churn among a node's descendants, for title
+ * strips / crumbs / tooltips. Units are omitted when every value shares the
+ * unit of the total it follows (`totalBytes`), and shown per value otherwise
+ * (`▲ 100M ▼ 200K Δ +100M`) — never a mixed line the reader has to parse.
+ * Both directions when there's churn both ways, else just the Δ.
+ */
+function churn(
+  n: Pick<CompareTMNode, 'grew' | 'shrank' | 'delta'>,
+  totalBytes: number,
+): { text: string; node: ReactNode } | null {
+  const both = n.grew > 0 && n.shrank < 0
+  if (!both && n.delta === 0) return null
+  const vals = both ? [n.grew, -n.shrank, Math.abs(n.delta)] : [Math.abs(n.delta)]
+  const unitOf = (b: number) => formatSize(b).split(' ')[1]
+  const shared = vals.every(v => v === 0 || unitOf(v) === unitOf(totalBytes))
+  const fmt = (b: number) => shared ? formatSize(b).split(' ')[0] : formatSize(b).replace(' ', '')
+  const d = (n.delta > 0 ? '+' : n.delta < 0 ? '-' : '') + fmt(Math.abs(n.delta))
+  const parts: [string, string, string][] = both
+    ? [['▲', fmt(n.grew), GREW_GREEN], ['▼', fmt(-n.shrank), SHRANK_RED], ['Δ', d, deltaTextColor(n.delta)]]
+    : [['Δ', d, deltaTextColor(n.delta)]]
+  return {
+    text: parts.map(([g, v]) => `${g} ${v}`).join(' '),
+    node: parts.map(([g, v, color], i) => (
+      <span key={g} style={{ color, marginLeft: i ? 6 : 0 }}>{g} {v}</span>
+    )),
+  }
+}
+
 function CompareTreemap({
   result,
   rec,
@@ -398,29 +427,26 @@ function CompareTreemap({
               </>
             )
           } : undefined}
-          // Branch title strips have room to spare: inline the ▲/▼/net
-          // (or just the net) when it fits after the name and size — a
-          // rough char-width estimate against the cell box, since the size
-          // span never shrinks and would crush the name otherwise.
+          // Branch title strips have room to spare: inline the ▲/▼/Δ (or
+          // just the Δ) when it fits after the name and size — a rough
+          // char-width estimate against the cell box, since the size span
+          // never shrinks and would crush the name otherwise.
           renderCellSubtitle={(n, _path, { w }) => {
-            if (!n.children?.length || n.delta === 0) return null
+            if (!n.children?.length) return null
+            // ▲/▼/Δ glyphs run wider than digits; err toward dropping the
+            // stats over ellipsizing the name.
             const room = w - 8 - n.label.length * 7 - formatSize(n.weight).length * 6.5 - 12
-            const net = <span style={{ color: deltaTextColor(n.delta) }}>{formatDelta(n.delta)}</span>
-            if (n.grew > 0 && n.shrank < 0) {
-              const full = `▲ ${formatDelta(n.grew)} · ▼ ${formatDelta(n.shrank)} · net ${formatDelta(n.delta)}`
-              if (full.length * 6.5 <= room) {
-                return (
-                  <>
-                    <span style={{ color: GREW_GREEN }}>▲ {formatDelta(n.grew)}</span>
-                    {' · '}
-                    <span style={{ color: SHRANK_RED }}>▼ {formatDelta(n.shrank)}</span>
-                    {' · net '}{net}
-                  </>
-                )
-              }
-            }
-            return formatDelta(n.delta).length * 6.5 <= room ? net : null
+            const fits = (c: { text: string }) => c.text.length * 7.5 + 12 <= room
+            const full = churn(n, n.weight)
+            if (!full) return null
+            if (fits(full)) return full.node
+            const net = churn({ grew: 0, shrank: 0, delta: n.delta }, n.weight)
+            return net && fits(net) ? net.node : null
           }}
+          // The crumbs row is the drilled node's own "title strip".
+          renderCrumbSuffix={n => (
+            <>— {formatSize(n.weight)}{(() => { const c = churn(n, n.weight); return c && <> {c.node}</> })()}</>
+          )}
           renderTooltip={n => (
             <>
               <div style={{ fontWeight: 500 }}>
@@ -441,13 +467,7 @@ function CompareTreemap({
               {/* Aggregates with churn in both directions: the net alone
                   hides how much grew vs shrank among descendants. */}
               {n.grew > 0 && n.shrank < 0 && (
-                <div style={{ fontSize: '0.8em' }}>
-                  <span style={{ color: GREW_GREEN }}>▲ {formatDelta(n.grew)}</span>
-                  {' · '}
-                  <span style={{ color: SHRANK_RED }}>▼ {formatDelta(n.shrank)}</span>
-                  {' · net '}
-                  <span style={{ color: deltaTextColor(n.delta) }}>{formatDelta(n.delta)}</span>
-                </div>
+                <div style={{ fontSize: '0.8em' }}>{churn(n, n.size_new)?.node}</div>
               )}
               {n.n_desc_delta !== 0 && (
                 <div style={{ opacity: 0.6, fontSize: '0.8em' }}>
