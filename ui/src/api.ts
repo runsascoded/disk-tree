@@ -227,7 +227,8 @@ export type CompareRow = {
   uri: string
   n_desc: number | null
   n_children: number | null
-  status: 'added' | 'removed' | 'changed' | 'unchanged'
+  /** `touched`: same size & count, mtime differs (rename / net-zero churn / `touch`) */
+  status: 'added' | 'removed' | 'changed' | 'touched' | 'unchanged'
   size_delta: number
   size_old?: number
   n_desc_delta?: number
@@ -371,7 +372,7 @@ export type CompareRecRow = {
   uri: string
   depth: number
   kind: 'file' | 'dir'
-  status: 'added' | 'removed' | 'changed' | 'unchanged'
+  status: 'added' | 'removed' | 'changed' | 'touched' | 'unchanged'
   size_a: number
   size_b: number
   size_delta: number

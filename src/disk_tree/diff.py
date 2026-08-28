@@ -7,6 +7,8 @@ one pass, and only down *changed spines*:
 - `added`/`removed` dirs are never descended — their aggregate row already tells
   the whole story (layer-2 dirs carry `size`/`n_desc`).
 - Common dirs whose `(size, n_desc, n_children, mtime)` all match are pruned.
+- Same size & count but a different mtime → `touched` (emitted; dirs are
+  still descended, since a net-zero rename hides below).
   Heuristic: compensating changes can hide (the eventual `digest` column makes
   this exact — spec §3d). `mtime` is in the descend-trigger so a same-size
   rename (net-zero Δ) is still found and surfaces as `added` + `removed` rows.
@@ -182,7 +184,9 @@ class DeltaRow:
     path: str      # relative to the compared uri
     depth: int     # levels below the compared uri (1 = direct child)
     kind: str
-    status: str    # added | removed | changed | unchanged
+    status: str    # added | removed | changed | touched | unchanged
+                   # touched: same size & n_desc, mtime differs (a rename /
+                   # net-zero churn / plain `touch` — bytes didn't move)
     size_a: int
     size_b: int
     n_desc_a: int
@@ -290,7 +294,12 @@ def recursive_diff(
                 # dir↔file swap: incomparable subtrees, report don't descend
                 row.status = 'changed'
             else:
-                row.status = 'changed' if (row.size_delta or row.n_desc_delta) else 'unchanged'
+                if row.size_delta or row.n_desc_delta:
+                    row.status = 'changed'
+                elif _neq(ra.get('mtime'), rb.get('mtime')):
+                    row.status = 'touched'
+                else:
+                    row.status = 'unchanged'
                 if kind_a == 'dir':
                     # mtime is in the trigger so net-zero renames are still found
                     descend = any(

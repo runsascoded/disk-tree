@@ -1285,6 +1285,14 @@ def filter_stream():
     return Response(generate(), mimetype='text/event-stream')
 
 
+def _mtime_differs(a, b) -> bool:
+    """NaN-safe: both-missing counts as equal."""
+    a_na, b_na = pd.isna(a), pd.isna(b)
+    if a_na and b_na:
+        return False
+    return bool(a_na or b_na or a != b)
+
+
 @app.route('/api/compare')
 def compare_scans():
     """Compare two scans of the same path.
@@ -1360,9 +1368,15 @@ def compare_scans():
             }
         # Load the parquet with depth + path-prefix filtering and find the row
         # for the target URI (the prefix filter narrows to exactly that row).
+        # Hybrid scans keep big subtrees in chunk blobs: resolve first, so a
+        # uri inside a chunk reads that chunk (its root row is `.` at depth 0).
         rel_path = uri[len(scan_path):].lstrip('/')
-        target_depth = rel_path.count('/') + 1
-        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth, path_prefix=rel_path or None)
+        blob, rel_path = resolve_chunk_for_path(scan['blob'], rel_path)
+        if rel_path == '.':
+            target_depth = 0
+        else:
+            target_depth = rel_path.count('/') + 1
+        df = load_scan_data(blob, max_depth=target_depth, min_depth=target_depth, path_prefix=None if rel_path == '.' else rel_path)
         row = df[df['path'] == rel_path]
         if not row.empty:
             r = row.iloc[0]
@@ -1434,6 +1448,7 @@ def compare_scans():
                 'added': sum(1 for r in rows if r['status'] == 'added'),
                 'removed': sum(1 for r in rows if r['status'] == 'removed'),
                 'changed': sum(1 for r in rows if r['status'] == 'changed'),
+                'touched': sum(1 for r in rows if r['status'] == 'touched'),
                 'unchanged': sum(1 for r in rows if r['status'] == 'unchanged'),
                 'total_delta': (stats2['size'] or 0) - (stats1['size'] or 0),
                 'expansions': result.expansions,
@@ -1450,34 +1465,29 @@ def compare_scans():
         """
         scan_path = scan['path']
 
-        # Calculate depth offset for ancestor scans
-        if scan_path == uri:
-            rel_prefix = ''
-            depth_offset = 0
-        else:
-            # URI is subdir of scan - calculate relative path
-            rel_prefix = uri[len(scan_path):].lstrip('/')
-            depth_offset = rel_prefix.count('/') + 1
+        # Rebase into the scan (it may be of an ancestor path), then across a
+        # hybrid chunk boundary — a uri inside a chunk blob reads that blob.
+        rel_prefix = '' if scan_path == uri else uri[len(scan_path):].lstrip('/')
+        blob, rebased = resolve_chunk_for_path(scan['blob'], rel_prefix or '.')
+        at_root = rebased in ('', '.')
+        depth_offset = 0 if at_root else rebased.count('/') + 1
 
-        # Load with EXACT depth filter - we only need children at depth_offset + 1
-        # This avoids loading millions of rows at other depths. For ancestor
-        # scans, the path-prefix filter also skips every sibling subtree.
+        # Load with EXACT depth filter - we only need rows at depth_offset +
+        # depth_limit. This avoids loading millions of rows at other depths;
+        # the path-prefix filter also skips every sibling subtree. Rows at
+        # exactly that depth under that prefix *are* the descendants wanted
+        # (no parent-column mask: root-level files carry parent='' while dirs
+        # carry '.', see find/index.py).
         target_depth = depth_offset + depth_limit
-        df = load_scan_data(scan['blob'], max_depth=target_depth, min_depth=target_depth, path_prefix=rel_prefix or None)
-
-        if scan_path == uri:
-            # Direct match: dirs at root have parent='.', but root-level files retain
-            # parent='' from the walk (see find/index.py). Matches the pattern used
-            # by /api/scan and /api/scans/progress (server.py:695/725/787).
-            children = df[(df['parent'] == '.') | ((df['parent'] == '') & (df['path'] != '.'))].copy()
-            children['rel_path'] = children['path']
-        else:
-            # URI is subdir of scan - filter to children of the relative path
-            # Children have parent == rel_prefix
-            children = df[df['parent'] == rel_prefix].copy()
-            # rel_path is just the filename (last component)
-            children['rel_path'] = children['path'].str.split('/').str[-1]
-
+        df = load_scan_data(blob, max_depth=target_depth, min_depth=target_depth, path_prefix=None if at_root else rebased)
+        if df.empty:
+            return df
+        depths = df['path'].map(lambda p: 0 if p == '.' else p.count('/') + 1)
+        mask = depths == target_depth
+        if not at_root:
+            mask &= df['path'].str.startswith(rebased + '/')
+        children = df[mask].copy()
+        children['rel_path'] = children['path'] if at_root else children['path'].str[len(rebased) + 1:]
         return children
 
     children1 = get_children(scan1, depth)
@@ -1552,6 +1562,8 @@ def compare_scans():
 
         if d['size_delta'] != 0 or d['n_desc_delta'] != 0:
             d['status'] = 'changed'
+        elif _mtime_differs(row1.get('mtime'), row2.get('mtime')):
+            d['status'] = 'touched'
         else:
             d['status'] = 'unchanged'
 
@@ -1587,6 +1599,7 @@ def compare_scans():
             'added': len(added),
             'removed': len(removed),
             'changed': len([r for r in results if r['status'] == 'changed']),
+            'touched': len([r for r in results if r['status'] == 'touched']),
             'unchanged': len([r for r in results if r['status'] == 'unchanged']),
             'total_delta': to_native(total_delta),
         }

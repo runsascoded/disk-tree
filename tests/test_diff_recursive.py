@@ -116,6 +116,8 @@ def test_net_zero_rename_is_found_via_mtime(sources):
     assert result.rows == [
         DeltaRow('a/f2.txt', 2, 'file', 'removed', 300, 0, 0, 0),
         DeltaRow('a/f3.txt', 2, 'file', 'added', 0, 300, 0, 0),
+        # the dir itself: same bytes & count, mtime moved — reported, not hidden
+        DeltaRow('a', 1, 'dir', 'touched', 400, 400, 2, 2, expanded=True),
     ]
     assert result.expansions == 2  # root + a
     assert result.truncated is False
@@ -161,3 +163,18 @@ def test_unchanged_top_and_rest(sources):
     result = recursive_diff(src_a, src_b, include_unchanged=True)
     assert result.unchanged_top == []
     assert result.unchanged_rest == {}
+
+
+def test_touched_file_is_reported(sources):
+    """A file whose only change is its mtime (same size) is `touched` — the
+    diff is not empty, and the row says what moved."""
+    df_b = _scan_a()
+    df_b.loc[df_b['path'] == 'a/f1.txt', 'mtime'] = 85.0
+    df_b.loc[df_b['path'] == 'a', 'mtime'] = 95.0
+    src_a, src_b = sources(_scan_a(), df_b)
+    result = recursive_diff(src_a, src_b)
+    assert result.rows == [
+        DeltaRow('a', 1, 'dir', 'touched', 400, 400, 2, 2, expanded=True),
+        DeltaRow('a/f1.txt', 2, 'file', 'touched', 100, 100, 0, 0),
+    ]
+    assert result.truncated is False

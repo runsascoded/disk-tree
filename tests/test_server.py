@@ -982,7 +982,7 @@ class TestCompareRecursive:
         ]
         assert data['rows'][0]['uri'] == '/test/b'
         assert data['summary'] == {
-            'added': 0, 'removed': 0, 'changed': 2, 'unchanged': 0,
+            'added': 0, 'removed': 0, 'changed': 2, 'touched': 0, 'unchanged': 0,
             'total_delta': 1000, 'expansions': 2, 'truncated': False,
         }
         # `a` was compared (and pruned) while expanding the root: it ships as

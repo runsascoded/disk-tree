@@ -31,13 +31,21 @@ def _resolve_scans(con: sqlite3.Connection, args: tuple[str, ...]) -> tuple[sqli
     or two scan-id args (uses those ids and picks their common path)."""
     if len(args) == 1:
         uri = args[0].rstrip('/') or '/'
-        rows = con.execute(
-            'SELECT * FROM scan WHERE path = ? ORDER BY time DESC LIMIT 2', (uri,),
-        ).fetchall()
-        if len(rows) < 2:
-            raise ValueError(f"need ≥2 scans of {uri!r}; found {len(rows)}")
-        # Most recent as scan_b, older as scan_a
-        return rows[1], rows[0], uri
+        # Exact scans of the uri, else the nearest ancestor with two (the
+        # server rebases into ancestor scans the same way).
+        path = uri
+        while True:
+            rows = con.execute(
+                'SELECT * FROM scan WHERE path = ? ORDER BY time DESC LIMIT 2', (path,),
+            ).fetchall()
+            if len(rows) >= 2:
+                if path != uri:
+                    err(f"no 2 scans of {uri!r}; comparing within scans of {path!r}")
+                # Most recent as scan_b, older as scan_a
+                return rows[1], rows[0], uri
+            if path == '/' or '/' not in path:
+                raise ValueError(f"need ≥2 scans of {uri!r} (or an ancestor); found none")
+            path = path.rsplit('/', 1)[0] or '/'
     if len(args) == 2:
         try:
             id_a, id_b = int(args[0]), int(args[1])
