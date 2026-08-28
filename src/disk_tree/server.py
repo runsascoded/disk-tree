@@ -1285,6 +1285,13 @@ def filter_stream():
     return Response(generate(), mimetype='text/event-stream')
 
 
+# Single-flight for /api/compare: identical concurrent requests (React's
+# StrictMode double-fires effects in dev; two tabs; a double-click) share one
+# computation instead of each walking the scans.
+_inflight_lock = threading.Lock()
+_inflight: dict[str, threading.Event] = {}
+
+
 def _mtime_differs(a, b) -> bool:
     """NaN-safe: both-missing counts as equal."""
     a_na, b_na = pd.isna(a), pd.isna(b)
@@ -1335,6 +1342,27 @@ def compare_scans():
     if cache_key in _cache:
         _, cached_result = _cache[cache_key]
         return jsonify(cached_result)
+    with _inflight_lock:
+        waiter = _inflight.get(cache_key)
+        if waiter is None:
+            _inflight[cache_key] = threading.Event()
+    if waiter is not None:
+        waiter.wait()
+        if cache_key in _cache:
+            return jsonify(_cache[cache_key][1])
+        # the leader failed; fall through and compute ourselves
+        with _inflight_lock:
+            _inflight.setdefault(cache_key, threading.Event())
+    try:
+        return _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now)
+    finally:
+        with _inflight_lock:
+            ev = _inflight.pop(cache_key, None)
+        if ev is not None:
+            ev.set()
+
+
+def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now):
 
     db = get_db()
 

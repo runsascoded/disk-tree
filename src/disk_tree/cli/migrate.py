@@ -1,5 +1,5 @@
 """Migration commands for disk-tree database."""
-from os import makedirs, rename
+from os import makedirs, rename, replace
 from os.path import basename, isabs, isfile, join
 
 import pandas as pd
@@ -8,6 +8,7 @@ from utz import err
 
 from disk_tree.cli.base import cli
 from disk_tree.config import SCANS_DIR, SQLITE_PATH as DB_PATH
+from disk_tree.storage.base import BLOB_ROW_GROUP_SIZE
 
 
 @cli.command('migrate')
@@ -339,3 +340,36 @@ def _normalize_parquet_chunks(blob_path: str, dry_run: bool, counts: dict) -> No
     for child_ref in df['child_scan_id'].dropna():
         child_path = child_ref if isabs(child_ref) else join(SCANS_DIR, basename(child_ref))
         _normalize_parquet_chunks(child_path, dry_run, counts)
+
+
+@cli.command('migrate-row-groups')
+@option('-n', '--dry-run', is_flag=True, help='Only report blobs that would be rewritten')
+@option('-r', '--rows', default=BLOB_ROW_GROUP_SIZE, help=f'Target rows per row group (default {BLOB_ROW_GROUP_SIZE})')
+def migrate_row_groups(dry_run: bool, rows: int):
+    """Rewrite scan blobs whose parquet row groups exceed ROWS rows.
+
+    A directory listing (`load(min_depth=max_depth=d, path_prefix=…)`) decodes
+    every row group whose stats overlap, so row-group size is the unit of work
+    per browse / diff expansion: ~4 ms at 64K rows vs ~40 ms at 1M. Older blobs
+    were written with 262K–1M-row groups. Rewrites are atomic (tmp + replace);
+    vocab sidecars index by row group and are skipped — rebuild them with
+    `disk-tree vocab` (they detect the changed blob and refuse stale reads).
+    """
+    from glob import glob
+    import pyarrow.parquet as pq
+    n = 0
+    for path in sorted(glob(join(SCANS_DIR, '*.parquet'))):
+        if path.endswith('.vocab.parquet'):
+            continue
+        md = pq.ParquetFile(path).metadata
+        biggest = max((md.row_group(i).num_rows for i in range(md.num_row_groups)), default=0)
+        if biggest <= rows:
+            continue
+        n += 1
+        err(f"{basename(path)}: {md.num_rows:,} rows in {md.num_row_groups} group(s), max {biggest:,}")
+        if dry_run:
+            continue
+        tmp = path + '.rg.tmp'
+        pq.write_table(pq.read_table(path), tmp, row_group_size=rows)
+        replace(tmp, path)
+    err(f"{n} blob(s) {'would be ' if dry_run else ''}rewritten to ≤{rows:,}-row groups")

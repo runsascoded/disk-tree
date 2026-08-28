@@ -23,12 +23,14 @@ so the CLI can share them without importing Flask).
 from __future__ import annotations
 
 import heapq
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache
 from os.path import exists, getmtime, isabs, join
 from typing import Callable, Protocol
 
 import pandas as pd
+import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
 from . import config as _config
@@ -56,9 +58,11 @@ def _chunk_map(parquet_path: str) -> dict[str, str] | None:
 def _chunk_map_cached(parquet_path: str, mtime: float) -> dict[str, str] | None:
     if 'child_scan_id' not in pq.read_schema(parquet_path).names:
         return None
-    df = pd.read_parquet(parquet_path, columns=['path', 'child_scan_id'])
-    df = df[df['child_scan_id'].notna()]
-    return dict(zip(df['path'], df['child_scan_id']))
+    # Filter Arrow-side: converting millions of path strings to pandas just
+    # to keep the few pointer rows cost ~0.4 s per blob (3× the read itself).
+    tbl = pq.read_table(parquet_path, columns=['path', 'child_scan_id'])
+    tbl = tbl.filter(pc.is_valid(tbl['child_scan_id']))
+    return dict(zip(tbl['path'].to_pylist(), tbl['child_scan_id'].to_pylist()))
 
 
 def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
@@ -239,12 +243,19 @@ def recursive_diff(
     max_depth: int | None = None,
     include_unchanged: bool = False,
     unchanged_top: int = 8,
+    batch: int = 8,
 ) -> RecursiveDiffResult:
     """Walk changed spines best-first; return the delta frontier.
 
     `unchanged_top`: per expanded dir, keep this many of the biggest unchanged
     children (by size) in `unchanged_top`, summarizing the rest in
     `unchanged_rest[parent]` — free, since every child was compared anyway.
+
+    `batch`: expansions are popped `batch` at a time and their listings loaded
+    concurrently (a listing is a parquet row-group decode — the file's row
+    groups hold ~1M rows, so each costs ~50–150 ms and releases the GIL).
+    Best-first then holds within a batch, not strictly across it: a child
+    discovered by the batch's first expansion can't pre-empt its siblings'.
     """
     rows: list[DeltaRow] = []
     top_rows: list[DeltaRow] = []
@@ -257,79 +268,93 @@ def recursive_diff(
     expansions = 0
     truncated = False
 
-    while heap:
+    pool = ThreadPoolExecutor(max_workers=max(1, min(batch, 16)))
+    try:
+      while heap:
         if expansions >= budget:
             truncated = True
             break
-        _, d, _, rel = heapq.heappop(heap)
-        ca = src_a.children(rel)
-        cb = src_b.children(rel)
-        expansions += 1
-        if rel:
-            by_path[rel].expanded = True
+        # Pop a batch (never past the budget) and load both sides' listings
+        # concurrently; process in popped (best-first) order.
+        popped = []
+        while heap and len(popped) < batch and expansions + len(popped) < budget:
+            popped.append(heapq.heappop(heap))
+        futs = [
+            (d, rel, pool.submit(src_a.children, rel), pool.submit(src_b.children, rel))
+            for _, d, _, rel in popped
+        ]
+        for d, rel, fa, fb in futs:
+          ca = fa.result()
+          cb = fb.result()
+          expansions += 1
+          if rel:
+              by_path[rel].expanded = True
 
-        unchanged_here: list[DeltaRow] = []
-        for name in sorted(set(ca.index) | set(cb.index)):
-            child_rel = f"{rel}/{name}" if rel else name
-            ra = ca.loc[name] if name in ca.index else None
-            rb = cb.loc[name] if name in cb.index else None
-            kind_a = ra['kind'] if ra is not None else None
-            kind_b = rb['kind'] if rb is not None else None
-            row = DeltaRow(
-                path=child_rel,
-                depth=d + 1,
-                kind=kind_b or kind_a or '',
-                status='',
-                size_a=_ival(ra, 'size'),
-                size_b=_ival(rb, 'size'),
-                n_desc_a=_ival(ra, 'n_desc'),
-                n_desc_b=_ival(rb, 'n_desc'),
-            )
-            descend = False
-            if ra is None:
-                row.status = 'added'
-            elif rb is None:
-                row.status = 'removed'
-            elif kind_a != kind_b:
-                # dir↔file swap: incomparable subtrees, report don't descend
-                row.status = 'changed'
-            else:
-                if row.size_delta or row.n_desc_delta:
-                    row.status = 'changed'
-                elif _neq(ra.get('mtime'), rb.get('mtime')):
-                    row.status = 'touched'
-                else:
-                    row.status = 'unchanged'
-                if kind_a == 'dir':
-                    # mtime is in the trigger so net-zero renames are still found
-                    descend = any(
-                        _neq(ra.get(c), rb.get(c))
-                        for c in ('size', 'n_desc', 'n_children', 'mtime')
-                    )
+          unchanged_here: list[DeltaRow] = []
+          for name in sorted(set(ca.index) | set(cb.index)):
+              child_rel = f"{rel}/{name}" if rel else name
+              ra = ca.loc[name] if name in ca.index else None
+              rb = cb.loc[name] if name in cb.index else None
+              kind_a = ra['kind'] if ra is not None else None
+              kind_b = rb['kind'] if rb is not None else None
+              row = DeltaRow(
+                  path=child_rel,
+                  depth=d + 1,
+                  kind=kind_b or kind_a or '',
+                  status='',
+                  size_a=_ival(ra, 'size'),
+                  size_b=_ival(rb, 'size'),
+                  n_desc_a=_ival(ra, 'n_desc'),
+                  n_desc_b=_ival(rb, 'n_desc'),
+              )
+              descend = False
+              if ra is None:
+                  row.status = 'added'
+              elif rb is None:
+                  row.status = 'removed'
+              elif kind_a != kind_b:
+                  # dir↔file swap: incomparable subtrees, report don't descend
+                  row.status = 'changed'
+              else:
+                  if row.size_delta or row.n_desc_delta:
+                      row.status = 'changed'
+                  elif _neq(ra.get('mtime'), rb.get('mtime')):
+                      row.status = 'touched'
+                  else:
+                      row.status = 'unchanged'
+                  if kind_a == 'dir':
+                      # mtime is in the trigger so net-zero renames are still found
+                      descend = any(
+                          _neq(ra.get(c), rb.get(c))
+                          for c in ('size', 'n_desc', 'n_children', 'mtime')
+                      )
 
-            by_path[child_rel] = row
-            if descend:
-                if max_depth is not None and d + 1 >= max_depth:
-                    row.pruned = True
-                    truncated = True
-                else:
-                    seq += 1
-                    heapq.heappush(heap, (-abs(row.size_delta), d + 1, seq, child_rel))
-            if row.status != 'unchanged' or include_unchanged or row.pruned:
-                rows.append(row)
-                emitted.add(child_rel)
-            elif not row.pruned:
-                unchanged_here.append(row)
-        if unchanged_here:
-            unchanged_here.sort(key=lambda r: (-r.size_b, r.path))
-            top_rows.extend(unchanged_here[:unchanged_top])
-            tail = unchanged_here[unchanged_top:]
-            if tail:
-                rest[rel] = UnchangedRest(
-                    count=len(tail),
-                    size=sum(r.size_b for r in tail),
-                    n_desc=sum(r.n_desc_b for r in tail),
-                )
+              by_path[child_rel] = row
+              if descend:
+                  if max_depth is not None and d + 1 >= max_depth:
+                      row.pruned = True
+                      truncated = True
+                  else:
+                      seq += 1
+                      heapq.heappush(heap, (-abs(row.size_delta), d + 1, seq, child_rel))
+              if row.status != 'unchanged' or include_unchanged or row.pruned:
+                  rows.append(row)
+                  emitted.add(child_rel)
+              elif not row.pruned:
+                  unchanged_here.append(row)
+          if unchanged_here:
+              unchanged_here.sort(key=lambda r: (-r.size_b, r.path))
+              top_rows.extend(unchanged_here[:unchanged_top])
+              tail = unchanged_here[unchanged_top:]
+              if tail:
+                  rest[rel] = UnchangedRest(
+                      count=len(tail),
+                      size=sum(r.size_b for r in tail),
+                      n_desc=sum(r.n_desc_b for r in tail),
+                  )
+
+    finally:
+        pool.shutdown(wait=False)
 
     # Anything still queued was never expanded: mark it (and surface it even if
     # its own Δ is zero — differing stats below mean unexplored change).

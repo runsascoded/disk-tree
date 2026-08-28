@@ -12,7 +12,12 @@ import pandas as pd
 # pushdown a full read. Also the grain of the vocab sidecar's block index
 # (`sidecar.py`): 1e9 rows / 262k ≈ 4k groups, so a selective name reads a
 # handful of groups instead of the file.
-BLOB_ROW_GROUP_SIZE = 262_144
+# Read-side granularity: a directory listing (`load(min_depth=max_depth=d,
+# path_prefix=…)`) decodes every row group whose stats overlap, so this is the
+# unit of work per browse/diff expansion. 64K rows ≈ 4 ms per listing vs
+# ~40 ms at 1M (measured 2026-08-28, 4.5M-row home scan); footer cost is
+# negligible either way. `disk-tree migrate-row-groups` rewrites older blobs.
+BLOB_ROW_GROUP_SIZE = 65_536
 
 
 def path_prefix_bounds(prefix: str) -> tuple[str, str]:
