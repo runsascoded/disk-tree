@@ -295,6 +295,67 @@ describe('<Treemap>', () => {
     })
   })
 
+  describe('cellHref', () => {
+    it('leaf-rendered cells become anchors; cells with nested tiles stay divs', () => {
+      const restore = withLayout()
+      try {
+        const { container } = render(
+          <Treemap root={tree} {...accessors} minCellArea={null} cellHref={n => `/n/${n.n}`} />,
+        )
+        const cells = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')] as HTMLElement[]
+        expect(cells.map(el => [el.tagName, el.getAttribute('href'), el.style.cursor, el.style.textDecoration])).toEqual([
+          ['DIV', null, 'pointer', ''],             // foo renders children → no <a>
+          ['A', '/n/bar', 'pointer', 'none'],
+        ])
+        // foo's leaf children are anchors too
+        const inner = [...cells[0].querySelectorAll('.dt-treemap-inner > .dt-treemap-cell')] as HTMLElement[]
+        expect(inner.map(el => [el.tagName, el.getAttribute('href')])).toEqual([['A', '/n/a.txt'], ['A', '/n/b.txt']])
+      } finally {
+        restore()
+      }
+    })
+
+    it('plain clicks are prevented and flow to onCellClick; modified clicks keep native behavior', () => {
+      const restore = withLayout()
+      try {
+        const onCellClick = vi.fn((_n: Node) => true)
+        const { container } = render(
+          <Treemap root={tree} {...accessors} minCellArea={null} cellHref={n => `/n/${n.n}`} onCellClick={onCellClick} />,
+        )
+        const bar = container.querySelector('.dt-treemap-map > a.dt-treemap-cell')!
+        const plain = fireEvent.click(bar)
+        expect(plain).toBe(false)   // preventDefault'ed
+        expect(onCellClick.mock.calls.map(([n]) => n.n)).toEqual(['bar'])
+        const meta = fireEvent.click(bar, { metaKey: true })
+        expect(meta).toBe(true)     // native (new tab)
+        expect(onCellClick).toHaveBeenCalledTimes(1)
+      } finally {
+        restore()
+      }
+    })
+  })
+
+  it('branch/chain chrome classes are size-gated (min dim ≥ 28px) unless children render', () => {
+    const restore = withLayout(400, 300)
+    try {
+      // 400 tiny drillable dirs → ~17px tiles: drillable, but no `branch` chrome
+      const many: Node = {
+        n: 'root', size: 400,
+        children: Array.from({ length: 400 }, (_, i) => ({ n: `d${i}`, size: 1, children: [{ n: 'f', size: 1 }] })),
+      }
+      const { container } = render(<Treemap root={many} {...accessors} minCellArea={null} />)
+      const cells = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')] as HTMLElement[]
+      expect(cells.length).toBe(400)
+      expect(cells.every(el => Math.min(parseFloat(el.style.width), parseFloat(el.style.height)) < 28)).toBe(true)
+      expect(cells.filter(el => el.classList.contains('branch')).length).toBe(0)
+      // the original tree: foo (266×300, renders children) keeps `branch`
+      const { container: c2 } = render(<Treemap root={tree} {...accessors} minCellArea={null} />)
+      expect(c2.querySelector('.dt-treemap-map > .dt-treemap-cell')!.classList.contains('branch')).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
   it('breadcrumb bar shows a single non-link segment for the current node', () => {
     const { container } = render(<Treemap root={tree} {...accessors} />)
     // Root is the current node — no interactive anchor around it

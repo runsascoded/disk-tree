@@ -140,6 +140,16 @@ export interface TreemapProps<T> {
    * drill/pin behavior (i.e. the consumer handled it).
    */
   onCellClick?: (n: T, path: T[], event: React.MouseEvent) => boolean | void
+  /**
+   * Make leaf-rendered cells real anchors (`<a href>`): native cursor,
+   * middle/cmd-click, link hints (Vimium), crawlability. Return `undefined`
+   * for cells that shouldn't be links. Cells that render nested tiles stay
+   * `<div>`s (anchors can't nest), so this suits shallow maps best. Plain
+   * clicks are `preventDefault`ed and flow through `onCellClick`/drill/pin
+   * as usual — an SPA router intercepts while the href keeps its native
+   * affordances.
+   */
+  cellHref?: (n: T, path: T[]) => string | undefined
   /** Called whenever the drill path changes (drill in, drill back). */
   onPathChange?: (path: T[]) => void
   /**
@@ -327,6 +337,7 @@ export function Treemap<T>({
   renderFooter,
   renderCellSubtitle,
   onCellClick,
+  cellHref,
   onPathChange,
   minCellArea = 16,
   mergeSmall,
@@ -668,9 +679,18 @@ export function Treemap<T>({
       // a mouse-following tip can't be hovered into to click its contents.
       setTip(prev => (prev?.key === cellKey ? prev : { x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath }))
     }
+    // Real-anchor cells (`cellHref`): only leaf-rendered ones — a cell with
+    // nested tiles would nest <a>s, which HTML forbids. Modified/middle
+    // clicks keep native behavior (new tab); plain clicks preventDefault and
+    // flow through the normal handler so SPA routers can intercept.
+    const href = cellHref && !folded && kids.length === 0 ? cellHref(kid as T, kidPath) : undefined
     const onClick = (e: React.MouseEvent) => {
       e.stopPropagation()
       if (folded) return
+      if (href) {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return
+        e.preventDefault()
+      }
       if (onCellClick && onCellClick(kid as T, kidPath, e)) return
       if (kidDrillable) {
         pin.clearPin()
@@ -682,11 +702,19 @@ export function Treemap<T>({
         )
       }
     }
+    // `branch` / `chain` chrome (consumers hang inset rings / doubled edges
+    // off these) only when the cell is big enough for that treatment to read
+    // — a dense field of small drillable or chain-collapsed tiles must not
+    // all grow dark inner rings. `branch` also applies whenever children
+    // actually render (a container needs its edge at any size).
+    const chromeOk = Math.min(r.w, r.h) >= 28
 
+    const CellTag: 'a' | 'div' = href ? 'a' : 'div'
     return (
-      <div
+      <CellTag
         key={cellKey}
-        className={'dt-treemap-cell' + (kidDrillable ? ' branch' : '') + (dust ? ' dust' : '') + (chainLabels ? ' chain' : '') + (shared ? ' shared' : '')}
+        {...(href && { href })}
+        className={'dt-treemap-cell' + (kidDrillable && (kids.length > 0 || chromeOk) ? ' branch' : '') + (dust ? ' dust' : '') + (chainLabels && chromeOk ? ' chain' : '') + (shared ? ' shared' : '')}
         style={{
           position: 'absolute',
           left: r.x,
@@ -706,11 +734,14 @@ export function Treemap<T>({
           boxShadow: shared
             ? `inset 0 0 0 ${edge}px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))`
             : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
-          color: style.ink,
+          // Anchors must not fall through to the page's link color when the
+          // consumer sets no ink.
+          color: style.ink ?? (href ? 'inherit' : undefined),
           borderRadius: shared ? 0 : dust ? 1.5 : 3,
           overflow: 'hidden',
           boxSizing: 'border-box',
-          cursor: kidDrillable ? 'pointer' : 'default',
+          cursor: href || kidDrillable ? 'pointer' : 'default',
+          ...(href && { textDecoration: 'none' }),
         }}
         tabIndex={folded ? -1 : 0}
         // Leaf cells hover their whole body; branch cells hover only their
@@ -843,7 +874,7 @@ export function Treemap<T>({
               .map(s => cell(s.it, isFolded(s.it) ? kidPath : [...kidPath, s.it as T], s, depth + 1, kidsMode))}
           </div>
         )}
-      </div>
+      </CellTag>
     )
   }
 
@@ -855,6 +886,15 @@ export function Treemap<T>({
   }
 
   const tipToShow = pinnedTip ?? tip
+  // Clamp the tip to the viewport using its MEASURED size — consumers widen
+  // it with CSS (max-width overrides), so a fixed guess overflows the edge.
+  const [tipDims, setTipDims] = useState<{ w: number; h: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = tipRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setTipDims(d => (d && Math.abs(d.w - r.width) < 1 && Math.abs(d.h - r.height) < 1 ? d : { w: r.width, h: r.height }))
+  })
   const tipContent = tipToShow && renderTooltip
     ? renderTooltip(tipToShow.node, tipToShow.path)
     : tipToShow
@@ -961,8 +1001,8 @@ export function Treemap<T>({
           onMouseLeave={() => { if (!pinnedTip) { pin.hover(null); setTip(null) } }}
           style={{
             position: 'fixed',
-            left: Math.min(tipToShow.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1600) - 320),
-            top: Math.min(tipToShow.y + 14, (typeof window !== 'undefined' ? window.innerHeight : 1200) - 80),
+            left: Math.max(4, Math.min(tipToShow.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1600) - (tipDims?.w ?? 320) - 8)),
+            top: Math.max(4, Math.min(tipToShow.y + 14, (typeof window !== 'undefined' ? window.innerHeight : 1200) - (tipDims?.h ?? 80) - 8)),
             background: 'var(--dt-treemap-tip-bg, #1a1a1e)',
             color: 'var(--dt-treemap-tip-ink, #e6e6ea)',
             border: '1px solid var(--dt-treemap-tip-border, #333)',
