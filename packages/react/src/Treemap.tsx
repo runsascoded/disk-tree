@@ -128,9 +128,12 @@ export interface TreemapProps<T> {
   renderFooter?: (n: T, path: T[]) => ReactNode
   /**
    * Right side of the cell size line — e.g. "$1.2/mo". Rendered inline with
-   * the size when the cell is big enough to fit a subtitle.
+   * the size when the cell is big enough to fit a subtitle; `dims` is the
+   * cell's box so the consumer can size its content to the room left after
+   * the label (the size span never shrinks, so an over-long subtitle would
+   * crush the name).
    */
-  renderCellSubtitle?: (n: T, path: T[]) => ReactNode
+  renderCellSubtitle?: (n: T, path: T[], dims: CellDims) => ReactNode
 
   /**
    * Override the click handler. Return `true` to skip the built-in
@@ -162,21 +165,21 @@ export interface TreemapProps<T> {
   /** Style overrides on the map area. */
   mapStyle?: CSSProperties
   /**
-   * Per-level fade applied to nested (depth > 0) cells. Default: 0.82.
+   * Per-level fade applied to nested (depth > 0) cell *backgrounds*.
+   * Default: 0.82.
    *
-   * Cells are nested DOM nodes, so CSS opacity would naturally *compound*
-   * without bound; the renderer instead targets a cumulative opacity of
-   * `max(rootFade × depthFade^depth, fadeFloor)` — the shallow levels recede
-   * gently, but labels deep in the tree stay readable. Pass `1` to keep
-   * saturation constant and lean on borders for structure.
+   * Each cell paints its background on a dedicated layer at opacity
+   * `max(rootFade × depthFade^depth, fadeFloor)` — deeper paint recedes, but
+   * label ink never fades: text renders outside the faded layer at full
+   * strength at every depth. Pass `1` to keep saturation constant and lean on
+   * borders for structure.
    */
   depthFade?: number
-  /** Opacity of the outermost (depth 0) cells. Default: 0.92. */
+  /** Background opacity of the outermost (depth 0) cells. Default: 0.92. */
   rootFade?: number
   /**
-   * Floor on the cumulative depth fade. Without one, compounding washes out
-   * deep cells entirely (depth 4 at the defaults would render at ~0.5, its
-   * label barely legible). Default: 0.75.
+   * Floor on the depth fade, so deep backgrounds don't wash out entirely
+   * (depth 4 at the defaults would otherwise paint at ~0.5). Default: 0.75.
    */
   fadeFloor?: number
 }
@@ -188,7 +191,8 @@ export interface CellStyle {
   ink?: string
   /** repeating-gradient overlay (e.g. the class-lens hatch marin uses) */
   hatch?: string
-  /** opacity multiplier (0–1). Combined with the built-in depth fade. */
+  /** opacity multiplier (0–1). Combined with the built-in depth fade; applies
+   * to the cell's background layer, never its label ink. */
   opacity?: number
   /**
    * Proportional makeup stripes for a leaf-rendered cell (no nested tiles at
@@ -492,10 +496,10 @@ export function Treemap<T>({
     [children, size, getSize],
   )
 
-  // Target cumulative opacity at a given nesting depth (fadeAt(-1) = 1 so the
-  // depth-0 local value comes out to rootFade).
-  const fadeAt = (d: number) =>
-    d < 0 ? 1 : Math.max(rootFade * depthFade ** d, fadeFloor)
+  // Background opacity at a given nesting depth. Applied per-cell to the
+  // `.dt-treemap-bg` layer (not the cell div), so ancestors' fades never
+  // compound and label ink stays full-strength at every depth.
+  const fadeAt = (d: number) => Math.max(rootFade * depthFade ** d, fadeFloor)
 
   const cell = (
     kid0: T | FoldedNode<T>,
@@ -612,13 +616,15 @@ export function Treemap<T>({
           top: r.y,
           width: Math.max(0, r.w - (dust ? 1 : 2)),
           height: Math.max(0, r.h - (dust ? 1 : 2)),
-          background: style.bg,
+          // Opaque base under the faded paint layer: a cell's fade recedes
+          // toward the container color, and ancestor bg never shows through
+          // descendants — it surfaces only in title bars and gutters.
+          background: 'var(--dt-treemap-container-bg, #202024)',
+          // Outer ring in the gutter; transparent by default so dark-palette
+          // consumers can opt into brighter sibling separation via the var.
+          // (boxShadow, not outline — :focus owns the outline.)
+          boxShadow: '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
           color: style.ink,
-          // Nested cells compound their ancestors' opacity, so pick each
-          // cell's local value such that the cumulative product lands on
-          // fadeAt(depth) exactly (floored — see `fadeFloor`).
-          opacity: (fadeAt(depth) / fadeAt(depth - 1)) * (style.opacity ?? 1),
-          ...(style.hatch && { backgroundImage: style.hatch }),
           borderRadius: dust ? 1.5 : 3,
           overflow: 'hidden',
           boxSizing: 'border-box',
@@ -635,6 +641,21 @@ export function Treemap<T>({
         onClick={onClick}
         onKeyDown={e => e.key === 'Enter' && onClick(e as unknown as React.MouseEvent)}
       >
+        {/* All paint (bg, hatch, makeup stripes) lives on this layer so the
+            depth fade (and any per-cell `style.opacity`) dims backgrounds
+            only — label ink renders outside it, full-strength at every
+            depth. */}
+        <div
+          className="dt-treemap-bg"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: style.bg,
+            ...(style.hatch && { backgroundImage: style.hatch }),
+            opacity: fadeAt(depth) * (style.opacity ?? 1),
+            pointerEvents: 'none',
+          }}
+        >
         {/* Makeup stripes: a leaf/fold cell with a mixed composition renders
             proportional inset slices (longer axis) instead of one dominant
             blob. The `bg` frame showing through the inset + the single outer
@@ -663,6 +684,7 @@ export function Treemap<T>({
               )
             })
           })()}
+        </div>
         {showLbl && (
           <div
             className={'dt-treemap-lbl' + (r.w < 64 ? ' sm' : '')}
@@ -694,7 +716,7 @@ export function Treemap<T>({
               <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none' }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
-                  <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
+                  <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h })}</span>
                 )}
               </span>
             )}
@@ -719,7 +741,7 @@ export function Treemap<T>({
           >
             {formatSize(kidSize)}
             {!folded && renderCellSubtitle && (
-              <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
+              <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h })}</span>
             )}
           </div>
         )}
