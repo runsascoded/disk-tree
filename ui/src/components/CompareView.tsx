@@ -106,6 +106,7 @@ function buildCompareTree(
   flat: CompareResult,
   rec: CompareRecResult | undefined,
   areaMode: AreaMode,
+  showUnchanged: boolean,
 ): { cells: CompareTMNode[]; maxAbsDelta: number } {
   const uriPrefix = flat.uri.replace(/\/$/, '') + '/'
   const byPath = new Map<string, CompareTMNode>()
@@ -162,8 +163,9 @@ function buildCompareTree(
     }, r.path)
   }
   // Labeled grey context at the top level (the recursive walk doesn't emit
-  // unchanged rows; the plain depth-1 compare does).
-  for (const r of flat.rows) {
+  // unchanged rows; the plain depth-1 compare does). Hidden entirely in
+  // hide-unchanged mode — only the changed frontier plots.
+  for (const r of showUnchanged ? flat.rows : []) {
     if (r.status === 'unchanged' && !byPath.has(r.path)) {
       attach({
         key: r.uri,
@@ -200,9 +202,13 @@ function buildCompareTree(
       node.grew += k.grew
       node.shrank += k.shrank
     }
-    node.weight = Math.max(own, kidSum)
+    // Hide-unchanged: a parent occupies only its changed children's bytes —
+    // no filler for the unenumerated remainder, so areas compare *changes*,
+    // not directory sizes. (Frontier leaves still carry their full
+    // max(old, new) — change granularity stops there.)
+    node.weight = showUnchanged ? Math.max(own, kidSum) : Math.max(kidSum, areaMode === 'max' ? 0 : own)
     const gap = node.weight - kidSum
-    if (areaMode === 'max' && gap > Math.max(1_000_000, node.weight * 0.002)) {
+    if (areaMode === 'max' && showUnchanged && gap > Math.max(1_000_000, node.weight * 0.002)) {
       // No name: it aggregates children the walk never enumerated — the
       // uniform grey (and the tooltip) do the talking.
       node.children.push({
@@ -248,8 +254,9 @@ function CompareTreemap({
   onDrill: (uri: string) => void
 }) {
   const [areaMode, setAreaMode] = useState<AreaMode>('max')
+  const [showUnchanged, setShowUnchanged] = useState(true)
   const { root, maxAbsDelta } = useMemo(() => {
-    const { cells, maxAbsDelta: maxAbs } = buildCompareTree(result, rec, areaMode)
+    const { cells, maxAbsDelta: maxAbs } = buildCompareTree(result, rec, areaMode, showUnchanged)
     const totalWeight = cells.reduce((s, c) => s + c.weight, 0)
     // Root aggregates its cells so the widget's crumbs line reads correctly.
     const root: CompareTMNode & { children: CompareTMNode[] } = {
@@ -268,16 +275,21 @@ function CompareTreemap({
       children: cells,
     }
     return { root, maxAbsDelta: maxAbs }
-  }, [result, rec, areaMode])
+  }, [result, rec, areaMode, showUnchanged])
 
   if (root.children.length === 0) {
     return (
       <Paper sx={{ p: 3, textAlign: 'center' }}>
         <Typography color="text.secondary" variant="body2">
-          {areaMode === 'max'
+          {areaMode === 'max' && showUnchanged
             ? 'Nothing to plot — no row has any bytes on either side.'
             : 'No size deltas to plot — every row is unchanged.'}
         </Typography>
+        {!showUnchanged && (
+          <Button size="small" sx={{ mt: 1 }} onClick={() => setShowUnchanged(true)}>
+            show unchanged
+          </Button>
+        )}
       </Paper>
     )
   }
@@ -411,10 +423,28 @@ function CompareTreemap({
               grew
               <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(-1), borderRadius: 2 }} />
               shrank
-              {areaMode === 'max' && <>
-                <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_GREY, borderRadius: 2 }} />
-                unchanged
-              </>}
+              {areaMode === 'max' && (
+                // Legend-item toggle (plot-legend style): click to hide/show
+                // unchanged rows. Hidden = only changed entries plot (at
+                // max(old, new) size); parents shrink to their changed
+                // contents, fillers and grey context rows drop out.
+                <button
+                  onClick={e => { e.stopPropagation(); setShowUnchanged(s => !s) }}
+                  title={showUnchanged
+                    ? 'Hide unchanged rows: only changed entries plot; parents shrink to their changed contents'
+                    : 'Show unchanged rows: grey context cells and fillers restore true directory proportions'}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                    background: 'none', border: 'none', padding: 0, margin: 0,
+                    font: 'inherit', color: 'inherit',
+                    opacity: showUnchanged ? 1 : 0.45,
+                    textDecoration: showUnchanged ? 'none' : 'line-through',
+                  }}
+                >
+                  <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_GREY, borderRadius: 2 }} />
+                  unchanged
+                </button>
+              )}
               <span style={{ opacity: 0.6, marginLeft: 4 }}>
                 {areaMode === 'max' ? 'area = max(old, new), band = |Δ|' : 'area = |Δ|'}
               </span>
