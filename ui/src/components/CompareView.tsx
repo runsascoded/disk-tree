@@ -407,8 +407,12 @@ function CompareTreemap({
           // the boundary; gaps: classic gutters). The dark compare palette
           // needs a light stroke/ring either way.
           tiling={getTiling()}
+          // The stroke paints over each cell's opaque base (the container
+          // color), so it's one fixed color for the whole map: mid grey reads
+          // against both the bright full-Δ cells and the dark mostly-grey
+          // ones (a darker stroke disappeared into the latter).
           mapStyle={{
-            '--dt-treemap-edge': 'rgba(255, 255, 255, 0.18)',
+            '--dt-treemap-edge': 'rgba(255, 255, 255, 0.34)',
             '--dt-treemap-cell-border': 'rgba(255, 255, 255, 0.14)',
           } as CSSProperties}
           // Displayed inline with the label — the raw |Δ| magnitude. Sign is
