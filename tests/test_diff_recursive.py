@@ -5,7 +5,7 @@ import tempfile
 import pandas as pd
 import pytest
 
-from disk_tree.diff import DeltaRow, ScanSource, recursive_diff
+from disk_tree.diff import DeltaRow, ScanSource, UnchangedRest, recursive_diff
 from disk_tree.storage.parquet import ParquetBackend
 
 
@@ -142,3 +142,22 @@ def test_include_unchanged(sources):
     # `a` (stats-equal dir) and big.bin's siblings-free levels contribute none;
     # unchanged rows come only from expanded dirs' listings.
     assert unchanged == ['a']
+
+
+def test_unchanged_top_and_rest(sources):
+    """Expanding a dir compares every child; the unchanged ones aren't lost:
+    the biggest `unchanged_top` land in `unchanged_top`, the rest aggregate
+    per parent in `unchanged_rest`."""
+    src_a, src_b = sources(_scan_a(), _scan_b_deep_change())
+    result = recursive_diff(src_a, src_b)
+    assert result.unchanged_top == [DeltaRow('a', 1, 'dir', 'unchanged', 400, 400, 2, 2)]
+    assert result.unchanged_rest == {}
+
+    result = recursive_diff(src_a, src_b, unchanged_top=0)
+    assert result.unchanged_top == []
+    assert result.unchanged_rest == {'': UnchangedRest(count=1, size=400, n_desc=2)}
+
+    # `include_unchanged` puts every unchanged row in `rows` instead
+    result = recursive_diff(src_a, src_b, include_unchanged=True)
+    assert result.unchanged_top == []
+    assert result.unchanged_rest == {}

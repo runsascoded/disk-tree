@@ -985,6 +985,17 @@ class TestCompareRecursive:
             'added': 0, 'removed': 0, 'changed': 2, 'unchanged': 0,
             'total_delta': 1000, 'expansions': 2, 'truncated': False,
         }
+        # `a` was compared (and pruned) while expanding the root: it ships as
+        # labeled grey context rather than vanishing.
+        assert data['unchanged'] == {
+            'top': [{
+                'path': 'a', 'uri': '/test/a', 'depth': 1, 'kind': 'dir', 'status': 'unchanged',
+                'size_a': 400, 'size_b': 400, 'size_delta': 0, 'size_old': 400,
+                'n_desc_a': 1, 'n_desc_b': 1, 'n_desc_delta': 0, 'n_desc_old': 1,
+                'expanded': False, 'pruned': False,
+            }],
+            'rest': {},
+        }
 
     def test_recursive_budget_prunes(self, test_client):
         client, db_path, scans_dir = test_client

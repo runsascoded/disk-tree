@@ -390,6 +390,13 @@ export type CompareRecResult = {
   scan1: CompareResult['scan1']
   scan2: CompareResult['scan2']
   rows: CompareRecRow[]
+  /** Labeled grey context: per expanded dir, its biggest unchanged children
+   * (`top`) and the aggregate of the rest (`rest`, keyed by parent path —
+   * `''` = the compared uri). */
+  unchanged?: {
+    top: CompareRecRow[]
+    rest: Record<string, { count: number; size: number; n_desc: number }>
+  }
   summary: CompareResult['summary'] & { expansions: number; truncated: boolean }
 }
 

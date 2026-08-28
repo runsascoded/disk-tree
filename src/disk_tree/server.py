@@ -1382,8 +1382,8 @@ def compare_scans():
         stats1 = get_subtree_stats(scan1)
         stats2 = get_subtree_stats(scan2)
         uri_prefix = uri.rstrip('/') + '/'
-        rows = [
-            {
+        def rec_row(r):
+            return {
                 'path': r.path,
                 'uri': uri_prefix + r.path,
                 'depth': r.depth,
@@ -1400,8 +1400,7 @@ def compare_scans():
                 'expanded': r.expanded,
                 'pruned': r.pruned,
             }
-            for r in result.rows
-        ]
+        rows = [rec_row(r) for r in result.rows]
         response = {
             'uri': uri,
             'recursive': True,
@@ -1420,6 +1419,17 @@ def compare_scans():
                 'scan_path': scan2['path'],
             },
             'rows': rows,
+            # Labeled grey context: the biggest unchanged siblings met while
+            # expanding each dir, plus the aggregate of the rest (keyed by
+            # parent path, '' = uri) — so the treemap can name its biggest
+            # grey cells and count what its filler stands for.
+            'unchanged': {
+                'top': [rec_row(r) for r in result.unchanged_top],
+                'rest': {
+                    parent: {'count': u.count, 'size': u.size, 'n_desc': u.n_desc}
+                    for parent, u in result.unchanged_rest.items()
+                },
+            },
             'summary': {
                 'added': sum(1 for r in rows if r['status'] == 'added'),
                 'removed': sum(1 for r in rows if r['status'] == 'removed'),

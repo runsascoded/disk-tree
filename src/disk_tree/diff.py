@@ -21,7 +21,7 @@ so the CLI can share them without importing Flask).
 from __future__ import annotations
 
 import heapq
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from os.path import exists, getmtime, isabs, join
 from typing import Callable, Protocol
@@ -200,10 +200,25 @@ class DeltaRow:
 
 
 @dataclass
+class UnchangedRest:
+    """Unchanged children of one expanded dir that were *not* emitted (beyond
+    the top-K): enough to label the grey remainder without shipping rows."""
+    count: int      # direct children
+    size: int       # Σ size (both sides equal — they're unchanged)
+    n_desc: int     # Σ n_desc — descendants below those children
+
+
+@dataclass
 class RecursiveDiffResult:
     rows: list[DeltaRow]   # sorted by |Δsize| desc
     expansions: int        # directories whose children were loaded (root included)
     truncated: bool        # budget or max_depth cut the walk short
+    # The biggest unchanged siblings seen while expanding each dir (labeled
+    # grey context for the treemap), and the aggregate of the rest, keyed by
+    # parent rel path ('' = the compared uri). Empty when `include_unchanged`
+    # already put every unchanged row in `rows`.
+    unchanged_top: list[DeltaRow] = field(default_factory=list)
+    unchanged_rest: dict[str, UnchangedRest] = field(default_factory=dict)
 
 
 def _ival(row, col: str) -> int:
@@ -219,9 +234,17 @@ def recursive_diff(
     budget: int = 100,
     max_depth: int | None = None,
     include_unchanged: bool = False,
+    unchanged_top: int = 8,
 ) -> RecursiveDiffResult:
-    """Walk changed spines best-first; return the delta frontier."""
+    """Walk changed spines best-first; return the delta frontier.
+
+    `unchanged_top`: per expanded dir, keep this many of the biggest unchanged
+    children (by size) in `unchanged_top`, summarizing the rest in
+    `unchanged_rest[parent]` — free, since every child was compared anyway.
+    """
     rows: list[DeltaRow] = []
+    top_rows: list[DeltaRow] = []
+    rest: dict[str, UnchangedRest] = {}
     emitted: set[str] = set()
     by_path: dict[str, DeltaRow] = {}
     # heap entries: (-|Δsize|, depth, seq, rel) — seq breaks ties FIFO
@@ -241,6 +264,7 @@ def recursive_diff(
         if rel:
             by_path[rel].expanded = True
 
+        unchanged_here: list[DeltaRow] = []
         for name in sorted(set(ca.index) | set(cb.index)):
             child_rel = f"{rel}/{name}" if rel else name
             ra = ca.loc[name] if name in ca.index else None
@@ -285,6 +309,18 @@ def recursive_diff(
             if row.status != 'unchanged' or include_unchanged or row.pruned:
                 rows.append(row)
                 emitted.add(child_rel)
+            elif not row.pruned:
+                unchanged_here.append(row)
+        if unchanged_here:
+            unchanged_here.sort(key=lambda r: (-r.size_b, r.path))
+            top_rows.extend(unchanged_here[:unchanged_top])
+            tail = unchanged_here[unchanged_top:]
+            if tail:
+                rest[rel] = UnchangedRest(
+                    count=len(tail),
+                    size=sum(r.size_b for r in tail),
+                    n_desc=sum(r.n_desc_b for r in tail),
+                )
 
     # Anything still queued was never expanded: mark it (and surface it even if
     # its own Δ is zero — differing stats below mean unexplored change).
@@ -298,4 +334,7 @@ def recursive_diff(
                 emitted.add(rel)
 
     rows.sort(key=lambda r: (-abs(r.size_delta), r.path))
-    return RecursiveDiffResult(rows=rows, expansions=expansions, truncated=truncated)
+    return RecursiveDiffResult(
+        rows=rows, expansions=expansions, truncated=truncated,
+        unchanged_top=top_rows, unchanged_rest=rest,
+    )
