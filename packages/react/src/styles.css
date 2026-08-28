@@ -10,6 +10,8 @@
   --dt-treemap-tip-bg: #1a1a1e;
   --dt-treemap-tip-ink: #e6e6ea;
   --dt-treemap-tip-border: #333;
+  /* shared-edge tiling stroke; defaults to the container color (a thin gutter) */
+  --dt-treemap-edge: var(--dt-treemap-container-bg);
   color: var(--dt-treemap-ink);
   font-family: system-ui, sans-serif;
 }
