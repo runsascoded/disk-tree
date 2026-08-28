@@ -1608,9 +1608,11 @@ export function ScanDetails() {
             <select
               value={selectedScanId ?? ''}
               onChange={e => setSelectedScanId(e.target.value ? Number(e.target.value) : undefined)}
-              style={{ padding: '4px 8px', fontSize: '0.85rem', background: '#2d2d2d', color: '#e6edf3', border: '1px solid #444', borderRadius: 4 }}
+              style={{ padding: '4px 8px', fontSize: '0.85rem', background: '#2d2d2d', color: '#e6edf3', border: '1px solid #444', borderRadius: 4, maxWidth: '100%' }}
             >
-              <option value="">Latest scan</option>
+              <option value="">
+                Latest — {formatScanTime(scanHistory[0].time)} · {formatSize(scanHistory[0].size ?? 0)}
+              </option>
               {scanHistory.map(scan => (
                 <option key={scan.id} value={scan.id}>
                   {formatScanTime(scan.time)} - {formatSize(scan.size ?? 0)}
@@ -1619,6 +1621,18 @@ export function ScanDetails() {
               ))}
             </select>
           </Tooltip>
+        )}
+        {scanHistory && scanHistory.length > 1 && (
+          <Button
+            component={Link}
+            to={`/compare${uriToPath(uri)}`}
+            size="small"
+            variant="outlined"
+            startIcon={<FaExchangeAlt size={12} />}
+            sx={{ textTransform: 'none' }}
+          >
+            Compare
+          </Button>
         )}
       </Box>
       <ScanProgressBanner progress={scanProgress} currentUri={uri} />
@@ -1682,6 +1696,9 @@ export function ScanDetails() {
           </Box>
         )}
       </Box>
+      {/* The table x-scrolls inside its own box on narrow screens; the page
+          itself never scrolls sideways. */}
+      <div style={{ overflowX: 'auto' }}>
       <DetailsTable
         root={root}
         children={paginatedChildren}
@@ -1705,6 +1722,7 @@ export function ScanDetails() {
         collapsedRows={collapsed_rows}
         tableRef={tableRef}
       />
+      </div>
       {sortedChildren.length > pageSize && (
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem', fontSize: '0.85rem' }}>
           <span style={{ opacity: 0.7 }}>

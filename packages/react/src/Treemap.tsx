@@ -202,9 +202,10 @@ export interface TreemapProps<T> {
    *   coarsest and finest displayed levels at once.
    * - `'shared'`: cells occupy their exact squarify rects and share edges;
    *   each boundary is one stroke (`borderWidth`), half drawn by each
-   *   neighbor as an inset ring, in `--dt-treemap-edge` (defaults to the
-   *   container color, so it reads like a thin gutter). Near-exact areas;
-   *   the stroke is the only residual.
+   *   neighbor as an inset ring in `--dt-treemap-edge` (defaults to the
+   *   container color, so it reads like a thin gutter) — the paint layer
+   *   insets by that much to expose it. Near-exact areas; the stroke is the
+   *   only residual.
    * - A callback decides per subtree — called for the node whose children
    *   are being tiled, with their laid-out density — e.g. `'shared'` for
    *   dense leaf fields (`medianChildArea < 100`), `'gaps'` elsewhere.
@@ -725,11 +726,15 @@ export function Treemap<T>({
           height: Math.max(0, shared ? r.h : r.h - (dust ? 1 : 2)),
           // Opaque base under the faded paint layer: a cell's fade recedes
           // toward the container color, and ancestor bg never shows through
-          // descendants — it surfaces only in title bars and gutters.
+          // descendants — it surfaces only in title bars and gutters. Stays
+          // the container color in both modes: the paint layer is translucent
+          // (depth fade), so a tinted base would wash every cell toward it.
           background: 'var(--dt-treemap-container-bg, #202024)',
-          // Gaps: outer ring in the gutter, transparent by default so
-          // dark-palette consumers can opt into brighter sibling separation
-          // via the var. Shared: this cell's half of the shared stroke.
+          // Shared: this cell's half of the shared stroke, painted in the ring
+          // the inset paint layer leaves bare (an inset shadow under a
+          // full-bleed paint layer would never show). Gaps: an outer ring in
+          // the gutter, transparent by default so dark-palette consumers can
+          // opt into brighter sibling separation via the var.
           // (boxShadow, not outline — :focus owns the outline.)
           boxShadow: shared
             ? `inset 0 0 0 ${edge}px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))`
@@ -762,7 +767,7 @@ export function Treemap<T>({
           className="dt-treemap-bg"
           style={{
             position: 'absolute',
-            inset: 0,
+            inset: shared ? edge : 0,
             background: style.bg,
             ...(style.hatch && { backgroundImage: style.hatch }),
             opacity: fadeAt(depth) * (style.opacity ?? 1),
@@ -938,7 +943,7 @@ export function Treemap<T>({
               )}
             </span>
           ))}
-          <span style={{ opacity: 0.6, marginLeft: 6 }}>
+          <span style={{ opacity: 0.6, marginLeft: 6, whiteSpace: 'nowrap' }}>
             {renderCrumbSuffix ? renderCrumbSuffix(node, path) : <>— {formatSize(getSize(node))}</>}
           </span>
         </nav>

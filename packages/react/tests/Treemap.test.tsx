@@ -229,17 +229,26 @@ describe('<Treemap>', () => {
           [266.67, 300, '0'],
           [133.33, 300, '0'],
         ])
-        // depth 0: borderWidth = max(1, 3 − 0) = 3 → 1.5px ring on each neighbor
+        // depth 0: borderWidth = max(1, 3 − 0) = 3 → each neighbor paints a
+        // 1.5px inset ring, exposed by insetting the paint layer to match
+        // (a full-bleed paint layer would cover the shadow entirely). The
+        // base stays the container color — the paint layer is translucent,
+        // so tinting the base would wash the whole cell toward the stroke.
         expect(bar.style.boxShadow).toBe('inset 0 0 0 1.5px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))')
+        expect(bar.style.background).toBe('var(--dt-treemap-container-bg, #202024)')
+        expect((bar.querySelector(':scope > .dt-treemap-bg') as HTMLElement).style.inset).toBe('1.5px')
         expect(bar.classList.contains('shared')).toBe(true)
         // foo's children fill to foo's own half-stroke (below the 20px title)
         expect((foo.querySelector(':scope > .dt-treemap-inner') as HTMLElement).style.inset).toBe('20px 1.5px 1.5px 1.5px')
         // depth 1: stroke 2 → 1px ring; children split foo's 263.67×278.5
         // canvas 1:1 (taller than wide → stacked)
         const [a, b] = [...foo.querySelectorAll(':scope > .dt-treemap-inner > .dt-treemap-cell')] as HTMLElement[]
-        expect([a, b].map(el => [px(el.style.width), px(el.style.height), el.style.boxShadow])).toEqual([
-          [263.67, 139.25, 'inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
-          [263.67, 139.25, 'inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
+        expect([a, b].map(el => [
+          px(el.style.width), px(el.style.height),
+          (el.querySelector(':scope > .dt-treemap-bg') as HTMLElement).style.inset, el.style.boxShadow,
+        ])).toEqual([
+          [263.67, 139.25, '1px', 'inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
+          [263.67, 139.25, '1px', 'inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
         ])
       } finally {
         restore()
@@ -288,6 +297,7 @@ describe('<Treemap>', () => {
         )
         const [foo] = rootCells(container)
         expect(foo.style.boxShadow).toBe('inset 0 0 0 2px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))')
+        expect((foo.querySelector(':scope > .dt-treemap-bg') as HTMLElement).style.inset).toBe('2px')
         expect((foo.querySelector(':scope > .dt-treemap-inner') as HTMLElement).style.inset).toBe('20px 2px 2px 2px')
       } finally {
         restore()

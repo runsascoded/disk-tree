@@ -36,7 +36,7 @@ export function Header() {
 
   return (
     <AppBar position="static" color="transparent" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
-      <Toolbar variant="dense">
+      <Toolbar variant="dense" sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
         <Typography variant="h6" component="div" sx={{ flexGrow: 0, mr: 4 }}>
           disk-tree
         </Typography>

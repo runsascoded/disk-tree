@@ -374,7 +374,8 @@ function CompareTreemap({
 
   return (
     <Paper sx={{ p: 0, mb: 3, overflow: 'hidden' }}>
-      <Box sx={{ height: 340, position: 'relative' }}>
+      {/* Taller on phones: a 340px strip of a portrait screen is unreadable. */}
+      <Box sx={{ height: { xs: 'min(75vh, 560px)', sm: 340 }, position: 'relative' }}>
         <DTTreemap<CompareTMNode & { children?: CompareTMNode[] }>
           root={root}
           getSize={n => n.weight}
@@ -923,6 +924,10 @@ function CompareTable({
 }) {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>('size_delta')
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
+  const PAGE = 50
+  const [page, setPage] = useState(0)
+
+  useEffect(() => { setPage(0) }, [result, sortColumn, sortDirection])
 
   const handleSort = (col: SortColumn) => {
     if (sortColumn === col) {
@@ -961,7 +966,9 @@ function CompareTable({
 
   return (
     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-      <thead>
+      {/* Header rows stick to the top of the viewport while the page scrolls
+          past a long table (`#0d1117` so rows don't show through). */}
+      <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: '#0d1117' }}>
         <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
           <th style={{ textAlign: 'left', padding: '8px', width: '100%' }}>Path</th>
           <th colSpan={4} style={{ textAlign: 'center', padding: '8px 12px', borderLeft: '1px solid rgba(255,255,255,0.1)', whiteSpace: 'nowrap' }}>Size</th>
@@ -990,7 +997,7 @@ function CompareTable({
           onScan={onScan}
           isScanning={isScanning}
         />
-        {sortedRows.map((row) => (
+        {sortedRows.slice(page * PAGE, (page + 1) * PAGE).map((row) => (
           <CompareRowComponent
             key={row.path}
             row={row}
@@ -1013,10 +1020,32 @@ function CompareTable({
         )}
         {/* The treemap draws unchanged children as grey context; the table
             lists changes only — say what it's leaving out so they agree. */}
-        {result.summary.unchanged > 0 && (
+        {(sortedRows.length > PAGE || result.summary.unchanged > 0) && (
           <tr>
             <td colSpan={10} style={{ padding: '6px 8px', color: '#8b949e', fontSize: '0.8em' }}>
-              {result.summary.unchanged.toLocaleString()} unchanged {result.summary.unchanged === 1 ? 'entry' : 'entries'} not listed
+              {sortedRows.length > PAGE && (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginRight: 16 }}>
+                  {page * PAGE + 1}–{Math.min((page + 1) * PAGE, sortedRows.length)} of {sortedRows.length.toLocaleString()}
+                  {(['«', '‹', '›', '»'] as const).map((g, i) => {
+                    const last = Math.ceil(sortedRows.length / PAGE) - 1
+                    const to = [0, page - 1, page + 1, last][i]
+                    const off = to < 0 || to > last || to === page
+                    return (
+                      <button
+                        key={g}
+                        disabled={off}
+                        onClick={() => setPage(to)}
+                        style={{ background: 'none', border: 'none', color: off ? '#555' : '#54aeff', cursor: off ? 'default' : 'pointer', fontSize: '1em', padding: '0 2px' }}
+                      >
+                        {g}
+                      </button>
+                    )
+                  })}
+                </span>
+              )}
+              {result.summary.unchanged > 0 && (
+                <>{result.summary.unchanged.toLocaleString()} unchanged {result.summary.unchanged === 1 ? 'entry' : 'entries'} not listed</>
+              )}
             </td>
           </tr>
         )}
@@ -1444,7 +1473,7 @@ export function CompareView() {
   }, [scanProgress, scanningPath, uri, scan1, scan2])
 
   return (
-    <Box sx={{ p: 3, maxWidth: 1400, margin: '0 auto' }}>
+    <Box sx={{ p: { xs: 1, sm: 3 }, maxWidth: 1400, margin: '0 auto' }}>
       <Typography variant="h5" sx={{ mb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
         <FaFolder color="#54aeff" />
         Compare Scans
@@ -1677,7 +1706,7 @@ export function CompareView() {
                   navigate(`/compare${uriToPath(childUri)}${suffix}`)
                 }}
               />
-              <Paper sx={{ overflow: 'auto' }}>
+              <Paper sx={{ overflowX: 'auto' }}>
                 <CompareTable
                   result={result}
                   onScan={handleStartScan}
