@@ -128,9 +128,12 @@ export interface TreemapProps<T> {
   renderFooter?: (n: T, path: T[]) => ReactNode
   /**
    * Right side of the cell size line — e.g. "$1.2/mo". Rendered inline with
-   * the size when the cell is big enough to fit a subtitle.
+   * the size when the cell is big enough to fit a subtitle; `dims` is the
+   * cell's box so the consumer can size its content to the room left after
+   * the label (the size span never shrinks, so an over-long subtitle would
+   * crush the name).
    */
-  renderCellSubtitle?: (n: T, path: T[]) => ReactNode
+  renderCellSubtitle?: (n: T, path: T[], dims: CellDims) => ReactNode
 
   /**
    * Override the click handler. Return `true` to skip the built-in
@@ -713,7 +716,7 @@ export function Treemap<T>({
               <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none' }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
-                  <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
+                  <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h })}</span>
                 )}
               </span>
             )}
@@ -738,7 +741,7 @@ export function Treemap<T>({
           >
             {formatSize(kidSize)}
             {!folded && renderCellSubtitle && (
-              <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath)}</span>
+              <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h })}</span>
             )}
           </div>
         )}
