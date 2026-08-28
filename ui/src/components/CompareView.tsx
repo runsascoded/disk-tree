@@ -43,6 +43,8 @@ const NEUTRAL = '#8b949e'
  * grey, which left the light ink low-contrast) — the colored bands pop and
  * labels read. */
 const UNCHANGED_GREY = 'rgba(110, 118, 129, 0.28)'
+/** touched (same bytes, mtime moved): the unchanged grey, hatched */
+const TOUCHED_HATCH = 'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.11) 0 3px, transparent 3px 9px)'
 const deltaColor = (t: number) => divergingColor(-t)
 const deltaTextColor = (d: number) => (d > 0 ? GREW_GREEN : d < 0 ? SHRANK_RED : NEUTRAL)
 
@@ -404,7 +406,7 @@ function CompareTreemap({
                 // and gutters show — tint them by the net trend Δ/weight (a
                 // summary cue; magnitude lives in the leaf bands). Net-zero
                 // parents get the same grey as every other unchanged rect.
-                if (n.delta === 0) return { bg: UNCHANGED_GREY, ink: '#fff' }
+                if (n.delta === 0) return { bg: UNCHANGED_GREY, ink: '#fff', ...(n.status === 'touched' && { hatch: TOUCHED_HATCH }) }
                 const t = n.weight === 0 ? 0 : n.delta / n.weight
                 return { bg: deltaColor(t), ink: '#fff' }
               }
@@ -412,7 +414,7 @@ function CompareTreemap({
               // full-strength colored band of |Δ| bytes, filling from the
               // bottom — magnitude by *area*, not saturation.
               const f = n.weight === 0 ? 0 : Math.min(1, Math.abs(n.delta) / n.weight)
-              if (f === 0) return { bg: UNCHANGED_GREY, ink: '#fff' }
+              if (f === 0) return { bg: UNCHANGED_GREY, ink: '#fff', ...(n.status === 'touched' && { hatch: TOUCHED_HATCH }) }
               const pct = `${(f * 100).toFixed(2)}%`
               const band = deltaColor(Math.sign(n.delta))
               return {
@@ -485,6 +487,8 @@ function CompareTreemap({
                 {n.delta === 0
                   ? formatSize(n.size_new)
                   : <>{formatSize(n.size_old)} → {formatSize(n.size_new)} ({formatDelta(n.delta)})</>}
+                {n.status === 'unchanged' && ' — unchanged'}
+                {n.status === 'touched' && ' — touched (same bytes & count, mtime moved)'}
                 {n.status === 'filler' && n.nDescRest !== undefined && n.nDescRest !== n.nRest && (
                   <> · {formatCount(n.nDescRest)} entries below</>
                 )}
@@ -501,13 +505,19 @@ function CompareTreemap({
                   {churn({ grew: n.nGrew, shrank: n.nShrank, delta: n.n_desc_delta }, null)?.node}
                 </div>
               )}
-              <div style={{ opacity: 0.5, fontSize: '0.75em', marginTop: 2 }}>
-                {n.status === 'filler' ? 'unchanged bytes the diff never needed to enumerate'
-                  : n.status === 'fold' ? 'children too small to draw, aggregated'
-                  : n.status}
-                {n.pruned && ' · more change below (walk budget) — click to compare here'}
-                {!n.pruned && n.kind === 'dir' && !n.children?.length && ' · click to drill into /compare'}
-              </div>
+              {/* Only what the size line doesn't already say. */}
+              {(n.status === 'filler' || n.status === 'fold' || n.status === 'added' || n.status === 'removed' || n.pruned) && (
+                <div style={{ opacity: 0.5, fontSize: '0.75em', marginTop: 2 }}>
+                  {n.status === 'filler' ? 'unchanged bytes the diff never needed to enumerate'
+                    : n.status === 'fold' ? 'children too small to draw, aggregated'
+                    : n.status === 'added' || n.status === 'removed' ? n.status
+                    : null}
+                  {n.pruned && (n.status === 'added' || n.status === 'removed' ? ' · ' : '')}
+                  {n.pruned && (n.delta === 0 && n.n_desc_delta === 0
+                    ? 'not descended (walk budget): something inside moved — click to compare here'
+                    : 'Δ not localized (walk budget) — click to compare here')}
+                </div>
+              )}
             </>
           )}
           renderLegend={() => (
@@ -537,6 +547,12 @@ function CompareTreemap({
                   <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_GREY, borderRadius: 2 }} />
                   unchanged
                 </button>
+              )}
+              {areaMode === 'max' && (
+                <span title="same bytes & count, mtime moved (rename / net-zero churn / touch)" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_GREY, backgroundImage: TOUCHED_HATCH, borderRadius: 2 }} />
+                  touched
+                </span>
               )}
               <span style={{ opacity: 0.6, marginLeft: 4 }}>
                 {areaMode === 'max' ? 'area = max(old, new), band = |Δ|' : 'area = |Δ|'}
@@ -609,6 +625,7 @@ const statusColors = {
   added: { bg: 'rgba(46, 160, 67, 0.15)' },
   removed: { bg: 'rgba(248, 81, 73, 0.15)' },
   changed: { bg: 'transparent' },
+  touched: { bg: 'transparent' },
   unchanged: { bg: 'transparent' },
 }
 
@@ -1497,7 +1514,16 @@ export function CompareView() {
                     Comparing scans from {formatDateTime(result.scan1.time)} → {formatDateTime(result.scan2.time)}
                   </Typography>
                   <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                    (this path was {history.length === 0 ? 'added or removed' : 'added'} between scans)
+                    {/* No scans of this exact path: usually a subtree of a
+                        broader scan (sizes on both sides), else it really
+                        was added/removed. */}
+                    {result.scan1.size != null && result.scan2.size != null
+                      ? `(within scans of ${result.scan1.scan_path ?? 'an ancestor'})`
+                      : result.scan2.size != null
+                      ? '(this path was added between scans)'
+                      : result.scan1.size != null
+                      ? '(this path was removed between scans)'
+                      : '(this path is absent from both scans)'}
                   </Typography>
                 </>
               ) : loading ? null : (
