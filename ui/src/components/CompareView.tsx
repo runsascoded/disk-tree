@@ -451,6 +451,9 @@ function CompareTreemap({
             if (f === 0) return null
             const bandH = h * f
             const greyH = h - bandH
+            // The title strip owns the top ~20px; a band label whose band
+            // reaches into it collides with the name in short cells.
+            if (greyH < 22 && h < 44) return null
             const minBytes = Math.min(n.size_old, n.size_new)
             const lbl = (top: string, height: number, text: string, style: CSSProperties) => (
               <div style={{
