@@ -202,9 +202,10 @@ export interface TreemapProps<T> {
    *   coarsest and finest displayed levels at once.
    * - `'shared'`: cells occupy their exact squarify rects and share edges;
    *   each boundary is one stroke (`borderWidth`), half drawn by each
-   *   neighbor as an inset ring, in `--dt-treemap-edge` (defaults to the
-   *   container color, so it reads like a thin gutter). Near-exact areas;
-   *   the stroke is the only residual.
+   *   neighbor as an inset ring in `--dt-treemap-edge` (defaults to the
+   *   container color, so it reads like a thin gutter) — the paint layer
+   *   insets by that much to expose it. Near-exact areas; the stroke is the
+   *   only residual.
    * - A callback decides per subtree — called for the node whose children
    *   are being tiled, with their laid-out density — e.g. `'shared'` for
    *   dense leaf fields (`medianChildArea < 100`), `'gaps'` elsewhere.
@@ -235,6 +236,15 @@ export interface CellStyle {
   ink?: string
   /** repeating-gradient overlay (e.g. the class-lens hatch marin uses) */
   hatch?: string
+  /**
+   * Shared-tiling stroke for THIS cell, overriding `--dt-treemap-edge`. Each
+   * cell paints its own half of every boundary it shares, so neighbours may
+   * choose different colors — each half then contrasts with the face it
+   * borders (one stroke color can't serve a bright cell and a dark one).
+   * `CellCtx.fade` gives the background opacity applied at this depth, so a
+   * consumer can compute the cell's true composited luminance.
+   */
+  edge?: string
   /** opacity multiplier (0–1). Combined with the built-in depth fade; applies
    * to the cell's background layer, never its label ink. */
   opacity?: number
@@ -259,6 +269,9 @@ export interface CellDims {
 export interface CellCtx extends CellDims {
   /** Whether this cell renders nested child tiles at the current size. */
   hasKids: boolean
+  /** Background opacity applied at this depth (the depth fade), so consumers
+   * can compute what their color actually composites to on screen. */
+  fade: number
 }
 
 const DEFAULT_SLOTS = DEFAULT_PALETTE
@@ -649,7 +662,7 @@ export function Treemap<T>({
     // the rest.
     const explicit = folded
       ? null
-      : colorForCell?.(kid as T, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 })
+      : colorForCell?.(kid as T, kidPath, depth, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 })
     let style: CellStyle
     if (explicit) {
       style = explicit
@@ -663,7 +676,7 @@ export function Treemap<T>({
         : { bg: slot ?? DEFAULT_SLOTS[0], ink: '#fff' }
     }
     if (lens && !folded) {
-      style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 }, style) ?? style
+      style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 }, style) ?? style
     }
 
     const cellKey = folded
@@ -725,14 +738,18 @@ export function Treemap<T>({
           height: Math.max(0, shared ? r.h : r.h - (dust ? 1 : 2)),
           // Opaque base under the faded paint layer: a cell's fade recedes
           // toward the container color, and ancestor bg never shows through
-          // descendants — it surfaces only in title bars and gutters.
+          // descendants — it surfaces only in title bars and gutters. Stays
+          // the container color in both modes: the paint layer is translucent
+          // (depth fade), so a tinted base would wash every cell toward it.
           background: 'var(--dt-treemap-container-bg, #202024)',
-          // Gaps: outer ring in the gutter, transparent by default so
-          // dark-palette consumers can opt into brighter sibling separation
-          // via the var. Shared: this cell's half of the shared stroke.
+          // Shared: this cell's half of the shared stroke, painted in the ring
+          // the inset paint layer leaves bare (an inset shadow under a
+          // full-bleed paint layer would never show). Gaps: an outer ring in
+          // the gutter, transparent by default so dark-palette consumers can
+          // opt into brighter sibling separation via the var.
           // (boxShadow, not outline — :focus owns the outline.)
           boxShadow: shared
-            ? `inset 0 0 0 ${edge}px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))`
+            ? `inset 0 0 0 ${edge}px ${style.edge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
             : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
           // Anchors must not fall through to the page's link color when the
           // consumer sets no ink.
@@ -762,7 +779,7 @@ export function Treemap<T>({
           className="dt-treemap-bg"
           style={{
             position: 'absolute',
-            inset: 0,
+            inset: shared ? edge : 0,
             background: style.bg,
             ...(style.hatch && { backgroundImage: style.hatch }),
             opacity: fadeAt(depth) * (style.opacity ?? 1),
@@ -938,7 +955,7 @@ export function Treemap<T>({
               )}
             </span>
           ))}
-          <span style={{ opacity: 0.6, marginLeft: 6 }}>
+          <span style={{ opacity: 0.6, marginLeft: 6, whiteSpace: 'nowrap' }}>
             {renderCrumbSuffix ? renderCrumbSuffix(node, path) : <>— {formatSize(getSize(node))}</>}
           </span>
         </nav>
