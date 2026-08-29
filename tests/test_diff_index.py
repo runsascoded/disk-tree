@@ -96,3 +96,39 @@ def test_serve_slice_row_budget_keeps_spines_marks_pruned(tmp_path):
         ('b/sub', False, True),
     ]
     assert resp['truncated'] is True
+
+
+def test_serve_slice_min_frac_trims_and_marks_pruned(tmp_path):
+    """Rows too small to draw are dropped (`min_frac` of the compared
+    subtree), their ancestors kept, and the dirs that lost descendants are
+    `pruned` — drilling into one gets a slice with finer thresholds."""
+    df_b = _scan_b_deep_change()          # b/sub/big.bin 600 → 1600
+    for path, delta in (('.', 10), ('a', 10), ('a/f1.txt', 10)):
+        df_b.loc[df_b['path'] == path, 'size'] += delta   # a tiny change too
+    tbl, _ = build_diff_table(_tbl(_scan_a()), _tbl(df_b))
+    path = str(tmp_path / 'idx.parquet')
+    pq.write_table(tbl, path)
+
+    full = serve_slice(load_index_slice(path, ''), min_frac=0, total=2010)
+    assert [r['path'] for r in full['rows']] == ['b', 'b/sub', 'b/sub/big.bin', 'a', 'a/f1.txt']
+    assert full['truncated'] is False
+
+    # 10% of the root = 201 bytes: `a/f1.txt` (110 bytes, Δ10) can't be drawn,
+    # so it goes; `a` (410) stays and is marked `pruned` for the child it lost
+    trimmed = serve_slice(load_index_slice(path, ''), min_frac=0.1, total=2010)
+    assert [(r['path'], r['pruned']) for r in trimmed['rows']] == [
+        ('b', False), ('b/sub', False), ('b/sub/big.bin', False), ('a', True),
+    ]
+    assert trimmed['truncated'] is True
+
+
+def test_serve_slice_max_depth(tmp_path):
+    tbl, _ = build_diff_table(_tbl(_scan_a()), _tbl(_scan_b_deep_change()))
+    path = str(tmp_path / 'idx.parquet')
+    pq.write_table(tbl, path)
+    resp = serve_slice(load_index_slice(path, ''), max_depth=2)
+    assert [(r['path'], r['depth'], r['pruned']) for r in resp['rows']] == [
+        ('b', 1, False),
+        ('b/sub', 2, True),
+    ]
+    assert resp['truncated'] is True

@@ -302,39 +302,77 @@ def load_index_slice(path: str, rel_prefix: str) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
+def _with_ancestors(chg: pd.DataFrame, keep: set[str]) -> pd.DataFrame:
+    """`keep` plus every ancestor of a kept row that the frame holds — a cell
+    can't render without its spine."""
+    have = set(chg['path'])
+    for p in list(keep):
+        q = p
+        while '/' in q:
+            q = q.rsplit('/', 1)[0]
+            if q in keep:
+                break
+            if q in have:
+                keep.add(q)
+    return chg[chg['path'].isin(keep)]
+
+
 def serve_slice(
     df: pd.DataFrame,
     max_rows: int = 20_000,
     unchanged_top: int = 8,
+    min_frac: float = 0.0,
+    total: int = 0,
+    max_depth: int | None = None,
 ) -> dict:
     """The recursive-compare response body (`rows`, `unchanged`, counts) from
-    an index slice. Rows beyond `max_rows` are trimmed best-first by |Δ| with
-    their ancestor spines kept; dirs with trimmed descendants are `pruned`."""
+    an index slice.
+
+    Trimming, in order — each keeps the ancestor spines of what it keeps, and
+    marks dirs whose descendants were dropped `pruned` (the client drills into
+    one to get a fresh slice, where the same relative thresholds resolve much
+    finer detail):
+
+    - `max_depth`: levels below the compared uri.
+    - `min_frac`: drop rows whose own bytes *and* |Δ| are under
+      `min_frac × total` — a cell that small can't be drawn at any sane
+      canvas size, and the index holds ~600K of them for a home dir.
+    - `max_rows`: backstop, best-first by |Δ|.
+    """
     for c in ('size_a', 'size_b', 'n_desc_a', 'n_desc_b'):
         df[c] = df[c].fillna(0).astype('int64')
     chg = df[~df['context']]
     ctx = df[df['context']]
     truncated = False
+    if max_depth is not None:
+        deeper = chg['depth'] > max_depth
+        if deeper.any():
+            truncated = True
+            chg = chg[~deeper]
+    if min_frac > 0 and total > 0:
+        thresh = min_frac * total
+        big = (chg[['size_a', 'size_b']].max(axis=1) >= thresh) | ((chg['size_b'] - chg['size_a']).abs() >= thresh)
+        if not big.all():
+            truncated = True
+            keep = set(chg.loc[big, 'path'])
+            chg = _with_ancestors(chg, keep)
+        # Grey context cells face the same floor — an undrawable unchanged
+        # sibling is just bytes on the wire. Their parent's filler absorbs
+        # them (its gap grows), so the map still tiles truthfully.
+        ctx = ctx[ctx['size_b'].fillna(0) >= thresh]
     if len(chg) > max_rows:
         truncated = True
         absd = (chg['size_b'] - chg['size_a']).abs()
         top = chg.loc[absd.sort_values(ascending=False).index[:max_rows]]
         keep = set(top['path'])
-        by_path = chg.set_index('path')
-        # ancestor closure: walk each kept row's parents up through rows we have
-        for p in list(keep):
-            q = p
-            while '/' in q:
-                q = q.rsplit('/', 1)[0]
-                if q in keep:
-                    break
-                if q in by_path.index:
-                    keep.add(q)
-        kept = chg[chg['path'].isin(keep)]
-        omitted_parents = set(chg.loc[~chg['path'].isin(keep), 'parent'])
+        kept = _with_ancestors(chg, keep)
+        omitted_parents = set(chg.loc[~chg['path'].isin(set(kept['path'])), 'parent'])
     else:
         kept = chg
         omitted_parents = set()
+    # Rows dropped by depth/size trimming: their parents are `pruned` too.
+    dropped = df[~df['context'] & ~df['path'].isin(set(kept['path']))]
+    omitted_parents |= set(dropped['parent'])
 
     kept_paths = set(kept['path'])
     child_parents = set(kept['parent'])

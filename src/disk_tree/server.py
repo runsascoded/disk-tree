@@ -1383,6 +1383,10 @@ def compare_scans():
             `pruned`; summary gains `expansions`, `truncated`.
         budget: recursive only — max directory expansions (default 100)
         max_depth: recursive only — deepest level to descend to
+        min_frac: index-served only — drop rows whose bytes and |Δ| are both
+            under this fraction of the compared subtree (default 2e-5: ~4K
+            rows instead of ~590K on a home dir, all of them drawable).
+            `0` serves everything the row budget allows.
 
     Scans can be of the exact URI or ancestor paths. When comparing ancestor
     scans, we extract the relevant subtree for the requested URI.
@@ -1395,6 +1399,7 @@ def compare_scans():
     budget = int(request.args.get('budget', 100))
     rec_max_depth_arg = request.args.get('max_depth')
     rec_max_depth = int(rec_max_depth_arg) if rec_max_depth_arg else None
+    min_frac = float(request.args.get('min_frac', 2e-5))
 
     if not scan1_id or not scan2_id:
         return jsonify({'error': 'scan1 and scan2 parameters required'}), 400
@@ -1406,7 +1411,7 @@ def compare_scans():
     # CACHE_TTL forced that recompute on nearly every page load.)
     index_status = _index_status(int(scan1_id), int(scan2_id)) if recursive and scan1_id.isdigit() and scan2_id.isdigit() else None
     indexed = bool(index_status and index_status['status'] == 'done')
-    cache_key = f"compare:{uri}:{scan1_id}:{scan2_id}:{depth}:{recursive}:{budget}:{rec_max_depth}:{'idx' if indexed else 'walk'}"
+    cache_key = f"compare:{uri}:{scan1_id}:{scan2_id}:{depth}:{recursive}:{budget}:{rec_max_depth}:{min_frac}:{'idx' if indexed else 'walk'}"
     now = time.time()
     if cache_key in _cache:
         _, cached_result = _cache[cache_key]
@@ -1423,7 +1428,7 @@ def compare_scans():
         with _inflight_lock:
             _inflight.setdefault(cache_key, threading.Event())
     try:
-        return _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now, index_status)
+        return _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now, index_status, min_frac)
     finally:
         with _inflight_lock:
             ev = _inflight.pop(cache_key, None)
@@ -1431,7 +1436,7 @@ def compare_scans():
             ev.set()
 
 
-def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now, index_status=None):
+def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_depth, cache_key, now, index_status=None, min_frac=0.0):
 
     db = get_db()
 
@@ -1494,7 +1499,16 @@ def _compare_scans(uri, scan1_id, scan2_id, depth, recursive, budget, rec_max_de
             row = get_index(int(scan1_id), int(scan2_id))
             if row is not None:
                 rel_prefix = '' if scan1['path'] == uri else uri[len(scan1['path']):].lstrip('/')
-                served = serve_slice(load_index_slice(row['blob'], rel_prefix))
+                # Thresholds are relative to the *compared* subtree, so a
+                # drill into a pruned dir resolves detail the parent view
+                # couldn't draw.
+                sub1, sub2 = get_subtree_stats(scan1), get_subtree_stats(scan2)
+                served = serve_slice(
+                    load_index_slice(row['blob'], rel_prefix),
+                    min_frac=min_frac,
+                    total=max(sub1['size'] or 0, sub2['size'] or 0),
+                    max_depth=rec_max_depth,
+                )
         if served is None:
             src1 = ScanSource(scan1['blob'], scan1['path'], uri, load_scan_data, resolve=resolve_chunk_for_path)
             src2 = ScanSource(scan2['blob'], scan2['path'], uri, load_scan_data, resolve=resolve_chunk_for_path)
