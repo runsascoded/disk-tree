@@ -209,6 +209,10 @@ class Scan(Base):
             db.session.delete(scan)
             db.session.commit()
             backend.delete(blob)
+        if scans:
+            # Diff indexes referencing a deleted scan can't be served.
+            from disk_tree.cli.diff_index import gc_indexes
+            gc_indexes()
 
     @classmethod
     def load(

@@ -173,6 +173,7 @@ def _run(
     do_import: bool,
     force_fetch: bool = False,
     force_import: bool = False,
+    diff_index: bool = True,
 ) -> None:
     cfg = load_config(config)
     date = date or datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -202,13 +203,18 @@ def _run(
             err(f"{b.uri}: scan for {date} already imported (id={existing.id}; use -f to re-import)")
             continue
         err(f"{b.uri}: importing (engine={b.engine})…")
-        import_bucket(
+        scan = import_bucket(
             db=db, storage=storage, con=con,
             engine=b.engine, listings=(f'{d}/*.parquet',),
             bucket=b.host, scheme=b.scheme, snap_time=snap_time,
             pivot_sums=b.pivot_sums, mean_mtime=b.mean_mtime,
             replace=existing,
         )
+        if diff_index and scan is not None:
+            # Overnight prep: yesterday→today is a parquet slice by morning,
+            # not a walk (spec: done/diff-index.md).
+            from disk_tree.cli.diff_index import build_previous
+            build_previous(scan.id)
 
 
 _OPT_CONFIG = option('-c', '--config', default=None, help=f'Config path (default: <DISK_TREE_ROOT>/{CONFIG_BASENAME})')
@@ -228,18 +234,20 @@ def fetch_cmd(config: str | None, date: str | None, force: bool, buckets: tuple[
 @cli.command('pull')
 @_OPT_CONFIG
 @_OPT_DATE
+@option('-D', '--no-diff', is_flag=True, help="Skip building each bucket's diff index against its previous scan")
 @option('-f', '--force', is_flag=True, help='Re-import even when a scan exists for (bucket, date). Reuses a complete listing — run `fetch -f` first to also re-list.')
 @argument('buckets', nargs=-1)
-def pull_cmd(config: str | None, date: str | None, force: bool, buckets: tuple[str, ...]):
+def pull_cmd(config: str | None, date: str | None, no_diff: bool, force: bool, buckets: tuple[str, ...]):
     """Fetch + import configured BUCKETS (default: all) as dated scans."""
-    _run(config, date, buckets, do_import=True, force_import=force)
+    _run(config, date, buckets, do_import=True, force_import=force, diff_index=not no_diff)
 
 
 @cli.command('sync')
 @_OPT_CONFIG
 @_OPT_DATE
+@option('-D', '--no-diff', is_flag=True, help="Skip building each bucket's diff index against its previous scan")
 @option('-f', '--force', is_flag=True, help='Re-import even when a scan exists for (bucket, date). Reuses complete listings — run `fetch -f` first to also re-list.')
-def sync_cmd(config: str | None, date: str | None, force: bool):
+def sync_cmd(config: str | None, date: str | None, no_diff: bool, force: bool):
     """Pull every configured bucket — the cron/launchd entrypoint.
 
     Config schema (<DISK_TREE_ROOT>/buckets.yml):
@@ -260,4 +268,4 @@ def sync_cmd(config: str | None, date: str | None, force: bool):
           pivot_sums: [storage_class_id]
           mean_mtime: true
     """
-    _run(config, date, (), do_import=True, force_import=force)
+    _run(config, date, (), do_import=True, force_import=force, diff_index=not no_diff)

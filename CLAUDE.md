@@ -72,10 +72,12 @@ disk-tree diff ARGS       # Per-path Δ table between two scans (URI → two mos
   -r, --recursive         # Best-first walk down changed spines → delta frontier across depths
   -b, --budget N          # Recursive mode: max directory expansions (default 100)
 
-disk-tree diff-index A B | PATH… | -a   # Persisted full diff of a scan pair (spec `diff-index.md`):
-                          # vectorized per-depth outer join → `~/.config/disk-tree/diffs/<a>-<b>.parquet`
-                          # (~8 s for two 7M-row home scans). `disk-tree index` builds it against the
-                          # path's previous scan automatically (`-D` to skip); `-f` rebuilds
+disk-tree diff-index A B | PATH… | -a   # Persisted full diff of a scan pair (spec `done/diff-index.md`):
+                          # vectorized per-depth outer join, streamed to
+                          # `~/.config/disk-tree/diffs/<a>-<b>.parquet` (two 7M-row home scans:
+                          # ~16 s, 3.8 GB peak). `disk-tree index` / `sync` build it against the
+                          # path's previous scan automatically (`-D` to skip); `-f` rebuilds,
+                          # `-g` GCs indexes whose scans are gone (`-n` previews)
 
 disk-tree migrate-row-groups  # Rewrite scan blobs to ≤64K-row parquet row groups (a directory listing
                           # decodes every overlapping row group: ~4 ms vs ~40 ms at 1M rows)
@@ -93,7 +95,8 @@ disk-tree histogram URI   # Byte-weighted mtime distribution per child (sparklin
 
 disk-tree fetch [BUCKET…] # Bulk-list configured buckets → dated raw-listing shards
 disk-tree pull [BUCKET…]  # fetch + import as dated scans
-disk-tree sync            # pull all configured buckets (cron entrypoint)
+disk-tree sync            # pull all configured buckets (cron entrypoint); builds each bucket's
+                          # diff index vs its previous scan (`-D` skips)
                           # Config: ~/.config/disk-tree/buckets.yml (see specs/personal-sync.md)
 
 disk-tree migrate         # Backfill SQLite stats from parquet files

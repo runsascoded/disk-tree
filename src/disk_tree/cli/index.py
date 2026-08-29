@@ -53,12 +53,8 @@ def index(
         # Overnight prep: the "what changed since last time" view is a slice,
         # not a walk, by the time anyone asks. (`--gc` deleted the previous
         # scan, so there's nothing to diff against.)
-        from disk_tree.diff_index import previous_scan
-        from disk_tree.cli.diff_index import _connect, build_pair
-        with _connect() as con:
-            prev = previous_scan(con, scan.id)
-        if prev is not None and prev['id'] != scan.id:
-            build_pair(prev['id'], scan.id)
+        from disk_tree.cli.diff_index import build_previous
+        build_previous(scan.id)
     # Find root row: try 'path == "."', fallback to 'parent == ""'
     root_rows = df[df['path'] == '.']
     if root_rows.empty:

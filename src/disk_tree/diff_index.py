@@ -131,16 +131,18 @@ class DiffIndexStats:
     n_context: int
 
 
-def build_diff_table(ta: pa.Table, tb: pa.Table) -> tuple[pa.Table, DiffIndexStats]:
-    """Full outer join per depth (rows at depth d only ever match rows at
-    depth d), status per row, prune under added/removed dirs, keep unchanged
-    *context* rows (siblings of changes). Returns the index table sorted
-    `(depth, path)`."""
+def iter_diff_depths(ta: pa.Table, tb: pa.Table, stats: DiffIndexStats):
+    """Yield one index table per depth, ascending — the diff, streamed.
+
+    Full outer join per depth (rows at depth d only ever match rows at depth
+    d), status per row, prune under added/removed dirs, keep unchanged
+    *context* rows (siblings of changes). Depths are yielded in order and each
+    is sorted by path, so the concatenation is already sorted `(depth, path)`
+    — the layout the read path's pushdown wants. `stats` is updated in place.
+    """
     max_depth = max(_max(ta['depth']), _max(tb['depth']))
-    out: list[pa.Table] = []
     blocked: set[str] = set()      # added/removed dirs and everything under them
     counts = dict.fromkeys(STATUSES, 0)
-    n_context = 0
     for d in range(0, max_depth + 1):
         a = ta.filter(pc.equal(ta['depth'], d))
         b = tb.filter(pc.equal(tb['depth'], d))
@@ -195,9 +197,9 @@ def build_diff_table(ta: pa.Table, tb: pa.Table) -> tuple[pa.Table, DiffIndexSta
         }
         rows = pa.table(cols)
         kept = rows.filter(pa.array(keep))
-        for s in STATUSES[:-1]:
-            counts[s] += int(np.count_nonzero(status[keep] == s))
-        out.append(kept.append_column('context', pa.array(np.zeros(kept.num_rows, dtype=bool))))
+        for st in STATUSES[:-1]:
+            counts[st] += int(np.count_nonzero(status[keep] == st))
+        at_depth = [kept.append_column('context', pa.array(np.zeros(kept.num_rows, dtype=bool)))]
 
         # Context: this depth's unchanged rows whose parent also has a kept
         # child — the grey siblings drawn beside the change.
@@ -205,18 +207,26 @@ def build_diff_table(ta: pa.Table, tb: pa.Table) -> tuple[pa.Table, DiffIndexSta
             unch = rows.filter(pa.array(unchanged))
             ctx = unch.filter(pc.is_in(unch['parent'], value_set=pc.unique(kept['parent'])))
             if ctx.num_rows:
-                n_context += ctx.num_rows
-                out.append(ctx.append_column('context', pa.array(np.ones(ctx.num_rows, dtype=bool))))
+                stats.n_context += ctx.num_rows
+                at_depth.append(ctx.append_column('context', pa.array(np.ones(ctx.num_rows, dtype=bool))))
 
-    tbl = pa.concat_tables(out) if out else _empty_index()
-    tbl = tbl.sort_by([('depth', 'ascending'), ('path', 'ascending')])
-    stats = DiffIndexStats(
-        n_rows=tbl.num_rows,
-        n_added=counts['added'], n_removed=counts['removed'],
-        n_changed=counts['changed'], n_touched=counts['touched'],
-        n_context=n_context,
-    )
-    return tbl, stats
+        tbl = pa.concat_tables(at_depth) if len(at_depth) > 1 else at_depth[0]
+        if tbl.num_rows:
+            stats.n_rows += tbl.num_rows
+            yield tbl.sort_by([('path', 'ascending')])
+
+    stats.n_added = counts['added']
+    stats.n_removed = counts['removed']
+    stats.n_changed = counts['changed']
+    stats.n_touched = counts['touched']
+
+
+def build_diff_table(ta: pa.Table, tb: pa.Table) -> tuple[pa.Table, DiffIndexStats]:
+    """The whole index in memory (tests, small inputs) — `iter_diff_depths`
+    concatenated."""
+    stats = DiffIndexStats(0, 0, 0, 0, 0, 0)
+    parts = list(iter_diff_depths(ta, tb, stats))
+    return (pa.concat_tables(parts) if parts else _empty_index()), stats
 
 
 def _empty_index() -> pa.Table:
@@ -243,16 +253,32 @@ def _ne(x: np.ndarray, y: np.ndarray) -> np.ndarray:
 
 
 def build_diff_index(scan_a_id: int, blob_a: str, scan_b_id: int, blob_b: str) -> tuple[str, DiffIndexStats]:
-    """Compute and persist the index for a scan pair; returns (path, stats)."""
+    """Compute and persist the index for a scan pair; returns (path, stats).
+
+    Depths stream to parquet as they finish rather than accumulating: the
+    join outputs dominate peak RSS (two home-dir scans held every depth's
+    result at once, ~7 GB), and each depth is independent once written.
+    """
+    import os
     ta = load_scan_table(blob_a)
     tb = load_scan_table(blob_b)
-    tbl, stats = build_diff_table(ta, tb)
-    del ta, tb
     makedirs(diffs_dir(), exist_ok=True)
     out = index_path(scan_a_id, scan_b_id)
     tmp = out + '.tmp'
-    pq.write_table(tbl, tmp, row_group_size=BLOB_ROW_GROUP_SIZE)
-    import os
+    stats = DiffIndexStats(0, 0, 0, 0, 0, 0)
+    writer = None
+    try:
+        for tbl in iter_diff_depths(ta, tb, stats):
+            if writer is None:
+                writer = pq.ParquetWriter(tmp, tbl.schema)
+            writer.write_table(tbl, row_group_size=BLOB_ROW_GROUP_SIZE)
+        if writer is None:  # no differing rows at any depth
+            writer = pq.ParquetWriter(tmp, _empty_index().schema)
+            writer.write_table(_empty_index())
+    finally:
+        if writer is not None:
+            writer.close()
+    del ta, tb
     os.replace(tmp, out)
     return out, stats
 
