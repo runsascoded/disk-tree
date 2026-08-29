@@ -25,6 +25,101 @@ def scans_list():
         print()
 
 
+@scans.command('move')
+@option('-f', '--from', 'src_dir', default=None, help='Source dir (default: every other dir on the read path)')
+@option('-L', '--no-keep-latest', is_flag=True, help='Also move the newest scan of each path (breaks browsing while the volume is out)')
+@option('-n', '--dry-run', is_flag=True, help='List what would move, then stop')
+@argument('dest', required=False)
+def scans_move(src_dir: str | None, no_keep_latest: bool, dry_run: bool, dest: str | None):
+    """Move scan blobs to DEST (default: the current write dir).
+
+    Blobs are referenced by basename, so relocating them needs no DB rewrite —
+    `scan_read_dirs()` finds them wherever they land.
+
+    The newest scan of each path stays put by default: an external volume is
+    removable, and the common case (browse the latest scan) should not depend on
+    it being plugged in. History, which is the bulk, goes to the volume.
+    """
+    from os import listdir, makedirs
+    from os.path import basename, exists, getsize, isdir, join
+    from shutil import move as mv
+
+    from disk_tree import config
+
+    dest = dest or config.scan_write_dir()
+    if not config._volume_mounted(dest):
+        raise SystemExit(f'{dest} is on an unmounted volume')
+    sources = [src_dir] if src_dir else [d for d in config.scan_read_dirs() if d != dest]
+    sources = [d for d in sources if isdir(d)]
+    if not sources:
+        raise SystemExit(f'no source dirs to move from (dest={dest})')
+
+    keep = set()
+    if not no_keep_latest:
+        db = init()
+        latest = {}
+        for scan in db.session.query(Scan).filter(Scan.blob.isnot(None)):
+            cur = latest.get(scan.path)
+            if cur is None or scan.time > cur.time:
+                latest[scan.path] = scan
+        # A hybrid scan's root blob only points at its chunks, so keeping the
+        # root alone would still leave the latest scan unbrowsable with the
+        # volume out. Keep the whole closure.
+        from disk_tree.diff import _chunk_map, resolve_blob
+        keep, queue = set(), [basename(s.blob) for s in latest.values()]
+        while queue:
+            ref = queue.pop()
+            if ref in keep:
+                continue
+            keep.add(ref)
+            try:
+                chunks = _chunk_map(resolve_blob(ref))
+            except (OSError, ValueError):
+                continue
+            if chunks:
+                queue.extend(basename(c) for c in chunks.values())
+        err(f'keeping {len(keep)} blobs in place ({len(latest)} newest scans + their chunks)')
+
+    moves = [
+        (join(d, name), join(dest, name))
+        for d in sources
+        for name in sorted(listdir(d))
+        if name.endswith('.parquet') and name not in keep and not name.startswith('._')
+    ]
+    total = sum(getsize(s) for s, _ in moves if exists(s))
+    err(f'{len(moves)} blobs, {total / 2**30:.2f} GiB: {", ".join(sources)} → {dest}')
+    if dry_run:
+        for s, _ in moves:
+            print(s)
+        return
+
+    makedirs(dest, exist_ok=True)
+    moved = 0
+    for src, dst in moves:
+        if exists(dst):
+            err(f'skip (exists at dest): {basename(src)}')
+            continue
+        mv(src, dst)
+        moved += 1
+    err(f'moved {moved} blobs to {dest}')
+
+
+@scans.command('dirs')
+def scans_dirs():
+    """Show where blobs are written and searched for."""
+    from os.path import isdir, join
+    from glob import glob
+
+    from disk_tree import config
+
+    print(f'write: {config.SCANS_DIR}')
+    for d in config.scan_read_dirs():
+        n = len(glob(join(d, '*.parquet'))) if isdir(d) else 0
+        mark = '*' if d == config.SCANS_DIR else ' '
+        state = f'{n} blobs' if isdir(d) else 'absent'
+        print(f'  {mark} {d}  ({state})')
+
+
 @scans.command('chunks')
 @argument('path')
 @option('-a', '--all', 'show_all', is_flag=True, help="Show all scans for path, not just most recent")

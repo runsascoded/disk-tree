@@ -196,6 +196,11 @@ Default paths (override with `DISK_TREE_ROOT`):
 - `~/.config/disk-tree/disk-tree.db` — SQLite metadata
 - `~/.config/disk-tree/scans/` — Parquet blob storage
 
+**Blob storage is a search path, not a single directory.** The DB stays on the boot disk (small, always mounted); blobs may live anywhere on `config.scan_read_dirs()`, since `Scan.blob` holds a basename. Creating `<volume>/disk-tree/scans` on an external volume opts it in — no config needed — and it becomes the *write* target while mounted; unplugging simply drops it out of the search path. `DISK_TREE_SCAN_DIRS` (colon-separated, priority order) overrides discovery, and an explicit `DISK_TREE_ROOT` disables it entirely so tests and alternate profiles stay self-contained. A candidate under an unmounted `/Volumes/<name>` is never written to — that would silently create the directory on the boot disk.
+
+- `disk-tree scans dirs` — show the write target and every read dir, with blob counts
+- `disk-tree scans move [DEST]` — relocate blobs (no DB rewrite). Keeps each path's newest scan **and its chunk closure** on the boot disk by default (`-L` to move those too), so browsing the latest scan doesn't depend on the volume being plugged in
+
 Stream-engine tuning knobs (env, all with measured defaults — see the constants block in `find/aggregate_stream.py`):
 - `DISK_TREE_FLUSH_ROWS` — output row-group size (read-side: smaller = less fetched per directory browse, bigger footer)
 - `DISK_TREE_PARALLEL_FINALIZE_MIN_ROWS` — below this the finalize stays serial even at `-j N`

@@ -39,7 +39,8 @@ class ParquetBackend(StorageBackend):
 
     def _resolve(self, blob_ref: str) -> str:
         # Legacy absolute paths are honored; new refs are basenames.
-        return blob_ref if isabs(blob_ref) else join(self.scans_dir, blob_ref)
+        # Blobs may live on an external volume; search every read dir.
+        return blob_ref if isabs(blob_ref) else _config.resolve_scan_blob(blob_ref, self.scans_dir)
 
     def save(self, df: pd.DataFrame, scan_path: str) -> str:
         """Save DataFrame to a new parquet file. Returns basename ref."""
