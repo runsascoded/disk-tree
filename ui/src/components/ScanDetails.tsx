@@ -13,7 +13,7 @@ import { VizBoundary } from './VizBoundary'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
-import { getTiling } from '../utils/tiling'
+import { useTiling } from '../utils/tiling'
 import {
   childLinkPrefix,
   detectRouteType,
@@ -689,6 +689,7 @@ function Treemap({
   /** When set, render the re-aggregated filter slice instead of the scan rows. */
   filterResult?: FilterResult
 }) {
+  const [tiling, setTiling] = useTiling()
   const tree = useMemo(
     () => ({
       path: '.',
@@ -734,7 +735,28 @@ function Treemap({
     <Box sx={{ height: 400 }}>
       <DTTreemap<DTNode>
         root={filterTree ?? tree}
-        tiling={getTiling()}
+        tiling={tiling}
+        renderLegend={() => (
+          <span style={{ display: 'inline-flex', gap: 2, fontSize: '0.8rem' }}>
+            {(['gaps', 'shared'] as const).map(t => (
+              <button
+                key={t}
+                onClick={e => { e.stopPropagation(); setTiling(t) }}
+                title={t === 'gaps'
+                  ? '2px gutters and rounded corners; dense leaf fields under-paint by ~perimeter/area'
+                  : 'Cells abut, one stroke per boundary — areas exact (a 6×6px cell with 2px gutters paints only 4×4)'}
+                style={{
+                  cursor: 'pointer', fontSize: '0.75rem', padding: '1px 7px', borderRadius: 3,
+                  border: '1px solid var(--dt-border, #444)',
+                  background: tiling === t ? 'var(--dt-accent-bg, #30363d)' : 'transparent',
+                  color: 'inherit', fontWeight: tiling === t ? 600 : 400,
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </span>
+        )}
         getSize={n => n.size}
         getChildren={n => n.children}
         hasChildren={n => !!n.expandable && !n.isPlaceholder}

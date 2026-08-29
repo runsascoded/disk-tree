@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchS3Buckets, startScan, fetchScanStatus } from '../api'
 import type { S3Bucket, ScanJob } from '../api'
 import { timeAgo, formatSize } from '../utils/format'
-import { getTiling } from '../utils/tiling'
+import { useTiling } from '../utils/tiling'
 
 /** Bucket-list treemap: a synthetic "S3" root whose children are the scanned buckets. */
 interface BucketNode {
@@ -27,11 +27,12 @@ function BucketsTreemap({ buckets }: { buckets: S3Bucket[] }) {
     children: scannedBuckets.map(b => ({ name: b.name, size: b.size ?? 0 })),
   }
 
+  const [tiling] = useTiling()
   return (
     <Box sx={{ height: 400 }}>
       <DTTreemap<BucketNode>
         root={root}
-        tiling={getTiling()}
+        tiling={tiling}
         getSize={n => n.size}
         getChildren={n => n.children}
         getLabel={n => n.name}

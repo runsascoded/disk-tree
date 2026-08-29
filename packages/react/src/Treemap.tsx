@@ -236,6 +236,15 @@ export interface CellStyle {
   ink?: string
   /** repeating-gradient overlay (e.g. the class-lens hatch marin uses) */
   hatch?: string
+  /**
+   * Shared-tiling stroke for THIS cell, overriding `--dt-treemap-edge`. Each
+   * cell paints its own half of every boundary it shares, so neighbours may
+   * choose different colors — each half then contrasts with the face it
+   * borders (one stroke color can't serve a bright cell and a dark one).
+   * `CellCtx.fade` gives the background opacity applied at this depth, so a
+   * consumer can compute the cell's true composited luminance.
+   */
+  edge?: string
   /** opacity multiplier (0–1). Combined with the built-in depth fade; applies
    * to the cell's background layer, never its label ink. */
   opacity?: number
@@ -260,6 +269,9 @@ export interface CellDims {
 export interface CellCtx extends CellDims {
   /** Whether this cell renders nested child tiles at the current size. */
   hasKids: boolean
+  /** Background opacity applied at this depth (the depth fade), so consumers
+   * can compute what their color actually composites to on screen. */
+  fade: number
 }
 
 const DEFAULT_SLOTS = DEFAULT_PALETTE
@@ -650,7 +662,7 @@ export function Treemap<T>({
     // the rest.
     const explicit = folded
       ? null
-      : colorForCell?.(kid as T, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 })
+      : colorForCell?.(kid as T, kidPath, depth, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 })
     let style: CellStyle
     if (explicit) {
       style = explicit
@@ -664,7 +676,7 @@ export function Treemap<T>({
         : { bg: slot ?? DEFAULT_SLOTS[0], ink: '#fff' }
     }
     if (lens && !folded) {
-      style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, hasKids: kids.length > 0 }, style) ?? style
+      style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 }, style) ?? style
     }
 
     const cellKey = folded
@@ -737,7 +749,7 @@ export function Treemap<T>({
           // opt into brighter sibling separation via the var.
           // (boxShadow, not outline — :focus owns the outline.)
           boxShadow: shared
-            ? `inset 0 0 0 ${edge}px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))`
+            ? `inset 0 0 0 ${edge}px ${style.edge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
             : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
           // Anchors must not fall through to the page's link color when the
           // consumer sets no ink.

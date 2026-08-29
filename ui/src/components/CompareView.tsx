@@ -20,7 +20,7 @@ import type { CompareRecResult, CompareResult, CompareRow, ScanHistoryItem } fro
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo } from '../utils/format'
-import { getTiling } from '../utils/tiling'
+import { useTiling } from '../utils/tiling'
 import { comparePathToUri, isSchemeRoot, uriToPath, type RouteType } from '../schemes'
 
 type SortColumn = 'size_old' | 'size_new' | 'size_delta' | 'desc_old' | 'desc_new' | 'desc_delta'
@@ -47,6 +47,57 @@ const UNCHANGED_GREY = 'rgba(110, 118, 129, 0.28)'
 /** touched (same bytes, mtime moved): the unchanged grey, hatched */
 const TOUCHED_HATCH = 'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.11) 0 3px, transparent 3px 9px)'
 const deltaColor = (t: number) => divergingColor(-t)
+
+/** The map's opaque base — every cell's paint composites over this. */
+const CONTAINER_BG: [number, number, number] = [32, 32, 36]
+
+const parseCache = new Map<string, [number, number, number, number]>()
+
+/** `#rgb`/`#rrggbb`/`rgb()`/`rgba()` → [r, g, b, a]; memoized (a handful of
+ * distinct strings serve thousands of cells). */
+function parseColor(c: string): [number, number, number, number] {
+  const hit = parseCache.get(c)
+  if (hit) return hit
+  let out: [number, number, number, number] = [128, 128, 128, 1]
+  const m = c.match(/rgba?\(([^)]+)\)/)
+  if (m) {
+    const [r, g, b, a = '1'] = m[1].split(',').map(x => x.trim())
+    out = [+r, +g, +b, +a]
+  } else if (c.startsWith('#')) {
+    const h = c.slice(1)
+    const x = h.length === 3 ? h.split('').map(d => d + d).join('') : h
+    out = [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16), 1]
+  }
+  parseCache.set(c, out)
+  return out
+}
+
+/**
+ * A cell's stroke, chosen to contrast with the cell's own face: dark on light
+ * faces, light on dark ones. Each cell paints half of every boundary it
+ * shares, so a bright cell beside a dark one gets a dark half-stroke against
+ * the neighbour's light one — one fixed color can't serve both (measured:
+ * ~4 arithmetic ops + a memoized parse per cell).
+ *
+ * `fade` is the depth fade the widget applies to the paint layer; the face is
+ * `color over CONTAINER_BG` at the color's alpha, then faded toward the base
+ * again, which is exactly what lands on screen.
+ */
+function edgeFor(color: string, fade: number): string {
+  const [r, g, b, a] = parseColor(color)
+  const eff = a * fade
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) * eff
+    + (0.2126 * CONTAINER_BG[0] + 0.7152 * CONTAINER_BG[1] + 0.0722 * CONTAINER_BG[2]) * (1 - eff)
+  return lum > 96 ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.42)'
+}
+
+/** Legend swatch color: the translucent grey as it actually paints (over the
+ * map's base), so it isn't invisible on the bar's own dark background. */
+const UNCHANGED_SWATCH = (() => {
+  const [r, g, b, a] = parseColor('rgba(110, 118, 129, 0.28)')
+  const mix = (c: number, base: number) => Math.round(c * a + base * (1 - a))
+  return `rgb(${mix(r, CONTAINER_BG[0])}, ${mix(g, CONTAINER_BG[1])}, ${mix(b, CONTAINER_BG[2])})`
+})()
 const deltaTextColor = (d: number) => (d > 0 ? GREW_GREEN : d < 0 ? SHRANK_RED : NEUTRAL)
 
 /**
@@ -330,6 +381,7 @@ function CompareTreemap({
   onDrill: (uri: string) => void
 }) {
   const [areaMode, setAreaMode] = useState<AreaMode>('max')
+  const [tiling, setTiling] = useTiling()
   const [showUnchanged, setShowUnchanged] = useState(true)
   const { root, maxAbsDelta } = useMemo(() => {
     const { cells, maxAbsDelta: maxAbs } = buildCompareTree(result, rec, areaMode, showUnchanged)
@@ -406,7 +458,7 @@ function CompareTreemap({
           // Tiling per the header toggle (shared: exact areas, the stroke is
           // the boundary; gaps: classic gutters). The dark compare palette
           // needs a light stroke/ring either way.
-          tiling={getTiling()}
+          tiling={tiling}
           // The stroke paints over each cell's opaque base (the container
           // color), so it's one fixed color for the whole map: mid grey reads
           // against both the bright full-Δ cells and the dark mostly-grey
@@ -418,33 +470,37 @@ function CompareTreemap({
           // Displayed inline with the label — the raw |Δ| magnitude. Sign is
           // encoded by the cell color; exact old/new/Δ lives in the tooltip.
           formatSize={formatSize}
-          colorForCell={n => {
+          colorForCell={(n, _path, _depth, ctx) => {
+            // Stroke per cell, from the face it borders (see `edgeFor`).
+            const withEdge = (s: { bg: string; ink: string; hatch?: string }, face: string) =>
+              ({ ...s, edge: edgeFor(face, ctx.fade) })
             if (areaMode === 'max') {
               if (n.children?.length) {
                 // Parent: children tile its interior, so only the title strip
                 // and gutters show — tint them by the net trend Δ/weight (a
                 // summary cue; magnitude lives in the leaf bands). Net-zero
                 // parents get the same grey as every other unchanged rect.
-                if (n.delta === 0) return { bg: UNCHANGED_GREY, ink: '#fff', ...(n.status === 'touched' && { hatch: TOUCHED_HATCH }) }
+                if (n.delta === 0) return withEdge({ bg: UNCHANGED_GREY, ink: '#fff', ...(n.status === 'touched' && { hatch: TOUCHED_HATCH }) }, UNCHANGED_GREY)
                 const t = n.weight === 0 ? 0 : n.delta / n.weight
-                return { bg: deltaColor(t), ink: '#fff' }
+                return withEdge({ bg: deltaColor(t), ink: '#fff' }, deltaColor(t))
               }
               // Sub-rect encoding: a grey rect of min(old, new) bytes plus a
               // full-strength colored band of |Δ| bytes, filling from the
               // bottom — magnitude by *area*, not saturation.
               const f = n.weight === 0 ? 0 : Math.min(1, Math.abs(n.delta) / n.weight)
-              if (f === 0) return { bg: UNCHANGED_GREY, ink: '#fff', ...(n.status === 'touched' && { hatch: TOUCHED_HATCH }) }
+              if (f === 0) return withEdge({ bg: UNCHANGED_GREY, ink: '#fff', ...(n.status === 'touched' && { hatch: TOUCHED_HATCH }) }, UNCHANGED_GREY)
               const pct = `${(f * 100).toFixed(2)}%`
               const band = deltaColor(Math.sign(n.delta))
-              return {
+              return withEdge({
                 bg: `linear-gradient(to top, ${band} ${pct}, ${UNCHANGED_GREY} ${pct})`,
                 ink: '#fff', // uniform with every other label
-              }
+              // The stroke follows whichever half dominates the face.
+              }, f > 0.5 ? band : UNCHANGED_GREY)
             }
             // Δ mode: full cell tinted by Δ relative to the largest |Δ|.
-            if (n.delta === 0) return { bg: UNCHANGED_GREY, ink: '#fff' }
+            if (n.delta === 0) return withEdge({ bg: UNCHANGED_GREY, ink: '#fff' }, UNCHANGED_GREY)
             const t = maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta
-            return { bg: deltaColor(t), ink: '#fff' }
+            return withEdge({ bg: deltaColor(t), ink: '#fff' }, deltaColor(t))
           }}
           renderCellExtra={areaMode === 'max' ? (n, _path, { w, h }) => {
             // Per-sub-rect size labels: Δ centered in the colored band, the
@@ -546,10 +602,20 @@ function CompareTreemap({
           )}
           renderLegend={() => (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', opacity: 0.85 }}>
-              <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(1), borderRadius: 2 }} />
-              grew
-              <span style={{ display: 'inline-block', width: 12, height: 12, background: deltaColor(-1), borderRadius: 2 }} />
-              shrank
+              {/* Δ share key: how much of a cell's max(old, new) the change
+                  is — the same ramp `deltaColor` walks, so a hue reads back
+                  as a rough percentage. */}
+              <span
+                title="Cell color = Δ as a share of max(old, new): full color when the change is the whole cell, grey when it's a sliver. Leaves paint that share as a band from the bottom; branches tint their title strip by the net share."
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              >
+                <span style={{ opacity: 0.6 }}>−100%</span>
+                <span style={{
+                  display: 'inline-block', width: 84, height: 10, borderRadius: 2,
+                  background: `linear-gradient(to right, ${deltaColor(-1)}, ${deltaColor(-0.4)}, ${UNCHANGED_SWATCH}, ${deltaColor(0.4)}, ${deltaColor(1)})`,
+                }} />
+                <span style={{ opacity: 0.6 }}>+100%</span>
+              </span>
               {areaMode === 'max' && (
                 // Legend-item toggle (plot-legend style): click to hide/show
                 // unchanged rows. Hidden = only changed entries plot (at
@@ -568,19 +634,18 @@ function CompareTreemap({
                     textDecoration: showUnchanged ? 'none' : 'line-through',
                   }}
                 >
-                  <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_GREY, borderRadius: 2 }} />
+                  {/* The map's grey is translucent; on the bar's own dark
+                      background it needs its composited color to be seen. */}
+                  <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_SWATCH, border: '1px solid rgba(255,255,255,0.25)', borderRadius: 2, boxSizing: 'border-box' }} />
                   unchanged
                 </button>
               )}
               {areaMode === 'max' && (
                 <span title="same bytes & count, mtime moved (rename / net-zero churn / touch)" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_GREY, backgroundImage: TOUCHED_HATCH, borderRadius: 2 }} />
+                  <span style={{ display: 'inline-block', width: 12, height: 12, background: UNCHANGED_SWATCH, backgroundImage: TOUCHED_HATCH, border: '1px solid rgba(255,255,255,0.25)', borderRadius: 2, boxSizing: 'border-box' }} />
                   touched
                 </span>
               )}
-              <span style={{ opacity: 0.6, marginLeft: 4 }}>
-                {areaMode === 'max' ? 'area = max(old, new), band = |Δ|' : 'area = |Δ|'}
-              </span>
               {rec?.index && rec.index.status !== 'done' && (
                 <span
                   title={rec.index.status === 'failed'
@@ -597,8 +662,8 @@ function CompareTreemap({
                     key={m}
                     onClick={e => { e.stopPropagation(); setAreaMode(m) }}
                     title={m === 'max'
-                      ? 'Size cells by max(old, new): deleted subtrees keep their old area; stable structure stays visible'
-                      : 'Size cells by |Δbytes|: churn only, unchanged rows dropped'}
+                      ? 'Area = max(old, new), with |Δ| painted as a band: deleted subtrees keep their old area; stable structure stays visible'
+                      : 'Area = |Δbytes|: churn only, unchanged rows dropped'}
                     style={{
                       cursor: 'pointer', fontSize: '0.75rem', padding: '1px 7px', borderRadius: 3,
                       border: '1px solid var(--dt-border, #444)',
@@ -607,6 +672,27 @@ function CompareTreemap({
                     }}
                   >
                     {m === 'max' ? 'max' : 'Δ'}
+                  </button>
+                ))}
+              </span>
+              {/* Tiling sits with the other view controls, not in the app
+                  header — it's the same kind of knob as max/Δ. */}
+              <span style={{ display: 'inline-flex', gap: 2, marginLeft: 4 }}>
+                {(['gaps', 'shared'] as const).map(t => (
+                  <button
+                    key={t}
+                    onClick={e => { e.stopPropagation(); setTiling(t) }}
+                    title={t === 'gaps'
+                      ? '2px gutters and rounded corners; dense leaf fields under-paint by ~perimeter/area'
+                      : 'Cells abut, one stroke per boundary — areas exact (a 6×6px cell with 2px gutters paints only 4×4)'}
+                    style={{
+                      cursor: 'pointer', fontSize: '0.75rem', padding: '1px 7px', borderRadius: 3,
+                      border: '1px solid var(--dt-border, #444)',
+                      background: tiling === t ? 'var(--dt-accent-bg, #30363d)' : 'transparent',
+                      color: 'inherit', fontWeight: tiling === t ? 600 : 400,
+                    }}
+                  >
+                    {t}
                   </button>
                 ))}
               </span>
