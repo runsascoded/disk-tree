@@ -431,10 +431,15 @@ export async function compareScansRecursive(
   scan1: number,
   scan2: number,
   budget: number = 200,
+  /** Drop rows whose bytes and |Δ| are both under this fraction of the
+   * compared subtree — pass the canvas's drawable floor (`min_px / canvas_px`)
+   * so the response carries what can actually be rendered. */
+  minFrac?: number,
 ): Promise<CompareRecResult> {
   const params = new URLSearchParams({
     uri, scan1: String(scan1), scan2: String(scan2), recursive: '1', budget: String(budget),
   })
+  if (minFrac !== undefined) params.set('min_frac', String(minFrac))
   const res = await fetch(`/api/compare?${params}`)
   if (!res.ok) {
     const err = await res.json()

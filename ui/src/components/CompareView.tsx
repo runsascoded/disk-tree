@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Box,
@@ -367,22 +367,83 @@ function churn(
   }
 }
 
+/** The smallest cell worth drawing, in px² — the widget's own fold floor. */
+const MIN_CELL_PX = 16
+
+/**
+ * Has diff detail we could fetch for it: a dir whose children the response
+ * trimmed but whose own row says something changed *inside* it. Everything
+ * else has no slice to fetch — an unchanged dir has no index rows at all, and
+ * an added/removed one is stored as a single row by design (its whole subtree
+ * is the change). Those navigate to their own page rather than drilling into
+ * a blank map.
+ */
+const fetchable = (n: CompareTMNode): boolean =>
+  n.kind === 'dir'
+  && !n.children?.length
+  && (n.status === 'changed' || n.status === 'touched')
+  && (!!n.pruned || n.delta !== 0 || n.n_desc_delta !== 0)
+
+/**
+ * The map's drawable floor as a byte fraction: a node's screen area is ≈ its
+ * share of the compared subtree × the canvas, so anything under
+ * `MIN_CELL_PX / canvas_px` can't be drawn and needn't be sent.
+ *
+ * The first request fires before the map mounts, so fall back to the size the
+ * layout will give it (page `maxWidth` 1400 minus padding; the responsive
+ * height below) — an estimate beats the server's fixed default.
+ */
+function mapMinFrac(ref: React.RefObject<HTMLDivElement | null>): number {
+  const box = ref.current?.getBoundingClientRect()
+  if (box && box.width > 0) return MIN_CELL_PX / (box.width * box.height)
+  const vw = typeof window === 'undefined' ? 1200 : window.innerWidth
+  const vh = typeof window === 'undefined' ? 800 : window.innerHeight
+  const w = Math.max(320, Math.min(vw, 1400) - (vw < 600 ? 16 : 48))
+  const h = vw < 600 ? Math.min(0.75 * vh, 560) : 340
+  return MIN_CELL_PX / (w * h)
+}
+
 function CompareTreemap({
   result,
   rec,
   recState,
   onRecRetry,
   onDrill,
+  scan1,
+  scan2,
+  mapRef,
 }: {
   result: CompareResult
   rec?: CompareRecResult
   recState: 'loading' | 'error' | 'ready'
   onRecRetry: () => void
   onDrill: (uri: string) => void
+  scan1: number
+  scan2: number
+  /** The map box, measured for the drawable floor (see `mapMinFrac`). */
+  mapRef: React.RefObject<HTMLDivElement | null>
 }) {
   const [areaMode, setAreaMode] = useState<AreaMode>('max')
   const [tiling, setTiling] = useTiling()
   const [showUnchanged, setShowUnchanged] = useState(true)
+
+  /**
+   * Drilling *inside* the widget shows a subtree whose deep cells the server
+   * trimmed relative to the whole compared tree — at the subtree's own scale
+   * they're big again. So fetch that subtree's slice on drill (one request
+   * per drill, cached by the widget), with the floor computed from the map's
+   * own pixels: a node's screen area is ≈ its byte share × the canvas.
+   */
+  const loadChildren = useCallback(
+    async (n: CompareTMNode) => {
+      const sub = await compareScansRecursive(n.uri, scan1, scan2, 200, mapMinFrac(mapRef))
+      const { cells } = buildCompareTree(
+        { uri: n.uri, rows: [] } as unknown as CompareResult, sub, areaMode, showUnchanged,
+      )
+      return cells
+    },
+    [scan1, scan2, areaMode, showUnchanged, mapRef],
+  )
   const { root, maxAbsDelta } = useMemo(() => {
     const { cells, maxAbsDelta: maxAbs } = buildCompareTree(result, rec, areaMode, showUnchanged)
     const totalWeight = cells.reduce((s, c) => s + c.weight, 0)
@@ -427,11 +488,15 @@ function CompareTreemap({
   return (
     <Paper sx={{ p: 0, mb: 3, overflow: 'hidden' }}>
       {/* Taller on phones: a 340px strip of a portrait screen is unreadable. */}
-      <Box sx={{ height: { xs: 'min(75vh, 560px)', sm: 340 }, position: 'relative' }}>
+      <Box ref={mapRef} sx={{ height: { xs: 'min(75vh, 560px)', sm: 340 }, position: 'relative' }}>
         <DTTreemap<CompareTMNode & { children?: CompareTMNode[] }>
           root={root}
           getSize={n => n.weight}
           getChildren={n => (n as { children?: CompareTMNode[] }).children}
+          // Only dirs with change *below* have a slice worth fetching.
+          hasChildren={fetchable}
+          loadChildren={loadChildren}
+          renderLoading={n => `Loading Δ for ${n.label || 'this subtree'}…`}
           getLabel={n => n.label}
           // First-class fold cells: aggregate the dust's Δ so a green parent
           // whose change lives entirely in tiny children still shows where
@@ -474,8 +539,13 @@ function CompareTreemap({
             // Stroke per cell, from the face it borders (see `edgeFor`).
             const withEdge = (s: { bg: string; ink: string; hatch?: string }, face: string) =>
               ({ ...s, edge: edgeFor(face, ctx.fade) })
+            // A branch either renders nested tiles now (`ctx.hasKids`) or
+            // holds children the layout was too small to draw — both take the
+            // container treatment, not the leaf band. (Lazily-loaded subtrees
+            // render kids without `n.children`, hence both halves.)
+            const hasKids = ctx.hasKids || !!n.children?.length
             if (areaMode === 'max') {
-              if (n.children?.length) {
+              if (hasKids) {
                 // Parent: children tile its interior, so only the title strip
                 // and gutters show — tint them by the net trend Δ/weight (a
                 // summary cue; magnitude lives in the leaf bands). Net-zero
@@ -502,12 +572,13 @@ function CompareTreemap({
             const t = maxAbsDelta === 0 ? 0 : n.delta / maxAbsDelta
             return withEdge({ bg: deltaColor(t), ink: '#fff' }, deltaColor(t))
           }}
-          renderCellExtra={areaMode === 'max' ? (n, _path, { w, h }) => {
+          renderCellExtra={areaMode === 'max' ? (n, _path, { w, h, hasKids }) => {
+            const branch = hasKids || !!n.children?.length
             // Per-sub-rect size labels: Δ centered in the colored band, the
             // unchanged min(old, new) bytes centered in the grey rect above it.
             // Leaves only (a parent's interior belongs to its children), and
             // skip narrow slivers — a clipped "+128.0KB" is worse than none.
-            if (n.children?.length || w < 56) return null
+            if (branch || w < 56) return null
             const f = n.weight === 0 ? 0 : Math.min(1, Math.abs(n.delta) / n.weight)
             if (f === 0) return null
             const bandH = h * f
@@ -536,8 +607,8 @@ function CompareTreemap({
           // just the Δ) when it fits after the name and size — a rough
           // char-width estimate against the cell box, since the size span
           // never shrinks and would crush the name otherwise.
-          renderCellSubtitle={(n, _path, { w }) => {
-            if (!n.children?.length) return null
+          renderCellSubtitle={(n, _path, { w, hasKids }) => {
+            if (!hasKids && !n.children?.length) return null
             // ▲/▼/Δ glyphs run wider than digits; err toward dropping the
             // stats over ellipsizing the name.
             const room = w - 8 - n.label.length * 7 - formatSize(n.weight).length * 6.5 - 12
@@ -699,10 +770,12 @@ function CompareTreemap({
             </span>
           )}
           onCellClick={(n) => {
-            // Cells with in-tree children drill inside the widget (return
-            // false); frontier/unchanged dirs navigate to /compare there.
-            if (n.children?.length) return false
-            if (n.kind !== 'dir') return false // let the widget pin the tooltip
+            // Dirs with detail drill inside the widget (in-tree children, or
+            // a slice `loadChildren` fetches). Everything else — unchanged
+            // dirs, files, synthetic cells — keeps the old behavior: dirs
+            // navigate to their own /compare page, files pin their tooltip.
+            if (n.kind !== 'dir' || n.status === 'filler' || n.status === 'fold') return false
+            if (n.children?.length || fetchable(n)) return false
             onDrill(n.uri)
             return true
           }}
@@ -1392,6 +1465,10 @@ export function CompareView() {
   const [recResult, setRecResult] = useState<CompareRecResult | null>(null)
   const [recState, setRecState] = useState<'loading' | 'error' | 'ready'>('loading')
   const [recAttempt, setRecAttempt] = useState(0)
+  // Measured at fetch time so the response carries only drawable cells (the
+  // map may not be mounted for the very first request; the server's default
+  // applies then).
+  const mapRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -1485,7 +1562,7 @@ export function CompareView() {
           .then(st => {
             if (stale) return
             if (st.status === 'done') {
-              compareScansRecursive(uri, s1, s2)
+              compareScansRecursive(uri, s1, s2, 200, mapMinFrac(mapRef))
                 .then(r => { if (!stale) setRecResult(r) })
                 .catch(() => { /* keep the walk result */ })
             } else if (st.status === 'building' || st.status === 'none') {
@@ -1495,7 +1572,7 @@ export function CompareView() {
           .catch(() => { if (!stale) pollIndex() })
       }, 3000)
     }
-    compareScansRecursive(uri, s1, s2)
+    compareScansRecursive(uri, s1, s2, 200, mapMinFrac(mapRef))
       .then(r => {
         if (stale) return
         setRecResult(r)
@@ -1785,6 +1862,9 @@ export function CompareView() {
                 result={result}
                 rec={recResult ?? undefined}
                 recState={recState}
+                scan1={scan1 as number}
+                scan2={scan2 as number}
+                mapRef={mapRef}
                 onRecRetry={() => setRecAttempt(a => a + 1)}
                 onDrill={childUri => {
                   // Preserve scan1/scan2 query params on drill so the sub-view
