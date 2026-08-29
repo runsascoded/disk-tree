@@ -94,6 +94,19 @@ disk-tree vocab URI       # Build the vocab sidecar (`<blob>.vocab.parquet`) for
 
 disk-tree histogram URI   # Byte-weighted mtime distribution per child (sparklines; -j for JSON)
 
+disk-tree du URI          # Top-N heaviest children per level, from the freshest covering scan —
+                          # `du -d1 | sort -rh` without a filesystem walk (-d depth, -n top-N,
+                          # -a to include files, -j for JSON). Sizes are per-path block counts,
+                          # so extents shared via APFS clones/hardlinks are charged to every
+                          # linking path — see the caveat under Performance
+
+disk-tree reclaim PATH…   # What deleting PATHs would *actually* free: maps each file's physical
+                          # extents (`fcntl(F_LOG2PHYS_EXT)`) and subtracts blocks the surviving
+                          # partner roots still reference (`-p` adds one, `-P` drops the
+                          # auto-detected uv/pnpm caches). macOS-only. Measured 2026-08-29:
+                          # `oa/marin/.venv` reports 2.84 GiB, frees 249 MiB (91% cloned from
+                          # `~/.cache/uv`); ~43 s, dominated by walking 756K partner files
+
 disk-tree fetch [BUCKET…] # Bulk-list configured buckets → dated raw-listing shards
 disk-tree pull [BUCKET…]  # fetch + import as dated scans
 disk-tree sync            # pull all configured buckets (cron entrypoint); builds each bucket's
@@ -215,6 +228,8 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet).
 - Depth column enables parquet predicate pushdown (only load needed rows)
 - `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning / SQL range predicates (rows sorted `(depth, path)`); wired into scan/compare/histogram/path-stats reads — see `specs/diff-and-search.md`
 - Denormalized stats avoid parquet reads for scan list and fresher child patching
+
+**Sizes are per-path, not per-extent.** `gfind -printf '%b'` reports blocks allocated to a *path*; APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount. So a subtree's reported size is an upper bound on what deleting it frees. Measured 2026-08-29: deleting 35 dormant `.venv` dirs totalling 16.9 GiB freed 9 GiB — uv's default macOS link mode is `clone`, so the remainder stayed live in `~/.cache/uv`. Clones are invisible to `stat` (distinct inodes, `nlink == 1`), so inode/link-count bookkeeping catches hardlinks only — and hardlinks are nearly irrelevant here: a census of `$HOME` found `nlink > 1` over-counting just **4.3 GiB of 385.9 GiB (1.1%)**, which is why `%i`/`%n` are *not* indexed. `disk-tree reclaim` answers the question properly, on demand, by mapping physical extents.
 
 ## TODOs / Known Issues
 
