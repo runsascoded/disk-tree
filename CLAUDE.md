@@ -107,6 +107,12 @@ disk-tree reclaim PATH…   # What deleting PATHs would *actually* free: maps ea
                           # `oa/marin/.venv` reports 2.84 GiB, frees 249 MiB (91% cloned from
                           # `~/.cache/uv`); ~43 s, dominated by walking 756K partner files
 
+disk-tree repos ROOT      # Delete-safety audit of git repos under ROOT (cleanup companion to `du`):
+                          # size + dirty/untracked counts + whether every local branch is on a
+                          # github/gitlab remote. `recoverable` = clean tree + all branches hosted;
+                          # DELETABLE also requires zero untracked. `-r` filters to recoverable,
+                          # `-m` sets a size floor (default 200M), `-j` for JSON
+
 disk-tree fetch [BUCKET…] # Bulk-list configured buckets → dated raw-listing shards
 disk-tree pull [BUCKET…]  # fetch + import as dated scans
 disk-tree sync            # pull all configured buckets (cron entrypoint); builds each bucket's
