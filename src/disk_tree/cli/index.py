@@ -14,6 +14,7 @@ from utz import err, iec
 @cli.command
 @option('-C', '--no-cache-read', is_flag=True)
 @option('-D', '--no-diff', is_flag=True, help="Skip building the diff index against the path's previous scan")
+@option('-e', '--require-external', is_flag=True, help='Skip (exit 0) if the resolved write target is the boot-disk default — i.e. no opted-in external volume is mounted. For scheduled scans that must land on external media.')
 @option('-g', '--gc', is_flag=True)
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendants) per path')
 @option('-M', '--measure-memory', is_flag=True)
@@ -23,6 +24,7 @@ from utz import err, iec
 def index(
     no_cache_read: bool,
     no_diff: bool,
+    require_external: bool,
     gc: bool,
     mean_mtime: bool,
     measure_memory: bool,
@@ -36,6 +38,23 @@ def index(
     db.create_all()
     url = url or getcwd()
     url = url.rstrip('/') or '/'
+    # Scheduled scans that must land on external media: bail before doing any
+    # work when the write target fell back to the boot disk (no opted-in volume
+    # mounted). Exit 0 so a launchd/cron wrapper logs a skip, not a failure.
+    if require_external and not url.startswith(('s3://', 'gcs://', 'r2://', 'ssh://')):
+        from disk_tree import config as _config
+        wd = _config.scan_write_dir()
+        if wd == _config.DEFAULT_SCANS_DIR:
+            err(f"--require-external: write target is the boot disk ({wd}); no external scans volume mounted — skipping")
+            return
+        err(f"--require-external: writing to {wd}")
+    # `load_or_create` returns any existing scan unconditionally (no freshness
+    # check) and can't tell a sudo scan from a plain one — so without this,
+    # `index --sudo` silently re-serves a cached *non*-sudo scan and never
+    # elevates. Asking for sudo means you want a fresh, privileged walk.
+    if sudo and not no_cache_read:
+        err("--sudo forces a fresh scan (-C)")
+        no_cache_read = True
     if measure_memory:
         from utz.mem import Tracker
         mem = Tracker()
@@ -77,11 +96,16 @@ def index(
     if scan.error_count:
         summary += f", {scan.error_count} permission errors"
     print(summary)
-    from os.path import isabs, join
-    from disk_tree.config import SCANS_DIR
-    blob_path = scan.blob if isabs(scan.blob) else join(SCANS_DIR, scan.blob)
-    stat = os.stat(blob_path)
-    print(f"Scan cached path: {blob_path} ({iec(stat.st_size)})")
+    # Blobs may live on any read dir (external volume incl.), so resolve via the
+    # search path — not a naive join with the *write* dir, which stats a path
+    # that need not exist (e.g. blob on the boot disk, write target on X6).
+    from disk_tree.diff import resolve_blob
+    blob_path = resolve_blob(scan.blob)
+    if os.path.exists(blob_path):
+        stat = os.stat(blob_path)
+        print(f"Scan cached path: {blob_path} ({iec(stat.st_size)})")
+    else:
+        print(f"Scan blob: {scan.blob}")
     if scan.error_count:
         import json
         error_paths = json.loads(scan.error_paths) if scan.error_paths else []
@@ -94,7 +118,10 @@ def index(
         print(f"\nTip: Run with --sudo for full access: disk-tree index --sudo {url}")
 
     if extents:
-        _build_reclaim_sidecar(url, blob_path)
+        if os.path.exists(blob_path):
+            _build_reclaim_sidecar(url, blob_path)
+        else:
+            err(f"--extents needs a resolvable blob to write the sidecar beside; skipping ({scan.blob})")
 
 
 def _build_reclaim_sidecar(url: str, blob_path: str):

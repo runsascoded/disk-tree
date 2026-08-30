@@ -79,3 +79,28 @@ def test_read_dirs_lead_with_the_write_dir_and_dedupe(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(config, 'DEFAULT_SCANS_DIR', a)
     monkeypatch.setenv(config.DISK_TREE_SCAN_DIRS_VAR, f'{a}:{b}')
     assert config.scan_read_dirs() == [b, a]
+
+
+def test_index_require_external_skips_when_write_target_is_boot_disk(tmp_path: Path):
+    """`index --require-external` exits 0 without scanning when no external
+    volume is mounted — an explicit DISK_TREE_ROOT forces the boot-disk default,
+    which is exactly the fall-through the flag guards against. See the flag's
+    use in the scheduled-scan LaunchAgent."""
+    import os
+    import subprocess
+    import sys
+
+    env = {**os.environ, config.DISK_TREE_ROOT_VAR: str(tmp_path)}
+    env.pop(config.DISK_TREE_SCAN_DIRS_VAR, None)
+    r = subprocess.run(
+        [sys.executable, '-m', 'disk_tree.cli.main', 'index', '-e', str(tmp_path)],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert r.returncode == 0
+    scans = tmp_path / 'scans'
+    assert list(scans.glob('*.parquet')) == []
+    last = r.stderr.rstrip('\n').split('\n')[-1]
+    assert last == (
+        f"--require-external: write target is the boot disk ({scans}); "
+        "no external scans volume mounted — skipping"
+    )
