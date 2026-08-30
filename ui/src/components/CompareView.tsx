@@ -770,15 +770,20 @@ function CompareTreemap({
             </span>
           )}
           onCellClick={(n) => {
-            // Dirs with detail drill inside the widget (in-tree children, or
-            // a slice `loadChildren` fetches). Everything else — unchanged
-            // dirs, files, synthetic cells — keeps the old behavior: dirs
-            // navigate to their own /compare page, files pin their tooltip.
+            // Option A (matches the scan treemap): a dir click re-roots the
+            // whole /compare page — URL + breadcrumb + table + map — preserving
+            // scan1/scan2, rather than drilling the map in place and diverging
+            // from the table. Synthetic filler/fold cells (no real uri) and
+            // files keep the widget default (pin tooltip).
             if (n.kind !== 'dir' || n.status === 'filler' || n.status === 'fold') return false
-            if (n.children?.length || fetchable(n)) return false
             onDrill(n.uri)
             return true
           }}
+          cellHref={n =>
+            n.kind === 'dir' && n.status !== 'filler' && n.status !== 'fold' && n.uri
+              ? `/compare${uriToPath(n.uri)}?scan1=${scan1}&scan2=${scan2}`
+              : undefined
+          }
         />
         {/* The colored Δ cells come from the recursive frontier; until it
             lands, the flat grey context alone reads as a broken all-grey
