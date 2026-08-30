@@ -57,6 +57,7 @@ class SshBackend(Backend):
         sudo: bool = False,
         progress_callback: ProgressCallback | None = None,
         progress_interval: float = 1.0,
+        progress: bool = True,
     ) -> Iterator[dict]:
         ssh, remote_path, host_part = self._ssh_base(url)
 
@@ -80,6 +81,7 @@ class SshBackend(Backend):
             errors=errors,
             progress_callback=progress_callback,
             progress_interval=progress_interval,
+            progress=progress,
         )
 
     def delete(self, url: str) -> None:

@@ -18,6 +18,7 @@ from utz import err, iec
 @option('-g', '--gc', is_flag=True)
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendants) per path')
 @option('-M', '--measure-memory', is_flag=True)
+@option('-q', '--no-progress', is_flag=True, help='Suppress the tqdm scan progress bar (for scheduled/redirected runs — keeps logs small)')
 @option('-s', '--sudo', is_flag=True, help='Run `find` as sudo')
 @option('-x', '--extents', is_flag=True, help='Also map physical extents → per-dir reclaimable bytes (APFS clones/hardlinks; writes a .reclaim sidecar). macOS, local scans only; exact when the scan root contains the sharing sources (home/full scan)')
 @argument('url', required=False)
@@ -28,6 +29,7 @@ def index(
     gc: bool,
     mean_mtime: bool,
     measure_memory: bool,
+    no_progress: bool,
     sudo: bool,
     extents: bool,
     url: str | None,
@@ -65,9 +67,9 @@ def index(
 
     with ctx, time("scan"):
         if no_cache_read:
-            scan, df = Scan.create(url, gc=gc, sudo=sudo, mean_mtime=mean_mtime)
+            scan, df = Scan.create(url, gc=gc, sudo=sudo, mean_mtime=mean_mtime, progress=not no_progress)
         else:
-            scan, df = Scan.load_or_create(url, gc=gc, sudo=sudo, mean_mtime=mean_mtime)
+            scan, df = Scan.load_or_create(url, gc=gc, sudo=sudo, mean_mtime=mean_mtime, progress=not no_progress)
 
     elapsed = time['scan']
     if not no_diff and not gc:

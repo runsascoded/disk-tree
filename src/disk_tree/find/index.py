@@ -143,6 +143,7 @@ def index(
     progress_callback: ProgressCallback | None = None,
     progress_interval: float = 1.0,
     excludes: list[str] | None = None,
+    progress: bool = True,
 ) -> IndexResult:
     path0 = path.rstrip('/') or '/'
     errors = ErrorCollector()
@@ -162,7 +163,7 @@ def index(
 
     def collect():
         nonlocal last_progress_time, items_count
-        kwargs = dict(errors=errors, excludes=excludes, sudo=sudo)
+        kwargs = dict(errors=errors, excludes=excludes, sudo=sudo, progress=progress)
         for e in backend.list(path0, **kwargs):
             items_count += 1
             now = time_module.time()

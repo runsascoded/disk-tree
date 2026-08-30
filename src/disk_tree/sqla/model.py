@@ -125,6 +125,7 @@ class Scan(Base):
         sudo: bool = False,
         mean_mtime: bool = False,
         track_progress: bool = True,
+        progress: bool = True,
     ) -> tuple['Scan', pd.DataFrame]:
         from .db import db
 
@@ -141,7 +142,7 @@ class Scan(Base):
                 ScanProgress.update(path, items_found, items_per_sec, error_count)
 
         try:
-            result = find.index(path, sudo=sudo, mean_mtime=mean_mtime, progress_callback=progress_callback)
+            result = find.index(path, sudo=sudo, mean_mtime=mean_mtime, progress_callback=progress_callback, progress=progress)
         except Exception as e:
             if track_progress:
                 ScanProgress.finish(path, status='failed')
@@ -238,15 +239,16 @@ class Scan(Base):
         sudo: bool = False,
         mean_mtime: bool = False,
         track_progress: bool = True,
+        progress: bool = True,
     ) -> tuple['Scan', pd.DataFrame]:
         scan = cls.load(path)
         if not scan:
-            return cls.create(path, gc=gc, sudo=sudo, mean_mtime=mean_mtime, track_progress=track_progress)
+            return cls.create(path, gc=gc, sudo=sudo, mean_mtime=mean_mtime, track_progress=track_progress, progress=progress)
         df = scan.df()
         if mean_mtime and 'mtime_mean' not in df.columns:
             # Cached scan predates the flag — rescan rather than silently
             # serving a frame without the requested column.
             err(f"{path}: cached scan lacks `mtime_mean`, rescanning")
-            return cls.create(path, gc=gc, sudo=sudo, mean_mtime=True, track_progress=track_progress)
+            return cls.create(path, gc=gc, sudo=sudo, mean_mtime=True, track_progress=track_progress, progress=progress)
         cls.gc(path=path, cutoff=scan.time)
         return scan, df

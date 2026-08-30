@@ -44,6 +44,7 @@ class S3Backend(Backend):
         errors: ErrorCollector | None = None,
         excludes: list[str] | None = None,
         sudo: bool = False,
+        progress: bool = True,
     ) -> Iterator[dict]:
         cmd = self._aws_cmd(['s3', 'ls', '--recursive', url])
         proc = subprocess.Popen(cmd, stdout=PIPE, stderr=PIPE, text=True)
@@ -52,7 +53,7 @@ class S3Backend(Backend):
         key0 = parsed.path.lstrip('/')
         dirs = set()
         with time("s3_files_iter lines"):
-            for line in tqdm(proc.stdout):
+            for line in tqdm(proc.stdout, disable=not progress):
                 strs = WS.split(line.rstrip('\n'), 3)
                 mtime_str = f'{strs[0]} {strs[1]}'
                 mtime = int(parse(mtime_str).replace(tzinfo=timezone.utc).timestamp())

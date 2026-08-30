@@ -45,6 +45,7 @@ class Backend(ABC):
         errors: ErrorCollector | None = None,
         excludes: list[str] | None = None,
         sudo: bool = False,
+        progress: bool = True,
     ) -> Iterator[dict]:
         """Recursive bulk listing.
 

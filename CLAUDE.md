@@ -60,11 +60,14 @@ Key goals:
 **CLI** (`cli/`):
 ```bash
 disk-tree index [URL]     # Scan directory or s3:// bucket
-  -C, --no-cache-read     # Force fresh scan
+  -C, --no-cache-read     # Force fresh scan (`index` otherwise returns any cached scan unconditionally)
+  -e, --require-external  # Skip (exit 0) if the write target is the boot disk (no opted-in external
+                          # volume mounted). For scheduled scans that must land on external media
   -g, --gc                # Garbage collect old scans
   -m, --mean-mtime        # Emit `mtime_mean` (size-weighted mean mtime; feeds the UI age lens)
   -M, --measure-memory    # Track peak memory
-  -s, --sudo              # Run gfind with sudo
+  -q, --no-progress       # Suppress the tqdm progress bar (scheduled/redirected runs — keeps logs small)
+  -s, --sudo              # Run gfind with sudo (implies `-C`: a cached scan can't be known to be sudo)
   -x, --extents           # Map physical extents → per-dir reclaimable bytes (APFS clones/hardlinks),
                           # written as a `<blob>.reclaim.parquet` sidecar. macOS + local scans only;
                           # exact when the scan root contains the sharing sources (home/full scan),

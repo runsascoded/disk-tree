@@ -37,6 +37,7 @@ class LocalBackend(Backend):
         sudo: bool = False,
         progress_callback: ProgressCallback | None = None,
         progress_interval: float = 1.0,
+        progress: bool = True,
     ) -> Iterator[dict]:
         path0 = abspath(url)
         cmd = ['gfind', path0]
@@ -62,6 +63,7 @@ class LocalBackend(Backend):
             errors=errors,
             progress_callback=progress_callback,
             progress_interval=progress_interval,
+            progress=progress,
         )
 
     def delete(self, url: str) -> None:

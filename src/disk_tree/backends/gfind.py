@@ -27,6 +27,7 @@ def run_gfind(
     errors: ErrorCollector | None = None,
     progress_callback: ProgressCallback | None = None,
     progress_interval: float = 1.0,
+    progress: bool = True,
 ) -> Iterator[dict]:
     """Spawn `cmd` (expected to produce null-terminated `gfind -printf '%y %b %T@ %p\\0'`
     output), parse entries, yield dicts.
@@ -49,7 +50,7 @@ def run_gfind(
     items_count = 0
 
     with time("gfind lines"):
-        for record in tqdm(read_records()):
+        for record in tqdm(read_records(), disable=not progress):
             try:
                 line = record.decode('utf-8', errors='replace')
             except UnicodeDecodeError:
