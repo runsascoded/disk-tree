@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
-import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch } from 'react-icons/fa'
+import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch, FaRegCopy, FaCheck } from 'react-icons/fa'
 import { useAction } from 'use-kbd'
 import { AgeHistograms, age01, ageDomain, ageFade, BytesOverTime, dimUnmatched, parseQuery, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchScanDetails, fetchScanHistory, fetchHistogram, fetchFilter, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
 import type { FilterResult, HistogramChild, Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { VoronoiTreemap } from '@disk-tree/react/voronoi'
@@ -179,6 +179,40 @@ function SortableHeader({
   return tooltip ? <Tooltip title={tooltip}>{header}</Tooltip> : header
 }
 
+/**
+ * Small click-to-copy button. Writes `text` to the clipboard and briefly
+ * swaps the icon to a check. Clipboard access can throw (insecure origin,
+ * denied permission) — swallow it and leave the icon unchanged.
+ */
+function CopyButton({ text, title = 'Copy', size = 12 }: { text: string; title?: string; size?: number }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <Tooltip title={copied ? 'Copied!' : title}>
+      <button
+        type="button"
+        aria-label={title}
+        onClick={async e => {
+          e.stopPropagation()
+          try {
+            await navigator.clipboard.writeText(text)
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1200)
+          } catch {
+            /* clipboard unavailable (insecure origin / denied) — no-op */
+          }
+        }}
+        style={{
+          background: 'none', border: 'none', padding: '0 4px', cursor: 'pointer',
+          color: 'inherit', opacity: copied ? 1 : 0.6, display: 'inline-flex',
+          alignItems: 'center', verticalAlign: 'middle',
+        }}
+      >
+        {copied ? <FaCheck size={size} color="#4caf50" /> : <FaRegCopy size={size} />}
+      </button>
+    </Tooltip>
+  )
+}
+
 function PermissionErrorWarning({ errorCount, errorPaths, scanPath }: { errorCount: number; errorPaths: string[] | null; scanPath: string | null }) {
   const [expanded, setExpanded] = useState(false)
   const displayPaths = errorPaths?.slice(0, 10) ?? []
@@ -208,7 +242,9 @@ function PermissionErrorWarning({ errorCount, errorPaths, scanPath }: { errorCou
         )}
       </Collapse>
       <Box sx={{ mt: 1, fontSize: '0.85rem', opacity: 0.85 }}>
-        Tip: Run <code style={{ background: 'rgba(0,0,0,0.1)', padding: '2px 4px', borderRadius: 3 }}>disk-tree index --sudo {scanPath ?? '<path>'}</code> for full access.
+        Tip: Run <code style={{ background: 'rgba(0,0,0,0.1)', padding: '2px 4px', borderRadius: 3 }}>disk-tree index --sudo {scanPath ?? '<path>'}</code>
+        <CopyButton text={`disk-tree index --sudo ${scanPath ?? '<path>'}`} title="Copy command" />
+        for full access.
       </Box>
     </Alert>
   )
@@ -1143,6 +1179,30 @@ export function ScanDetails() {
 
   // Live scan progress from SSE
   const scanProgress = useScanProgress()
+
+  // Auto-refetch when a scan relevant to this view finishes. A completed scan
+  // is *deleted* from `scan_progress` (see ScanProgress.finish), so completion
+  // is a path that was streaming last tick and is now gone. Relevance mirrors
+  // the banner: exact / ancestor / descendant of the current uri — a fresher
+  // ancestor or descendant scan both change what this view should show
+  // (descendants via fresher-child patching). Invalidate rather than refetch
+  // so background/unmounted queries (history, sibling depths) refresh too.
+  const queryClient = useQueryClient()
+  const prevScanPaths = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const relevant = (p: string) =>
+      p === uri || uri.startsWith(p + '/') || p.startsWith(uri + '/')
+    const active = new Set(scanProgress.map(s => s.path).filter(relevant))
+    let finished = false
+    for (const p of prevScanPaths.current) {
+      if (!active.has(p)) { finished = true; break }
+    }
+    prevScanPaths.current = active
+    if (finished) {
+      queryClient.invalidateQueries({ queryKey: ['scan-details', uri] })
+      queryClient.invalidateQueries({ queryKey: ['scan-history', uri] })
+    }
+  }, [scanProgress, uri, queryClient])
 
   // Record visit to recent paths
   const { recordVisit } = useRecentPaths()
