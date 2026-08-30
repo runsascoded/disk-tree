@@ -77,8 +77,11 @@ export function Header() {
           </Button>
         </Box>
 
-        {/* Size units: SI (G = 10⁹) vs IEC (Gi = 2³⁰) */}
-        <Tooltip title={units === 'si' ? 'SI units: K/M/G = powers of 1000 (Finder, df -H)' : 'IEC units: Ki/Mi/Gi = powers of 1024 (du, ls -h)'}>
+        {/* Size units: SI (G = 10⁹) vs IEC (Gi = 2³⁰). Single tooltip on the
+            group (wrapping each button breaks ToggleButtonGroup's value/onChange
+            injection), with static text describing *both* — keying it to the
+            active unit read backwards when hovering the inactive button. */}
+        <Tooltip title="Size units — G: SI, powers of 1000 (Finder, df -H) · Gi: IEC, powers of 1024 (du, ls -h)">
           <ToggleButtonGroup
             size="small"
             exclusive
