@@ -171,3 +171,73 @@ def test_overcount_cli_reports_shared(tmp_path: Path):
     assert d['shared'] == MIB          # the cloned MiB
     assert d['exclusive'] == MIB       # the owned MiB
     assert [(row['path'], row['shared']) for row in d['rows']] == [('sub', MIB)]
+
+
+def test_reclaimable_clone_within_subtree_attributed_to_lca(tmp_path: Path):
+    """A block cloned between two sibling dirs is freed only by removing their
+    common ancestor — not either sibling alone."""
+    from disk_tree.extents import reclaimable_by_dir
+    proj = tmp_path / 'proj'
+    (proj / 'a').mkdir(parents=True)
+    (proj / 'b').mkdir()
+    src = _write(proj / 'a' / 'x.bin')
+    _clone(src, proj / 'b' / 'y.bin')
+
+    recl, err = reclaimable_by_dir(str(proj))
+    assert err == 0
+    # rm proj/a alone frees nothing (the block survives in proj/b), and vice versa
+    assert recl.get('a', 0) == 0
+    assert recl.get('b', 0) == 0
+    # rm the whole subtree frees the block once
+    assert recl['.'] == MIB
+
+
+def test_reclaimable_external_sharing_only_seen_when_walk_covers_it(tmp_path: Path):
+    """The LCA model is exact only when the walk sees every referencer. A clone
+    shared outside the walked root looks root-owned (an over-count); walking the
+    common ancestor reveals the sharing and excludes it."""
+    from disk_tree.extents import reclaimable_by_dir
+    proj = tmp_path / 'proj'
+    proj.mkdir()
+    src = _write(tmp_path / 'external.bin')     # sibling of proj, shares blocks
+    _clone(src, proj / 'copy.bin')
+    owned = _write(proj / 'owned.bin')
+
+    # Walking proj alone can't see external.bin → the clone counts (upper bound).
+    narrow, _ = reclaimable_by_dir(str(proj))
+    assert narrow['.'] == owned.stat().st_size + MIB
+
+    # Walking the ancestor sees both referencers → clone's LCA is the ancestor,
+    # so proj is correctly credited only its owned file.
+    wide, _ = reclaimable_by_dir(str(tmp_path))
+    assert wide['proj'] == owned.stat().st_size
+
+
+def test_reclaimable_hardlink_lca_is_common_ancestor(tmp_path: Path):
+    """A hardlink under two dirs raises the block's LCA to their ancestor."""
+    from disk_tree.extents import reclaimable_by_dir
+    proj = tmp_path / 'proj'
+    (proj / 'a').mkdir(parents=True)
+    (proj / 'b').mkdir()
+    f = _write(proj / 'a' / 'x.bin')
+    os.link(f, proj / 'b' / 'x_link.bin')
+
+    recl, _ = reclaimable_by_dir(str(proj))
+    assert recl.get('a', 0) == 0 and recl.get('b', 0) == 0
+    assert recl['.'] == MIB
+
+
+def test_reclaim_sidecar_roundtrip_and_freshness(tmp_path: Path):
+    from disk_tree.extents import (read_reclaim_sidecar, reclaim_sidecar_path,
+                                   write_reclaim_sidecar)
+    blob = tmp_path / 'scan.parquet'
+    blob.write_bytes(b'blob')
+    write_reclaim_sidecar(str(blob), {'.': 100, 'sub': 40})
+    assert reclaim_sidecar_path(str(blob)) == str(tmp_path / 'scan.reclaim.parquet')
+    assert read_reclaim_sidecar(str(blob)) == {'.': 100, 'sub': 40}
+
+    # A blob rewritten after the sidecar makes the sidecar stale → ignored.
+    import time as _t
+    _t.sleep(0.01)
+    blob.write_bytes(b'blob2')
+    assert read_reclaim_sidecar(str(blob)) is None

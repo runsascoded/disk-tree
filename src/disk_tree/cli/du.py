@@ -32,7 +32,8 @@ def _fmt(size: int, human: bool) -> str:
 @argument('uri')
 def du_cmd(all_kinds: bool, depth: int, no_human: bool, as_json: bool, top: int, scan_id: str | None, uri: str):
     """Biggest children of URI, per level, from the freshest covering scan."""
-    from disk_tree.diff import resolve_chunk_for_path
+    from disk_tree.diff import resolve_blob, resolve_chunk_for_path
+    from disk_tree.extents import read_reclaim_sidecar
     from disk_tree.filter import rebase_frame
     from disk_tree.registry import freshest_scan_covering
     from disk_tree.storage import get_backend
@@ -47,6 +48,14 @@ def du_cmd(all_kinds: bool, depth: int, no_human: bool, as_json: bool, top: int,
 
     rel = '.' if scan['path'] == uri else uri[len(scan['path'].rstrip('/') + '/'):]
     blob, rebased = resolve_chunk_for_path(scan['blob'], rel)
+    recl_map = read_reclaim_sidecar(resolve_blob(scan['blob']))
+    def _recl(sub_rel: str):
+        # Sidecar keys are relative to the scan root; `rel` is the URI's offset
+        # from it (`rebased` is only the offset within a resolved chunk).
+        if recl_map is None:
+            return None
+        scanrel = sub_rel if rel == '.' else (rel if sub_rel == '.' else f'{rel}/{sub_rel}')
+        return recl_map.get(scanrel)
     df = get_backend().load(blob, follow_refs=True, path_prefix=rebased if rebased != '.' else None)
     root_size = int(df.loc[df['path'] == rebased, 'size'].iloc[0]) if (df['path'] == rebased).any() else 0
     df = rebase_frame(df, rebased)
@@ -64,6 +73,7 @@ def du_cmd(all_kinds: bool, depth: int, no_human: bool, as_json: bool, top: int,
             'mtime': float(row.mtime),
             'kind': row.kind,
             'n_desc': int(row.n_desc),
+            'reclaimable': _recl(row.path),
         })
 
     def walk(parent: str) -> list[dict]:
@@ -74,34 +84,53 @@ def du_cmd(all_kinds: bool, depth: int, no_human: bool, as_json: bool, top: int,
             out.append({**r, 'children': walk(r['path'])})
         rest = rows[len(shown):]
         if rest:
+            rest_recl = [r['reclaimable'] for r in rest]
             out.append({
                 'path': f'{parent}/…' if parent else '…',
                 'size': sum(r['size'] for r in rest),
                 'mtime': 0.0,
                 'kind': 'rest',
                 'n_desc': sum(r['n_desc'] for r in rest),
+                'reclaimable': sum(v for v in rest_recl if v is not None) if any(v is not None for v in rest_recl) else None,
                 'children': [],
                 'n_rest': len(rest),
             })
         return out
 
     tree = walk('')
+    root_recl = _recl('.')
     if as_json:
-        print(json.dumps({'uri': uri, 'scan_id': scan['id'], 'time': scan['time'], 'size': root_size, 'rows': tree}, indent=2))
+        print(json.dumps({'uri': uri, 'scan_id': scan['id'], 'time': scan['time'], 'size': root_size, 'reclaimable': root_recl, 'rows': tree}, indent=2))
         return
 
     human = not no_human
     print(f"{uri} — {_fmt(root_size, human)} (scan {scan['id']} of {scan['path']}, {str(scan['time'])[:19]})")
 
+    show_recl = recl_map is not None
+
+    def rcol(r) -> str:
+        if not show_recl:
+            return ''
+        v = r.get('reclaimable')
+        return f"  {(_fmt(v, human) if v is not None else '—'):>9}"
+
+    if show_recl:
+        print(f"{'apparent':>9}{'  frees':>11}  path")
+
     def emit(rows: list[dict], indent: int):
         for r in rows:
             name = r['path'].rsplit('/', 1)[-1]
             if r['kind'] == 'rest':
-                print(f"{_fmt(r['size'], human):>9}  {'':>10}  {'  ' * indent}… {r['n_rest']} more")
+                print(f"{_fmt(r['size'], human):>9}{rcol(r)}  {'  ' * indent}… {r['n_rest']} more"
+                      if show_recl else
+                      f"{_fmt(r['size'], human):>9}  {'':>10}  {'  ' * indent}… {r['n_rest']} more")
                 continue
             when = datetime.fromtimestamp(r['mtime']).strftime('%Y-%m-%d') if r['mtime'] else ''
             suffix = '/' if r['kind'] == 'dir' else ''
-            print(f"{_fmt(r['size'], human):>9}  {when:>10}  {'  ' * indent}{name}{suffix}")
+            if show_recl:
+                print(f"{_fmt(r['size'], human):>9}{rcol(r)}  {'  ' * indent}{name}{suffix}")
+            else:
+                print(f"{_fmt(r['size'], human):>9}  {when:>10}  {'  ' * indent}{name}{suffix}")
             emit(r['children'], indent + 1)
 
     emit(tree, 0)

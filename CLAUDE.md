@@ -65,6 +65,10 @@ disk-tree index [URL]     # Scan directory or s3:// bucket
   -m, --mean-mtime        # Emit `mtime_mean` (size-weighted mean mtime; feeds the UI age lens)
   -M, --measure-memory    # Track peak memory
   -s, --sudo              # Run gfind with sudo
+  -x, --extents           # Map physical extents → per-dir reclaimable bytes (APFS clones/hardlinks),
+                          # written as a `<blob>.reclaim.parquet` sidecar. macOS + local scans only;
+                          # exact when the scan root contains the sharing sources (home/full scan),
+                          # else an upper bound. `du` shows a `frees` column when the sidecar exists
 
 disk-tree scans           # List cached scans (JSON)
 
@@ -98,7 +102,8 @@ disk-tree du URI          # Top-N heaviest children per level, from the freshest
                           # `du -d1 | sort -rh` without a filesystem walk (-d depth, -n top-N,
                           # -a to include files, -j for JSON). Sizes are per-path block counts,
                           # so extents shared via APFS clones/hardlinks are charged to every
-                          # linking path — see the caveat under Performance
+                          # linking path — see the caveat under Performance.
+                          # Shows a `frees` column (true reclaim) when a `-x` reclaim sidecar exists
 
 disk-tree reclaim PATH…   # What deleting PATHs would *actually* free: maps each file's physical
                           # extents (`fcntl(F_LOG2PHYS_EXT)`) and subtracts blocks the surviving

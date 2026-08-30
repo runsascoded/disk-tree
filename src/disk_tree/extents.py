@@ -284,3 +284,136 @@ def measure_overcount(root: str, seen_inodes: set[int] | None = None) -> Overcou
         oc.apparent += alloc
         oc.exclusive += priv
     return oc
+
+
+# --- Exact per-subtree reclaim via extent → LCA attribution ------------------
+#
+# `alloc_and_private` answers "delete this file, keep everything else". The
+# question users actually ask — "how much would `rm -rf D` free, for a directory
+# D?" — is context-dependent: a block cloned only between two files *inside* D is
+# freed by removing D, though it is not private to either file. Spec:
+# specs/reflink-aware-sizing.md.
+#
+# Model: attribute each physical extent to the lowest common ancestor directory
+# of every file that references it; then reclaim(D) = Σ extents whose LCA is at
+# or below D. Because each extent's bytes live at its LCA, the value rolls up the
+# tree exactly like `size` does.
+
+from collections import defaultdict as _defaultdict
+
+
+def _lca(a: tuple[str, ...], b: tuple[str, ...]) -> tuple[str, ...]:
+    out = []
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        out.append(x)
+    return tuple(out)
+
+
+def reclaimable_by_dir(root: str) -> tuple[dict[str, int], int]:
+    """Map `root`'s files and return (reclaimable, n_errors).
+
+    `reclaimable[relpath]` is the rolled-up bytes that `rm -rf <relpath>` frees:
+    physical blocks referenced only by files at or below it. Paths are relative
+    to `root` in disk-tree's scheme (root itself is '.'). Rolls up, so
+    `reclaimable['.']` is the whole tree's physical footprint.
+
+    Exactness depends on coverage: only referencers *under `root`* are seen, so a
+    block cloned from outside (e.g. `~/.cache/uv` when `root` is a single
+    project) looks root-owned and is counted — an over-count. The result is exact
+    when `root` contains every sharing partner (a home/full scan including the
+    caches); for a narrow subtree it is an upper bound.
+    """
+    if not SUPPORTED:
+        raise NotImplementedError(f'extent mapping is Darwin-only (got {sys.platform})')
+
+    # inode → (its extents, LCA of every dir that links it). Extents are per
+    # inode (hardlinks share them); folding the inode's own paths first makes
+    # hardlinks correct before clones fold across inodes below.
+    inode_dirs: dict[int, tuple[str, ...]] = {}
+    inode_first: dict[int, str] = {}
+    inode_blocks: dict[int, int] = {}
+    n_errors = 0
+    for p in _walk_files(root):
+        try:
+            st = os.lstat(p)
+        except OSError:
+            n_errors += 1
+            continue
+        rel = os.path.relpath(os.path.dirname(p), root)
+        parts = () if rel == '.' else tuple(rel.split(os.sep))
+        ino = st.st_ino
+        if ino in inode_dirs:
+            inode_dirs[ino] = _lca(inode_dirs[ino], parts)
+        else:
+            inode_dirs[ino] = parts
+            inode_first[ino] = p
+            inode_blocks[ino] = st.st_blocks * 512
+
+    extent_lca: dict[int, list] = {}   # phys → [lca_parts, length]
+    local: dict[tuple[str, ...], int] = _defaultdict(int)
+    for ino, parts in inode_dirs.items():
+        try:
+            ex = file_extents(inode_first[ino])
+        except OSError:
+            ex = []
+            n_errors += 1
+        if not ex:
+            # No mappable extents (compressed/empty): bytes are wholly owned by
+            # this inode, attributed to the LCA of its own links.
+            local[parts] += inode_blocks[ino]
+            continue
+        for phys, length in ex:
+            if phys in extent_lca:
+                extent_lca[phys][0] = _lca(extent_lca[phys][0], parts)
+            else:
+                extent_lca[phys] = [parts, length]
+
+    for parts, length in extent_lca.values():
+        local[tuple(parts)] += length
+
+    # Roll each dir's local total up through its ancestors (inclusive of root ()).
+    recl: dict[tuple[str, ...], int] = _defaultdict(int)
+    for parts, val in local.items():
+        for i in range(len(parts) + 1):
+            recl[parts[:i]] += val
+
+    return ({(os.sep.join(p) if p else '.'): v for p, v in recl.items()}, n_errors)
+
+
+# --- Reclaim sidecar: <blob-stem>.reclaim.parquet ---------------------------
+#
+# A second parquet next to a scan's blob, holding one row per directory:
+#   path         str    directory, in the scan's relative scheme ('.' = root)
+#   reclaimable  int64  bytes `rm -rf path` frees (extent-LCA rollup)
+# Written only by `index -x` (needs the live filesystem). Stale if older than
+# its blob, which `/api/delete` rewrites in place.
+
+RECLAIM_SUFFIX = '.reclaim.parquet'
+
+
+def reclaim_sidecar_path(blob_path: str) -> str:
+    from os.path import splitext
+    stem, ext = splitext(blob_path)
+    return (stem if ext == '.parquet' else blob_path) + RECLAIM_SUFFIX
+
+
+def write_reclaim_sidecar(blob_path: str, reclaimable: dict[str, int]) -> str:
+    import pandas as pd
+    out = reclaim_sidecar_path(blob_path)
+    df = pd.DataFrame(
+        sorted(reclaimable.items()), columns=['path', 'reclaimable'],
+    ).astype({'reclaimable': 'int64'})
+    df.to_parquet(out, index=False)
+    return out
+
+
+def read_reclaim_sidecar(blob_path: str) -> dict[str, int] | None:
+    """Fresh reclaim map for `blob_path`, or None if absent/stale."""
+    import pandas as pd
+    out = reclaim_sidecar_path(blob_path)
+    if not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(blob_path):
+        return None
+    df = pd.read_parquet(out)
+    return dict(zip(df['path'], df['reclaimable'].astype(int)))

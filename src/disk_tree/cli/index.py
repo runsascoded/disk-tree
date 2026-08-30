@@ -18,6 +18,7 @@ from utz import err, iec
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendants) per path')
 @option('-M', '--measure-memory', is_flag=True)
 @option('-s', '--sudo', is_flag=True, help='Run `find` as sudo')
+@option('-x', '--extents', is_flag=True, help='Also map physical extents → per-dir reclaimable bytes (APFS clones/hardlinks; writes a .reclaim sidecar). macOS, local scans only; exact when the scan root contains the sharing sources (home/full scan)')
 @argument('url', required=False)
 def index(
     no_cache_read: bool,
@@ -26,6 +27,7 @@ def index(
     mean_mtime: bool,
     measure_memory: bool,
     sudo: bool,
+    extents: bool,
     url: str | None,
 ):
     """Index a directory, persisting data to a SQLite DB."""
@@ -90,3 +92,36 @@ def index(
             if len(error_paths) > 10:
                 print(f"  ... and {len(error_paths) - 10} more")
         print(f"\nTip: Run with --sudo for full access: disk-tree index --sudo {url}")
+
+    if extents:
+        _build_reclaim_sidecar(url, blob_path)
+
+
+def _build_reclaim_sidecar(url: str, blob_path: str):
+    """Map physical extents of the just-scanned tree → per-dir reclaimable bytes.
+
+    Walks the live filesystem (not the blob), so it only applies to a local path
+    that still exists. The blob's paths are relative to `url`, and
+    `reclaimable_by_dir` returns the same scheme, so the sidecar joins directly.
+    """
+    import sys
+    from os.path import isdir
+    from disk_tree.extents import SUPPORTED, reclaimable_by_dir, write_reclaim_sidecar
+
+    if not SUPPORTED:
+        err(f"--extents is macOS-only (got {sys.platform}); skipping")
+        return
+    if url.startswith(('s3://', 'gcs://', 'r2://', 'ssh://')) or not isdir(url):
+        err(f"--extents needs a local directory that still exists; skipping ({url})")
+        return
+    with time("extents"):
+        recl, n_err = reclaimable_by_dir(url)
+    out = write_reclaim_sidecar(blob_path, recl)
+    root = recl.get('.', 0)
+    err(f"extents: reclaim sidecar → {out} ({time['extents']:.1f}s"
+        + (f", {n_err} unreadable" if n_err else "") + ")")
+    from humanize import naturalsize as _ns
+    top = sorted(((k, v) for k, v in recl.items() if k != '.'), key=lambda kv: -kv[1])[:8]
+    print(f"Reclaimable (rm -rf frees): {_ns(root, binary=True, format='%.3g')} total")
+    for k, v in top:
+        print(f"  {_ns(v, binary=True, format='%.3g'):>9}  {k}")

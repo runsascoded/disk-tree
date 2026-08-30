@@ -78,8 +78,14 @@ def scans_move(src_dir: str | None, no_keep_latest: bool, dry_run: bool, dest: s
                 continue
             if chunks:
                 queue.extend(basename(c) for c in chunks.values())
-        err(f'keeping {len(keep)} blobs in place ({len(latest)} newest scans + their chunks)')
+        # A kept blob's sidecars (vocab/reclaim) must stay beside it, not be
+        # left behind on the source volume.
+        keep |= {f'{n[:-len(".parquet")]}{sfx}'
+                 for n in list(keep) for sfx in ('.vocab.parquet', '.reclaim.parquet')}
+        err(f'keeping {len(keep)} files in place ({len(latest)} newest scans + chunks + sidecars)')
 
+    # Sidecars are not scans, so they are never counted as "blobs", but they move
+    # with (or stay with) the blob they annotate — handled by the same keep set.
     moves = [
         (join(d, name), join(dest, name))
         for d in sources

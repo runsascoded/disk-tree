@@ -110,3 +110,38 @@ def test_no_scan_covering(scanned: Path):
     r = _run_dt(scanned, 'du', 'gcs://nope')
     assert r.returncode != 0
     assert r.stderr.rstrip().split('\n')[-1] == "no scan covering 'gcs://nope'"
+
+
+def test_du_shows_reclaimable_when_sidecar_present(scanned: Path, monkeypatch):
+    """When a .reclaim sidecar sits beside the blob, du joins it as a `frees`
+    column keyed by scan-relative path."""
+    import subprocess
+    from disk_tree.extents import write_reclaim_sidecar
+
+    env = {**os.environ, 'DISK_TREE_ROOT': str(scanned)}
+    r = subprocess.run(
+        [sys.executable, '-m', 'disk_tree.cli.main', 'scans', 'list'],
+        env=env, capture_output=True, text=True, check=True,
+    )
+    scan = [json.loads(l) for l in r.stdout.splitlines() if l.strip().startswith('{')][0]
+    blob = resolve_blob_env(env, scan['blob'])
+    write_reclaim_sidecar(blob, {'.': 600, 'sub': 250})
+
+    out = subprocess.run(
+        [sys.executable, '-m', 'disk_tree.cli.main', 'du', 'gcs://b1', '-j'],
+        env=env, capture_output=True, text=True, check=True,
+    )
+    d = json.loads(out.stdout)
+    assert d['reclaimable'] == 600
+    assert [(row['path'], row['reclaimable']) for row in d['rows'] if row['kind'] == 'dir'] == [('sub', 250)]
+
+
+def resolve_blob_env(env, blob):
+    """Resolve a blob basename to its path under the test's DISK_TREE_ROOT."""
+    import subprocess, sys
+    code = (
+        "from disk_tree.diff import resolve_blob;"
+        f"print(resolve_blob({blob!r}))"
+    )
+    return subprocess.run([sys.executable, '-c', code], env=env,
+                          capture_output=True, text=True, check=True).stdout.strip()

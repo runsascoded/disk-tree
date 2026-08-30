@@ -110,4 +110,9 @@ pass; bulk accelerates the *sizing* scan, not the extent index.
 ## Status
 
 - Shipped: `reclaim`, `overcount`, `extents.py` primitives, this measurement set.
-- Next: `index -x` + `reclaimable` column (this spec's core), then the bulk walker.
+- Shipped: **`index -x`** → `reclaimable_by_dir` (extent→LCA rollup) written as a
+  `<blob>.reclaim.parquet` sidecar; `du` joins it as a `frees` column; `scans
+  move` keeps sidecars beside their blobs. Coverage caveat is enforced in docs +
+  tests: exact only when the scan root contains the sharing partners, else an
+  upper bound (a narrow subtree can't see clones from `~/.cache/uv`).
+- Next: surface `frees` in the server/UI treemap; the `getattrlistbulk` walker.
