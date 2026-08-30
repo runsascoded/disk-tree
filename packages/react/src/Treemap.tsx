@@ -112,7 +112,7 @@ export interface TreemapProps<T> {
    */
   collapseChains?: boolean
   /** Optional extra content rendered inside the cell after the label. */
-  renderCellExtra?: (n: T, path: T[], dims: CellDims) => ReactNode
+  renderCellExtra?: (n: T, path: T[], ctx: CellCtx) => ReactNode
   /** Tooltip body; return null to suppress the tooltip. */
   renderTooltip?: (n: T, path: T[]) => ReactNode
   /** Extra row above the map (e.g. rollup / totals). */
@@ -129,11 +129,12 @@ export interface TreemapProps<T> {
   /**
    * Right side of the cell size line — e.g. "$1.2/mo". Rendered inline with
    * the size when the cell is big enough to fit a subtitle; `dims` is the
-   * cell's box so the consumer can size its content to the room left after
-   * the label (the size span never shrinks, so an over-long subtitle would
-   * crush the name).
+   * cell's box (plus `hasKids`/`fade`) so the consumer can size its content
+   * to the room left after the label (the size span never shrinks, so an
+   * over-long subtitle would crush the name) and tell branches from leaves —
+   * `n`'s own children may be lazily loaded rather than in hand.
    */
-  renderCellSubtitle?: (n: T, path: T[], dims: CellDims) => ReactNode
+  renderCellSubtitle?: (n: T, path: T[], ctx: CellCtx) => ReactNode
 
   /**
    * Override the click handler. Return `true` to skip the built-in
@@ -846,7 +847,7 @@ export function Treemap<T>({
               <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none' }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
-                  <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h })}</span>
+                  <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 })}</span>
                 )}
               </span>
             )}
@@ -871,11 +872,11 @@ export function Treemap<T>({
           >
             {formatSize(kidSize)}
             {!folded && renderCellSubtitle && (
-              <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h })}</span>
+              <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 })}</span>
             )}
           </div>
         )}
-        {!folded && renderCellExtra && renderCellExtra(kid as T, kidPath, { w: r.w, h: r.h })}
+        {!folded && renderCellExtra && renderCellExtra(kid as T, kidPath, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 })}
         {kids.length > 0 && kidChildren && (
           <div
             className="dt-treemap-inner"
