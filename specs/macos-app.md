@@ -1,6 +1,10 @@
 # Spec: disk-tree as a macOS app
 
-Status: **draft / not started** (2026-08-30). Companion to the scheduled-scan work; see also the TCC discussion in memory `package-macos-app-for-tcc-identity`.
+Status: **v1 building & headless-verified** (2026-08-30) — `disk_tree.desktop` + a PyInstaller bundle (`packaging/macos/`). Remaining v1: a self-signed cert for a stable FDA grant, and a manual window-render check. Companion to the scheduled-scan work; see also memory `package-macos-app-for-tcc-identity`.
+
+## Freezer note (settled)
+
+py2app was the first pick but is a **dead end with this toolchain**: it requires a *framework* Python, and the uv-managed CPython 3.13 is a standalone (python-build-standalone) build — the frozen app fails with "A Python runtime could not be located" and py2app also chokes on 3.13's statically-linked `zlib` (`module 'zlib' has no attribute '__file__'`). **PyInstaller** handles the standalone Python and the native wheels; it's what shipped. Also: use **waitress**, not Flask's dev server, inside the bundle — the dev server prints its banner but never binds under PyInstaller.
 
 ## Why
 
@@ -21,12 +25,12 @@ So the app is really "a native window around the existing Flask+React, plus the 
 
 ## Options
 
-### A. pywebview + py2app  — recommended for v1
-- `pywebview` opens a native WKWebView window pointed at the embedded Flask server (spin it up on a random localhost port in-process, then `webview.create_window(url=…)`).
-- `py2app` bundles Python + deps into `disk-tree.app` with a real `Info.plist` (`CFBundleName=disk-tree`, `CFBundleIdentifier=com.runsascoded.disk-tree`). The bundle's main executable *is* the app, so TCC attributes to "disk-tree".
-- **No Xcode** — `py2app` is pip-installable; signing uses `codesign` from the **Command Line Tools**.
-- Pros: smallest delta, reuses Flask+React as-is, pure-Python toolchain.
-- Cons: py2app with native wheels (pyarrow, duckdb, pandas) needs care (dylib collection, `packages=`/`includes=` tuning); first build is fiddly.
+### A. pywebview + PyInstaller  — **shipped for v1** (was: py2app; see freezer note)
+- `pywebview` opens a native WKWebView window pointed at the embedded server (a free loopback port, served by **waitress** in a daemon thread, then `webview.create_window(url=…)`). Implemented in `disk_tree.desktop`.
+- `PyInstaller` (`packaging/macos/disk-tree.spec`) bundles Python + deps into `disk-tree.app` with a real `Info.plist` (`CFBundleName=disk-tree`, `CFBundleIdentifier=com.runsascoded.disk-tree`). The bundle's main executable *is* the app, so TCC attributes to "disk-tree".
+- **No Xcode** — PyInstaller is pip-installable; signing uses `codesign` from the **Command Line Tools**.
+- Pros: smallest delta, reuses Flask+React as-is, works with the uv standalone Python (py2app does not).
+- Cons: ~330 MB bundle; native wheels need `collect_all` in the spec.
 
 ### B. Electron
 - Electron (Chromium + Node) hosts the React UI natively; the Python backend runs as a **sidecar subprocess** (frozen with PyInstaller) — two packaging systems.
