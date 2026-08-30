@@ -1,7 +1,7 @@
 # Packaging disk-tree as `disk-tree.app` (macOS)
 
 v1 wraps the existing Flask server + built React UI in a native WKWebView window
-(`disk_tree.desktop`) and freezes it with **py2app**. This gives scans a stable
+(`disk_tree.desktop`) and freezes it with **PyInstaller** (py2app needs a *framework* Python; the uv-managed standalone CPython 3.13 is one PyInstaller handles and py2app does not). This gives scans a stable
 TCC identity — prompts and Full Disk Access show **"disk-tree"**, and one FDA
 grant covers the app's child `gfind`. See `specs/macos-app.md` for the full
 design (and the Tauri v2 plan).
@@ -48,7 +48,7 @@ removes this dependency.
 
 - `disk_tree/static/` is a **build artifact** (copied from `ui/dist`); it's
   git-ignored, not committed.
-- py2app + native wheels (pyarrow/duckdb/pandas) can need `packages`/`includes`
-  tuning in `setup.py` if the first build reports missing modules or dylibs.
+- PyInstaller + native wheels (pyarrow/duckdb) can need `collect_all`
+  tuning in `disk-tree.spec` if the first build reports missing modules.
 - For *distribution* to other machines (not just this one), you'd add hardened
   runtime + Developer ID + notarization (`notarytool`) — also CLT-only.

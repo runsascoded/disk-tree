@@ -83,12 +83,17 @@ init_db()
 
 
 # Static file serving for bundled UI
-# Check multiple locations: packaged static/, dev ui/dist/
+# Check multiple locations: PyInstaller bundle, packaged static/, dev ui/dist/
+import sys as _sys
 _this_dir = dirname(abspath(__file__))
 _static_candidates = [
     join(_this_dir, 'static'),           # Packaged: disk_tree/static/
     join(_this_dir, '..', '..', 'ui', 'dist'),  # Dev: ../../ui/dist from src/disk_tree/
 ]
+# Frozen (PyInstaller): a frozen `__file__` isn't a real dir; data is staged
+# under sys._MEIPASS. We add-data the UI as `disk_tree/static` (see the spec).
+if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
+    _static_candidates.insert(0, join(_sys._MEIPASS, 'disk_tree', 'static'))
 STATIC_DIR = None
 for candidate in _static_candidates:
     if exists(join(candidate, 'index.html')):

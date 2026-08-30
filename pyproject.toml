@@ -26,9 +26,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Native macOS window (pywebview → pyobjc WebKit/Cocoa). See specs/macos-app.md.
+# Native macOS window (pywebview → pyobjc WebKit/Cocoa) + a real WSGI server
+# (Flask's dev server doesn't bind under PyInstaller). See specs/macos-app.md.
 app = [
     "pywebview",
+    "waitress",
 ]
 dev = [
     "mypy",

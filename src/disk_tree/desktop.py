@@ -14,6 +14,7 @@ and DB, so a scan started here shows up everywhere.
 
 from __future__ import annotations
 
+import os
 import socket
 import threading
 import time
@@ -51,12 +52,25 @@ def main() -> None:
     port = _free_loopback_port()
 
     def serve() -> None:
-        # threaded so the window's concurrent requests (SSE + data) don't
-        # deadlock a single-threaded dev server; no reloader inside a thread.
-        app.run(host='127.0.0.1', port=port, threaded=True, use_reloader=False, debug=False)
+        # A real WSGI server, not Flask's dev server: the latter prints its
+        # banner but never binds under PyInstaller. waitress is pure-Python,
+        # threaded, and freezes cleanly. Threads cover concurrent data requests
+        # plus the long-lived progress SSE stream.
+        from waitress import serve as _serve
+        _serve(app, host='127.0.0.1', port=port, threads=8)
 
     threading.Thread(target=serve, daemon=True, name='disk-tree-flask').start()
     _wait_until_up(port)
+
+    # Headless self-check (CI / frozen-bundle verification): confirm the
+    # embedded server is up and serving the API, then exit without a window.
+    if os.environ.get('DISK_TREE_APP_SMOKE'):
+        import json
+        import urllib.request
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/scans', timeout=10) as r:
+            n = len(json.load(r))
+        print(f'SMOKE OK: server up on {port}, /api/scans returned {n} scans')
+        return
 
     webview.create_window(
         'disk-tree',

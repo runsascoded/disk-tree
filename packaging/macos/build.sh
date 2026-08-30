@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# Build (and self-sign) disk-tree.app. See packaging/macos/README.md.
+# Build (and self-sign) disk-tree.app with PyInstaller. See README.md.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 cd "$ROOT"
 
-# 1. Build the UI and stage it where the package looks first (disk_tree/static).
+# 1. Build the UI and stage it where the spec bundles it from.
 ( cd ui && pnpm install && pnpm build )
 rm -rf src/disk_tree/static
 cp -R ui/dist src/disk_tree/static
 
-# 2. Build tooling (py2app is a build-time tool, not a runtime dep).
-uv pip install py2app
+# 2. Build tooling (PyInstaller is a build-time tool, not a runtime dep).
+uv pip install pyinstaller
 
-# 3. Clean + freeze the bundle.
+# 3. Freeze → dist/disk-tree.app
 rm -rf build dist
-python packaging/macos/setup.py py2app
+pyinstaller --clean --noconfirm \
+    --distpath "$ROOT/dist" --workpath "$ROOT/build" \
+    packaging/macos/disk-tree.spec
 
 # 4. Sign. A *self-signed* identity (not ad-hoc) keeps the Full Disk Access
 #    grant stable across rebuilds — ad-hoc's cdhash changes every build.
