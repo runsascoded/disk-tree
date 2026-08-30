@@ -689,6 +689,7 @@ function Treemap({
   /** When set, render the re-aggregated filter slice instead of the scan rows. */
   filterResult?: FilterResult
 }) {
+  const navigate = useNavigate()
   const [tiling, setTiling] = useTiling()
   const tree = useMemo(
     () => ({
@@ -761,6 +762,18 @@ function Treemap({
         getChildren={n => n.children}
         hasChildren={n => !!n.expandable && !n.isPlaceholder}
         loadChildren={loadChildren}
+        // Option A: a cell click re-roots the whole page (URL + breadcrumb +
+        // table + treemap) to that node, SPA-style — same navigation the
+        // staleness/voronoi views already do — rather than drilling the map
+        // in place and diverging from the table above. `uri` is the absolute
+        // URI, so this is correct through chunk/collapse boundaries; `true`
+        // suppresses the widget's built-in in-place drill.
+        onCellClick={n => {
+          if (!n.uri || n.isPlaceholder) return
+          navigate(uriToPath(n.uri))
+          return true
+        }}
+        cellHref={n => (n.uri && !n.isPlaceholder ? uriToPath(n.uri) : undefined)}
         renderLoading={n => `Loading ${n.label}…`}
         getLabel={n => n.label}
         formatSize={formatSize}
