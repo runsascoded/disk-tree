@@ -112,3 +112,62 @@ def test_cli_reports_apparent_shared_and_frees(tmp_path: Path):
     assert [(row['path'], row['shared'], row['frees'], row['n_files']) for row in d['rows']] == [
         (str(proj), MIB, d['apparent'] - MIB, 2),
     ]
+
+
+def test_alloc_and_private_on_a_plain_file(tmp_path: Path):
+    f = _write(tmp_path / 'a.bin')
+    alloc, priv = __import__('disk_tree.extents', fromlist=['alloc_and_private']).alloc_and_private(str(f))
+    assert alloc == f.stat().st_blocks * 512
+    assert priv == alloc  # nothing shared → fully private
+
+
+def test_clone_has_zero_private_where_it_overlaps(tmp_path: Path):
+    from disk_tree.extents import alloc_and_private
+    a = _write(tmp_path / 'a.bin')
+    b = _clone(a, tmp_path / 'b.bin')
+    aa, pa = alloc_and_private(str(a))
+    ab, pb = alloc_and_private(str(b))
+    # Both report the full allocation but neither owns the shared blocks
+    # exclusively, so private drops to 0 for both.
+    assert aa == ab == a.stat().st_blocks * 512
+    assert pa == 0 and pb == 0
+
+
+def test_measure_overcount_splits_apparent_and_exclusive(tmp_path: Path):
+    from disk_tree.extents import measure_overcount
+    proj = tmp_path / 'proj'
+    src = _write(tmp_path / 'src.bin')          # outside the subtree
+    _clone(src, proj / 'cloned.bin')            # shared with src → not private
+    owned = _write(proj / 'owned.bin')          # unique to the subtree
+
+    oc = measure_overcount(str(proj))
+    assert oc.n_files == 2
+    assert oc.apparent == src.stat().st_blocks * 512 + owned.stat().st_blocks * 512
+    assert oc.exclusive == owned.stat().st_size
+    assert oc.shared == src.stat().st_size
+
+
+def test_measure_overcount_counts_hardlinks_once(tmp_path: Path):
+    from disk_tree.extents import measure_overcount
+    proj = tmp_path / 'proj'
+    a = _write(proj / 'a.bin')
+    os.link(a, proj / 'b.bin')
+    oc = measure_overcount(str(proj))
+    assert oc.n_files == 1
+    assert oc.apparent == a.stat().st_blocks * 512
+
+
+def test_overcount_cli_reports_shared(tmp_path: Path):
+    proj = tmp_path / 'proj'
+    (proj / 'sub').mkdir(parents=True)
+    src = _write(tmp_path / 'src.bin')
+    _clone(src, proj / 'sub' / 'cloned.bin')
+    _write(proj / 'sub' / 'owned.bin')
+
+    r = _run_dt('overcount', '-j', str(proj))
+    assert r.returncode == 0, r.stderr
+    d = json.loads(r.stdout)
+    assert d['uri'] == str(proj)
+    assert d['shared'] == MIB          # the cloned MiB
+    assert d['exclusive'] == MIB       # the owned MiB
+    assert [(row['path'], row['shared']) for row in d['rows']] == [('sub', MIB)]

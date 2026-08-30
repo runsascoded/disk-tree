@@ -113,6 +113,12 @@ disk-tree repos ROOT      # Delete-safety audit of git repos under ROOT (cleanup
                           # DELETABLE also requires zero untracked. `-r` filters to recoverable,
                           # `-m` sets a size floor (default 200M), `-j` for JSON
 
+disk-tree overcount URI   # How much URI's apparent size overstates physical bytes (APFS clones +
+                          # hardlinks). Per top-level child: apparent vs `exclusive`
+                          # (ATTR_CMNEXT_PRIVATESIZE — bytes only this subtree holds, i.e. what a
+                          # delete frees) vs `shared`. No open() per file; ~32K files/s. macOS-only.
+                          # Measured 2026-08-29: `oa/marin` 18.7 GiB apparent → 3.92 GiB exclusive
+
 disk-tree fetch [BUCKET…] # Bulk-list configured buckets → dated raw-listing shards
 disk-tree pull [BUCKET…]  # fetch + import as dated scans
 disk-tree sync            # pull all configured buckets (cron entrypoint); builds each bucket's
@@ -240,7 +246,7 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet).
 - `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning / SQL range predicates (rows sorted `(depth, path)`); wired into scan/compare/histogram/path-stats reads — see `specs/diff-and-search.md`
 - Denormalized stats avoid parquet reads for scan list and fresher child patching
 
-**Sizes are per-path, not per-extent.** `gfind -printf '%b'` reports blocks allocated to a *path*; APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount. So a subtree's reported size is an upper bound on what deleting it frees. Measured 2026-08-29: deleting 35 dormant `.venv` dirs totalling 16.9 GiB freed 9 GiB — uv's default macOS link mode is `clone`, so the remainder stayed live in `~/.cache/uv`. Clones are invisible to `stat` (distinct inodes, `nlink == 1`), so inode/link-count bookkeeping catches hardlinks only — and hardlinks are nearly irrelevant here: a census of `$HOME` found `nlink > 1` over-counting just **4.3 GiB of 385.9 GiB (1.1%)**, which is why `%i`/`%n` are *not* indexed. `disk-tree reclaim` answers the question properly, on demand, by mapping physical extents.
+**Sizes are per-path, not per-extent.** `gfind -printf '%b'` reports blocks allocated to a *path*; APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount. So a subtree's reported size is an upper bound on what deleting it frees. Measured 2026-08-29: deleting 35 dormant `.venv` dirs totalling 16.9 GiB freed 9 GiB — uv's default macOS link mode is `clone`, so the remainder stayed live in `~/.cache/uv`. Clones are invisible to `stat` (distinct inodes, `nlink == 1`), so inode/link-count bookkeeping catches hardlinks only — and hardlinks are nearly irrelevant here: a census of `$HOME` found `nlink > 1` over-counting just **4.3 GiB of 385.9 GiB (1.1%)**, which is why `%i`/`%n` are *not* indexed. `disk-tree reclaim` (extent intersection, for a custom keep-set) and `disk-tree overcount` (`ATTR_CMNEXT_PRIVATESIZE`, no open per file, for apparent-vs-exclusive) answer the question properly, on demand. The whole-*volume* overcount is free without either — `df` counts shared blocks once, so `apparent_total − df_used` is the number, but only for a scan that covers the entire volume (a subtree's apparent can't be compared to the volume's `df`); for a subtree, `overcount`'s `Σexclusive` is the physical footprint.
 
 ## TODOs / Known Issues
 
