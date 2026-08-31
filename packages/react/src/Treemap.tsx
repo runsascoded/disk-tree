@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { contrastEdge, DEFAULT_PALETTE } from './colors'
+import { DustHatch } from './DustHatch'
 import { foldSmall, foldThin, squarify } from './squarify'
 import { useHoverPin } from './useHoverPin'
 
@@ -236,6 +237,16 @@ export interface TreemapProps<T> {
    * keep the flat neutral gutter for every cell.
    */
   edgeContrast?: boolean
+  /**
+   * Render the default synthetic fold tile (the `(+n)` "(other)" stand-in) as
+   * a canvas cross-hatch whose rules tighten toward the lower-right and whose
+   * density scales with the folded count — reading as "dust" distinct from a
+   * real cell — instead of a flat grey block. Hovering the tile maps the
+   * cursor to the specific folded child under it (a squarify of the folded
+   * items), so the tail stays interrogable without one DOM node per item.
+   * Only applies to the built-in fold (no `mergeSmall`). Default: true.
+   */
+  dustTexture?: boolean
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -384,6 +395,7 @@ export function Treemap<T>({
   tiling = 'gaps',
   borderWidth = defaultBorderWidth,
   edgeContrast = true,
+  dustTexture = true,
 }: TreemapProps<T>) {
   const [pathState, setPathState] = useState<T[]>(initialPath?.[0] === root ? initialPath : [root])
   const controlled = pathProp !== undefined
@@ -700,7 +712,11 @@ export function Treemap<T>({
     if (explicit) {
       style = explicit
     } else if (folded) {
-      style = { bg: 'var(--dt-treemap-folded, #4a4a52)', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
+      // Dust texture wants a faint ground so the hatch reads on top; the flat
+      // fallback keeps the old solid block.
+      style = dustTexture
+        ? { bg: 'var(--dt-treemap-folded-ground, rgba(120, 120, 135, 0.12))', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
+        : { bg: 'var(--dt-treemap-folded, #4a4a52)', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
     } else {
       const top = kidPath[1] // path[0] = root; [1] is the top-level bucket-of-the-current-drill
       const slot = top ? topLevelSlot.get(getLabel(top)) : undefined
@@ -722,10 +738,37 @@ export function Treemap<T>({
       ? `__folded_${depth}_${r.x}_${r.y}`
       : idFor(kid as T, kidPath)
 
+    // Position→child hit map for the dust tile: a squarify of the folded items
+    // over the cell box, so hovering/clicking the hatch resolves to a specific
+    // folded item. Guarded by item count so a very long tail doesn't re-lay on
+    // every render; larger tails stay drawn but non-interrogable.
+    const foldedNode = folded ? (kid as FoldedNode<T>) : null
+    const dustHits = foldedNode && dustTexture && foldedNode.children.length > 1
+      && Math.min(r.w, r.h) >= 10 && foldedNode.children.length <= 4000
+      ? squarify<T>(foldedNode.children, 0, 0, boxW, boxH, getSize)
+      : null
+    /** Which folded item sits under a pointer event over the dust tile. */
+    const dustHitAt = (e: React.MouseEvent): { it: T; path: T[]; key: string } | null => {
+      if (!dustHits) return null
+      const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      const lx = e.clientX - box.left
+      const ly = e.clientY - box.top
+      const hit = dustHits.find(rc => lx >= rc.x && lx < rc.x + rc.w && ly >= rc.y && ly < rc.y + rc.h)
+      if (!hit) return null
+      const p = [...kidPath, hit.it]
+      return { it: hit.it, path: p, key: idFor(hit.it, p) }
+    }
+
     const showTip = (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (folded) return
       cancelTipClear()
+      if (folded) {
+        const hit = dustHitAt(e)
+        if (!hit) return
+        pin.hover(hit.key)
+        setTip(prev => (prev?.key === hit.key ? prev : { x: e.clientX, y: e.clientY, key: hit.key, node: hit.it, path: hit.path }))
+        return
+      }
       pin.hover(cellKey)
       // Anchor to the cell (frozen once per cell) instead of chasing the cursor:
       // a mouse-following tip can't be hovered into to click its contents.
@@ -738,7 +781,15 @@ export function Treemap<T>({
     const href = cellHref && !folded && kids.length === 0 ? cellHref(kid as T, kidPath) : undefined
     const onClick = (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (folded) return
+      if (folded) {
+        const hit = dustHitAt(e)
+        if (!hit) return
+        pin.togglePin(hit.key)
+        setPinnedTip(p =>
+          p?.key === hit.key ? null : { x: e.clientX, y: e.clientY, key: hit.key, node: hit.it, path: hit.path },
+        )
+        return
+      }
       if (href) {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return
         e.preventDefault()
@@ -821,10 +872,22 @@ export function Treemap<T>({
             inset: shared ? edge : 0,
             background: style.bg,
             ...(style.hatch && { backgroundImage: style.hatch }),
+            // Dashed frame marks the dust tile as not-a-real-cell.
+            ...(foldedNode && dustTexture && Math.min(r.w, r.h) >= 8 && {
+              border: '1px dashed var(--dt-treemap-folded-edge, rgba(150, 150, 165, 0.55))',
+              boxSizing: 'border-box' as const,
+            }),
             opacity: fadeAt(depth) * (style.opacity ?? 1),
             pointerEvents: 'none',
           }}
         >
+        {/* Dust hatch: the folded "(other)" tail, drawn as rules that tighten
+            toward the lower-right, density scaled by the folded count — a
+            texture distinct from real cells. Hit-detection (above) maps a
+            hover back to a specific folded item. */}
+        {foldedNode && dustTexture && Math.min(r.w, r.h) >= 6 && (
+          <DustHatch w={boxW} h={boxH} count={foldedNode.count} />
+        )}
         {/* Makeup stripes: a leaf/fold cell with a mixed composition renders
             proportional inset slices (longer axis) instead of one dominant
             blob. The `bg` frame showing through the inset + the single outer
