@@ -108,6 +108,15 @@ disk-tree du URI          # Top-N heaviest children per level, from the freshest
                           # linking path — see the caveat under Performance.
                           # Shows a `frees` column (true reclaim) when a `-x` reclaim sidecar exists
 
+disk-tree snapshots DEST  # Publish scans as a static snapshot library under DEST (local dir) for
+                          # file-tree's `snapshotTreeSource` (spec `file-tree-integration.md` B1):
+                          # `snapshots.json` index + one self-contained `snapshots/<id>/tree.parquet`
+                          # per scan (chunks materialized, rows sorted `(depth,path)` in 64K groups,
+                          # projected to the public columns). Default: newest scan per path (`-a` all,
+                          # `-s ID` specific, repeatable); `-d` copies existing diff-index blobs
+                          # between consecutive snapshots; `-n` dry-run. Sync DEST to a bucket after.
+                          # Published `path` is relative to the scan root (root=`.`); `uri` is absolute
+
 disk-tree reclaim PATH…   # What deleting PATHs would *actually* free: maps each file's physical
                           # extents (`fcntl(F_LOG2PHYS_EXT)`) and subtracts blocks the surviving
                           # partner roots still reference (`-p` adds one, `-P` drops the
