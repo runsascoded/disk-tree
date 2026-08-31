@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { DEFAULT_PALETTE } from './colors'
-import { foldSmall, squarify } from './squarify'
+import { foldSmall, foldThin, squarify } from './squarify'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -158,6 +158,13 @@ export interface TreemapProps<T> {
    * "…" tile. Pass `null` to disable folding.
    */
   minCellArea?: number | null
+  /**
+   * Fold cells whose *short side* renders below `minCellSide` px into one
+   * synthetic tile — catches the tall, skinny slivers a dominant sibling
+   * squeezes out, which have enough area to escape `minCellArea` but are too
+   * narrow to hover or label. Pass `null` to disable. Default: 7.
+   */
+  minCellSide?: number | null
   /**
    * Build the folded stand-in as a *first-class* `T` (label, aggregated
    * size, and whatever the consumer's tooltip/colors need). When given, the
@@ -354,6 +361,7 @@ export function Treemap<T>({
   cellHref,
   onPathChange,
   minCellArea = 16,
+  minCellSide = 7,
   mergeSmall,
   fullscreen = true,
   chrome = true,
@@ -521,32 +529,36 @@ export function Treemap<T>({
     return new Map(kids.map((k, i) => [getLabel(k), DEFAULT_SLOTS[i % DEFAULT_SLOTS.length]]))
   }, [root, childrenOf, getLabel])
 
-  // Fold small items at any level: consumer `mergeSmall` builds a first-class
-  // T stand-in; the default builds a synthetic FoldedNode.
+  // Build a folded stand-in from a set of small/thin items: consumer
+  // `mergeSmall` builds a first-class T; the default builds a synthetic
+  // FoldedNode (flattening any nested folds so `.count` stays accurate).
+  const mergeItems = useCallback(
+    (small: (T | FoldedNode<T>)[]): T | FoldedNode<T> => {
+      if (mergeSmall) return mergeSmall(small as T[])
+      const flat: T[] = []
+      let sum = 0
+      for (const s of small) {
+        if (isFolded(s)) {
+          flat.push(...s.children)
+          sum += s.size
+        } else {
+          flat.push(s)
+          sum += getSize(s)
+        }
+      }
+      return { __folded: true, count: flat.length, size: sum, children: flat }
+    },
+    [getSize, mergeSmall],
+  )
+
+  // Fold small-area items at any level, before layout.
   const fold = useCallback(
     (raw: (T | FoldedNode<T>)[], w: number, h: number): (T | FoldedNode<T>)[] => {
       if (minCellArea == null) return raw
       const sz = (it: T | FoldedNode<T>) => (isFolded(it) ? it.size : getSize(it))
-      const merge = mergeSmall
-        ? (small: (T | FoldedNode<T>)[]) => mergeSmall(small as T[])
-        : (small: (T | FoldedNode<T>)[]): FoldedNode<T> => {
-            // Flatten any nested folds so `.count` is accurate.
-            const flat: T[] = []
-            let sum = 0
-            for (const s of small) {
-              if (isFolded(s)) {
-                flat.push(...s.children)
-                sum += s.size
-              } else {
-                flat.push(s)
-                sum += getSize(s)
-              }
-            }
-            return { __folded: true, count: flat.length, size: sum, children: flat }
-          }
-      return foldSmall<T | FoldedNode<T>>(raw, w, h, sz, merge, minCellArea)
+      return foldSmall<T | FoldedNode<T>>(raw, w, h, sz, mergeItems, minCellArea)
     },
-    [getSize, minCellArea, mergeSmall],
+    [getSize, minCellArea, mergeItems],
   )
 
   // Foldable children of the currently-viewed node.
@@ -556,13 +568,19 @@ export function Treemap<T>({
   )
 
   const rects = useMemo(
-    () =>
-      squarify<T | FoldedNode<T>>(
-        children,
-        0, 0, size.w, size.h,
-        n => (isFolded(n) ? n.size : getSize(n)),
-      ),
-    [children, size, getSize],
+    () => {
+      const sz = (n: T | FoldedNode<T>) => (isFolded(n) ? n.size : getSize(n))
+      const laid = squarify<T | FoldedNode<T>>(children, 0, 0, size.w, size.h, sz)
+      // Area folding can't see a cell's short side, so a dominant sibling still
+      // squeezes the rest into unhoverable slivers; fold those by geometry and
+      // re-lay once (the merged tile lands in the remainder as a single cell).
+      if (minCellSide != null) {
+        const refolded = foldThin<T | FoldedNode<T>>(laid, minCellSide, mergeItems)
+        if (refolded) return squarify<T | FoldedNode<T>>(refolded, 0, 0, size.w, size.h, sz)
+      }
+      return laid
+    },
+    [children, size, getSize, minCellSide, mergeItems],
   )
 
   // Background opacity at a given nesting depth. Applied per-cell to the
