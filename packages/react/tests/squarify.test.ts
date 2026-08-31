@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { foldSmall, foldThin, squarify } from '../src/squarify'
+import { foldSmall, foldThin, squarify, squarifyRemainder } from '../src/squarify'
 import type { Rect } from '../src/squarify'
 
 /** Sort rects by `it` for deterministic comparison. */
@@ -154,5 +154,39 @@ describe('foldThin', () => {
     // The many slivers collapse to at most one thin cell (the merged tile).
     expect(relaid.filter(r => Math.min(r.w, r.h) < 7).length).toBeLessThanOrEqual(1)
     expect(relaid.map(r => r.it.n).sort()).toEqual(['(+3)', 'big'])
+  })
+})
+
+describe('squarifyRemainder', () => {
+  it('gives a long tail a wider 2D band instead of slivers (area preserved)', () => {
+    // One dominant item + a cramped tail that plain squarify squeezes thin.
+    const items: N[] = [
+      { n: 'big', b: 9800 },
+      { n: 'a', b: 60 }, { n: 'b', b: 50 }, { n: 'c', b: 40 },
+      { n: 'd', b: 30 }, { n: 'e', b: 20 },
+    ]
+    const w = 800, h = 300
+    const plain = squarify<N>(items, 0, 0, w, h, sz)
+    const rem = squarifyRemainder<N>(items, 0, 0, w, h, sz, 28, 0.18)
+    const shortSide = (rects: Rect<N>[], n: string) => {
+      const r = rects.find(x => x.it.n === n)!
+      return Math.min(r.w, r.h)
+    }
+    // A tail cell renders wider under the remainder layout.
+    expect(shortSide(rem, 'a')).toBeGreaterThan(shortSide(plain, 'a'))
+    // It actually triggered (not a plain fallthrough).
+    expect(rem).not.toEqual(plain)
+    // Still tiles the whole container.
+    expect(rem.reduce((s, r) => s + r.w * r.h, 0)).toBeCloseTo(w * h, -1)
+    for (const r of rem) {
+      expect(r.x).toBeGreaterThanOrEqual(-1e-6)
+      expect(r.x + r.w).toBeLessThanOrEqual(w + 1e-6)
+    }
+  })
+
+  it('falls back to plain squarify when no tail is cramped', () => {
+    const items: N[] = [{ n: 'a', b: 50 }, { n: 'b', b: 50 }]
+    expect(squarifyRemainder<N>(items, 0, 0, 200, 200, sz, 7, 0.14))
+      .toEqual(squarify<N>(items, 0, 0, 200, 200, sz))
   })
 })

@@ -1,6 +1,6 @@
 export { Treemap } from './Treemap'
 export type { CellCtx, CellDims, CellStyle, Tiling, TilingCtx, TreemapProps } from './Treemap'
-export { foldSmall, squarify } from './squarify'
+export { foldSmall, foldThin, squarifyRemainder, squarify } from './squarify'
 export type { Rect } from './squarify'
 export { useHoverPin } from './useHoverPin'
 export type { HoverPin, HoverPinOpts } from './useHoverPin'
