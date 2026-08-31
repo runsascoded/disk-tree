@@ -223,7 +223,9 @@ describe('<Treemap>', () => {
     it('shared: exact rects, square corners, half of a depth-scaled stroke inset per cell', () => {
       const restore = withLayout()
       try {
-        const { container } = render(<Treemap root={tree} {...accessors} minCellArea={null} tiling="shared" />)
+        // edgeContrast off so the stroke stays the neutral gutter var — this
+        // test is about tiling geometry, not the adaptive-edge default (below).
+        const { container } = render(<Treemap root={tree} {...accessors} minCellArea={null} tiling="shared" edgeContrast={false} />)
         const [foo, bar] = rootCells(container)
         expect([foo, bar].map(el => [px(el.style.width), px(el.style.height), el.style.borderRadius])).toEqual([
           [266.67, 300, '0'],
@@ -250,6 +252,31 @@ describe('<Treemap>', () => {
           [263.67, 139.25, '1px', 'inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
           [263.67, 139.25, '1px', 'inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
         ])
+      } finally {
+        restore()
+      }
+    })
+
+    it('edgeContrast (default): each shared cell strokes to contrast with its own face', () => {
+      const restore = withLayout()
+      try {
+        const { container } = render(
+          <Treemap
+            root={tree}
+            {...accessors}
+            minCellArea={null}
+            tiling="shared"
+            colorForCell={n => (accessors.getLabel(n) === 'foo'
+              ? { bg: '#ffffff', ink: '#000' }
+              : { bg: '#000000', ink: '#fff' })}
+          />,
+        )
+        const [foo, bar] = rootCells(container)
+        // depth 0 → 1.5px half-stroke; white face gets a dark stroke, black a
+        // light one — grey-on-grey borders can't vanish because the color is
+        // derived from each cell's own face.
+        expect(foo.style.boxShadow).toBe('inset 0 0 0 1.5px rgba(0, 0, 0, 0.55)')
+        expect(bar.style.boxShadow).toBe('inset 0 0 0 1.5px rgba(255, 255, 255, 0.42)')
       } finally {
         restore()
       }

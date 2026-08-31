@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { DEFAULT_PALETTE } from './colors'
+import { contrastEdge, DEFAULT_PALETTE } from './colors'
 import { foldSmall, foldThin, squarify } from './squarify'
 import { useHoverPin } from './useHoverPin'
 
@@ -226,6 +226,16 @@ export interface TreemapProps<T> {
    * (<14px) are capped at 1px.
    */
   borderWidth?: (depth: number, ctx: CellDims) => number
+  /**
+   * In shared tiling, default each cell's half-stroke to a luminance-contrast
+   * color derived from its own face (dark stroke on light cells, light on
+   * dark) instead of the neutral `--dt-treemap-edge` gutter — so borders read
+   * on any palette, including grey-on-grey fields. Default: true. A per-cell
+   * `CellStyle.edge` from `colorForCell` still wins; a container cell whose
+   * face is an unparseable `var()` falls back to the gutter. Set `false` to
+   * keep the flat neutral gutter for every cell.
+   */
+  edgeContrast?: boolean
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -373,6 +383,7 @@ export function Treemap<T>({
   fadeFloor = 0.75,
   tiling = 'gaps',
   borderWidth = defaultBorderWidth,
+  edgeContrast = true,
 }: TreemapProps<T>) {
   const [pathState, setPathState] = useState<T[]>(initialPath?.[0] === root ? initialPath : [root])
   const controlled = pathProp !== undefined
@@ -645,6 +656,9 @@ export function Treemap<T>({
     // cell as an inset ring, the neighbor draws the other half.
     const bw = shared ? Math.min(borderWidth(depth, { w: r.w, h: r.h }), dust ? 1 : Infinity) : 0
     const edge = bw / 2
+    // Built-in adaptive half-stroke, computed once the cell's face is resolved
+    // (below). Filled after `style` is known.
+    let builtinEdge: string | null = null
     // Children canvas. Gaps mode pads 3px inside the cell; shared mode fills
     // to the cell's own half-stroke so the children's outer strokes meet it.
     // Their tiling mode is decided from a first layout's density, and the
@@ -696,6 +710,12 @@ export function Treemap<T>({
     }
     if (lens && !folded) {
       style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 }, style) ?? style
+    }
+    // Adaptive edge default: only in shared mode, only when the consumer didn't
+    // pin one, and only for a parseable face (container `var()` faces fall
+    // through to the neutral gutter, keeping their thin-gutter look).
+    if (shared && edgeContrast && !style.edge) {
+      builtinEdge = contrastEdge(style.bg, fadeAt(depth))
     }
 
     const cellKey = folded
@@ -768,7 +788,7 @@ export function Treemap<T>({
           // opt into brighter sibling separation via the var.
           // (boxShadow, not outline — :focus owns the outline.)
           boxShadow: shared
-            ? `inset 0 0 0 ${edge}px ${style.edge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
+            ? `inset 0 0 0 ${edge}px ${style.edge ?? builtinEdge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
             : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
           // Anchors must not fall through to the page's link color when the
           // consumer sets no ink.

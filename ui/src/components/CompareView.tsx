@@ -13,7 +13,7 @@ import {
   Typography,
 } from '@mui/material'
 import { FaArrowRight, FaFolder, FaFile, FaSortUp, FaSortDown, FaSync, FaList } from 'react-icons/fa'
-import { Treemap as DTTreemap, divergingColor } from '@disk-tree/react'
+import { Treemap as DTTreemap, CONTAINER_BG, contrastEdge, divergingColor, parseColor } from '@disk-tree/react'
 import '@disk-tree/react/styles.css'
 import { compareScans, compareScansRecursive, fetchDiffIndexStatus, fetchScanHistory, startScan } from '../api'
 import type { CompareRecResult, CompareResult, CompareRow, ScanHistoryItem } from '../api'
@@ -48,53 +48,10 @@ const UNCHANGED_GREY = 'rgba(110, 118, 129, 0.28)'
 const TOUCHED_HATCH = 'repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.11) 0 3px, transparent 3px 9px)'
 const deltaColor = (t: number) => divergingColor(-t)
 
-/** The map's opaque base — every cell's paint composites over this. */
-const CONTAINER_BG: [number, number, number] = [32, 32, 36]
-
-const parseCache = new Map<string, [number, number, number, number]>()
-
-/** `#rgb`/`#rrggbb`/`rgb()`/`rgba()` → [r, g, b, a]; memoized (a handful of
- * distinct strings serve thousands of cells). */
-function parseColor(c: string): [number, number, number, number] {
-  const hit = parseCache.get(c)
-  if (hit) return hit
-  let out: [number, number, number, number] = [128, 128, 128, 1]
-  const m = c.match(/rgba?\(([^)]+)\)/)
-  if (m) {
-    const [r, g, b, a = '1'] = m[1].split(',').map(x => x.trim())
-    out = [+r, +g, +b, +a]
-  } else if (c.startsWith('#')) {
-    const h = c.slice(1)
-    const x = h.length === 3 ? h.split('').map(d => d + d).join('') : h
-    out = [parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16), 1]
-  }
-  parseCache.set(c, out)
-  return out
-}
-
-/**
- * A cell's stroke, chosen to contrast with the cell's own face: dark on light
- * faces, light on dark ones. Each cell paints half of every boundary it
- * shares, so a bright cell beside a dark one gets a dark half-stroke against
- * the neighbour's light one — one fixed color can't serve both (measured:
- * ~4 arithmetic ops + a memoized parse per cell).
- *
- * `fade` is the depth fade the widget applies to the paint layer; the face is
- * `color over CONTAINER_BG` at the color's alpha, then faded toward the base
- * again, which is exactly what lands on screen.
- */
-function edgeFor(color: string, fade: number): string {
-  const [r, g, b, a] = parseColor(color)
-  const eff = a * fade
-  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) * eff
-    + (0.2126 * CONTAINER_BG[0] + 0.7152 * CONTAINER_BG[1] + 0.0722 * CONTAINER_BG[2]) * (1 - eff)
-  return lum > 96 ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.42)'
-}
-
 /** Legend swatch color: the translucent grey as it actually paints (over the
  * map's base), so it isn't invisible on the bar's own dark background. */
 const UNCHANGED_SWATCH = (() => {
-  const [r, g, b, a] = parseColor('rgba(110, 118, 129, 0.28)')
+  const [r, g, b, a] = parseColor(UNCHANGED_GREY) ?? [110, 118, 129, 0.28]
   const mix = (c: number, base: number) => Math.round(c * a + base * (1 - a))
   return `rgb(${mix(r, CONTAINER_BG[0])}, ${mix(g, CONTAINER_BG[1])}, ${mix(b, CONTAINER_BG[2])})`
 })()
@@ -536,9 +493,9 @@ function CompareTreemap({
           // encoded by the cell color; exact old/new/Δ lives in the tooltip.
           formatSize={formatSize}
           colorForCell={(n, _path, _depth, ctx) => {
-            // Stroke per cell, from the face it borders (see `edgeFor`).
+            // Stroke per cell, from the face it borders (see `contrastEdge`).
             const withEdge = (s: { bg: string; ink: string; hatch?: string }, face: string) =>
-              ({ ...s, edge: edgeFor(face, ctx.fade) })
+              ({ ...s, edge: contrastEdge(face, ctx.fade) ?? undefined })
             // A branch either renders nested tiles now (`ctx.hasKids`) or
             // holds children the layout was too small to draw — both take the
             // container treatment, not the leaf band. (Lazily-loaded subtrees
