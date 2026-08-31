@@ -58,9 +58,13 @@ def record_open(path: str) -> None:
 
 
 def summary() -> dict:
-    """The active library at a glance: root path, DB path, whether the DB exists yet."""
-    root = config.current_root()
-    return {'path': root, 'db': config.SQLITE_PATH, 'exists': exists(config.SQLITE_PATH)}
+    """The active library at a glance: root path + DB path.
+
+    On-disk facts (whether the DB exists, its scan count) are left to callers
+    that read the file — a schema-provisioning hook may create the DB on open,
+    so "exists" here would just mean "did a hook run," not "was it a library."
+    """
+    return {'path': config.current_root(), 'db': config.SQLITE_PATH}
 
 
 def open_library(path: str) -> dict:

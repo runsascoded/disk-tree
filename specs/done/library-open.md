@@ -1,6 +1,6 @@
 # Spec: open a scans "library" at runtime
 
-Status: **in progress** — config-swappability core landing first (the load-bearing part); API + UI follow.
+Status: **done** — runtime root swap, API, and header UI shipped. Moved from in-progress; see the commit trailer.
 
 ## Idea
 
@@ -31,11 +31,11 @@ Dispose the current engine, drop the app/db singletons, rebuild against `config.
 - `open_library(path)`: `config.set_root` → `db.reinit` → `storage.reset_backend` → `server.clear_cache` → record in recents. Returns the new library's summary (path, scan count).
 - Recents live in a **pointer file outside any library** — `~/.config/disk-tree/libraries.json` (`{recents: [{path, opened_at, label}], current}`) — since libraries come and go. `list_libraries()`, `record_open(path)`, `current_library()`.
 
-### 4. API (next)
+### 4. API — done
 - `GET /api/library` → `{current, recents:[...]}`
 - `POST /api/library/open {path}` → opens, returns summary; 400 on a nonexistent/unmounted path.
 
-### 5. UI (next)
+### 5. UI — done
 - Header shows the open library's name; a menu lists recents + "Open…" → pywebview `create_file_dialog(FOLDER_DIALOG)` in the app, a path input in the browser.
 
 ## Tests
@@ -44,3 +44,10 @@ Dispose the current engine, drop the app/db singletons, rebuild against `config.
 ## Non-goals (v1)
 - Concurrent multiple-library views (one open at a time by design).
 - Moving the *default* boot-disk pointer file into a library (it must stay always-mounted).
+
+## Implementation notes (as shipped)
+
+- `GET /api/library` → `{current: {path,label,exists,scans}, recents: [{path,label,opened_at}]}`; `POST /api/library/open {path}` returns the same payload (400 on a missing/unmounted path). `POST /api/library/pick` opens a native folder dialog **only** inside the pywebview app (`webview.windows[0].create_file_dialog`); the browser gets 501 and falls back to a path input.
+- **Schema on open**: a freshly-opened root has no DB, so the server's `on_root_change` hook runs `init_db()` (idempotent `CREATE TABLE IF NOT EXISTS`) after re-pointing `DB_PATH` — otherwise the raw-sqlite `/api/scans` read 500s on `no such table: scan`. Regression-tested (`test_open_empty_library_serves_empty_scans`).
+- UI: `ui/src/components/LibrarySwitcher.tsx` in the header — current library + scan count, recents (click to switch), "Open folder…". On switch it `invalidateQueries()` (the whole dataset changed) and navigates to `/`.
+- `library.summary()` deliberately omits on-disk `exists`/`scans` (a provisioning hook may create the DB on open); the API payload reads those from the file instead.

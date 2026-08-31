@@ -5,6 +5,7 @@ import { FaCloud, FaDatabase, FaFolder, FaHistory, FaCog } from 'react-icons/fa'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAvailableBackends } from '../api'
 import { useUnits } from '../utils/units'
+import { LibrarySwitcher } from './LibrarySwitcher'
 
 export function Header() {
   const location = useLocation()
@@ -76,6 +77,8 @@ export function Header() {
             Recent
           </Button>
         </Box>
+
+        <LibrarySwitcher />
 
         {/* Size units: SI (G = 10⁹) vs IEC (Gi = 2³⁰). Single tooltip on the
             group (wrapping each button breaks ToggleButtonGroup's value/onChange

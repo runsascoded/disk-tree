@@ -1,6 +1,6 @@
 import json
 from os import listdir, makedirs, remove, stat
-from os.path import abspath, dirname, exists, isabs, isdir, isfile, join
+from os.path import abspath, basename, dirname, exists, isabs, isdir, isfile, join
 import shutil
 import sqlite3
 import subprocess
@@ -15,6 +15,7 @@ from flask import Flask, jsonify, redirect, request, g, Response, send_from_dire
 from flask_cors import CORS
 
 from disk_tree import config as _config
+from disk_tree import library
 from disk_tree.config import SQLITE_PATH
 from disk_tree.diff import ScanSource, recursive_diff, resolve_blob, resolve_chunk_for_path
 from disk_tree.diff_index import DIFF_TABLE_SQL, build_and_record, get_index, load_index_slice, serve_slice
@@ -146,9 +147,15 @@ def clear_cache():
 
 
 def _on_root_change():
-    """Re-point raw-sqlite `DB_PATH` and drop cached results after a library swap."""
+    """Re-point raw-sqlite `DB_PATH`, ensure its schema, drop caches — on a library swap.
+
+    A freshly-opened library has no DB yet; `init_db` creates the tables so the
+    raw-sqlite reads (`/api/scans` et al.) return empty rather than 500 on a
+    missing `scan` table.
+    """
     global DB_PATH
     DB_PATH = abspath(_config.SQLITE_PATH)
+    init_db()
     clear_cache()
 
 
@@ -2241,6 +2248,81 @@ def get_available_backends():
         'current': current,
         'switch_instructions': 'Set DISK_TREE_BACKEND env var and restart server',
     })
+
+
+def _label(path: str) -> str:
+    return basename(path.rstrip('/')) or path
+
+
+def _scan_count(db_path: str) -> int:
+    if not exists(db_path):
+        return 0
+    con = sqlite3.connect(db_path)
+    try:
+        # A freshly-created root has a DB file but no `scan` table yet — a
+        # legitimate "empty library" state, not an error.
+        try:
+            return con.execute('SELECT COUNT(*) FROM scan').fetchone()[0]
+        except sqlite3.OperationalError:
+            return 0
+    finally:
+        con.close()
+
+
+def _library_payload() -> dict:
+    """Active library + recents, each decorated with a display label and scan count."""
+    state = library.list_libraries()
+    cur = state['current']
+    return {
+        'current': {
+            'path': cur,
+            'label': _label(cur),
+            'exists': exists(join(cur, 'disk-tree.db')),
+            'scans': _scan_count(join(cur, 'disk-tree.db')),
+        },
+        'recents': [
+            {'path': r['path'], 'label': _label(r['path']), 'opened_at': r.get('opened_at')}
+            for r in state.get('recents', [])
+        ],
+    }
+
+
+@app.route('/api/library', methods=['GET'])
+def get_library():
+    """The open scans library plus recently-opened ones."""
+    return jsonify(_library_payload())
+
+
+@app.route('/api/library/open', methods=['POST'])
+def open_library_route():
+    """Switch the active library to `path`, rebinding DB / backend / caches."""
+    data = request.get_json(silent=True) or {}
+    path = (data.get('path') or '').strip()
+    if not path:
+        return jsonify({'error': 'path required'}), 400
+    try:
+        library.open_library(path)
+    except (ValueError, RuntimeError) as e:
+        return jsonify({'error': str(e)}), 400
+    return jsonify(_library_payload())
+
+
+@app.route('/api/library/pick', methods=['POST'])
+def pick_library_dir():
+    """Native folder picker — only when running inside the pywebview app window.
+
+    The browser has no way to hand back an absolute directory path, so it gets a
+    501 and falls back to a path input.
+    """
+    try:
+        import webview
+    except ImportError:
+        return jsonify({'error': 'no native picker'}), 501
+    wins = getattr(webview, 'windows', None) or []
+    if not wins:
+        return jsonify({'error': 'no window'}), 501
+    result = wins[0].create_file_dialog(webview.FOLDER_DIALOG)
+    return jsonify({'picked': result[0] if result else None})
 
 
 # Static file serving routes (if UI is bundled)

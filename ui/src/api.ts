@@ -314,6 +314,49 @@ export type AvailableBackendsResponse = {
   switch_instructions: string
 }
 
+export type LibraryEntry = {
+  path: string
+  label: string
+  opened_at?: number
+}
+
+export type CurrentLibrary = LibraryEntry & {
+  exists: boolean
+  scans: number
+}
+
+export type LibraryInfo = {
+  current: CurrentLibrary
+  recents: LibraryEntry[]
+}
+
+export async function fetchLibrary(): Promise<LibraryInfo> {
+  const res = await fetch('/api/library')
+  if (!res.ok) throw new Error('Failed to fetch library')
+  return res.json()
+}
+
+export async function openLibrary(path: string): Promise<LibraryInfo> {
+  const res = await fetch('/api/library/open', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path }),
+  })
+  const data = await res.json()
+  if (!res.ok) throw new Error(data?.error || 'Failed to open library')
+  return data
+}
+
+/** Native folder picker (pywebview app only). Returns the chosen absolute path,
+ * null if cancelled, or undefined when no native picker is available (browser). */
+export async function pickLibraryDir(): Promise<string | null | undefined> {
+  const res = await fetch('/api/library/pick', { method: 'POST' })
+  if (res.status === 501) return undefined
+  if (!res.ok) throw new Error('Folder picker failed')
+  const data = await res.json()
+  return data.picked ?? null
+}
+
 export async function fetchBackendInfo(): Promise<BackendInfo> {
   const res = await fetch('/api/backend')
   if (!res.ok) throw new Error('Failed to fetch backend info')

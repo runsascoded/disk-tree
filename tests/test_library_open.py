@@ -8,6 +8,7 @@ under one root are invisible once another is open, and reappear on switch-back.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -23,10 +24,14 @@ def isolated_config(monkeypatch, tmp_path: Path):
     """Snapshot/restore the mutable `config` + DB singletons around a test.
 
     `set_root` mutates module globals and rebinds the shared engine; without this
-    the switch would leak into the rest of the suite.
+    the switch would leak into the rest of the suite. `server.DB_PATH` is
+    restored too when the server has been imported (its `on_root_change` hook
+    re-points it during the test).
     """
     snap = {k: getattr(config, k) for k in ('ROOT_DIR', 'DEFAULT_SCANS_DIR', 'SQLITE_PATH', 'SCANS_DIR', '_explicit_root')}
     db_snap = (sqla_db.db, sqla_db.app, sqla_db.cache_url)
+    server = sys.modules.get('disk_tree.server')
+    server_db_path = server.DB_PATH if server else None
     monkeypatch.setenv(library.LIBRARIES_FILE_VAR, str(tmp_path / 'libraries.json'))
     sqla_db.db = sqla_db.app = sqla_db.cache_url = None
     reset_backend()
@@ -34,6 +39,8 @@ def isolated_config(monkeypatch, tmp_path: Path):
     for k, v in snap.items():
         setattr(config, k, v)
     sqla_db.db, sqla_db.app, sqla_db.cache_url = db_snap
+    if server is not None:
+        server.DB_PATH = server_db_path
     reset_backend()
 
 
@@ -58,7 +65,7 @@ def test_open_rebinds_root_and_derived_paths(isolated_config, tmp_path: Path):
     assert config.current_root() == str(a)
     assert config.SQLITE_PATH == str(a / 'disk-tree.db')
     assert config.SCANS_DIR == str(a / 'scans')  # explicit root → no volume discovery
-    assert out == {'path': str(a), 'db': str(a / 'disk-tree.db'), 'exists': False}
+    assert out == {'path': str(a), 'db': str(a / 'disk-tree.db')}
 
 
 def test_scans_follow_the_open_library(isolated_config, tmp_path: Path):
@@ -92,6 +99,20 @@ def test_recents_records_most_recent_first(isolated_config, tmp_path: Path):
     # Persisted to the override pointer file, not to any library dir.
     on_disk = json.loads((tmp_path / 'libraries.json').read_text())
     assert [r['path'] for r in on_disk['recents']] == [str(a), str(b)]
+
+
+def test_open_empty_library_serves_empty_scans(isolated_config, tmp_path: Path):
+    """A freshly-opened library has no DB yet; the raw-sqlite `/api/scans` read
+    must return `[]`, not 500 on a missing `scan` table (the root-change hook
+    runs `init_db` to create the schema)."""
+    from disk_tree.server import app
+    lib = tmp_path / 'fresh'
+    lib.mkdir()
+    client = app.test_client()
+    assert client.post('/api/library/open', json={'path': str(lib)}).status_code == 200
+    res = client.get('/api/scans')
+    assert res.status_code == 200
+    assert res.get_json() == []
 
 
 def test_open_nonexistent_dir_raises(isolated_config, tmp_path: Path):
