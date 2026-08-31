@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { foldSmall, squarify } from '../src/squarify'
+import { foldSmall, foldThin, squarify } from '../src/squarify'
 import type { Rect } from '../src/squarify'
 
 /** Sort rects by `it` for deterministic comparison. */
@@ -107,5 +107,52 @@ describe('foldSmall', () => {
     // isn't smaller than the item it replaces, so foldSmall skips it.
     const out = foldSmall(items, 10, 10, sz, mergeSmall, 5)
     expect(out).toEqual(items)
+  })
+})
+
+describe('foldThin', () => {
+  const mergeSmall = (small: N[]): N => ({
+    n: `(+${small.length})`,
+    b: small.reduce((s, it) => s + it.b, 0),
+  })
+
+  it('merges cells whose short side is below the threshold', () => {
+    // Three 2px-wide slivers + one wide cell.
+    const rects: Rect<N>[] = [
+      { it: { n: 'wide', b: 1 }, x: 0, y: 0, w: 90, h: 100 },
+      { it: { n: 's1', b: 1 }, x: 90, y: 0, w: 2, h: 33 },
+      { it: { n: 's2', b: 1 }, x: 90, y: 33, w: 2, h: 33 },
+      { it: { n: 's3', b: 1 }, x: 90, y: 66, w: 2, h: 34 },
+    ]
+    const out = foldThin(rects, 7, mergeSmall)
+    expect(out).not.toBeNull()
+    expect(out!.map(o => o.n)).toEqual(['wide', '(+3)'])
+    expect(out!.find(o => o.n === '(+3)')!.b).toBe(3)
+  })
+
+  it('returns null when fewer than two cells are thin (nothing to fold)', () => {
+    const rects: Rect<N>[] = [
+      { it: { n: 'a', b: 1 }, x: 0, y: 0, w: 50, h: 100 },
+      { it: { n: 'thin', b: 1 }, x: 50, y: 0, w: 3, h: 100 },
+    ]
+    expect(foldThin(rects, 7, mergeSmall)).toBeNull()
+  })
+
+  it('a dominant sibling produces slivers that foldThin then collapses', () => {
+    // 99%-dominant item squeezes three tiny siblings into a ~4px strip.
+    const items: N[] = [
+      { n: 'big', b: 990 },
+      { n: 't1', b: 4 },
+      { n: 't2', b: 3 },
+      { n: 't3', b: 3 },
+    ]
+    const laid = squarify<N>(items, 0, 0, 400, 300, sz)
+    const slivers = laid.filter(r => Math.min(r.w, r.h) < 7)
+    expect(slivers.length).toBeGreaterThanOrEqual(2) // the defect: unhoverable slivers
+    const refolded = foldThin(laid, 7, mergeSmall)!
+    const relaid = squarify<N>(refolded, 0, 0, 400, 300, sz)
+    // The many slivers collapse to at most one thin cell (the merged tile).
+    expect(relaid.filter(r => Math.min(r.w, r.h) < 7).length).toBeLessThanOrEqual(1)
+    expect(relaid.map(r => r.it.n).sort()).toEqual(['(+3)', 'big'])
   })
 })

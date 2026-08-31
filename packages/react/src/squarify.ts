@@ -127,3 +127,26 @@ export function foldSmall<T>(
   if (tiny.length < 2) return vis
   return [...kept, mergeSmall(tiny)]
 }
+
+/**
+ * Fold layout rects whose **short side** is below `minSide` px into one
+ * synthetic node, and return the new item list to re-`squarify` (or `null` when
+ * fewer than two qualify, i.e. nothing to do).
+ *
+ * Complements {@link foldSmall}, which folds by *area*: when one item dominates,
+ * the remainder is squeezed into a thin strip and its cells come out as tall,
+ * skinny slivers — enough area to escape the area fold, but too narrow to hover,
+ * label, or read. This catches those by their rendered geometry. Runs *after*
+ * squarify, since a cell's short side isn't known until it's laid out.
+ */
+export function foldThin<T>(
+  rects: Rect<T>[],
+  minSide: number,
+  mergeSmall: (small: T[]) => T,
+): T[] | null {
+  const keep: T[] = []
+  const thin: T[] = []
+  for (const r of rects) (Math.min(r.w, r.h) < minSide ? thin : keep).push(r.it)
+  if (thin.length < 2) return null
+  return [...keep, mergeSmall(thin)]
+}
