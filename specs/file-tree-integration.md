@@ -222,16 +222,27 @@ a consumable `<FileTree>`). Paired with
 
 ## As built (disk-tree side) — what file-tree can rely on today
 
-### C — dist branch already exists ✅
-`@disk-tree/react` **is** SHA-pinnable now: `.github/workflows/build-dist.yml`
-(npm-dist, monorepo mode `pkgs: packages/react`, source-first) publishes the
-`dist` branch on every push touching `packages/react/`. Pin it:
-`pnpm add github:runsascoded/disk-tree#<dist-sha>` (or `pds gh`), where
+### C — dist branch now reproducibly pinnable ✅ (fixed 2026-08-31)
+`.github/workflows/build-dist.yml` (npm-dist, source-first) publishes the `dist`
+branch on every push touching `packages/react/`. **Correction to the earlier
+claim here:** the branch existed but was *not* directly pinnable — monorepo
+`pkgs` mode nested `@disk-tree/react` under a private `disk-tree-workspace-dist`
+root, and a git dep has no subdir selector, so `github:runsascoded/disk-tree#<sha>`
+resolved to the workspace, not the package. **Fixed** by teaching npm-dist a new
+`package_dir` mode (flatten one subdir package to the dist branch root; additive,
+`v1` ≥ `de25b2a`) and repointing our workflow to it. The `dist` branch root now
+**is** `@disk-tree/react`.
+
+**Pin recipe (verified — `pnpm add` installs `@disk-tree/react@0.1.0-dist.<sha>`):**
+```
+pnpm add github:runsascoded/disk-tree#<dist-sha>
+```
 `<dist-sha>` is a commit on the **`dist`** branch (not `main`) — HEAD is
-`d06c250` as of writing. `<Treemap>` pulls no d3 (only the optional `./voronoi`
-subpath does). Treat `TreemapProps<T>` as the stable public API; it's
-generic-over-`T` so file-tree instantiates `Treemap<TreeNode>` without touching
-our node shape. (The spec above assumed this was undone — it wasn't.)
+`bdfe23a` as of writing (rebuilds on every `packages/react/` change; pin a
+specific dist SHA for reproducibility). `<Treemap>` pulls no d3 (only the
+optional `./voronoi` subpath does). Treat `TreemapProps<T>` as the stable public
+API; it's generic-over-`T` so file-tree instantiates `Treemap<TreeNode>` without
+touching our node shape.
 
 ### B2 — live API is already a `TreeSource` ✅ (zero code)
 Audited on `main`, all present and CORS-enabled:
