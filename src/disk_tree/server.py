@@ -1,4 +1,6 @@
 import json
+import mimetypes
+import re
 from os import listdir, makedirs, remove, stat
 from os.path import abspath, basename, dirname, exists, isabs, isdir, isfile, join
 import shutil
@@ -2016,6 +2018,66 @@ def file_preview():
         return jsonify({'error': 'Permission denied'}), 403
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/files/get')
+def files_get():
+    """Raw file bytes for `<FileTree>`'s `Store.get` — with HTTP Range support.
+
+    Backs the parquet/csv/sqlite viewers, which read byte ranges (unlike the
+    size-capped `/api/file/preview`). Local absolute paths only; `s3://`/`gcs://`
+    objects return 501 until presign/proxy lands (Half A follow-up).
+
+    A `Range: bytes=<start>-<end>` request gets a 206 with `Content-Range`; a
+    plain GET streams the whole file. `Accept-Ranges: bytes` is always set so
+    the client knows ranges are available.
+    """
+    path = request.args.get('path')
+    if not path:
+        return jsonify({'error': 'path is required'}), 400
+    if '://' in path:
+        return jsonify({'error': 'cloud object fetch not implemented (local paths only)'}), 501
+    if not path.startswith('/'):
+        return jsonify({'error': 'path must be absolute'}), 400
+    if not isfile(path):
+        return jsonify({'error': 'file not found'}), 404
+
+    file_size = stat(path).st_size
+    ctype = mimetypes.guess_type(path)[0] or 'application/octet-stream'
+    range_header = request.headers.get('Range')
+
+    if range_header:
+        m = re.match(r'bytes=(\d*)-(\d*)\s*$', range_header.strip())
+        if not m or (not m.group(1) and not m.group(2)):
+            return jsonify({'error': f'unsatisfiable range: {range_header!r}'}), 416
+        if m.group(1):
+            start = int(m.group(1))
+            end = int(m.group(2)) if m.group(2) else file_size - 1
+        else:
+            # suffix range: bytes=-N → last N bytes
+            start = max(0, file_size - int(m.group(2)))
+            end = file_size - 1
+        end = min(end, file_size - 1)
+        if start > end or start >= file_size:
+            resp = jsonify({'error': 'range not satisfiable'})
+            resp.status_code = 416
+            resp.headers['Content-Range'] = f'bytes */{file_size}'
+            return resp
+        with open(path, 'rb') as f:
+            f.seek(start)
+            data = f.read(end - start + 1)
+        resp = Response(data, status=206, mimetype=ctype)
+        resp.headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
+        resp.headers['Accept-Ranges'] = 'bytes'
+        resp.headers['Content-Length'] = str(len(data))
+        return resp
+
+    with open(path, 'rb') as f:
+        data = f.read()
+    resp = Response(data, mimetype=ctype)
+    resp.headers['Accept-Ranges'] = 'bytes'
+    resp.headers['Content-Length'] = str(len(data))
+    return resp
 
 
 @app.route('/api/reveal', methods=['POST'])
