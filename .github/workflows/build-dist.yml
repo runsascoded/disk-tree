@@ -1,10 +1,13 @@
 name: Build @disk-tree/react dist branch
 
-# Builds a SHA-pinnable dist branch for `packages/react/` so external
-# consumers (marin's site, etc.) can `pnpm add
-# github:runsascoded/disk-tree#<sha>` without pulling the whole
-# monorepo. Uses runsascoded/npm-dist in monorepo mode (`pkgs:
-# packages/react`), source-first (no compile — the package ships .ts).
+# Builds a SHA-pinnable `dist` branch for `packages/react/` so external
+# consumers (marin's site, file-tree, etc.) can `pnpm add
+# github:runsascoded/disk-tree#<dist-sha>` without pulling the whole
+# monorepo. Uses runsascoded/npm-dist in `package_dir` mode, which packs
+# the one package and flattens it to the dist branch ROOT — so the git dep
+# resolves to `@disk-tree/react` directly (monorepo `pkgs` mode nested it
+# under a workspace root, which a git dep can't select). Source-first (no
+# compile — the package ships .ts; `pnpm pack` respects its `files`).
 #
 # Fires on any push to main that touches packages/react/, and on
 # manual dispatch for one-off rebuilds.
@@ -28,12 +31,10 @@ jobs:
       contents: write
     uses: runsascoded/npm-dist/.github/workflows/build-dist.yml@v1
     with:
-      pkgs: packages/react
+      # Package at the dist branch ROOT → `github:runsascoded/disk-tree#<dist-sha>`
+      # resolves to `@disk-tree/react`. (`pnpm pack` carries `src/` + README per
+      # the package's `files`, so no `source_dirs`/`extra_files` needed here.)
+      package_dir: packages/react
       source_ref: ${{ inputs.source_ref }}
-      # Source-first — `main`/`types` in package.json point at src/*.ts,
-      # so the built branch keeps `src/` as-is next to the transformed
-      # package.json.
-      source_dirs: src
-      extra_files: README.md
       # The package's `build` script just typechecks (source-first, no
       # emit); npm-dist runs it to smoke-test the source before publishing.
