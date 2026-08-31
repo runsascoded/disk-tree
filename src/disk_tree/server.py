@@ -145,6 +145,16 @@ def clear_cache():
     _cache.clear()
 
 
+def _on_root_change():
+    """Re-point raw-sqlite `DB_PATH` and drop cached results after a library swap."""
+    global DB_PATH
+    DB_PATH = abspath(_config.SQLITE_PATH)
+    clear_cache()
+
+
+_config.on_root_change(_on_root_change)
+
+
 def get_db():
     """Get database connection for current request."""
     if 'db' not in g:

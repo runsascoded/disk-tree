@@ -43,3 +43,8 @@ def reset_backend():
     """Reset the backend singleton (for testing)."""
     global _backend_instance
     _backend_instance = None
+
+
+# Opening a library must drop the backend built against the previous root.
+from .. import config as _config  # noqa: E402
+_config.on_root_change(reset_backend)
