@@ -71,6 +71,45 @@ Design decisions to settle in this spec before building:
 
 Shipped as `foldControl` (§What shipped). The canvas modes should keep honoring the same multiplier, since folding still decides how much of the tail becomes a dust/hatch region vs. individual marks.
 
+## Benchmark: canvas vs DOM (2026-09-01)
+
+A2A harness (`tmp/playground/bench.{html,tsx}`, `window.__benchSweep`): a fresh
+`<Treemap>` of N cells mounted into a fixed 1400×900 box, folding off (drawn
+cells = N), `flushSync` so the full React reconcile + DOM construction + (for
+canvas) the whole `useLayoutEffect` draw are measured synchronously — plus a
+forced `offsetHeight` reflow so the DOM renderer pays its style+layout cost.
+**Browser rasterization is excluded for both**, which only the DOM renderer
+pays on top, so every number is *conservative toward DOM*. Median of 2.
+
+Flat (root → N leaves):
+
+| cells  | DOM ms | DOM nodes | canvas ms | canvas nodes |
+|-------:|-------:|----------:|----------:|-------------:|
+|  1,000 |     67 |     2,666 |        11 |            1 |
+|  5,000 |    192 |    10,000 |        54 |            1 |
+| 15,000 |  1,039 |    30,000 |       188 |            1 |
+| 40,000 |  4,922 |    80,000 |       999 |            1 |
+
+Nested (root → √N dirs → √N leaves each — the representative shape, with title
+bars + inner containers):
+
+| cells  | DOM ms | DOM nodes | canvas ms | canvas nodes |
+|-------:|-------:|----------:|----------:|-------------:|
+|  1,000 |    340 |     2,814 |        55 |            1 |
+|  4,000 |    839 |     8,316 |       146 |            1 |
+| 12,000 |  2,289 |    24,639 |       543 |            1 |
+
+**Verdict: the rewrite is justified.** Canvas is 4–6× faster to construct and
+holds at exactly **one** DOM node vs the DOM renderer's 2–5× cell count (up to
+80k) — the node blowup is what drives style recalc, memory, and GC on every
+resize/drill. Nested containers cost the DOM renderer ~5× more per cell (340ms
+for 1,000 nested vs 67ms flat); canvas is indifferent to nesting. The DOM
+renderer's super-linear curve makes a 12k-cell real map a ~2.3s freeze (paint
+excluded); canvas is ~0.5s. Canvas is not yet *instant* at the top end (~1s at
+40k) — that's what §2 progressive rendering buys next, and layout (`layoutCells`)
+is a shrinkable share of it. Color-id-buffer hit-testing (§3) stays deferred:
+pointer-move on the retained tree hasn't shown up as a cost.
+
 ## Sequencing
 
 **Superseded by the 2026-09-01 pivot.** The original plan sequenced §1 (hybrid) → §3 (rewrite). We go to §3 directly via the `renderer` prop, since a whole-map canvas swap is *simpler* than the hybrid, not riskier: the DOM path is untouched (default), so the canvas path can land incrementally behind the flag and be measured against the DOM baseline before it's ever a default. The color-id-buffer hit-test is a later optimization — the first cut hit-tests the retained placed-cell tree (deepest-hit-wins, O(depth) per event, exact), which is enough to prove the renderer; swap in the color buffer only if pointer-move cost shows up in the mgu-scale profile.
