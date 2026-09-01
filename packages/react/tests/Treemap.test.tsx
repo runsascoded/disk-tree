@@ -912,4 +912,26 @@ describe('<Treemap> canvas pin ring', () => {
       restore()
     }
   })
+
+  it('the pinned tip is click-through (container none, × auto) so a covered cell still pins', () => {
+    // The tip anchors over a cell's top-left; if it caught clicks, a cell lying
+    // under an already-pinned tip could never be pinned. Container must pass
+    // clicks through to the canvas/cell; only its × takes pointer events.
+    const restore = withLayout(600, 400)
+    try {
+      const { container } = render(<Treemap root={tree3} {...accessors} minCellArea={null} renderer="canvas" />)
+      const bigBtn = [...container.querySelectorAll('.dt-treemap-map button')]
+        .find(b => b.getAttribute('aria-label')?.startsWith('big'))!
+      fireEvent.click(bigBtn)
+      const tip = container.querySelector('.dt-treemap-tip') as HTMLElement
+      expect(tip).not.toBe(null)
+      expect(tip.classList.contains('pinned')).toBe(true)
+      expect(tip.style.pointerEvents).toBe('none')
+      const closeBtn = tip.querySelector('button') as HTMLElement
+      expect(closeBtn.title).toBe('Unpin (Esc)')
+      expect(closeBtn.style.pointerEvents).toBe('auto')
+    } finally {
+      restore()
+    }
+  })
 })

@@ -1330,9 +1330,12 @@ export function Treemap<T>({
             fontSize: '0.85rem',
             zIndex: 1000,
             maxWidth: 320,
-            // Interactive whether hovered or pinned — you can move into it and
-            // click its links/controls (the grace timer keeps it alive en route).
-            pointerEvents: 'auto',
+            // The tip anchors over a cell's top-left, so it sits on pixels you'd
+            // click — to pin this cell, or (when a different cell is already
+            // pinned and its tip overlaps) to pin that one. The container must
+            // never eat those clicks; only its × button (below) takes pointer
+            // events, so clicks fall through to the canvas/cell underneath.
+            pointerEvents: 'none',
             boxShadow: '0 4px 10px rgba(0,0,0,0.35)',
           }}
         >
@@ -1343,7 +1346,7 @@ export function Treemap<T>({
               style={{
                 position: 'absolute', top: 2, right: 4,
                 background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer',
-                fontSize: '1em', opacity: 0.6,
+                fontSize: '1em', opacity: 0.6, pointerEvents: 'auto',
               }}
             >
               ×
