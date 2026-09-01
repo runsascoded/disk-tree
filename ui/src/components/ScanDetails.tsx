@@ -776,6 +776,9 @@ function Treemap({
         root={filterTree ?? tree}
         tiling={tiling}
         renderer={renderer}
+        // Emphasize top-level boundaries so the coarse tree structure reads at a
+        // glance (shallow edges thicker than deep ones).
+        edgeEmphasis={1}
         renderLegend={() => (
           <span style={{ display: 'inline-flex', gap: 8, fontSize: '0.8rem' }}>
             <span style={{ display: 'inline-flex', gap: 2 }}>

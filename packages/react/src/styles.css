@@ -36,3 +36,9 @@
   outline: 2px solid var(--dt-treemap-focus, rgba(120, 170, 255, 0.95));
   outline-offset: -2px;
 }
+
+/* Pinned tooltip: an accent border (matching the pinned-cell ring) so a pinned
+   tip reads as distinct from a transient hover tip. */
+.dt-treemap-tip.pinned {
+  border-color: var(--dt-treemap-pin, rgba(120, 170, 255, 0.95)) !important;
+}

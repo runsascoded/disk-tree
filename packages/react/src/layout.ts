@@ -55,6 +55,17 @@ export interface PlacedCell<T> {
 
 type Node<T> = T | FoldedNode<T>
 
+/**
+ * Shared-edge width multiplier that emphasizes shallow (top-level) boundaries
+ * over deep ones, so the tree's coarse structure reads at a glance. At
+ * `emphasis = 0` it's 1 everywhere (no change); higher values thicken depth-0
+ * and depth-1 edges, decaying to 1 by depth 2. Used identically by both
+ * renderers so their strokes match.
+ */
+export function edgeEmphFactor(depth: number, emphasis: number): number {
+  return 1 + emphasis * Math.max(0, 2 - depth)
+}
+
 /** Everything `layoutCells` needs from the host component, threaded as one bundle. */
 export interface LayoutConfig<T> {
   getSize: (n: T) => number
@@ -64,6 +75,8 @@ export interface LayoutConfig<T> {
   showLabels: boolean
   collapseChains: boolean
   borderWidth: (depth: number, ctx: { w: number; h: number }) => number
+  /** Shallow-edge emphasis (see {@link edgeEmphFactor}); 0 = uniform. */
+  edgeEmphasis: number
   /** Fold small/thin items before layout (the component's `fold`). */
   fold: (raw: Node<T>[], w: number, h: number) => Node<T>[]
   /** Lay already-folded items into a box (plain squarify or `squarifyRemainder`). */
@@ -94,7 +107,7 @@ function place<T>(
   mode: Tiling,
   cfg: LayoutConfig<T>,
 ): PlacedCell<T> {
-  const { getLabel, childrenOf, showLabels, collapseChains, borderWidth, fold, layTiles, tilingFor } = cfg
+  const { getLabel, childrenOf, showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor } = cfg
   const folded = isFolded(node0)
 
   // Single-child wrapper chains collapse into one cell labeled `a/…/z`: the
@@ -124,7 +137,9 @@ function place<T>(
   const dust = Math.min(r.w, r.h) < 14
   const shared = mode === 'shared'
   const showLbl = showLabels && r.w > 36 && r.h > 13
-  const bw = shared ? Math.min(borderWidth(depth, { w: r.w, h: r.h }), dust ? 1 : Infinity) : 0
+  const bw = shared
+    ? Math.min(borderWidth(depth, { w: r.w, h: r.h }) * edgeEmphFactor(depth, edgeEmphasis), dust ? 1 : Infinity)
+    : 0
   const edge = bw / 2
   const boxW = shared ? r.w : r.w - (dust ? 1 : 2)
   const boxH = shared ? r.h : r.h - (dust ? 1 : 2)

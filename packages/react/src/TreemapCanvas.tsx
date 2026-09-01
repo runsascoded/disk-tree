@@ -54,6 +54,8 @@ export interface TreemapCanvasProps<T> {
   a11yMaxCells: number
   /** Minimum short-side px for a cell to get an overlay element. */
   a11yMinSide: number
+  /** Key of the currently pinned cell, ringed on the canvas so the pin reads. */
+  pinnedKey: string | null
   onHover: (hit: CanvasHit<T>, clientX: number, clientY: number) => void
   onClick: (hit: CanvasHit<T>, e: React.MouseEvent) => void
   onLeave: () => void
@@ -96,6 +98,7 @@ export function TreemapCanvas<T>({
   a11yLinks,
   a11yMaxCells,
   a11yMinSide,
+  pinnedKey,
   onHover,
   onClick,
   onLeave,
@@ -216,6 +219,13 @@ export function TreemapCanvas<T>({
     return out
   }, [flat, a11yLinks, a11yMaxCells, a11yMinSide])
 
+  // The pinned cell (if any), so the canvas can ring it — otherwise a pin is
+  // invisible on the canvas and the map looks frozen (hover is suppressed).
+  const pinnedCell = useMemo(
+    () => (pinnedKey ? flat.find(c => !c.folded && idFor(c.node as T, c.path) === pinnedKey) ?? null : null),
+    [flat, pinnedKey, idFor],
+  )
+
   return (
     <>
       <canvas
@@ -224,13 +234,22 @@ export function TreemapCanvas<T>({
         height={Math.max(1, Math.round(height))}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'default' }}
         onMouseMove={e => {
+          const cv = e.currentTarget
           const { lx, ly } = localXY(e)
           const cell = hitTest(cells, lx, ly)
           // No-hit (a gutter between cells): leave the current tip alone, matching
           // the DOM renderer where sweeping a gap doesn't clear. Real exit clears.
-          if (!cell) return
+          if (!cell) { cv.style.cursor = 'default'; return }
           const hit = toHit(cell, lx, ly)
-          if (hit) onHover(hit, e.clientX, e.clientY)
+          if (!hit) { cv.style.cursor = 'default'; return }
+          // Interactive cells read as clickable, like the DOM renderer's cells.
+          const interactive = hit.drillable || !!(cellHref && cellHref(hit.node, hit.path))
+          cv.style.cursor = interactive ? 'pointer' : 'default'
+          // Anchor the tip to the cell's top-left (screen), so it lands in the
+          // same place no matter which edge the pointer entered from — the
+          // previous entry-cursor anchor made the placement look random.
+          const box = cv.getBoundingClientRect()
+          onHover(hit, box.left + cell.x, box.top + cell.y)
         }}
         onMouseLeave={onLeave}
         onClick={e => {
@@ -241,6 +260,20 @@ export function TreemapCanvas<T>({
           if (hit) onClick(hit, e)
         }}
       />
+      {/* Pinned-cell ring — the visible counterpart of the pinned tooltip's ×,
+          so it's clear which cell is pinned (and why hover is suppressed). */}
+      {pinnedCell && (
+        <div
+          style={{
+            position: 'absolute',
+            left: pinnedCell.x, top: pinnedCell.y, width: pinnedCell.w, height: pinnedCell.h,
+            boxSizing: 'border-box',
+            border: '2px solid var(--dt-treemap-pin, rgba(120, 170, 255, 0.95))',
+            borderRadius: pinnedCell.mode === 'shared' ? 0 : 2,
+            pointerEvents: 'none',
+          }}
+        />
+      )}
       {/* A11y/keyboard/link overlay. Transparent and pointer-events:none — the
           canvas above handles all mouse input; these focusable anchors/buttons
           exist for keyboard, screen readers, Vimium, real `cellHref` links, and

@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { contrastEdge, DEFAULT_PALETTE } from './colors'
 import { DustHatch } from './DustHatch'
 import type { FoldedNode, LayoutConfig } from './layout'
-import { isFolded, layoutCells } from './layout'
+import { edgeEmphFactor, isFolded, layoutCells } from './layout'
 import { foldSmall, foldThin, squarify, squarifyRemainder } from './squarify'
 import { TreemapCanvas, type CanvasHit } from './TreemapCanvas'
 import type { StyleOpts } from './cellStyle'
@@ -242,6 +242,17 @@ export interface TreemapProps<T> {
    */
   borderWidth?: (depth: number, ctx: CellDims) => number
   /**
+   * Shared-tiling only: emphasize shallow (top-level) boundaries over deep ones
+   * so the tree's coarse structure reads at a glance — the fix for "top-level
+   * edges are hard to see". Multiplies each cell's stroke width by
+   * `1 + edgeEmphasis · max(0, 2 − depth)`, so depth-0 edges get `1 + 2·e`,
+   * depth-1 `1 + e`, and depth-2+ are unchanged. Composes with `borderWidth`
+   * (which sets the base per-depth width) and `edgeContrast` (the stroke color).
+   * `0` = uniform (current behavior). Try `~0.75`–`1.5` for a clear step.
+   * Default: 0.
+   */
+  edgeEmphasis?: number
+  /**
    * In shared tiling, default each cell's half-stroke to a luminance-contrast
    * color derived from its own face (dark stroke on light cells, light on
    * dark) instead of the neutral `--dt-treemap-edge` gutter — so borders read
@@ -456,6 +467,7 @@ export function Treemap<T>({
   fadeFloor = 0.75,
   tiling = 'gaps',
   borderWidth = defaultBorderWidth,
+  edgeEmphasis = 0,
   edgeContrast = true,
   dustTexture = true,
   foldControl = false,
@@ -722,12 +734,12 @@ export function Treemap<T>({
   const placedCells = useMemo(() => {
     if (renderer !== 'canvas') return []
     const cfg: LayoutConfig<T> = {
-      getSize, getLabel, childrenOf, showLabels, collapseChains, borderWidth, fold, layTiles, tilingFor,
+      getSize, getLabel, childrenOf, showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
     }
     return layoutCells(rects, path, rootMode, cfg)
   }, [
     renderer, rects, path, rootMode, getSize, getLabel, childrenOf,
-    showLabels, collapseChains, borderWidth, fold, layTiles, tilingFor,
+    showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
   ])
 
   // Stable style bundle for the canvas paint. Memoized so the paint effect
@@ -761,8 +773,12 @@ export function Treemap<T>({
     }
   }
   const activatePin = (node: T, path: T[], key: string, x: number, y: number) => {
+    // Reuse the hover tip's anchor for the same cell, so pinning doesn't jump
+    // the tooltip from the cell to the click point.
+    const ax = tip?.key === key ? tip.x : x
+    const ay = tip?.key === key ? tip.y : y
     pin.togglePin(key)
-    setPinnedTip(p => (p?.key === key ? null : { x, y, key, node, path }))
+    setPinnedTip(p => (p?.key === key ? null : { x: ax, y: ay, key, node, path }))
   }
   const activateClick = (
     node: T, path: T[], key: string, drillable: boolean, x: number, y: number, e: React.MouseEvent,
@@ -818,7 +834,7 @@ export function Treemap<T>({
     const shared = mode === 'shared'
     // This cell's own stroke (shared mode): half of it is drawn inside this
     // cell as an inset ring, the neighbor draws the other half.
-    const bw = shared ? Math.min(borderWidth(depth, { w: r.w, h: r.h }), dust ? 1 : Infinity) : 0
+    const bw = shared ? Math.min(borderWidth(depth, { w: r.w, h: r.h }) * edgeEmphFactor(depth, edgeEmphasis), dust ? 1 : Infinity) : 0
     const edge = bw / 2
     // Built-in adaptive half-stroke, computed once the cell's face is resolved
     // (below). Filled after `style` is known.
@@ -909,15 +925,18 @@ export function Treemap<T>({
 
     const showTip = (e: React.MouseEvent) => {
       e.stopPropagation()
+      // Anchor to the cell's top-left (not the entry cursor), so the tip lands
+      // in the same spot regardless of which edge the pointer came in from, and
+      // so it's stable to move into (it doesn't chase the cursor). Matches the
+      // canvas renderer.
+      const b = (e.currentTarget as HTMLElement).getBoundingClientRect()
       if (folded) {
         const hit = dustHitAt(e)
         if (!hit) return
-        activateHover(hit.it, hit.path, hit.key, e.clientX, e.clientY)
+        activateHover(hit.it, hit.path, hit.key, b.left, b.top)
         return
       }
-      // Anchor to the cell (frozen once per cell) instead of chasing the cursor:
-      // a mouse-following tip can't be hovered into to click its contents.
-      activateHover(kid as T, kidPath, cellKey, e.clientX, e.clientY)
+      activateHover(kid as T, kidPath, cellKey, b.left, b.top)
     }
     // Real-anchor cells (`cellHref`): only leaf-rendered ones — a cell with
     // nested tiles would nest <a>s, which HTML forbids. Modified/middle
@@ -1259,6 +1278,7 @@ export function Treemap<T>({
                 a11yLinks={a11yLinks}
                 a11yMaxCells={a11yMaxCells}
                 a11yMinSide={a11yMinSide}
+                pinnedKey={pinnedTip?.key ?? null}
                 onHover={(hit: CanvasHit<T>, x, y) => activateHover(hit.node, hit.path, hit.key, x, y)}
                 onClick={(hit: CanvasHit<T>, e) =>
                   hit.foldChild

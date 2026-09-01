@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { flattenPlaced, hitTest, layoutCells, type LayoutConfig, type PlacedCell } from '../src/layout'
+import { edgeEmphFactor, flattenPlaced, hitTest, layoutCells, type LayoutConfig, type PlacedCell } from '../src/layout'
 import { squarify } from '../src/squarify'
 
 interface N {
@@ -20,6 +20,7 @@ const cfg: LayoutConfig<N> = {
   showLabels: true,
   collapseChains: false,
   borderWidth: () => 2,
+  edgeEmphasis: 0,
   fold: raw => raw,
   layTiles: (items, x, y, w, h) => squarify(items, x, y, w, h, it => (it as N).size),
   tilingFor: () => 'gaps',
@@ -112,6 +113,18 @@ describe('flattenPlaced', () => {
       }
     }
     cells.forEach(check)
+  })
+})
+
+describe('edgeEmphFactor', () => {
+  it('is 1 everywhere when emphasis is 0 (no change)', () => {
+    expect([0, 1, 2, 3].map(d => edgeEmphFactor(d, 0))).toEqual([1, 1, 1, 1])
+  })
+
+  it('thickens shallow depths, decaying to 1 by depth 2', () => {
+    // 1 + emphasis · max(0, 2 − depth)
+    expect([0, 1, 2, 3].map(d => edgeEmphFactor(d, 1))).toEqual([3, 2, 1, 1])
+    expect([0, 1, 2].map(d => edgeEmphFactor(d, 0.5))).toEqual([2, 1.5, 1])
   })
 })
 

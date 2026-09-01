@@ -884,3 +884,32 @@ describe('<Treemap a11yLinks> (canvas overlay)', () => {
     }
   })
 })
+
+describe('<Treemap> canvas pin ring', () => {
+  const tree3: Node = {
+    n: 'root',
+    size: 100,
+    children: [
+      { n: 'big', size: 70 },
+      { n: 'mid', size: 20 },
+      { n: 'small', size: 10 },
+    ],
+  }
+
+  it('clicking a leaf pins it and rings the cell on the canvas', () => {
+    const restore = withLayout(600, 400)
+    try {
+      const { container } = render(<Treemap root={tree3} {...accessors} minCellArea={null} renderer="canvas" />)
+      const ringSel = '.dt-treemap-map div[style*="120, 170, 255"]'
+      expect(container.querySelector(ringSel)).toBe(null)
+      // A leaf isn't drillable → clicking pins it (via the a11y overlay button,
+      // which routes through the same click path as a canvas mouse click).
+      const bigBtn = [...container.querySelectorAll('.dt-treemap-map button')]
+        .find(b => b.getAttribute('aria-label')?.startsWith('big'))!
+      fireEvent.click(bigBtn)
+      expect(container.querySelector(ringSel)).not.toBe(null)
+    } finally {
+      restore()
+    }
+  })
+})
