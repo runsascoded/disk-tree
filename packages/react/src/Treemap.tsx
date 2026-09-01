@@ -159,6 +159,16 @@ export interface TreemapProps<T> {
   /** Called whenever the drill path changes (drill in, drill back). */
   onPathChange?: (path: T[]) => void
   /**
+   * Fired when the pointer enters a cell (with the node + its path from root)
+   * and again with `null` when it leaves the map / all cells — the outward
+   * mirror of the inward `lens` highlight, so a consumer can reflect the map's
+   * hover into another view (e.g. file-tree's split listing lights the row for
+   * the hovered tile). Fires once per cell change, not per pixel; `null` on
+   * leave. Debounce/grace is the consumer's concern. No behavior change when
+   * absent. `path` is the root→cell node array, same shape as `onPathChange`.
+   */
+  onCellHover?: (n: T | null, path: T[]) => void
+  /**
    * Fold small-area cells (below `minCellArea` in px²) into a synthetic
    * "…" tile. Pass `null` to disable folding.
    */
@@ -408,6 +418,7 @@ export function Treemap<T>({
   onCellClick,
   cellHref,
   onPathChange,
+  onCellHover,
   minCellArea = 16,
   minCellSide = 7,
   mergeSmall,
@@ -446,6 +457,8 @@ export function Treemap<T>({
   // and use its controls/links without pinning (the tip is anchored, not
   // mouse-following, so it stays put while you reach for it).
   const tipClear = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Last cell key reported through `onCellHover`, so it fires once per change.
+  const hoverKeyRef = useRef<string | null>(null)
   const cancelTipClear = () => {
     if (tipClear.current) { clearTimeout(tipClear.current); tipClear.current = undefined }
   }
@@ -705,7 +718,20 @@ export function Treemap<T>({
   const activateHover = (node: T, path: T[], key: string, x: number, y: number) => {
     cancelTipClear()
     pin.hover(key)
+    // Outward hover signal (once per cell change, not per pixel).
+    if (hoverKeyRef.current !== key) {
+      hoverKeyRef.current = key
+      onCellHover?.(node, path)
+    }
     setTip(prev => (prev?.key === key ? prev : { x, y, key, node, path }))
+  }
+  // Fire `onCellHover(null)` once, when hover actually leaves all cells —
+  // called alongside every `pin.hover(null)` (map leave, tip leave, canvas leave).
+  const clearHover = () => {
+    if (hoverKeyRef.current !== null) {
+      hoverKeyRef.current = null
+      onCellHover?.(null, [])
+    }
   }
   const activatePin = (node: T, path: T[], key: string, x: number, y: number) => {
     pin.togglePin(key)
@@ -1186,7 +1212,7 @@ export function Treemap<T>({
           // Don't clear immediately — give the pointer time to reach the tip
           // (cancelled by the tip's onMouseEnter).
           cancelTipClear()
-          tipClear.current = setTimeout(() => { pin.hover(null); setTip(null) }, 180)
+          tipClear.current = setTimeout(() => { pin.hover(null); clearHover(); setTip(null) }, 180)
         }}
       >
         {renderer === 'canvas'
@@ -1209,7 +1235,7 @@ export function Treemap<T>({
                     : activateClick(hit.node, hit.path, hit.key, hit.drillable, e.clientX, e.clientY, e)}
                 onLeave={() => {
                   cancelTipClear()
-                  tipClear.current = setTimeout(() => { pin.hover(null); setTip(null) }, 180)
+                  tipClear.current = setTimeout(() => { pin.hover(null); clearHover(); setTip(null) }, 180)
                 }}
               />
             ))
@@ -1240,7 +1266,7 @@ export function Treemap<T>({
           ref={tipRef}
           className={'dt-treemap-tip' + (pinnedTip ? ' pinned' : '')}
           onMouseEnter={cancelTipClear}
-          onMouseLeave={() => { if (!pinnedTip) { pin.hover(null); setTip(null) } }}
+          onMouseLeave={() => { if (!pinnedTip) { pin.hover(null); clearHover(); setTip(null) } }}
           style={{
             position: 'fixed',
             left: Math.max(4, Math.min(tipToShow.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1600) - (tipDims?.w ?? 320) - 8)),

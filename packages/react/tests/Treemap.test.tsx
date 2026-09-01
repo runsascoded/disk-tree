@@ -779,3 +779,39 @@ describe('<Treemap renderer>', () => {
     expect(screen.getByText(/300 B/)).toBeInTheDocument()
   })
 })
+
+describe('<Treemap onCellHover>', () => {
+  it('fires node+path on enter, once per cell, null on leave', () => {
+    vi.useFakeTimers()
+    const restore = withLayout()
+    try {
+      const calls: [string | null, string[]][] = []
+      const onCellHover = (n: Node | null, p: Node[]) => calls.push([n ? n.n : null, p.map(x => x.n)])
+      const { container } = render(
+        <Treemap root={tree} {...accessors} onCellHover={onCellHover} minCellArea={null} />,
+      )
+      const leaf = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')]
+        .find(el => !el.classList.contains('branch'))!
+      fireEvent.mouseMove(leaf)
+      fireEvent.mouseMove(leaf) // same cell: no second enter
+      fireEvent.mouseLeave(container.querySelector('.dt-treemap-map')!)
+      vi.advanceTimersByTime(200) // past the 180ms leave grace
+      expect(calls).toEqual([['bar', ['root', 'bar']], [null, []]])
+    } finally {
+      restore()
+      vi.useRealTimers()
+    }
+  })
+
+  it('is inert when absent (no throw on hover/leave)', () => {
+    const restore = withLayout()
+    try {
+      const { container } = render(<Treemap root={tree} {...accessors} minCellArea={null} />)
+      const leaf = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')]
+        .find(el => !el.classList.contains('branch'))!
+      expect(() => fireEvent.mouseMove(leaf)).not.toThrow()
+    } finally {
+      restore()
+    }
+  })
+})
