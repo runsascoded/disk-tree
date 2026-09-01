@@ -270,6 +270,34 @@ function paintCell<T>(ctx: CanvasRenderingContext2D, cell: PlacedCell<T>, o: Pai
     drawDust(ctx, bx, by, bw, bh, (cell.node as FoldedNode<T>).count)
   }
 
+  // Makeup stripes: a leaf cell with a mixed composition renders proportional
+  // inset slices along its longer axis instead of one blob — the `bg` frame
+  // showing through the inset + the outer border reads as "one blob split by
+  // share", distinct from real child tiles. Faded with the bg layer.
+  const segs = style.segments
+  if (segs && segs.length > 1 && !hasKids && !dust && Math.min(w, h) >= 18) {
+    const segInset = shared ? Math.max(1, 2 * edge) : 3
+    const gap = 1
+    const horiz = w >= h // slice along the longer axis
+    const span = (horiz ? cw : ch) - 2 * segInset - gap * (segs.length - 1)
+    if (span >= segs.length * 2) {
+      const total = segs.reduce((s, x) => s + x.frac, 0) || 1
+      let at = segInset
+      for (const seg of segs) {
+        const len = (seg.frac / total) * span
+        const fill = rgbaAt(seg.color, alpha)
+        if (fill) {
+          ctx.fillStyle = fill
+          ctx.beginPath()
+          if (horiz) roundRect(ctx, x + at, y + segInset, len, ch - 2 * segInset - 2, 2)
+          else roundRect(ctx, x + segInset, y + at, cw - 2 * segInset - 2, len, 2)
+          ctx.fill()
+        }
+        at += len + gap
+      }
+    }
+  }
+
   // Label: name (+ inline size when there's room). Ink stays full-strength.
   if (showLbl) {
     const ink = rgbaAt(style.ink, 1) ?? 'rgba(230, 230, 238, 1)'
@@ -311,6 +339,13 @@ function paintCell<T>(ctx: CanvasRenderingContext2D, cell: PlacedCell<T>, o: Pai
     }
     ctx.restore()
   }
+}
+
+/** Add a rounded-rect subpath (falls back to a plain rect where unsupported). */
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  if (w <= 0 || h <= 0) return
+  if (typeof ctx.roundRect === 'function') ctx.roundRect(x, y, w, h, Math.min(r, w / 2, h / 2))
+  else ctx.rect(x, y, w, h)
 }
 
 /** Truncate `text` with an ellipsis to fit `maxW` px in the current ctx font. */
