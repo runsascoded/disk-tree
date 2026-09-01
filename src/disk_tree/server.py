@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime
 
 import pandas as pd
-from flask import Flask, jsonify, redirect, request, g, Response, send_from_directory, url_for
+from flask import Flask, jsonify, redirect, request, g, Response, send_file, send_from_directory, url_for
 from flask_cors import CORS
 
 from disk_tree import config as _config
@@ -2063,21 +2063,25 @@ def files_get():
             resp.status_code = 416
             resp.headers['Content-Range'] = f'bytes */{file_size}'
             return resp
-        with open(path, 'rb') as f:
-            f.seek(start)
-            data = f.read(end - start + 1)
+        try:
+            with open(path, 'rb') as f:
+                f.seek(start)
+                data = f.read(end - start + 1)
+        except PermissionError:
+            return jsonify({'error': 'permission denied'}), 403
         resp = Response(data, status=206, mimetype=ctype)
         resp.headers['Content-Range'] = f'bytes {start}-{end}/{file_size}'
         resp.headers['Accept-Ranges'] = 'bytes'
         resp.headers['Content-Length'] = str(len(data))
         return resp
 
-    with open(path, 'rb') as f:
-        data = f.read()
-    resp = Response(data, mimetype=ctype)
-    resp.headers['Accept-Ranges'] = 'bytes'
-    resp.headers['Content-Length'] = str(len(data))
-    return resp
+    # Plain GET: stream the whole file (send_file, not read() into memory — a
+    # multi-GB blob would otherwise spike RAM). It sets Content-Length and,
+    # with conditional=True, honors a Range itself as a fallback.
+    try:
+        return send_file(path, mimetype=ctype, conditional=True)
+    except PermissionError:
+        return jsonify({'error': 'permission denied'}), 403
 
 
 @app.route('/api/reveal', methods=['POST'])
