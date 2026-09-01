@@ -282,6 +282,43 @@ describe('<Treemap>', () => {
       }
     })
 
+    it('foldControl slider scales the fold thresholds live', () => {
+      const restore = withLayout()
+      try {
+        // Dominant cell + 20 tiny siblings. At 400×300 (scale ≈ 11.54) each
+        // tiny cell is ~231px²: below minCellArea 300 by default (they fold
+        // into one dust tile — collectively wide enough to draw a hatch),
+        // above it at the finest slider setting (×0.25 → 75) so they render as
+        // their own cells.
+        const foldTree: Node = {
+          n: 'root',
+          size: 10_400,
+          children: [
+            { n: 'big', size: 10_000 },
+            ...Array.from({ length: 20 }, (_, i) => ({ n: `t${i}`, size: 20 })),
+          ],
+        }
+        const cells = (c: HTMLElement) => c.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')
+        // The dust tile carries a canvas; a real cell does not — so the canvas
+        // count is the number of folded tiles.
+        const dustTiles = (c: HTMLElement) => c.querySelectorAll('.dt-treemap-map > .dt-treemap-cell canvas')
+        const { container } = render(
+          <Treemap root={foldTree} {...accessors} foldControl minCellArea={300} minCellSide={null} />,
+        )
+        // Default (multiplier 1): the six tiny siblings fold into one dust tile.
+        expect(cells(container).length).toBe(2)
+        expect(dustTiles(container).length).toBe(1)
+        // Drag to the finest setting (value 1 → multiplier 0.25): the tiny
+        // siblings drop below the lowered threshold and render individually.
+        const slider = container.querySelector('.dt-treemap-fold input') as HTMLInputElement
+        fireEvent.change(slider, { target: { value: '1' } })
+        expect(cells(container).length).toBe(21)
+        expect(dustTiles(container).length).toBe(0)
+      } finally {
+        restore()
+      }
+    })
+
     it('callback decides per subtree, with the children\'s laid-out density', () => {
       const restore = withLayout()
       try {

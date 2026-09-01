@@ -247,6 +247,14 @@ export interface TreemapProps<T> {
    * Only applies to the built-in fold (no `mergeSmall`). Default: true.
    */
   dustTexture?: boolean
+  /**
+   * Render a "detail" slider in the chrome bar that scales the fold thresholds
+   * live (`minCellArea` and `minCellSide`), so a viewer can trade legibility
+   * against completeness without a code change — drag toward *fine* to split
+   * the dust back into cells, toward *coarse* to fold more away. Seeds at the
+   * given thresholds (multiplier 1). Requires `chrome`. Default: false.
+   */
+  foldControl?: boolean
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -396,7 +404,14 @@ export function Treemap<T>({
   borderWidth = defaultBorderWidth,
   edgeContrast = true,
   dustTexture = true,
+  foldControl = false,
 }: TreemapProps<T>) {
+  // Live fold-threshold multiplier driven by the optional "detail" slider:
+  // >1 folds more (coarser), <1 folds less (finer). Scales area linearly and
+  // the short-side threshold by its square root (side ~ √area).
+  const [foldMul, setFoldMul] = useState(1)
+  const effMinCellArea = minCellArea == null ? null : minCellArea * foldMul
+  const effMinCellSide = minCellSide == null ? null : minCellSide * Math.sqrt(foldMul)
   const [pathState, setPathState] = useState<T[]>(initialPath?.[0] === root ? initialPath : [root])
   const controlled = pathProp !== undefined
   const path = controlled && pathProp[0] === root ? pathProp : pathState
@@ -577,11 +592,11 @@ export function Treemap<T>({
   // Fold small-area items at any level, before layout.
   const fold = useCallback(
     (raw: (T | FoldedNode<T>)[], w: number, h: number): (T | FoldedNode<T>)[] => {
-      if (minCellArea == null) return raw
+      if (effMinCellArea == null) return raw
       const sz = (it: T | FoldedNode<T>) => (isFolded(it) ? it.size : getSize(it))
-      return foldSmall<T | FoldedNode<T>>(raw, w, h, sz, mergeItems, minCellArea)
+      return foldSmall<T | FoldedNode<T>>(raw, w, h, sz, mergeItems, effMinCellArea)
     },
-    [getSize, minCellArea, mergeItems],
+    [getSize, effMinCellArea, mergeItems],
   )
 
   // Foldable children of the currently-viewed node.
@@ -597,13 +612,13 @@ export function Treemap<T>({
       // Area folding can't see a cell's short side, so a dominant sibling still
       // squeezes the rest into unhoverable slivers; fold those by geometry and
       // re-lay once (the merged tile lands in the remainder as a single cell).
-      if (minCellSide != null) {
-        const refolded = foldThin<T | FoldedNode<T>>(laid, minCellSide, mergeItems)
+      if (effMinCellSide != null) {
+        const refolded = foldThin<T | FoldedNode<T>>(laid, effMinCellSide, mergeItems)
         if (refolded) return squarify<T | FoldedNode<T>>(refolded, 0, 0, size.w, size.h, sz)
       }
       return laid
     },
-    [children, size, getSize, minCellSide, mergeItems],
+    [children, size, getSize, effMinCellSide, mergeItems],
   )
 
   // Background opacity at a given nesting depth. Applied per-cell to the
@@ -1062,6 +1077,25 @@ export function Treemap<T>({
           </span>
         </nav>
         {renderLegend && <div className="dt-treemap-legend">{renderLegend(node, path)}</div>}
+        {foldControl && (minCellArea != null || minCellSide != null) && (
+          <label
+            className="dt-treemap-fold"
+            title="Detail: fold fewer cells (fine) ↔ more (coarse)"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', fontSize: '0.8em', opacity: 0.75 }}
+          >
+            <span>detail</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.02}
+              // Right = finer (lower multiplier); left = coarser (higher).
+              value={(2 - Math.log2(foldMul)) / 4}
+              onChange={e => setFoldMul(2 ** (2 - 4 * +e.target.value))}
+              style={{ width: 72 }}
+            />
+          </label>
+        )}
         {fullscreen && (
           <button
             className="dt-treemap-fs"
