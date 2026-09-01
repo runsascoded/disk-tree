@@ -319,6 +319,43 @@ describe('<Treemap>', () => {
       }
     })
 
+    it('remainderTail widens a dominated tail vs. plain squarify', () => {
+      const restore = withLayout(400, 300)
+      try {
+        // One dominant child + a five-cell tail that plain squarify squeezes
+        // into thin full-height slivers. Folding off so both layouts keep all
+        // six cells (else foldThin would collapse the default's slivers).
+        const remTree: Node = {
+          n: 'root',
+          size: 10_000,
+          children: [
+            { n: 'big', size: 9_875 },
+            { n: 'a', size: 40 }, { n: 'b', size: 30 }, { n: 'c', size: 25 },
+            { n: 'd', size: 18 }, { n: 'e', size: 12 },
+          ],
+        }
+        const widths = (c: HTMLElement) =>
+          rootCells(c).map(el => px(el.style.width)).sort((x, y) => x - y)
+        const plain = render(
+          <Treemap root={remTree} {...accessors} minCellArea={null} minCellSide={null} />,
+        )
+        const rem = render(
+          <Treemap root={remTree} {...accessors} minCellArea={null} minCellSide={null} remainderTail />,
+        )
+        const wPlain = widths(plain.container)
+        const wRem = widths(rem.container)
+        // Same six cells either way.
+        expect(wPlain.length).toBe(6)
+        expect(wRem.length).toBe(6)
+        // The narrowest tail cell is wider under the remainder band…
+        expect(wRem[0]).toBeGreaterThan(wPlain[0])
+        // …and the dominant cell is a little narrower (area traded to the tail).
+        expect(wRem[5]).toBeLessThan(wPlain[5])
+      } finally {
+        restore()
+      }
+    })
+
     it('callback decides per subtree, with the children\'s laid-out density', () => {
       const restore = withLayout()
       try {
