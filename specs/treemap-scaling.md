@@ -43,9 +43,20 @@ Large maps should paint big-to-small so the first frame is instant:
 
 This is orthogonal to the hybrid split and buys perceived performance even before a full canvas rewrite. `ResizeObserver`-driven re-lays should debounce and repaint progressively rather than synchronously.
 
-### 3. Fully canvas-backed treemap (medium-term)
+### 3. Fully canvas-backed treemap (medium-term) — **in progress; approach pivoted**
 
 One `<canvas>` (or a small fixed set of layers) draws the entire map; DOM holds only the chrome bar, tooltip, and overlays. This is the "see how performant it can get" target — saving 1e4–1e6 DOM nodes.
+
+**Pivot (2026-09-01): go here directly, skip the §1 hybrid.** The hybrid (canvas fields injected into a DOM tree) means two rendering models interleaved and hit-testing split between DOM events and canvas rewalks — fiddly to reason about and to test. A *standalone canvas renderer, swapped in as a whole*, is one code path, one paint loop, one hit-test — the "battle-tested renderer you reuse." So §1 is superseded by a clean renderer switch, and §2 (progressive) folds into the canvas paint pass.
+
+**Architecture — a `renderer` prop, not a second component.** All of `<Treemap>`'s complexity is renderer-agnostic — drill state (controlled/uncontrolled), lazy-load (`fetched`/`pending`/`failed`), fold/layout, the tooltip/pin machinery, keyboard, resize, and the chrome bar. Only the recursive `cell()` (paint + hit-test) is renderer-specific, and there the layout math is *entangled* with the div emission. So:
+
+- **`renderer?: 'dom' | 'canvas'`** (default `'dom'` — zero change for every current consumer). It swaps only the map body; everything around it is written once.
+- **Extract `layoutCells()`** (`layout.ts`, pure): the tree → a placed-cell tree (`PlacedCell<T>`: absolute `x/y/w/h`, `depth`, `mode`, `boxW/boxH`, `edge`, `dust`, `showLbl`, `children`) — geometry + node identity only, no style, no paint. Written to match `cell()`'s formulas exactly so the DOM path can later adopt it too (single source of truth for layout). `FoldedNode`/`isFolded` move here.
+- **Lift the hit→action closures** (`showTip`/`onClick`/`dustHitAt`) to operate on `(node, path)` so a canvas hit and a DOM event call the same handler.
+- **`<TreemapCanvas>`** paints the placed tree to one canvas (fill+fade, `contrastEdge` stroke, dust via a shared `drawDust(ctx,…)` factored out of `DustHatch`, labels above a size threshold) and hit-tests the retained placed tree (deepest-hit-wins), reporting `(node, path)` up.
+
+Feature parity is staged: first cut covers fill/edge/dust/labels/drill/tooltip; segments (makeup stripes), chain-collapse, `cellHref` anchors, and the lazy-load overlay follow. `cellHref`/Vimium/crawlability is the one thing canvas can't do natively — keep a thin off-screen anchor list mirroring the visible drillable cells (the a11y contract below).
 
 Design decisions to settle in this spec before building:
 
@@ -62,7 +73,7 @@ Shipped as `foldControl` (§What shipped). The canvas modes should keep honoring
 
 ## Sequencing
 
-1 and 2 are independent, near-term, and low-risk — they extend the shipped hybrid without changing the interaction model, and each stands alone. 3 is the big bet and should not start until 1 has proven the hybrid hit-testing at scale (it already works for one dust tile; §1 stresses it across many fields). Write the color-id-buffer hit-test as a standalone experiment first and measure it against the DOM baseline before committing to the rewrite.
+**Superseded by the 2026-09-01 pivot.** The original plan sequenced §1 (hybrid) → §3 (rewrite). We go to §3 directly via the `renderer` prop, since a whole-map canvas swap is *simpler* than the hybrid, not riskier: the DOM path is untouched (default), so the canvas path can land incrementally behind the flag and be measured against the DOM baseline before it's ever a default. The color-id-buffer hit-test is a later optimization — the first cut hit-tests the retained placed-cell tree (deepest-hit-wins, O(depth) per event, exact), which is enough to prove the renderer; swap in the color buffer only if pointer-move cost shows up in the mgu-scale profile.
 
 ## Consumers
 

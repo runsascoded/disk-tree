@@ -747,3 +747,35 @@ describe('<Treemap> depth fade', () => {
     }
   })
 })
+
+describe('<Treemap renderer>', () => {
+  it("default 'dom' renders DOM cells and no canvas", () => {
+    const restore = withLayout()
+    try {
+      const { container } = render(<Treemap root={tree} {...accessors} minCellArea={null} />)
+      expect(container.querySelector('.dt-treemap-map canvas')).toBe(null)
+      expect(cellLabels(container)).toEqual(['foo', 'bar'])
+    } finally {
+      restore()
+    }
+  })
+
+  it("'canvas' renders one canvas and no DOM cells", () => {
+    const restore = withLayout()
+    try {
+      const { container } = render(
+        <Treemap root={tree} {...accessors} minCellArea={null} renderer="canvas" />,
+      )
+      expect(container.querySelectorAll('.dt-treemap-map canvas')).toHaveLength(1)
+      expect(container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')).toHaveLength(0)
+    } finally {
+      restore()
+    }
+  })
+
+  it("'canvas' still renders the shared chrome (crumbs + size)", () => {
+    render(<Treemap root={tree} {...accessors} renderer="canvas" formatSize={n => `${n} B`} />)
+    expect(screen.getByText('root')).toBeInTheDocument()
+    expect(screen.getByText(/300 B/)).toBeInTheDocument()
+  })
+})
