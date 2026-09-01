@@ -52,6 +52,18 @@ export interface TreemapCanvasProps<T> {
 }
 
 const CONTAINER_RGB = `rgb(${CONTAINER_BG[0]}, ${CONTAINER_BG[1]}, ${CONTAINER_BG[2]})`
+/** First (synchronous) frame's paint budget — small maps finish inside it. */
+const SYNC_BUDGET_MS = 8
+/** Each subsequent animation frame's paint budget, leaving headroom in 16ms. */
+const FRAME_BUDGET_MS = 10
+
+interface PaintOpts<T> {
+  styleOpts: StyleOpts<T>
+  getSize: (n: T) => number
+  getLabel: (n: T) => string
+  formatSize: (n: number) => string
+  dustTexture: boolean
+}
 
 /** A CSS color → `rgba()` at `alpha`, or null if it isn't a parseable solid
  * (a `var()`/gradient/`color-mix`) so the caller can skip or fall back. */
@@ -77,9 +89,23 @@ export function TreemapCanvas<T>({
   onLeave,
 }: TreemapCanvasProps<T>) {
   const ref = useRef<HTMLCanvasElement>(null)
-  // Parent-first flat list for painting; the same tree hit-tests deepest-first.
-  const flat = useMemo(() => flattenPlaced(cells), [cells])
+  // Biggest-first paint order. A container's rect always contains its
+  // descendants', so its area strictly exceeds theirs — area-descending is
+  // therefore a valid ancestor-before-descendant order (children paint over
+  // their parent) *and* makes the first frame the whole map's skeleton, refined
+  // by later frames. The tree (`cells`) still hit-tests deepest-first.
+  const flat = useMemo(() => {
+    const f = flattenPlaced(cells)
+    f.sort((a, b) => b.w * b.h - a.w * a.h)
+    return f
+  }, [cells])
 
+  // Progressive paint: the first frame paints synchronously up to a time budget
+  // — small/medium maps finish here (identical to a one-shot paint, and correct
+  // in a backgrounded tab where rAF is paused) — and any remainder streams in
+  // over subsequent animation frames, so a 1e4–1e5-cell map never blocks the
+  // main thread. The canvas is never cleared between chunks (they accumulate);
+  // a layout/size/style change re-runs the effect, which clears and restarts.
   useLayoutEffect(() => {
     const cv = ref.current
     if (!cv || width <= 0 || height <= 0) return
@@ -94,104 +120,27 @@ export function TreemapCanvas<T>({
     ctx.fillStyle = CONTAINER_RGB
     ctx.fillRect(0, 0, width, height)
 
-    for (const cell of flat) {
-      const { x, y, w, h, depth, mode, edge, dust, folded, showLbl, hasKids } = cell
-      const shared = mode === 'shared'
-      // Cell box: gaps leaves a 2px (1px dust) gutter to the container ground;
-      // shared fills the exact rect.
-      const cw = shared ? w : w - (dust ? 1 : 2)
-      const ch = shared ? h : h - (dust ? 1 : 2)
-      if (cw <= 0 || ch <= 0) continue
-
-      const { style, builtinEdge } = resolveCellStyle(cell, styleOpts)
-      const fade = styleOpts.fadeAt(depth)
-      const alpha = fade * (style.opacity ?? 1)
-
-      // Opaque base under the translucent bg layer (matches the DOM cell's
-      // container-color base): so a faded bg recedes toward the container tone.
-      ctx.fillStyle = CONTAINER_RGB
-      ctx.fillRect(x, y, cw, ch)
-
-      // Faded bg layer, inset by the half-stroke in shared mode.
-      const inset = shared ? edge : 0
-      const bx = x + inset
-      const by = y + inset
-      const bw = cw - 2 * inset
-      const bh = ch - 2 * inset
-      if (bw > 0 && bh > 0) {
-        const fill = rgbaAt(style.bg, alpha)
-        if (fill) {
-          ctx.fillStyle = fill
-          ctx.fillRect(bx, by, bw, bh)
-        }
-      }
-
-      // Shared edge: this cell's half-stroke ring (contrast default or pinned).
-      if (shared && edge > 0) {
-        const stroke = style.edge ? rgbaAt(style.edge, 1) : builtinEdge ? rgbaAt(builtinEdge, 1) : null
-        if (stroke) {
-          ctx.strokeStyle = stroke
-          ctx.lineWidth = edge
-          ctx.strokeRect(x + edge / 2, y + edge / 2, cw - edge, ch - edge)
-        }
-      }
-
-      // Dust tail: dashed frame + the tightening cross-hatch.
-      if (folded && dustTexture && Math.min(w, h) >= 6) {
-        if (Math.min(w, h) >= 8) {
-          ctx.strokeStyle = 'rgba(150, 150, 165, 0.55)'
-          ctx.lineWidth = 1
-          ctx.setLineDash([2, 2])
-          ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1)
-          ctx.setLineDash([])
-        }
-        const count = (cell.node as FoldedNode<T>).count
-        drawDust(ctx, bx, by, bw, bh, count)
-      }
-
-      // Label: name (+ inline size when there's room). Ink stays full-strength.
-      if (showLbl) {
-        const ink = rgbaAt(style.ink, 1) ?? 'rgba(230, 230, 238, 1)'
-        const small = w < 64
-        const fs = small ? 11.5 : 13.5
-        ctx.font = `${fs}px system-ui, -apple-system, sans-serif`
-        ctx.textBaseline = 'top'
-        ctx.fillStyle = ink
-        const label = folded
-          ? `(+${(cell.node as FoldedNode<T>).count})`
-          : cell.chainLabels
-            ? (cell.chainLabels.length > 3
-                ? `${cell.chainLabels[0]}/…/${cell.chainLabels[cell.chainLabels.length - 1]}`
-                : cell.chainLabels.join('/'))
-            : getLabel(cell.node as T)
-        // Clip text to the cell so long names don't bleed across neighbors.
-        ctx.save()
-        ctx.beginPath()
-        ctx.rect(x, y, cw, ch)
-        ctx.clip()
-        const pad = 4
-        const kidSize = folded ? (cell.node as FoldedNode<T>).size : getSize(cell.node as T)
-        const inlineSize = (hasKids || h <= 34) && w > 90
-        let nameMax = cw - 2 * pad
-        if (inlineSize) {
-          const szText = formatSize(kidSize)
-          const szW = ctx.measureText(szText).width
-          nameMax -= szW + 8
-          ctx.globalAlpha = 0.75
-          ctx.fillText(szText, x + cw - pad - szW, y + 2)
-          ctx.globalAlpha = 1
-        }
-        ctx.fillText(fit(ctx, label, Math.max(0, nameMax)), x + pad, y + 2)
-        // Second-line size for a tall leaf (name owns the first line).
-        if (!hasKids && !inlineSize && h > 34 && w > 40) {
-          ctx.globalAlpha = 0.75
-          ctx.font = `11.5px system-ui, -apple-system, sans-serif`
-          ctx.fillText(fit(ctx, formatSize(kidSize), cw - 2 * pad), x + pad, y + 2 + fs + 3)
-          ctx.globalAlpha = 1
-        }
-        ctx.restore()
+    const opts: PaintOpts<T> = { styleOpts, getSize, getLabel, formatSize, dustTexture }
+    let i = 0
+    let raf = 0
+    // Paint until `budgetMs` elapses (clock read every 256 cells to keep it
+    // cheap) or the list is exhausted.
+    const paintUntil = (budgetMs: number) => {
+      const start = performance.now()
+      let n = 0
+      while (i < flat.length) {
+        paintCell(ctx, flat[i], opts)
+        i++
+        if (++n >= 256) { n = 0; if (performance.now() - start >= budgetMs) return }
       }
     }
+    paintUntil(SYNC_BUDGET_MS)
+    const step = () => {
+      paintUntil(FRAME_BUDGET_MS)
+      if (i < flat.length) raf = requestAnimationFrame(step)
+    }
+    if (i < flat.length) raf = requestAnimationFrame(step)
+    return () => { if (raf) cancelAnimationFrame(raf) }
   }, [flat, width, height, styleOpts, getSize, getLabel, formatSize, dustTexture])
 
   /** Squarify a folded tile's children over its box, to resolve a dust hover. */
@@ -259,6 +208,109 @@ export function TreemapCanvas<T>({
       }}
     />
   )
+}
+
+/**
+ * Paint one placed cell: opaque base, faded bg layer, shared edge stroke, dust
+ * hatch, and label — the canvas equivalent of one DOM `.dt-treemap-cell`.
+ * Standalone so the progressive loop can call it per cell across frames.
+ */
+function paintCell<T>(ctx: CanvasRenderingContext2D, cell: PlacedCell<T>, o: PaintOpts<T>): void {
+  const { styleOpts, getSize, getLabel, formatSize, dustTexture } = o
+  const { x, y, w, h, depth, mode, edge, dust, folded, showLbl, hasKids } = cell
+  const shared = mode === 'shared'
+  // Cell box: gaps leaves a 2px (1px dust) gutter to the container ground;
+  // shared fills the exact rect.
+  const cw = shared ? w : w - (dust ? 1 : 2)
+  const ch = shared ? h : h - (dust ? 1 : 2)
+  if (cw <= 0 || ch <= 0) return
+
+  const { style, builtinEdge } = resolveCellStyle(cell, styleOpts)
+  const fade = styleOpts.fadeAt(depth)
+  const alpha = fade * (style.opacity ?? 1)
+
+  // Opaque base under the translucent bg layer (matches the DOM cell's
+  // container-color base): so a faded bg recedes toward the container tone.
+  ctx.fillStyle = CONTAINER_RGB
+  ctx.fillRect(x, y, cw, ch)
+
+  // Faded bg layer, inset by the half-stroke in shared mode.
+  const inset = shared ? edge : 0
+  const bx = x + inset
+  const by = y + inset
+  const bw = cw - 2 * inset
+  const bh = ch - 2 * inset
+  if (bw > 0 && bh > 0) {
+    const fill = rgbaAt(style.bg, alpha)
+    if (fill) {
+      ctx.fillStyle = fill
+      ctx.fillRect(bx, by, bw, bh)
+    }
+  }
+
+  // Shared edge: this cell's half-stroke ring (contrast default or pinned).
+  if (shared && edge > 0) {
+    const stroke = style.edge ? rgbaAt(style.edge, 1) : builtinEdge ? rgbaAt(builtinEdge, 1) : null
+    if (stroke) {
+      ctx.strokeStyle = stroke
+      ctx.lineWidth = edge
+      ctx.strokeRect(x + edge / 2, y + edge / 2, cw - edge, ch - edge)
+    }
+  }
+
+  // Dust tail: dashed frame + the tightening cross-hatch.
+  if (folded && dustTexture && Math.min(w, h) >= 6) {
+    if (Math.min(w, h) >= 8) {
+      ctx.strokeStyle = 'rgba(150, 150, 165, 0.55)'
+      ctx.lineWidth = 1
+      ctx.setLineDash([2, 2])
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1)
+      ctx.setLineDash([])
+    }
+    drawDust(ctx, bx, by, bw, bh, (cell.node as FoldedNode<T>).count)
+  }
+
+  // Label: name (+ inline size when there's room). Ink stays full-strength.
+  if (showLbl) {
+    const ink = rgbaAt(style.ink, 1) ?? 'rgba(230, 230, 238, 1)'
+    const fs = w < 64 ? 11.5 : 13.5
+    ctx.font = `${fs}px system-ui, -apple-system, sans-serif`
+    ctx.textBaseline = 'top'
+    ctx.fillStyle = ink
+    const label = folded
+      ? `(+${(cell.node as FoldedNode<T>).count})`
+      : cell.chainLabels
+        ? (cell.chainLabels.length > 3
+            ? `${cell.chainLabels[0]}/…/${cell.chainLabels[cell.chainLabels.length - 1]}`
+            : cell.chainLabels.join('/'))
+        : getLabel(cell.node as T)
+    // Clip text to the cell so long names don't bleed across neighbors.
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(x, y, cw, ch)
+    ctx.clip()
+    const pad = 4
+    const kidSize = folded ? (cell.node as FoldedNode<T>).size : getSize(cell.node as T)
+    const inlineSize = (hasKids || h <= 34) && w > 90
+    let nameMax = cw - 2 * pad
+    if (inlineSize) {
+      const szText = formatSize(kidSize)
+      const szW = ctx.measureText(szText).width
+      nameMax -= szW + 8
+      ctx.globalAlpha = 0.75
+      ctx.fillText(szText, x + cw - pad - szW, y + 2)
+      ctx.globalAlpha = 1
+    }
+    ctx.fillText(fit(ctx, label, Math.max(0, nameMax)), x + pad, y + 2)
+    // Second-line size for a tall leaf (name owns the first line).
+    if (!hasKids && !inlineSize && h > 34 && w > 40) {
+      ctx.globalAlpha = 0.75
+      ctx.font = `11.5px system-ui, -apple-system, sans-serif`
+      ctx.fillText(fit(ctx, formatSize(kidSize), cw - 2 * pad), x + pad, y + 2 + fs + 3)
+      ctx.globalAlpha = 1
+    }
+    ctx.restore()
+  }
 }
 
 /** Truncate `text` with an ellipsis to fit `maxW` px in the current ctx font. */

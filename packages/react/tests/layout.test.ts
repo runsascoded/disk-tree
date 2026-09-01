@@ -96,6 +96,23 @@ describe('flattenPlaced', () => {
   it('emits parents before their children (paint order)', () => {
     expect(flattenPlaced(place()).map(label)).toEqual(['foo', 'a.txt', 'b.txt', 'bar'])
   })
+
+  it('area-descending sort keeps every parent before its children', () => {
+    // The canvas renderer paints biggest-first; this is only a valid
+    // ancestor-before-descendant order because a container's rect strictly
+    // contains its descendants', so its area exceeds theirs.
+    const cells = place()
+    const flat = flattenPlaced(cells)
+    flat.sort((a, b) => b.w * b.h - a.w * a.h)
+    const idx = new Map(flat.map((c, i) => [c, i]))
+    const check = (c: PlacedCell<N>) => {
+      for (const k of c.children) {
+        expect(idx.get(c)!).toBeLessThan(idx.get(k)!)
+        check(k)
+      }
+    }
+    cells.forEach(check)
+  })
 })
 
 describe('hitTest', () => {

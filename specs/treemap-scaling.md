@@ -34,14 +34,31 @@ Payoff: the node count drops from "every cell" to "the big cells + one canvas pe
 
 Open question: labels. A canvas field can draw its few largest members' labels itself (measure text, skip when it won't fit), which we already do implicitly by leaving the big cells as divs. Decide whether the canvas ever draws text or stays purely areal.
 
-### 2. Progressive rendering (near-term, independent)
+### 2. Progressive rendering — **shipped (canvas), 2026-09-01**
 
-Large maps should paint big-to-small so the first frame is instant:
-- Frame 1: the big cells (divs) + a flat fill for each dense field.
-- Frame 2 (rAF): the dense-field canvases (dust/hatch) fill in.
-- Frame 3+: any deferred detail (subtitles, lens shading).
+`TreemapCanvas` paints biggest-cell-first, budgeted: the first frame paints
+synchronously up to an 8 ms budget (small/medium maps finish there, and it's
+correct in a backgrounded tab where rAF is paused), and any remainder streams
+over subsequent animation frames at ~10 ms each, so a 1e4–1e5-cell map never
+blocks the main thread. Biggest-first is free and exact: a container's rect
+contains its descendants', so area-descending *is* an ancestor-before-descendant
+order (children paint over their parent) — so the first frame is the whole map's
+skeleton, refined by later frames, in one flat sorted pass with no special
+casing. The canvas isn't cleared between chunks (they accumulate); a
+layout/size/style change re-runs the paint from a clean clear. Hit-testing works
+off the retained tree immediately, before paint finishes.
 
-This is orthogonal to the hybrid split and buys perceived performance even before a full canvas rewrite. `ResizeObserver`-driven re-lays should debounce and repaint progressively rather than synchronously.
+**Finding — layout is the next floor, not paint.** With paint bounded, the
+`flushSync` first-frame window at 40k un-folded cells dropped 1072 → ~700 ms,
+and the residual is now `layoutCells`/`squarify` (a single squarify of 40k
+sibling rects), not paint. Two things keep this from mattering yet: (a) real
+maps fold the tail (`minCellArea`), so the laid+drawn count is bounded by
+viewport/threshold, not the raw node count — you never squarify 40k *visible*
+cells; (b) it's a flat-tree artifact (no nesting to defer). A faster or
+incremental layout (lay the top level + big cells first, defer deep subtree
+layout — which dovetails with the existing lazy `loadChildren` drill model) is a
+separate lever if a real folded map ever shows layout cost. `ResizeObserver`
+re-lays already repaint progressively through this same path.
 
 ### 3. Fully canvas-backed treemap (medium-term) — **in progress; approach pivoted**
 
@@ -105,10 +122,11 @@ holds at exactly **one** DOM node vs the DOM renderer's 2–5× cell count (up t
 resize/drill. Nested containers cost the DOM renderer ~5× more per cell (340ms
 for 1,000 nested vs 67ms flat); canvas is indifferent to nesting. The DOM
 renderer's super-linear curve makes a 12k-cell real map a ~2.3s freeze (paint
-excluded); canvas is ~0.5s. Canvas is not yet *instant* at the top end (~1s at
-40k) — that's what §2 progressive rendering buys next, and layout (`layoutCells`)
-is a shrinkable share of it. Color-id-buffer hit-testing (§3) stays deferred:
-pointer-move on the retained tree hasn't shown up as a cost.
+excluded); canvas is ~0.5s. Canvas was not yet *instant* at the top end (~1s at
+40k) — §2 progressive rendering (now shipped) bounds the first frame to its 8 ms
+paint budget and streams the rest, leaving layout (`layoutCells`) as the residual
+first-frame cost (see §2's finding). Color-id-buffer hit-testing (§3) stays
+deferred: pointer-move on the retained tree hasn't shown up as a cost.
 
 ## Sequencing
 

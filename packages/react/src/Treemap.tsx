@@ -690,6 +690,15 @@ export function Treemap<T>({
     showLabels, collapseChains, borderWidth, fold, layTiles, tilingFor,
   ])
 
+  // Stable style bundle for the canvas paint. Memoized so the paint effect
+  // isn't restarted by the component's own hover/tooltip re-renders — those
+  // change none of these inputs (consumer props keep their identity across
+  // internal state changes), so a hover never re-triggers a full repaint.
+  const styleOpts = useMemo<StyleOpts<T>>(
+    () => ({ colorForCell, lens, getLabel, topLevelSlot, defaultSlots: DEFAULT_SLOTS, dustTexture, edgeContrast, fadeAt }),
+    [colorForCell, lens, getLabel, topLevelSlot, dustTexture, edgeContrast, fadeAt],
+  )
+
   // Hit → action, shared by both renderers: a DOM cell's event and a canvas
   // pointer hit resolve to a `(node, path, key)` and route through here, so the
   // tooltip/pin/drill behavior is written once.
@@ -1186,10 +1195,7 @@ export function Treemap<T>({
                 cells={placedCells}
                 width={size.w}
                 height={size.h}
-                styleOpts={{
-                  colorForCell, lens, getLabel, topLevelSlot,
-                  defaultSlots: DEFAULT_SLOTS, dustTexture, edgeContrast, fadeAt,
-                } as StyleOpts<T>}
+                styleOpts={styleOpts}
                 getSize={getSize}
                 getLabel={getLabel}
                 formatSize={formatSize}
