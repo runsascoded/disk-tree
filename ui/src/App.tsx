@@ -9,6 +9,7 @@ import { ScanDetails } from './components/ScanDetails'
 import { S3BucketList } from './components/S3BucketList'
 import { RecentList } from './components/RecentList'
 import { CompareView } from './components/CompareView'
+import { BrowsePage } from './components/BrowsePage'
 import './App.scss'
 import type { ReactNode } from 'react'
 import { useUnits } from './utils/units'
@@ -45,6 +46,9 @@ function App() {
               <Route path="/ssh/*" element={<ScanDetails />} />
               <Route path="/recent" element={<RecentList />} />
               <Route path="/compare/*" element={<CompareView />} />
+              {/* Half A phase-1 proof: raw browse via `<FileTree>` over the live
+                  API, beside the hand-rolled table (nothing retired yet). */}
+              <Route path="/browse/*" element={<BrowsePage />} />
             </Routes>
           </div>
           <ShortcutsModal
