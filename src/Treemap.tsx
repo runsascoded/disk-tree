@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { DEFAULT_PALETTE } from './colors'
+import { contrastEdge, DEFAULT_PALETTE } from './colors'
+import { DustHatch } from './DustHatch'
 import { foldSmall, foldThin, squarify } from './squarify'
 import { useHoverPin } from './useHoverPin'
 
@@ -226,6 +227,34 @@ export interface TreemapProps<T> {
    * (<14px) are capped at 1px.
    */
   borderWidth?: (depth: number, ctx: CellDims) => number
+  /**
+   * In shared tiling, default each cell's half-stroke to a luminance-contrast
+   * color derived from its own face (dark stroke on light cells, light on
+   * dark) instead of the neutral `--dt-treemap-edge` gutter — so borders read
+   * on any palette, including grey-on-grey fields. Default: true. A per-cell
+   * `CellStyle.edge` from `colorForCell` still wins; a container cell whose
+   * face is an unparseable `var()` falls back to the gutter. Set `false` to
+   * keep the flat neutral gutter for every cell.
+   */
+  edgeContrast?: boolean
+  /**
+   * Render the default synthetic fold tile (the `(+n)` "(other)" stand-in) as
+   * a canvas cross-hatch whose rules tighten toward the lower-right and whose
+   * density scales with the folded count — reading as "dust" distinct from a
+   * real cell — instead of a flat grey block. Hovering the tile maps the
+   * cursor to the specific folded child under it (a squarify of the folded
+   * items), so the tail stays interrogable without one DOM node per item.
+   * Only applies to the built-in fold (no `mergeSmall`). Default: true.
+   */
+  dustTexture?: boolean
+  /**
+   * Render a "detail" slider in the chrome bar that scales the fold thresholds
+   * live (`minCellArea` and `minCellSide`), so a viewer can trade legibility
+   * against completeness without a code change — drag toward *fine* to split
+   * the dust back into cells, toward *coarse* to fold more away. Seeds at the
+   * given thresholds (multiplier 1). Requires `chrome`. Default: false.
+   */
+  foldControl?: boolean
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -373,7 +402,16 @@ export function Treemap<T>({
   fadeFloor = 0.75,
   tiling = 'gaps',
   borderWidth = defaultBorderWidth,
+  edgeContrast = true,
+  dustTexture = true,
+  foldControl = false,
 }: TreemapProps<T>) {
+  // Live fold-threshold multiplier driven by the optional "detail" slider:
+  // >1 folds more (coarser), <1 folds less (finer). Scales area linearly and
+  // the short-side threshold by its square root (side ~ √area).
+  const [foldMul, setFoldMul] = useState(1)
+  const effMinCellArea = minCellArea == null ? null : minCellArea * foldMul
+  const effMinCellSide = minCellSide == null ? null : minCellSide * Math.sqrt(foldMul)
   const [pathState, setPathState] = useState<T[]>(initialPath?.[0] === root ? initialPath : [root])
   const controlled = pathProp !== undefined
   const path = controlled && pathProp[0] === root ? pathProp : pathState
@@ -554,11 +592,11 @@ export function Treemap<T>({
   // Fold small-area items at any level, before layout.
   const fold = useCallback(
     (raw: (T | FoldedNode<T>)[], w: number, h: number): (T | FoldedNode<T>)[] => {
-      if (minCellArea == null) return raw
+      if (effMinCellArea == null) return raw
       const sz = (it: T | FoldedNode<T>) => (isFolded(it) ? it.size : getSize(it))
-      return foldSmall<T | FoldedNode<T>>(raw, w, h, sz, mergeItems, minCellArea)
+      return foldSmall<T | FoldedNode<T>>(raw, w, h, sz, mergeItems, effMinCellArea)
     },
-    [getSize, minCellArea, mergeItems],
+    [getSize, effMinCellArea, mergeItems],
   )
 
   // Foldable children of the currently-viewed node.
@@ -574,13 +612,13 @@ export function Treemap<T>({
       // Area folding can't see a cell's short side, so a dominant sibling still
       // squeezes the rest into unhoverable slivers; fold those by geometry and
       // re-lay once (the merged tile lands in the remainder as a single cell).
-      if (minCellSide != null) {
-        const refolded = foldThin<T | FoldedNode<T>>(laid, minCellSide, mergeItems)
+      if (effMinCellSide != null) {
+        const refolded = foldThin<T | FoldedNode<T>>(laid, effMinCellSide, mergeItems)
         if (refolded) return squarify<T | FoldedNode<T>>(refolded, 0, 0, size.w, size.h, sz)
       }
       return laid
     },
-    [children, size, getSize, minCellSide, mergeItems],
+    [children, size, getSize, effMinCellSide, mergeItems],
   )
 
   // Background opacity at a given nesting depth. Applied per-cell to the
@@ -645,6 +683,9 @@ export function Treemap<T>({
     // cell as an inset ring, the neighbor draws the other half.
     const bw = shared ? Math.min(borderWidth(depth, { w: r.w, h: r.h }), dust ? 1 : Infinity) : 0
     const edge = bw / 2
+    // Built-in adaptive half-stroke, computed once the cell's face is resolved
+    // (below). Filled after `style` is known.
+    let builtinEdge: string | null = null
     // Children canvas. Gaps mode pads 3px inside the cell; shared mode fills
     // to the cell's own half-stroke so the children's outer strokes meet it.
     // Their tiling mode is decided from a first layout's density, and the
@@ -686,7 +727,11 @@ export function Treemap<T>({
     if (explicit) {
       style = explicit
     } else if (folded) {
-      style = { bg: 'var(--dt-treemap-folded, #4a4a52)', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
+      // Dust texture wants a faint ground so the hatch reads on top; the flat
+      // fallback keeps the old solid block.
+      style = dustTexture
+        ? { bg: 'var(--dt-treemap-folded-ground, rgba(120, 120, 135, 0.12))', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
+        : { bg: 'var(--dt-treemap-folded, #4a4a52)', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
     } else {
       const top = kidPath[1] // path[0] = root; [1] is the top-level bucket-of-the-current-drill
       const slot = top ? topLevelSlot.get(getLabel(top)) : undefined
@@ -697,15 +742,48 @@ export function Treemap<T>({
     if (lens && !folded) {
       style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 }, style) ?? style
     }
+    // Adaptive edge default: only in shared mode, only when the consumer didn't
+    // pin one, and only for a parseable face (container `var()` faces fall
+    // through to the neutral gutter, keeping their thin-gutter look).
+    if (shared && edgeContrast && !style.edge) {
+      builtinEdge = contrastEdge(style.bg, fadeAt(depth))
+    }
 
     const cellKey = folded
       ? `__folded_${depth}_${r.x}_${r.y}`
       : idFor(kid as T, kidPath)
 
+    // Position→child hit map for the dust tile: a squarify of the folded items
+    // over the cell box, so hovering/clicking the hatch resolves to a specific
+    // folded item. Guarded by item count so a very long tail doesn't re-lay on
+    // every render; larger tails stay drawn but non-interrogable.
+    const foldedNode = folded ? (kid as FoldedNode<T>) : null
+    const dustHits = foldedNode && dustTexture && foldedNode.children.length > 1
+      && Math.min(r.w, r.h) >= 10 && foldedNode.children.length <= 4000
+      ? squarify<T>(foldedNode.children, 0, 0, boxW, boxH, getSize)
+      : null
+    /** Which folded item sits under a pointer event over the dust tile. */
+    const dustHitAt = (e: React.MouseEvent): { it: T; path: T[]; key: string } | null => {
+      if (!dustHits) return null
+      const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
+      const lx = e.clientX - box.left
+      const ly = e.clientY - box.top
+      const hit = dustHits.find(rc => lx >= rc.x && lx < rc.x + rc.w && ly >= rc.y && ly < rc.y + rc.h)
+      if (!hit) return null
+      const p = [...kidPath, hit.it]
+      return { it: hit.it, path: p, key: idFor(hit.it, p) }
+    }
+
     const showTip = (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (folded) return
       cancelTipClear()
+      if (folded) {
+        const hit = dustHitAt(e)
+        if (!hit) return
+        pin.hover(hit.key)
+        setTip(prev => (prev?.key === hit.key ? prev : { x: e.clientX, y: e.clientY, key: hit.key, node: hit.it, path: hit.path }))
+        return
+      }
       pin.hover(cellKey)
       // Anchor to the cell (frozen once per cell) instead of chasing the cursor:
       // a mouse-following tip can't be hovered into to click its contents.
@@ -718,7 +796,15 @@ export function Treemap<T>({
     const href = cellHref && !folded && kids.length === 0 ? cellHref(kid as T, kidPath) : undefined
     const onClick = (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (folded) return
+      if (folded) {
+        const hit = dustHitAt(e)
+        if (!hit) return
+        pin.togglePin(hit.key)
+        setPinnedTip(p =>
+          p?.key === hit.key ? null : { x: e.clientX, y: e.clientY, key: hit.key, node: hit.it, path: hit.path },
+        )
+        return
+      }
       if (href) {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return
         e.preventDefault()
@@ -768,7 +854,7 @@ export function Treemap<T>({
           // opt into brighter sibling separation via the var.
           // (boxShadow, not outline — :focus owns the outline.)
           boxShadow: shared
-            ? `inset 0 0 0 ${edge}px ${style.edge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
+            ? `inset 0 0 0 ${edge}px ${style.edge ?? builtinEdge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
             : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
           // Anchors must not fall through to the page's link color when the
           // consumer sets no ink.
@@ -801,10 +887,22 @@ export function Treemap<T>({
             inset: shared ? edge : 0,
             background: style.bg,
             ...(style.hatch && { backgroundImage: style.hatch }),
+            // Dashed frame marks the dust tile as not-a-real-cell.
+            ...(foldedNode && dustTexture && Math.min(r.w, r.h) >= 8 && {
+              border: '1px dashed var(--dt-treemap-folded-edge, rgba(150, 150, 165, 0.55))',
+              boxSizing: 'border-box' as const,
+            }),
             opacity: fadeAt(depth) * (style.opacity ?? 1),
             pointerEvents: 'none',
           }}
         >
+        {/* Dust hatch: the folded "(other)" tail, drawn as rules that tighten
+            toward the lower-right, density scaled by the folded count — a
+            texture distinct from real cells. Hit-detection (above) maps a
+            hover back to a specific folded item. */}
+        {foldedNode && dustTexture && Math.min(r.w, r.h) >= 6 && (
+          <DustHatch w={boxW} h={boxH} count={foldedNode.count} />
+        )}
         {/* Makeup stripes: a leaf/fold cell with a mixed composition renders
             proportional inset slices (longer axis) instead of one dominant
             blob. The `bg` frame showing through the inset + the single outer
@@ -979,6 +1077,25 @@ export function Treemap<T>({
           </span>
         </nav>
         {renderLegend && <div className="dt-treemap-legend">{renderLegend(node, path)}</div>}
+        {foldControl && (minCellArea != null || minCellSide != null) && (
+          <label
+            className="dt-treemap-fold"
+            title="Detail: fold fewer cells (fine) ↔ more (coarse)"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap', fontSize: '0.8em', opacity: 0.75 }}
+          >
+            <span>detail</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.02}
+              // Right = finer (lower multiplier); left = coarser (higher).
+              value={(2 - Math.log2(foldMul)) / 4}
+              onChange={e => setFoldMul(2 ** (2 - 4 * +e.target.value))}
+              style={{ width: 72 }}
+            />
+          </label>
+        )}
         {fullscreen && (
           <button
             className="dt-treemap-fs"

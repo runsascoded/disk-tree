@@ -51,6 +51,83 @@ export function divergingInk(t: number): string {
   return Math.abs(t) > 0.35 ? '#fff' : 'var(--dt-treemap-ink, #d0d0d8)'
 }
 
+/** The treemap map's opaque base — every cell's paint composites over this
+ * (matches `--dt-treemap-container-bg`'s default). Consumers that theme the
+ * base to a light ground pass their own to {@link contrastEdge}. */
+export const CONTAINER_BG: [number, number, number] = [32, 32, 36]
+
+const parseCache = new Map<string, [number, number, number, number] | null>()
+
+/** h,s,l in [0,360),[0,1],[0,1] → [r,g,b] 0-255. */
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s
+  const hp = ((h % 360) + 360) % 360 / 60
+  const x = c * (1 - Math.abs((hp % 2) - 1))
+  const [r1, g1, b1] =
+    hp < 1 ? [c, x, 0] : hp < 2 ? [x, c, 0] : hp < 3 ? [0, c, x]
+    : hp < 4 ? [0, x, c] : hp < 5 ? [x, 0, c] : [c, 0, x]
+  const m = l - c / 2
+  return [Math.round((r1 + m) * 255), Math.round((g1 + m) * 255), Math.round((b1 + m) * 255)]
+}
+
+/**
+ * Parse a CSS color to `[r, g, b, a]` (channels 0–255, alpha 0–1). Handles
+ * `#rgb` / `#rrggbb` / `#rrggbbaa`, `rgb()`/`rgba()`, and `hsl()`/`hsla()`
+ * (comma- or space-separated, optional `/ alpha`). Returns `null` for anything
+ * else — `var()`, `color-mix()`, gradients, named colors — so callers can fall
+ * back rather than mis-render a grey. Memoized: a handful of distinct strings
+ * serve thousands of cells.
+ */
+export function parseColor(c: string): [number, number, number, number] | null {
+  if (parseCache.has(c)) return parseCache.get(c)!
+  let out: [number, number, number, number] | null = null
+  const rgb = c.match(/^rgba?\(([^)]+)\)$/)
+  const hsl = c.match(/^hsla?\(([^)]+)\)$/)
+  if (rgb) {
+    const [r, g, b, a = '1'] = rgb[1].replace(/\//g, ' ').split(/[\s,]+/).filter(Boolean)
+    out = [+r, +g, +b, +a]
+  } else if (hsl) {
+    const [h, s, l, a = '1'] = hsl[1].replace(/\//g, ' ').split(/[\s,]+/).filter(Boolean)
+    const [r, g, b] = hslToRgb(parseFloat(h), parseFloat(s) / 100, parseFloat(l) / 100)
+    out = [r, g, b, parseFloat(a)]
+  } else if (/^#[0-9a-fA-F]{3,8}$/.test(c)) {
+    const h = c.slice(1)
+    const x = h.length === 3 || h.length === 4 ? h.split('').map(d => d + d).join('') : h
+    out = [
+      parseInt(x.slice(0, 2), 16), parseInt(x.slice(2, 4), 16), parseInt(x.slice(4, 6), 16),
+      x.length >= 8 ? parseInt(x.slice(6, 8), 16) / 255 : 1,
+    ]
+  }
+  if (out && out.some(n => Number.isNaN(n))) out = null
+  parseCache.set(c, out)
+  return out
+}
+
+/**
+ * A high-contrast half-stroke for a shared-tiling cell whose face is `bg`:
+ * dark on light faces, light on dark ones. Each cell paints its own half of
+ * every boundary it shares, so a bright cell beside a dark one gets a dark
+ * half-stroke against the neighbour's light one — one fixed color can't serve
+ * both, which is why grey-on-grey borders vanish.
+ *
+ * The face that actually lands on screen is `bg` (at its own alpha) composited
+ * over the opaque `base`, then faded toward `base` by the depth `fade` the
+ * widget applies to the paint layer — this reproduces that. Returns `null`
+ * when `bg` can't be parsed (a container `var()`, a gradient), so the caller
+ * keeps its own neutral fallback for those.
+ */
+export function contrastEdge(bg: string | undefined, fade = 1, base = CONTAINER_BG): string | null {
+  if (!bg) return null
+  const p = parseColor(bg)
+  if (!p) return null
+  const [r, g, b, a] = p
+  const eff = a * fade
+  const lum =
+    (0.2126 * r + 0.7152 * g + 0.0722 * b) * eff +
+    (0.2126 * base[0] + 0.7152 * base[1] + 0.0722 * base[2]) * (1 - eff)
+  return lum > 96 ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.42)'
+}
+
 export interface AgeFadeOpts {
   /**
    * Max fraction of the panel color mixed in at `age01 = 1` — the fade
