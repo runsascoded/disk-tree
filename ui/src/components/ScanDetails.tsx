@@ -14,6 +14,7 @@ import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
 import { useTiling } from '../utils/tiling'
+import { useRenderer } from '../utils/renderer'
 import {
   childLinkPrefix,
   detectRouteType,
@@ -727,6 +728,7 @@ function Treemap({
 }) {
   const navigate = useNavigate()
   const [tiling, setTiling] = useTiling()
+  const [renderer, setRenderer] = useRenderer()
   const tree = useMemo(
     () => ({
       path: '.',
@@ -773,25 +775,47 @@ function Treemap({
       <DTTreemap<DTNode>
         root={filterTree ?? tree}
         tiling={tiling}
+        renderer={renderer}
         renderLegend={() => (
-          <span style={{ display: 'inline-flex', gap: 2, fontSize: '0.8rem' }}>
-            {(['gaps', 'shared'] as const).map(t => (
-              <button
-                key={t}
-                onClick={e => { e.stopPropagation(); setTiling(t) }}
-                title={t === 'gaps'
-                  ? '2px gutters and rounded corners; dense leaf fields under-paint by ~perimeter/area'
-                  : 'Cells abut, one stroke per boundary — areas exact (a 6×6px cell with 2px gutters paints only 4×4)'}
-                style={{
-                  cursor: 'pointer', fontSize: '0.75rem', padding: '1px 7px', borderRadius: 3,
-                  border: '1px solid var(--dt-border, #444)',
-                  background: tiling === t ? 'var(--dt-accent-bg, #30363d)' : 'transparent',
-                  color: 'inherit', fontWeight: tiling === t ? 600 : 400,
-                }}
-              >
-                {t}
-              </button>
-            ))}
+          <span style={{ display: 'inline-flex', gap: 8, fontSize: '0.8rem' }}>
+            <span style={{ display: 'inline-flex', gap: 2 }}>
+              {(['gaps', 'shared'] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={e => { e.stopPropagation(); setTiling(t) }}
+                  title={t === 'gaps'
+                    ? '2px gutters and rounded corners; dense leaf fields under-paint by ~perimeter/area'
+                    : 'Cells abut, one stroke per boundary — areas exact (a 6×6px cell with 2px gutters paints only 4×4)'}
+                  style={{
+                    cursor: 'pointer', fontSize: '0.75rem', padding: '1px 7px', borderRadius: 3,
+                    border: '1px solid var(--dt-border, #444)',
+                    background: tiling === t ? 'var(--dt-accent-bg, #30363d)' : 'transparent',
+                    color: 'inherit', fontWeight: tiling === t ? 600 : 400,
+                  }}
+                >
+                  {t}
+                </button>
+              ))}
+            </span>
+            <span style={{ display: 'inline-flex', gap: 2 }}>
+              {(['dom', 'canvas'] as const).map(r => (
+                <button
+                  key={r}
+                  onClick={e => { e.stopPropagation(); setRenderer(r) }}
+                  title={r === 'dom'
+                    ? 'DOM renderer: one <div> per cell (mature, full feature set)'
+                    : 'Canvas renderer: the whole map on one <canvas> — no DOM node per cell, progressive paint (faster on large maps)'}
+                  style={{
+                    cursor: 'pointer', fontSize: '0.75rem', padding: '1px 7px', borderRadius: 3,
+                    border: '1px solid var(--dt-border, #444)',
+                    background: renderer === r ? 'var(--dt-accent-bg, #30363d)' : 'transparent',
+                    color: 'inherit', fontWeight: renderer === r ? 600 : 400,
+                  }}
+                >
+                  {r}
+                </button>
+              ))}
+            </span>
           </span>
         )}
         getSize={n => n.size}
