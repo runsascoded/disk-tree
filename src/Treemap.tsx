@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, ReactNode } from 'react'
 import { contrastEdge, DEFAULT_PALETTE } from './colors'
 import { DustHatch } from './DustHatch'
-import { foldSmall, foldThin, squarify } from './squarify'
+import { foldSmall, foldThin, squarify, squarifyRemainder } from './squarify'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -255,6 +255,20 @@ export interface TreemapProps<T> {
    * given thresholds (multiplier 1). Requires `chrome`. Default: false.
    */
   foldControl?: boolean
+  /**
+   * Lay each level with {@link squarifyRemainder} instead of plain squarify:
+   * when one child dominates, the rest are given their own legible side-by-side
+   * band instead of the tall skinny slivers a plain squarify squeezes them
+   * into. Trades exact area-proportionality (the tail draws a little larger,
+   * the dominant a little smaller) for hoverable, labelable tail cells — the
+   * alternative to folding the tail into one `(+n)` dust tile. Falls back to a
+   * plain squarify at any level with no cramped tail. Default: false.
+   *
+   * The sliver threshold is `minCellSide` (or 7 when folding is off); pass a
+   * number to set the tail band's minimum fraction of the long axis (default
+   * 0.14) — raise it if the tail still reads thin.
+   */
+  remainderTail?: boolean | number
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -405,6 +419,7 @@ export function Treemap<T>({
   edgeContrast = true,
   dustTexture = true,
   foldControl = false,
+  remainderTail = false,
 }: TreemapProps<T>) {
   // Live fold-threshold multiplier driven by the optional "detail" slider:
   // >1 folds more (coarser), <1 folds less (finer). Scales area linearly and
@@ -605,20 +620,37 @@ export function Treemap<T>({
     [node, path, size, childrenOf, fold],
   )
 
+  // One layout pass over already-folded items. `remainderTail` swaps plain
+  // squarify for `squarifyRemainder` (dominated tail gets its own side-by-side
+  // band instead of slivers) at every level; otherwise it's plain squarify,
+  // and the top-level `foldThin` below stays exactly as it was.
+  const layTiles = useCallback(
+    (items: (T | FoldedNode<T>)[], x: number, y: number, w: number, h: number) => {
+      const sz = (n: T | FoldedNode<T>) => (isFolded(n) ? n.size : getSize(n))
+      if (remainderTail) {
+        const frac = typeof remainderTail === 'number' ? remainderTail : 0.14
+        return squarifyRemainder<T | FoldedNode<T>>(items, x, y, w, h, sz, effMinCellSide ?? 7, frac)
+      }
+      return squarify<T | FoldedNode<T>>(items, x, y, w, h, sz)
+    },
+    [getSize, remainderTail, effMinCellSide],
+  )
+
   const rects = useMemo(
     () => {
-      const sz = (n: T | FoldedNode<T>) => (isFolded(n) ? n.size : getSize(n))
-      const laid = squarify<T | FoldedNode<T>>(children, 0, 0, size.w, size.h, sz)
+      const laid = layTiles(children, 0, 0, size.w, size.h)
       // Area folding can't see a cell's short side, so a dominant sibling still
       // squeezes the rest into unhoverable slivers; fold those by geometry and
       // re-lay once (the merged tile lands in the remainder as a single cell).
-      if (effMinCellSide != null) {
+      // `remainderTail` already widens the tail, so it skips this.
+      if (!remainderTail && effMinCellSide != null) {
+        const sz = (n: T | FoldedNode<T>) => (isFolded(n) ? n.size : getSize(n))
         const refolded = foldThin<T | FoldedNode<T>>(laid, effMinCellSide, mergeItems)
         if (refolded) return squarify<T | FoldedNode<T>>(refolded, 0, 0, size.w, size.h, sz)
       }
       return laid
     },
-    [children, size, getSize, effMinCellSide, mergeItems],
+    [children, size, getSize, remainderTail, effMinCellSide, mergeItems, layTiles],
   )
 
   // Background opacity at a given nesting depth. Applied per-cell to the
@@ -700,11 +732,7 @@ export function Treemap<T>({
     let kids: ReturnType<typeof squarify<T | FoldedNode<T>>> = []
     if (kidChildren && kidChildren.length > 0 && r.w > 90 && r.h > 44) {
       const lay = (w: number, h: number) =>
-        squarify<T | FoldedNode<T>>(
-          fold(kidChildren.slice(), w, h),
-          0, 0, w, h,
-          n => (isFolded(n) ? n.size : getSize(n)),
-        )
+        layTiles(fold(kidChildren.slice(), w, h), 0, 0, w, h)
       kids = lay(kw, kh)
       kidsMode = tilingFor(kid as T, kidPath, depth + 1, r.w, r.h, kids)
       if (kidsMode === 'shared') {
