@@ -2077,11 +2077,15 @@ def files_get():
 
     # Plain GET: stream the whole file (send_file, not read() into memory — a
     # multi-GB blob would otherwise spike RAM). It sets Content-Length and,
-    # with conditional=True, honors a Range itself as a fallback.
+    # with conditional=True, honors a Range itself as a fallback. Set
+    # Accept-Ranges explicitly — send_file only emits it on some Werkzeug
+    # versions, and the client keys off it to know ranges are available.
     try:
-        return send_file(path, mimetype=ctype, conditional=True)
+        resp = send_file(path, mimetype=ctype, conditional=True)
     except PermissionError:
         return jsonify({'error': 'permission denied'}), 403
+    resp.headers['Accept-Ranges'] = 'bytes'
+    return resp
 
 
 @app.route('/api/reveal', methods=['POST'])
