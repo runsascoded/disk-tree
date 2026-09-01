@@ -296,6 +296,30 @@ export interface TreemapProps<T> {
    * the canvas). Default: `'dom'`.
    */
   renderer?: 'dom' | 'canvas'
+  /**
+   * Canvas renderer only: build a thin DOM overlay of focusable
+   * anchors/buttons over the largest cells, restoring the keyboard focus,
+   * screen-reader labels, Vimium hints, `cellHref` links, and crawlability a
+   * single `<canvas>` can't provide. The overlay is transparent and
+   * `pointer-events:none` — the canvas handles every mouse interaction; the
+   * overlay exists for keyboard/AT/crawlers, so focusing a cell scrubs
+   * (`onCellHover`) and Enter/activate routes through the same drill/click path
+   * as a mouse click. Bounded by `a11yMaxCells`/`a11yMinSide` so the node count
+   * stays a fraction of the DOM renderer's. Ignored by the DOM renderer (whose
+   * cells are already real elements). Default: true.
+   */
+  a11yLinks?: boolean
+  /**
+   * Canvas a11y overlay: cap on the number of overlay elements, largest cells
+   * first — the knob that keeps a huge map's overlay bounded. Default: 400.
+   */
+  a11yMaxCells?: number
+  /**
+   * Canvas a11y overlay: only cells whose shorter side is ≥ this many px get an
+   * overlay element (0 = every labeled/container cell up to the cap). Raise it
+   * to mirror only the comfortably-clickable cells. Default: 0.
+   */
+  a11yMinSide?: number
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -437,6 +461,9 @@ export function Treemap<T>({
   foldControl = false,
   remainderTail = false,
   renderer = 'dom',
+  a11yLinks = true,
+  a11yMaxCells = 400,
+  a11yMinSide = 0,
 }: TreemapProps<T>) {
   // Live fold-threshold multiplier driven by the optional "detail" slider:
   // >1 folds more (coarser), <1 folds less (finer). Scales area linearly and
@@ -1228,6 +1255,10 @@ export function Treemap<T>({
                 idFor={idFor}
                 expandable={expandable}
                 dustTexture={dustTexture}
+                cellHref={cellHref}
+                a11yLinks={a11yLinks}
+                a11yMaxCells={a11yMaxCells}
+                a11yMinSide={a11yMinSide}
                 onHover={(hit: CanvasHit<T>, x, y) => activateHover(hit.node, hit.path, hit.key, x, y)}
                 onClick={(hit: CanvasHit<T>, e) =>
                   hit.foldChild

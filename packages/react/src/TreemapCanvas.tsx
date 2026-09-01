@@ -46,6 +46,14 @@ export interface TreemapCanvasProps<T> {
   idFor: (n: T, p: T[]) => string
   expandable: (n: T, p: T[]) => boolean
   dustTexture: boolean
+  /** Per-cell link href for the a11y overlay (mirrors the DOM `cellHref`). */
+  cellHref?: (n: T, path: T[]) => string | undefined
+  /** Build the focusable a11y overlay (see `TreemapProps.a11yLinks`). */
+  a11yLinks: boolean
+  /** Cap on overlay elements, largest cells first. */
+  a11yMaxCells: number
+  /** Minimum short-side px for a cell to get an overlay element. */
+  a11yMinSide: number
   onHover: (hit: CanvasHit<T>, clientX: number, clientY: number) => void
   onClick: (hit: CanvasHit<T>, e: React.MouseEvent) => void
   onLeave: () => void
@@ -84,6 +92,10 @@ export function TreemapCanvas<T>({
   idFor,
   expandable,
   dustTexture,
+  cellHref,
+  a11yLinks,
+  a11yMaxCells,
+  a11yMinSide,
   onHover,
   onClick,
   onLeave,
@@ -161,12 +173,8 @@ export function TreemapCanvas<T>({
     return { node: hit.it, path, key: idFor(hit.it, path) }
   }
 
-  const toHit = (cell: PlacedCell<T>, lx: number, ly: number): CanvasHit<T> | null => {
-    if (cell.folded) {
-      const child = dustChildAt(cell, lx, ly)
-      if (!child) return null
-      return { node: child.node, path: child.path, key: child.key, drillable: false, branch: false, foldChild: true }
-    }
+  /** CanvasHit for a real (non-folded) cell — shared by hit-test and overlay. */
+  const cellHit = (cell: PlacedCell<T>): CanvasHit<T> => {
     const node = cell.node as T
     return {
       node,
@@ -178,35 +186,107 @@ export function TreemapCanvas<T>({
     }
   }
 
+  const toHit = (cell: PlacedCell<T>, lx: number, ly: number): CanvasHit<T> | null => {
+    if (cell.folded) {
+      const child = dustChildAt(cell, lx, ly)
+      if (!child) return null
+      return { node: child.node, path: child.path, key: child.key, drillable: false, branch: false, foldChild: true }
+    }
+    return cellHit(cell)
+  }
+
   const localXY = (e: React.MouseEvent) => {
     const box = (e.currentTarget as HTMLElement).getBoundingClientRect()
     return { lx: e.clientX - box.left, ly: e.clientY - box.top }
   }
 
+  // A11y overlay set: the largest labeled/container cells (flat is area-sorted),
+  // above the min-side floor, capped — a bounded DOM mirror of the canvas for
+  // keyboard focus, screen readers, Vimium, `cellHref` links, and crawlers.
+  const overlayCells = useMemo(() => {
+    if (!a11yLinks) return []
+    const out: PlacedCell<T>[] = []
+    for (const c of flat) {
+      if (out.length >= a11yMaxCells) break
+      if (c.folded) continue
+      if (!(c.showLbl || c.hasKids)) continue
+      if (Math.min(c.w, c.h) < a11yMinSide) continue
+      out.push(c)
+    }
+    return out
+  }, [flat, a11yLinks, a11yMaxCells, a11yMinSide])
+
   return (
-    <canvas
-      ref={ref}
-      width={Math.max(1, Math.round(width))}
-      height={Math.max(1, Math.round(height))}
-      style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'default' }}
-      onMouseMove={e => {
-        const { lx, ly } = localXY(e)
-        const cell = hitTest(cells, lx, ly)
-        // No-hit (a gutter between cells): leave the current tip alone, matching
-        // the DOM renderer where sweeping a gap doesn't clear. Real exit clears.
-        if (!cell) return
-        const hit = toHit(cell, lx, ly)
-        if (hit) onHover(hit, e.clientX, e.clientY)
-      }}
-      onMouseLeave={onLeave}
-      onClick={e => {
-        const { lx, ly } = localXY(e)
-        const cell = hitTest(cells, lx, ly)
-        if (!cell) return
-        const hit = toHit(cell, lx, ly)
-        if (hit) onClick(hit, e)
-      }}
-    />
+    <>
+      <canvas
+        ref={ref}
+        width={Math.max(1, Math.round(width))}
+        height={Math.max(1, Math.round(height))}
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'default' }}
+        onMouseMove={e => {
+          const { lx, ly } = localXY(e)
+          const cell = hitTest(cells, lx, ly)
+          // No-hit (a gutter between cells): leave the current tip alone, matching
+          // the DOM renderer where sweeping a gap doesn't clear. Real exit clears.
+          if (!cell) return
+          const hit = toHit(cell, lx, ly)
+          if (hit) onHover(hit, e.clientX, e.clientY)
+        }}
+        onMouseLeave={onLeave}
+        onClick={e => {
+          const { lx, ly } = localXY(e)
+          const cell = hitTest(cells, lx, ly)
+          if (!cell) return
+          const hit = toHit(cell, lx, ly)
+          if (hit) onClick(hit, e)
+        }}
+      />
+      {/* A11y/keyboard/link overlay. Transparent and pointer-events:none — the
+          canvas above handles all mouse input; these focusable anchors/buttons
+          exist for keyboard, screen readers, Vimium, real `cellHref` links, and
+          crawlers. Focus scrubs (fires the same hover); Enter/programmatic
+          click routes through the same drill/pin path as a mouse click. */}
+      {overlayCells.length > 0 && (
+        <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+          {overlayCells.map(cell => {
+            const node = cell.node as T
+            const href = cellHref?.(node, cell.path)
+            const hit = cellHit(cell)
+            // Transparent (not opacity:0 — that hides the focus ring and can
+            // make Vimium skip it); invisible until focused, when the browser
+            // rings the cell. pointer-events:none so all mouse input hits the
+            // canvas below.
+            const commonStyle = {
+              position: 'absolute' as const,
+              left: cell.x, top: cell.y, width: cell.w, height: cell.h,
+              margin: 0, padding: 0, border: 0, background: 'transparent',
+              color: 'transparent', font: 'inherit', textAlign: 'start' as const,
+              pointerEvents: 'none' as const, overflow: 'hidden',
+            }
+            const ariaLabel = `${getLabel(node)}, ${formatSize(getSize(node))}`
+            const focusHover = () => {
+              const r = ref.current?.getBoundingClientRect()
+              onHover(hit, (r?.left ?? 0) + cell.x + cell.w / 2, (r?.top ?? 0) + cell.y + 8)
+            }
+            const activate = (e: React.SyntheticEvent) => {
+              const me = e as unknown as React.MouseEvent
+              // Anchors: let modified/middle clicks do native new-tab; otherwise
+              // suppress navigation and route through the SPA drill/click path.
+              if (!(href && (me.metaKey || me.ctrlKey || me.shiftKey || me.altKey || me.button === 1))) {
+                e.preventDefault()
+                onClick(hit, me)
+              }
+            }
+            const onKeyDown = (e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') activate(e)
+            }
+            return href
+              ? <a key={hit.key} className="dt-treemap-a11y-cell" href={href} aria-label={ariaLabel} style={commonStyle} onFocus={focusHover} onClick={activate} onKeyDown={onKeyDown} />
+              : <button key={hit.key} className="dt-treemap-a11y-cell" type="button" aria-label={ariaLabel} style={commonStyle} onFocus={focusHover} onClick={activate} onKeyDown={onKeyDown} />
+          })}
+        </div>
+      )}
+    </>
   )
 }
 

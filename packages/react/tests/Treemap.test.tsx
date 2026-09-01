@@ -815,3 +815,72 @@ describe('<Treemap onCellHover>', () => {
     }
   })
 })
+
+describe('<Treemap a11yLinks> (canvas overlay)', () => {
+  const a11yTree: Node = {
+    n: 'root',
+    size: 100,
+    children: [
+      { n: 'big', size: 70 },
+      { n: 'mid', size: 20 },
+      { n: 'small', size: 10 },
+    ],
+  }
+  const base = { ...accessors, minCellArea: null as null, renderer: 'canvas' as const, formatSize: (n: number) => `${n}` }
+
+  it('builds a bounded anchor overlay (largest-first) with href + aria-label', () => {
+    const restore = withLayout(600, 400)
+    try {
+      const { container } = render(<Treemap root={a11yTree} {...base} a11yMaxCells={2} cellHref={n => `/f/${n.n}`} />)
+      const links = [...container.querySelectorAll('.dt-treemap-map a')]
+      expect(links.map(a => [a.getAttribute('href'), a.getAttribute('aria-label')])).toEqual([
+        ['/f/big', 'big, 70'],
+        ['/f/mid', 'mid, 20'],
+      ])
+    } finally {
+      restore()
+    }
+  })
+
+  it('renders buttons (not anchors) when no cellHref is given', () => {
+    const restore = withLayout(600, 400)
+    try {
+      const { container } = render(<Treemap root={a11yTree} {...base} a11yMaxCells={2} />)
+      expect(container.querySelectorAll('.dt-treemap-map a').length).toBe(0)
+      expect(container.querySelectorAll('.dt-treemap-map button').length).toBe(2)
+    } finally {
+      restore()
+    }
+  })
+
+  it('a11yLinks={false} builds no overlay', () => {
+    const restore = withLayout(600, 400)
+    try {
+      const { container } = render(<Treemap root={a11yTree} {...base} a11yLinks={false} cellHref={n => `/f/${n.n}`} />)
+      expect(container.querySelectorAll('.dt-treemap-map a, .dt-treemap-map button').length).toBe(0)
+    } finally {
+      restore()
+    }
+  })
+
+  it('a11yMinSide filters out cells below the short-side floor', () => {
+    const restore = withLayout(600, 400)
+    try {
+      const { container } = render(<Treemap root={a11yTree} {...base} a11yMinSide={100000} cellHref={n => `/f/${n.n}`} />)
+      expect(container.querySelectorAll('.dt-treemap-map a').length).toBe(0)
+    } finally {
+      restore()
+    }
+  })
+
+  it('the DOM renderer ignores a11y overlay props (no extra anchors)', () => {
+    const restore = withLayout(600, 400)
+    try {
+      // DOM cells are real elements already; a11yLinks adds nothing.
+      const { container } = render(<Treemap root={a11yTree} {...accessors} minCellArea={null} a11yMaxCells={2} />)
+      expect(container.querySelector('.dt-treemap-map canvas')).toBe(null)
+    } finally {
+      restore()
+    }
+  })
+})

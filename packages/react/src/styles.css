@@ -24,3 +24,15 @@
   outline: 2px solid rgba(255, 255, 255, 0.5);
   outline-offset: -2px;
 }
+
+/* Canvas a11y overlay: transparent, focusable elements over the cells. Invisible
+   until focused, when the browser's focus ring rings the cell for keyboard
+   users (the canvas underneath is the visual). */
+.dt-treemap-a11y-cell {
+  -webkit-appearance: none;
+  appearance: none;
+}
+.dt-treemap-a11y-cell:focus-visible {
+  outline: 2px solid var(--dt-treemap-focus, rgba(120, 170, 255, 0.95));
+  outline-offset: -2px;
+}
