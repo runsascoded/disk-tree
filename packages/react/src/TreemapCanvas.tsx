@@ -1,7 +1,7 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
 import { CONTAINER_BG, parseColor } from './colors'
 import { drawDust } from './DustHatch'
-import { resolveCellStyle, type StyleOpts } from './cellStyle'
+import { resolveCellStyle, resolveRing, type StyleOpts } from './cellStyle'
 import { flattenPlaced, hitTest, type FoldedNode, type PlacedCell } from './layout'
 import { squarify } from './squarify'
 
@@ -451,6 +451,23 @@ function paintCell<T>(ctx: CanvasRenderingContext2D, cell: PlacedCell<T>, o: Pai
       ctx.globalAlpha = 1
     }
     ctx.restore()
+  }
+
+  // Consumer emphasis ring (brush/selection): the canvas counterpart of the DOM
+  // cell's `ring` box-shadow. Drawn last so it frames over fill + label, in
+  // either tiling mode; a stroked rounded-rect matching the cell's corner radius.
+  const ring = resolveRing(style.ring)
+  if (ring && ring.width > 0) {
+    const off = ring.inset ? ring.width / 2 : -ring.width / 2
+    const rw = cw - 2 * off
+    const rh = ch - 2 * off
+    if (rw > 0 && rh > 0) {
+      ctx.strokeStyle = ring.color
+      ctx.lineWidth = ring.width
+      ctx.beginPath()
+      roundRect(ctx, x + off, y + off, rw, rh, shared ? 0 : dust ? 1.5 : 3)
+      ctx.stroke()
+    }
   }
 }
 

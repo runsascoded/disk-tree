@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Treemap } from '../src/Treemap'
+import { resolveRing } from '../src/cellStyle'
 
 interface Node {
   n: string
@@ -400,6 +401,107 @@ describe('<Treemap>', () => {
         expect(foo.style.boxShadow).toBe('inset 0 0 0 2px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))')
         expect((foo.querySelector(':scope > .dt-treemap-bg') as HTMLElement).style.inset).toBe('2px')
         expect((foo.querySelector(':scope > .dt-treemap-inner') as HTMLElement).style.inset).toBe('20px 2px 2px 2px')
+      } finally {
+        restore()
+      }
+    })
+  })
+
+  describe('resolveRing', () => {
+    it('normalizes every ring form and drops the empty ones', () => {
+      expect([
+        resolveRing(undefined),
+        resolveRing(''),
+        resolveRing('rgb(1, 2, 3)'),
+        resolveRing({ color: 'rgb(1, 2, 3)' }),
+        resolveRing({ color: 'rgb(1, 2, 3)', width: 4, inset: false }),
+        resolveRing({ color: '', width: 4 }),
+      ]).toEqual([
+        null,
+        null,
+        { color: 'rgb(1, 2, 3)', width: 2, inset: true },
+        { color: 'rgb(1, 2, 3)', width: 2, inset: true },
+        { color: 'rgb(1, 2, 3)', width: 4, inset: false },
+        null,
+      ])
+    })
+  })
+
+  describe('ring (brush emphasis)', () => {
+    const rootCells = (c: HTMLElement) =>
+      [...c.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')] as HTMLElement[]
+    const barRing = (props: Record<string, unknown>): string => {
+      const { container } = render(
+        <Treemap
+          root={tree}
+          {...accessors}
+          minCellArea={null}
+          colorForCell={n => (accessors.getLabel(n) === 'bar' ? { bg: '#123456', ...props } : { bg: '#654321' })}
+        />,
+      )
+      return (rootCells(container)[1] as HTMLElement).style.boxShadow
+    }
+
+    it('gaps: an object ring stacks first (on top of) the structural border', () => {
+      const restore = withLayout()
+      try {
+        expect(barRing({ ring: { color: 'rgb(255, 255, 255)', width: 3 } })).toBe(
+          'inset 0 0 0 3px rgb(255, 255, 255), 0 0 0 1px var(--dt-treemap-cell-border, transparent)',
+        )
+      } finally {
+        restore()
+      }
+    })
+
+    it('a bare-string ring is shorthand for that color at the default 2px, inset', () => {
+      const restore = withLayout()
+      try {
+        expect(barRing({ ring: 'rgb(0, 200, 0)' })).toBe(
+          'inset 0 0 0 2px rgb(0, 200, 0), 0 0 0 1px var(--dt-treemap-cell-border, transparent)',
+        )
+      } finally {
+        restore()
+      }
+    })
+
+    it('inset:false draws the ring outside the box (no `inset` keyword)', () => {
+      const restore = withLayout()
+      try {
+        expect(barRing({ ring: { color: 'rgb(0, 0, 0)', inset: false } })).toBe(
+          '0 0 0 2px rgb(0, 0, 0), 0 0 0 1px var(--dt-treemap-cell-border, transparent)',
+        )
+      } finally {
+        restore()
+      }
+    })
+
+    it('shared: the ring stacks over the half-stroke, honored in this mode too', () => {
+      const restore = withLayout()
+      try {
+        const { container } = render(
+          <Treemap
+            root={tree}
+            {...accessors}
+            minCellArea={null}
+            tiling="shared"
+            edgeContrast={false}
+            colorForCell={n => (accessors.getLabel(n) === 'bar'
+              ? { bg: '#123456', ring: { color: 'rgb(120, 170, 255)', width: 2 } }
+              : { bg: '#654321' })}
+          />,
+        )
+        expect((rootCells(container)[1] as HTMLElement).style.boxShadow).toBe(
+          'inset 0 0 0 2px rgb(120, 170, 255), inset 0 0 0 1.5px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))',
+        )
+      } finally {
+        restore()
+      }
+    })
+
+    it('no ring: box-shadow is the structural border alone (gaps unchanged)', () => {
+      const restore = withLayout()
+      try {
+        expect(barRing({})).toBe('0 0 0 1px var(--dt-treemap-cell-border, transparent)')
       } finally {
         restore()
       }

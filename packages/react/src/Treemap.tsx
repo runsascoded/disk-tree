@@ -6,7 +6,7 @@ import type { FoldedNode, LayoutConfig } from './layout'
 import { edgeEmphFactor, isFolded, layoutCells } from './layout'
 import { foldSmall, foldThin, squarify, squarifyRemainder } from './squarify'
 import { TreemapCanvas, type CanvasHit } from './TreemapCanvas'
-import type { StyleOpts } from './cellStyle'
+import { resolveRing, type StyleOpts } from './cellStyle'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -371,6 +371,17 @@ export interface CellStyle {
    * when the cell is too small to read.
    */
   segments?: { color: string; frac: number }[]
+  /**
+   * An emphasis ring around this cell — for brushing / selection highlights.
+   * Unlike `edge` (the shared-mode gutter half-stroke, which `gaps` mode
+   * ignores), `ring` is honored in BOTH tiling modes and is painted as a
+   * box-shadow, so it never affects layout. `width` in px; `color` any CSS
+   * color; `inset` draws it inside the cell box (default true) rather than
+   * outside. It follows the cell's corner radius and composites over whatever
+   * structural `edge`/gutter the cell already has. A bare string is shorthand
+   * for `{ color }` at the default width.
+   */
+  ring?: string | { color: string; width?: number; inset?: boolean }
 }
 
 export interface CellDims {
@@ -897,6 +908,7 @@ export function Treemap<T>({
     if (shared && edgeContrast && !style.edge) {
       builtinEdge = contrastEdge(style.bg, fadeAt(depth))
     }
+    const ring = resolveRing(style.ring)
 
     const cellKey = folded
       ? `__folded_${depth}_${r.x}_${r.y}`
@@ -990,9 +1002,15 @@ export function Treemap<T>({
           // the gutter, transparent by default so dark-palette consumers can
           // opt into brighter sibling separation via the var.
           // (boxShadow, not outline — :focus owns the outline.)
-          boxShadow: shared
-            ? `inset 0 0 0 ${edge}px ${style.edge ?? builtinEdge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
-            : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
+          // A consumer `ring` (brush/selection emphasis) stacks first (on top)
+          // so it reads over the structural gutter, in either tiling mode; it
+          // follows the cell's `borderRadius` automatically.
+          boxShadow: [
+            ring && `${ring.inset ? 'inset ' : ''}0 0 0 ${ring.width}px ${ring.color}`,
+            shared
+              ? `inset 0 0 0 ${edge}px ${style.edge ?? builtinEdge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
+              : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
+          ].filter(Boolean).join(', '),
           // Anchors must not fall through to the page's link color when the
           // consumer sets no ink.
           color: style.ink ?? (href ? 'inherit' : undefined),

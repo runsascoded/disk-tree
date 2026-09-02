@@ -32,6 +32,28 @@ export interface ResolvedStyle {
   builtinEdge: string | null
 }
 
+/** Default width (px) of a `CellStyle.ring` emphasis ring when unspecified. */
+export const DEFAULT_RING_WIDTH = 2
+
+/** A normalized emphasis ring: color + width (px) + inset flag. */
+export interface ResolvedRing {
+  color: string
+  width: number
+  inset: boolean
+}
+
+/**
+ * Normalize `CellStyle.ring` (a bare color string or `{ color, width?, inset? }`)
+ * into a `ResolvedRing`, or `null` when there's no ring. Shared by both renderers
+ * so the DOM box-shadow and the canvas stroke agree on width/inset.
+ */
+export function resolveRing(ring: CellStyle['ring']): ResolvedRing | null {
+  if (!ring) return null
+  if (typeof ring === 'string') return { color: ring, width: DEFAULT_RING_WIDTH, inset: true }
+  if (!ring.color) return null
+  return { color: ring.color, width: ring.width ?? DEFAULT_RING_WIDTH, inset: ring.inset ?? true }
+}
+
 export function resolveCellStyle<T>(cell: PlacedCell<T>, o: StyleOpts<T>): ResolvedStyle {
   const { folded, node, path, depth, w, h, hasKids, mode } = cell
   const fade = o.fadeAt(depth)
