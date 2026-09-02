@@ -969,7 +969,7 @@ export function Treemap<T>({
       <CellTag
         key={cellKey}
         {...(href && { href })}
-        className={'dt-treemap-cell' + (kidDrillable && (kids.length > 0 || chromeOk) ? ' branch' : '') + (dust ? ' dust' : '') + (chainLabels && chromeOk ? ' chain' : '') + (shared ? ' shared' : '')}
+        className={'dt-treemap-cell' + (kidDrillable && (kids.length > 0 || chromeOk) ? ' branch' : '') + (dust ? ' dust' : '') + (chainLabels && chromeOk ? ' chain' : '') + (shared ? ' shared' : '') + (cellKey === pinnedTip?.key ? ' pinned' : '')}
         style={{
           position: 'absolute',
           left: r.x,

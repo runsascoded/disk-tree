@@ -446,6 +446,27 @@ describe('<Treemap>', () => {
     })
   })
 
+  it('clicking a leaf marks that DOM cell .pinned (accent ring); re-click clears it', () => {
+    // The `.pinned` class carries the same accent ring the canvas renderer and
+    // the pinned tooltip use — committed on click (mouseup), not on the focus
+    // that a mousedown lands (`:focus-visible` handles keyboard focus only).
+    const restore = withLayout()
+    try {
+      const { container } = render(<Treemap root={tree} {...accessors} minCellArea={null} />)
+      const leaf = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell')]
+        .find(el => !el.classList.contains('branch')) as HTMLElement // `bar`
+      expect(leaf.classList.contains('pinned')).toBe(false)
+      fireEvent.click(leaf)
+      const pinned = [...container.querySelectorAll('.dt-treemap-map > .dt-treemap-cell.pinned')]
+      expect(pinned.length).toBe(1)
+      expect(pinned[0].classList.contains('branch')).toBe(false)
+      fireEvent.click(pinned[0] as HTMLElement)
+      expect(container.querySelectorAll('.dt-treemap-cell.pinned').length).toBe(0)
+    } finally {
+      restore()
+    }
+  })
+
   it('branch/chain chrome classes are size-gated (min dim ≥ 28px) unless children render', () => {
     const restore = withLayout(400, 300)
     try {
