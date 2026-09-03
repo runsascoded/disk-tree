@@ -2,7 +2,11 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, ReactNode } from 'react'
 import { contrastEdge, DEFAULT_PALETTE } from './colors'
 import { DustHatch } from './DustHatch'
+import type { FoldedNode, LayoutConfig } from './layout'
+import { edgeEmphFactor, isFolded, layoutCells } from './layout'
 import { foldSmall, foldThin, squarify, squarifyRemainder } from './squarify'
+import { TreemapCanvas, type CanvasHit } from './TreemapCanvas'
+import { resolveRing, type StyleOpts } from './cellStyle'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -155,6 +159,16 @@ export interface TreemapProps<T> {
   /** Called whenever the drill path changes (drill in, drill back). */
   onPathChange?: (path: T[]) => void
   /**
+   * Fired when the pointer enters a cell (with the node + its path from root)
+   * and again with `null` when it leaves the map / all cells — the outward
+   * mirror of the inward `lens` highlight, so a consumer can reflect the map's
+   * hover into another view (e.g. file-tree's split listing lights the row for
+   * the hovered tile). Fires once per cell change, not per pixel; `null` on
+   * leave. Debounce/grace is the consumer's concern. No behavior change when
+   * absent. `path` is the root→cell node array, same shape as `onPathChange`.
+   */
+  onCellHover?: (n: T | null, path: T[]) => void
+  /**
    * Fold small-area cells (below `minCellArea` in px²) into a synthetic
    * "…" tile. Pass `null` to disable folding.
    */
@@ -228,6 +242,17 @@ export interface TreemapProps<T> {
    */
   borderWidth?: (depth: number, ctx: CellDims) => number
   /**
+   * Shared-tiling only: emphasize shallow (top-level) boundaries over deep ones
+   * so the tree's coarse structure reads at a glance — the fix for "top-level
+   * edges are hard to see". Multiplies each cell's stroke width by
+   * `1 + edgeEmphasis · max(0, 2 − depth)`, so depth-0 edges get `1 + 2·e`,
+   * depth-1 `1 + e`, and depth-2+ are unchanged. Composes with `borderWidth`
+   * (which sets the base per-depth width) and `edgeContrast` (the stroke color).
+   * `0` = uniform (current behavior). Try `~0.75`–`1.5` for a clear step.
+   * Default: 0.
+   */
+  edgeEmphasis?: number
+  /**
    * In shared tiling, default each cell's half-stroke to a luminance-contrast
    * color derived from its own face (dark stroke on light cells, light on
    * dark) instead of the neutral `--dt-treemap-edge` gutter — so borders read
@@ -269,6 +294,43 @@ export interface TreemapProps<T> {
    * 0.14) — raise it if the tail still reads thin.
    */
   remainderTail?: boolean | number
+  /**
+   * Which renderer draws the map body. `'dom'` (default) is the mature
+   * absolutely-positioned-`<div>` renderer with full feature parity. `'canvas'`
+   * paints the entire map to a single `<canvas>` — one paint loop, no DOM node
+   * per cell, for the 1e3–1e6-cell maps the DOM renderer bogs down on — and
+   * hit-tests the retained layout, routing hits into the *same* drill/tooltip
+   * handlers. Every surrounding affordance (crumbs, fold slider, drill, pinned
+   * tips, lazy-load) is shared. Canvas parity is still filling in: segments
+   * (makeup stripes), chain-label text, `cellHref` anchors, and the in-map
+   * loading/error overlay are DOM-only for now (the overlay still renders atop
+   * the canvas). Default: `'dom'`.
+   */
+  renderer?: 'dom' | 'canvas'
+  /**
+   * Canvas renderer only: build a thin DOM overlay of focusable
+   * anchors/buttons over the largest cells, restoring the keyboard focus,
+   * screen-reader labels, Vimium hints, `cellHref` links, and crawlability a
+   * single `<canvas>` can't provide. The overlay is transparent and
+   * `pointer-events:none` — the canvas handles every mouse interaction; the
+   * overlay exists for keyboard/AT/crawlers, so focusing a cell scrubs
+   * (`onCellHover`) and Enter/activate routes through the same drill/click path
+   * as a mouse click. Bounded by `a11yMaxCells`/`a11yMinSide` so the node count
+   * stays a fraction of the DOM renderer's. Ignored by the DOM renderer (whose
+   * cells are already real elements). Default: true.
+   */
+  a11yLinks?: boolean
+  /**
+   * Canvas a11y overlay: cap on the number of overlay elements, largest cells
+   * first — the knob that keeps a huge map's overlay bounded. Default: 400.
+   */
+  a11yMaxCells?: number
+  /**
+   * Canvas a11y overlay: only cells whose shorter side is ≥ this many px get an
+   * overlay element (0 = every labeled/container cell up to the cap). Raise it
+   * to mirror only the comfortably-clickable cells. Default: 0.
+   */
+  a11yMinSide?: number
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -309,6 +371,17 @@ export interface CellStyle {
    * when the cell is too small to read.
    */
   segments?: { color: string; frac: number }[]
+  /**
+   * An emphasis ring around this cell — for brushing / selection highlights.
+   * Unlike `edge` (the shared-mode gutter half-stroke, which `gaps` mode
+   * ignores), `ring` is honored in BOTH tiling modes and is painted as a
+   * box-shadow, so it never affects layout. `width` in px; `color` any CSS
+   * color; `inset` draws it inside the cell box (default true) rather than
+   * outside. It follows the cell's corner radius and composites over whatever
+   * structural `edge`/gutter the cell already has. A bare string is shorthand
+   * for `{ color }` at the default width.
+   */
+  ring?: string | { color: string; width?: number; inset?: boolean }
 }
 
 export interface CellDims {
@@ -346,18 +419,6 @@ interface TipState<T> {
   key: string
   node: T
   path: T[]
-}
-
-/** Synthetic node returned by the default fold-small merger. */
-interface FoldedNode<T> {
-  __folded: true
-  count: number
-  size: number
-  children: T[]
-}
-
-function isFolded<T>(n: T | FoldedNode<T>): n is FoldedNode<T> {
-  return typeof n === 'object' && n !== null && (n as FoldedNode<T>).__folded === true
 }
 
 /** Centered overlay for the lazy-load loading/error states. */
@@ -403,6 +464,7 @@ export function Treemap<T>({
   onCellClick,
   cellHref,
   onPathChange,
+  onCellHover,
   minCellArea = 16,
   minCellSide = 7,
   mergeSmall,
@@ -416,10 +478,15 @@ export function Treemap<T>({
   fadeFloor = 0.75,
   tiling = 'gaps',
   borderWidth = defaultBorderWidth,
+  edgeEmphasis = 0,
   edgeContrast = true,
   dustTexture = true,
   foldControl = false,
   remainderTail = false,
+  renderer = 'dom',
+  a11yLinks = true,
+  a11yMaxCells = 400,
+  a11yMinSide = 0,
 }: TreemapProps<T>) {
   // Live fold-threshold multiplier driven by the optional "detail" slider:
   // >1 folds more (coarser), <1 folds less (finer). Scales area linearly and
@@ -440,6 +507,8 @@ export function Treemap<T>({
   // and use its controls/links without pinning (the tip is anchored, not
   // mouse-following, so it stays put while you reach for it).
   const tipClear = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Last cell key reported through `onCellHover`, so it fires once per change.
+  const hoverKeyRef = useRef<string | null>(null)
   const cancelTipClear = () => {
     if (tipClear.current) { clearTimeout(tipClear.current); tipClear.current = undefined }
   }
@@ -656,16 +725,79 @@ export function Treemap<T>({
   // Background opacity at a given nesting depth. Applied per-cell to the
   // `.dt-treemap-bg` layer (not the cell div), so ancestors' fades never
   // compound and label ink stays full-strength at every depth.
-  const fadeAt = (d: number) => Math.max(rootFade * depthFade ** d, fadeFloor)
+  const fadeAt = useCallback(
+    (d: number) => Math.max(rootFade * depthFade ** d, fadeFloor),
+    [rootFade, depthFade, fadeFloor],
+  )
 
   // Tiling mode for a node's children (`depth` = the children's depth).
-  const tilingFor = (
-    n: T, p: T[], depth: number, w: number, h: number, rs: { w: number; h: number }[],
-  ): Tiling =>
-    typeof tiling === 'function'
-      ? tiling(n, p, depth, { w, h, nChildren: rs.length, medianChildArea: medianArea(rs) })
-      : tiling
+  const tilingFor = useCallback(
+    (n: T, p: T[], depth: number, w: number, h: number, rs: { w: number; h: number }[]): Tiling =>
+      typeof tiling === 'function'
+        ? tiling(n, p, depth, { w, h, nChildren: rs.length, medianChildArea: medianArea(rs) })
+        : tiling,
+    [tiling],
+  )
   const rootMode = tilingFor(node, path, 0, size.w, size.h, rects)
+
+  // Canvas renderer: the placed-cell tree (geometry only) for the whole map,
+  // laid once and reused for paint + hit-test. Only built in canvas mode.
+  const placedCells = useMemo(() => {
+    if (renderer !== 'canvas') return []
+    const cfg: LayoutConfig<T> = {
+      getSize, getLabel, childrenOf, showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
+    }
+    return layoutCells(rects, path, rootMode, cfg)
+  }, [
+    renderer, rects, path, rootMode, getSize, getLabel, childrenOf,
+    showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
+  ])
+
+  // Stable style bundle for the canvas paint. Memoized so the paint effect
+  // isn't restarted by the component's own hover/tooltip re-renders — those
+  // change none of these inputs (consumer props keep their identity across
+  // internal state changes), so a hover never re-triggers a full repaint.
+  const styleOpts = useMemo<StyleOpts<T>>(
+    () => ({ colorForCell, lens, getLabel, topLevelSlot, defaultSlots: DEFAULT_SLOTS, dustTexture, edgeContrast, fadeAt }),
+    [colorForCell, lens, getLabel, topLevelSlot, dustTexture, edgeContrast, fadeAt],
+  )
+
+  // Hit → action, shared by both renderers: a DOM cell's event and a canvas
+  // pointer hit resolve to a `(node, path, key)` and route through here, so the
+  // tooltip/pin/drill behavior is written once.
+  const activateHover = (node: T, path: T[], key: string, x: number, y: number) => {
+    cancelTipClear()
+    pin.hover(key)
+    // Outward hover signal (once per cell change, not per pixel).
+    if (hoverKeyRef.current !== key) {
+      hoverKeyRef.current = key
+      onCellHover?.(node, path)
+    }
+    setTip(prev => (prev?.key === key ? prev : { x, y, key, node, path }))
+  }
+  // Fire `onCellHover(null)` once, when hover actually leaves all cells —
+  // called alongside every `pin.hover(null)` (map leave, tip leave, canvas leave).
+  const clearHover = () => {
+    if (hoverKeyRef.current !== null) {
+      hoverKeyRef.current = null
+      onCellHover?.(null, [])
+    }
+  }
+  const activatePin = (node: T, path: T[], key: string, x: number, y: number) => {
+    // Reuse the hover tip's anchor for the same cell, so pinning doesn't jump
+    // the tooltip from the cell to the click point.
+    const ax = tip?.key === key ? tip.x : x
+    const ay = tip?.key === key ? tip.y : y
+    pin.togglePin(key)
+    setPinnedTip(p => (p?.key === key ? null : { x: ax, y: ay, key, node, path }))
+  }
+  const activateClick = (
+    node: T, path: T[], key: string, drillable: boolean, x: number, y: number, e: React.MouseEvent,
+  ) => {
+    if (onCellClick && onCellClick(node, path, e)) return
+    if (drillable) { pin.clearPin(); go(path) }
+    else activatePin(node, path, key, x, y)
+  }
 
   const cell = (
     kid0: T | FoldedNode<T>,
@@ -713,7 +845,7 @@ export function Treemap<T>({
     const shared = mode === 'shared'
     // This cell's own stroke (shared mode): half of it is drawn inside this
     // cell as an inset ring, the neighbor draws the other half.
-    const bw = shared ? Math.min(borderWidth(depth, { w: r.w, h: r.h }), dust ? 1 : Infinity) : 0
+    const bw = shared ? Math.min(borderWidth(depth, { w: r.w, h: r.h }) * edgeEmphFactor(depth, edgeEmphasis), dust ? 1 : Infinity) : 0
     const edge = bw / 2
     // Built-in adaptive half-stroke, computed once the cell's face is resolved
     // (below). Filled after `style` is known.
@@ -776,6 +908,7 @@ export function Treemap<T>({
     if (shared && edgeContrast && !style.edge) {
       builtinEdge = contrastEdge(style.bg, fadeAt(depth))
     }
+    const ring = resolveRing(style.ring)
 
     const cellKey = folded
       ? `__folded_${depth}_${r.x}_${r.y}`
@@ -804,18 +937,18 @@ export function Treemap<T>({
 
     const showTip = (e: React.MouseEvent) => {
       e.stopPropagation()
-      cancelTipClear()
+      // Anchor to the cell's top-left (not the entry cursor), so the tip lands
+      // in the same spot regardless of which edge the pointer came in from, and
+      // so it's stable to move into (it doesn't chase the cursor). Matches the
+      // canvas renderer.
+      const b = (e.currentTarget as HTMLElement).getBoundingClientRect()
       if (folded) {
         const hit = dustHitAt(e)
         if (!hit) return
-        pin.hover(hit.key)
-        setTip(prev => (prev?.key === hit.key ? prev : { x: e.clientX, y: e.clientY, key: hit.key, node: hit.it, path: hit.path }))
+        activateHover(hit.it, hit.path, hit.key, b.left, b.top)
         return
       }
-      pin.hover(cellKey)
-      // Anchor to the cell (frozen once per cell) instead of chasing the cursor:
-      // a mouse-following tip can't be hovered into to click its contents.
-      setTip(prev => (prev?.key === cellKey ? prev : { x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath }))
+      activateHover(kid as T, kidPath, cellKey, b.left, b.top)
     }
     // Real-anchor cells (`cellHref`): only leaf-rendered ones — a cell with
     // nested tiles would nest <a>s, which HTML forbids. Modified/middle
@@ -827,26 +960,14 @@ export function Treemap<T>({
       if (folded) {
         const hit = dustHitAt(e)
         if (!hit) return
-        pin.togglePin(hit.key)
-        setPinnedTip(p =>
-          p?.key === hit.key ? null : { x: e.clientX, y: e.clientY, key: hit.key, node: hit.it, path: hit.path },
-        )
+        activatePin(hit.it, hit.path, hit.key, e.clientX, e.clientY)
         return
       }
       if (href) {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button === 1) return
         e.preventDefault()
       }
-      if (onCellClick && onCellClick(kid as T, kidPath, e)) return
-      if (kidDrillable) {
-        pin.clearPin()
-        go(kidPath)
-      } else {
-        pin.togglePin(cellKey)
-        setPinnedTip(p =>
-          p?.key === cellKey ? null : { x: e.clientX, y: e.clientY, key: cellKey, node: kid as T, path: kidPath },
-        )
-      }
+      activateClick(kid as T, kidPath, cellKey, kidDrillable, e.clientX, e.clientY, e)
     }
     // `branch` / `chain` chrome (consumers hang inset rings / doubled edges
     // off these) only when the cell is big enough for that treatment to read
@@ -860,7 +981,7 @@ export function Treemap<T>({
       <CellTag
         key={cellKey}
         {...(href && { href })}
-        className={'dt-treemap-cell' + (kidDrillable && (kids.length > 0 || chromeOk) ? ' branch' : '') + (dust ? ' dust' : '') + (chainLabels && chromeOk ? ' chain' : '') + (shared ? ' shared' : '')}
+        className={'dt-treemap-cell' + (kidDrillable && (kids.length > 0 || chromeOk) ? ' branch' : '') + (dust ? ' dust' : '') + (chainLabels && chromeOk ? ' chain' : '') + (shared ? ' shared' : '') + (cellKey === pinnedTip?.key ? ' pinned' : '')}
         style={{
           position: 'absolute',
           left: r.x,
@@ -881,9 +1002,15 @@ export function Treemap<T>({
           // the gutter, transparent by default so dark-palette consumers can
           // opt into brighter sibling separation via the var.
           // (boxShadow, not outline — :focus owns the outline.)
-          boxShadow: shared
-            ? `inset 0 0 0 ${edge}px ${style.edge ?? builtinEdge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
-            : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
+          // A consumer `ring` (brush/selection emphasis) stacks first (on top)
+          // so it reads over the structural gutter, in either tiling mode; it
+          // follows the cell's `borderRadius` automatically.
+          boxShadow: [
+            ring && `${ring.inset ? 'inset ' : ''}0 0 0 ${ring.width}px ${ring.color}`,
+            shared
+              ? `inset 0 0 0 ${edge}px ${style.edge ?? builtinEdge ?? 'var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'}`
+              : '0 0 0 1px var(--dt-treemap-cell-border, transparent)',
+          ].filter(Boolean).join(', '),
           // Anchors must not fall through to the page's link color when the
           // consumer sets no ink.
           color: style.ink ?? (href ? 'inherit' : undefined),
@@ -1149,10 +1276,39 @@ export function Treemap<T>({
           // Don't clear immediately — give the pointer time to reach the tip
           // (cancelled by the tip's onMouseEnter).
           cancelTipClear()
-          tipClear.current = setTimeout(() => { pin.hover(null); setTip(null) }, 180)
+          tipClear.current = setTimeout(() => { pin.hover(null); clearHover(); setTip(null) }, 180)
         }}
       >
-        {rects.filter(r => r.w >= 3 && r.h >= 3).map(r => cell(r.it, isFolded(r.it) ? path : [...path, r.it as T], r, 0, rootMode))}
+        {renderer === 'canvas'
+          ? (size.w > 0 && size.h > 0 && (
+              <TreemapCanvas<T>
+                cells={placedCells}
+                width={size.w}
+                height={size.h}
+                styleOpts={styleOpts}
+                getSize={getSize}
+                getLabel={getLabel}
+                formatSize={formatSize}
+                idFor={idFor}
+                expandable={expandable}
+                dustTexture={dustTexture}
+                cellHref={cellHref}
+                a11yLinks={a11yLinks}
+                a11yMaxCells={a11yMaxCells}
+                a11yMinSide={a11yMinSide}
+                pinnedKey={pinnedTip?.key ?? null}
+                onHover={(hit: CanvasHit<T>, x, y) => activateHover(hit.node, hit.path, hit.key, x, y)}
+                onClick={(hit: CanvasHit<T>, e) =>
+                  hit.foldChild
+                    ? activatePin(hit.node, hit.path, hit.key, e.clientX, e.clientY)
+                    : activateClick(hit.node, hit.path, hit.key, hit.drillable, e.clientX, e.clientY, e)}
+                onLeave={() => {
+                  cancelTipClear()
+                  tipClear.current = setTimeout(() => { pin.hover(null); clearHover(); setTip(null) }, 180)
+                }}
+              />
+            ))
+          : rects.filter(r => r.w >= 3 && r.h >= 3).map(r => cell(r.it, isFolded(r.it) ? path : [...path, r.it as T], r, 0, rootMode))}
         {failed?.key === viewKey ? (
           <div className="dt-treemap-status error" style={STATUS_STYLE}>
             {renderLoadError
@@ -1179,7 +1335,7 @@ export function Treemap<T>({
           ref={tipRef}
           className={'dt-treemap-tip' + (pinnedTip ? ' pinned' : '')}
           onMouseEnter={cancelTipClear}
-          onMouseLeave={() => { if (!pinnedTip) { pin.hover(null); setTip(null) } }}
+          onMouseLeave={() => { if (!pinnedTip) { pin.hover(null); clearHover(); setTip(null) } }}
           style={{
             position: 'fixed',
             left: Math.max(4, Math.min(tipToShow.x + 14, (typeof window !== 'undefined' ? window.innerWidth : 1600) - (tipDims?.w ?? 320) - 8)),
@@ -1192,9 +1348,12 @@ export function Treemap<T>({
             fontSize: '0.85rem',
             zIndex: 1000,
             maxWidth: 320,
-            // Interactive whether hovered or pinned — you can move into it and
-            // click its links/controls (the grace timer keeps it alive en route).
-            pointerEvents: 'auto',
+            // The tip anchors over a cell's top-left, so it sits on pixels you'd
+            // click — to pin this cell, or (when a different cell is already
+            // pinned and its tip overlaps) to pin that one. The container must
+            // never eat those clicks; only its × button (below) takes pointer
+            // events, so clicks fall through to the canvas/cell underneath.
+            pointerEvents: 'none',
             boxShadow: '0 4px 10px rgba(0,0,0,0.35)',
           }}
         >
@@ -1205,7 +1364,7 @@ export function Treemap<T>({
               style={{
                 position: 'absolute', top: 2, right: 4,
                 background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer',
-                fontSize: '1em', opacity: 0.6,
+                fontSize: '1em', opacity: 0.6, pointerEvents: 'auto',
               }}
             >
               ×

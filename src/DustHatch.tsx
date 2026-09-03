@@ -56,6 +56,43 @@ export function dustLineCount(len: number, count: number, base: number): number 
   return Math.max(2, Math.min(byCount, Math.floor(len / 4)))
 }
 
+/**
+ * Stroke the dust cross-hatch into an already-configured 2D context, at CSS-px
+ * origin `(ox, oy)`. Self-contained (sets stroke style + width, does its own
+ * `beginPath`/`stroke`), so both the standalone `<DustHatch>` canvas and the
+ * whole-map canvas renderer draw an identical tile. `ctx` is assumed already
+ * dpr-scaled by the caller; coordinates are CSS px.
+ */
+export function drawDust(
+  ctx: CanvasRenderingContext2D,
+  ox: number,
+  oy: number,
+  w: number,
+  h: number,
+  count: number,
+  color = 'rgba(150, 150, 165, 0.5)',
+  baseLines = 3,
+  ratio = 1.32,
+): void {
+  if (w <= 0 || h <= 0) return
+  ctx.strokeStyle = color
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  // Vertical rules: dense at the right edge (x = w), gaps grow leftward.
+  for (const d of dustOffsets(w, dustLineCount(w, count, baseLines), ratio)) {
+    const x = Math.round(w - d) + 0.5
+    ctx.moveTo(ox + x, oy)
+    ctx.lineTo(ox + x, oy + h)
+  }
+  // Horizontal rules: dense at the bottom edge (y = h), gaps grow upward.
+  for (const d of dustOffsets(h, dustLineCount(h, count, baseLines), ratio)) {
+    const y = Math.round(h - d) + 0.5
+    ctx.moveTo(ox, oy + y)
+    ctx.lineTo(ox + w, oy + y)
+  }
+  ctx.stroke()
+}
+
 export function DustHatch({ w, h, count, color, baseLines = 3, ratio = 1.32 }: DustHatchProps) {
   const ref = useRef<HTMLCanvasElement>(null)
   useLayoutEffect(() => {
@@ -68,22 +105,7 @@ export function DustHatch({ w, h, count, color, baseLines = 3, ratio = 1.32 }: D
     if (!ctx) return
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, w, h)
-    ctx.strokeStyle = color ?? 'rgba(150, 150, 165, 0.5)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    // Vertical rules: dense at the right edge (x = w), gaps grow leftward.
-    for (const d of dustOffsets(w, dustLineCount(w, count, baseLines), ratio)) {
-      const x = Math.round(w - d) + 0.5
-      ctx.moveTo(x, 0)
-      ctx.lineTo(x, h)
-    }
-    // Horizontal rules: dense at the bottom edge (y = h), gaps grow upward.
-    for (const d of dustOffsets(h, dustLineCount(h, count, baseLines), ratio)) {
-      const y = Math.round(h - d) + 0.5
-      ctx.moveTo(0, y)
-      ctx.lineTo(w, y)
-    }
-    ctx.stroke()
+    drawDust(ctx, 0, 0, w, h, count, color ?? 'rgba(150, 150, 165, 0.5)', baseLines, ratio)
   }, [w, h, count, color, baseLines, ratio])
 
   return (
