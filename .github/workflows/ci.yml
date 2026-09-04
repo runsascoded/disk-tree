@@ -79,6 +79,31 @@ jobs:
       - name: Build
         run: cd ui && pnpm build
 
+  treemap-widget:
+    name: "@rdub/treemap (typecheck + test)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        # pnpm version comes from root package.json's `packageManager` field;
+        # passing `version:` here on top of that is a hard error in v4.
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type check
+        run: cd packages/treemap && pnpm typecheck
+
+      - name: Test
+        run: cd packages/treemap && pnpm test
+
   react-widgets:
     name: "@disk-tree/react (typecheck + test)"
     runs-on: ubuntu-latest

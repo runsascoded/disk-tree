@@ -1,5 +1,7 @@
 # `<Treemap>` per-cell brush styling — a border + fill for "selected"/"hovered" cells, in *both* tiling modes
 
+> **Landed.** `CellStyle.ring` (`string | { color; width?; inset? }`) resolves via `resolveRing` in `cellStyle.ts` (default width 2px, `inset` default true). The DOM renderer stacks it first in the cell's `boxShadow` list (over the structural gutter, in either mode; follows `borderRadius`); the canvas renderer strokes a matching rounded-rect last in `paintCell`. It flows through the existing `colorForCell` / `lens` path — no new prop, no new event. Verified live in the playground across gaps/shared × DOM/canvas. Consumer bump (file-tree drops its forced-`shared` + `borderWidth` workaround, returns `ring` from `emphasize()`) is the next dist re-pin, alongside the already-landed `onCellHover`. (Since landed, the treemap moved to its own `@rdub/treemap` package — `packages/treemap/src/cellStyle.ts` — with `@disk-tree/react` re-exporting it; file-tree should re-pin `@rdub/treemap`.)
+
 Companion to `specs/done/treemap-cell-hover.md` (the `onCellHover` output signal, already landed) and `~/c/js/file-tree/specs/tree-sources-and-treemap.md` (the file-tree side). Where `onCellHover` closed the *event* gap for bidirectional brushing, this closes the *styling* gap: giving a brushed/selected cell a legible, customizable **border** — not just a fill tint — regardless of tiling mode.
 
 ## The problem

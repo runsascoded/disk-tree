@@ -16,6 +16,7 @@
   "dependencies": {
     "@disk-tree/react": "workspace:*",
     "@rdub/file-tree": "github:runsascoded/file-tree#49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1",
+    "@rdub/treemap": "workspace:*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/material": "^7.3.6",

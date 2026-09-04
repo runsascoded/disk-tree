@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { DEFAULT_PALETTE } from './colors'
+import { DEFAULT_PALETTE } from '@rdub/treemap'
 import { pow10 } from './stats'
 
 /**

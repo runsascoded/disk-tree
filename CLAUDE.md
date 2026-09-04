@@ -150,8 +150,16 @@ disk-tree-server          # Start Flask API server
 
 ### Web UI (`ui/`)
 
-Vite + React + TypeScript with Material-UI, TanStack Query, and `@disk-tree/react` widgets
-(chart-lib-free DIY SVG: `<Treemap>`, `<TimeSeries>`, `<StalenessScatter>`, `<AgeHistograms>`).
+Vite + React + TypeScript with Material-UI, TanStack Query, and chart-lib-free DIY-SVG/canvas
+widgets from two workspace packages:
+- **`@rdub/treemap`** (`packages/treemap/`) — the SOTA treemap core + layout/color primitives:
+  `<Treemap>` (SVG + canvas renderers, shared-edge tiling, dust texturing, per-cell `ring`
+  emphasis, hover/pin events), `<VoronoiTreemap>` (`/voronoi` subpath), `useHoverPin`, `squarify`,
+  `DEFAULT_PALETTE`/`ageFade`/`parseQuery`, `styles.css`. Disk-agnostic; the intended external
+  consumer (e.g. file-tree) pins this.
+- **`@disk-tree/react`** (`packages/react/`) — disk-flavored widgets built on the core (which it
+  re-exports for back-compat): `<TimeSeries>`/`<BytesOverTime>`, `<StalenessScatter>`,
+  `<AgeHistograms>`, `sumTbYears`.
 
 **Key features**:
 - Directory listing with size, mtime, n_children, n_desc columns

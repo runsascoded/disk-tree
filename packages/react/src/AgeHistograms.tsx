@@ -1,8 +1,8 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { DEFAULT_PALETTE } from './colors'
+import { DEFAULT_PALETTE } from '@rdub/treemap'
 import { bytesOlderThan, peakBin, timeTicks, totalBytes } from './histogram'
-import { useHoverPin } from './useHoverPin'
+import { useHoverPin } from '@rdub/treemap'
 
 /**
  * Byte-weighted age histograms, one column per item (spec: viz-widgets.md §4).

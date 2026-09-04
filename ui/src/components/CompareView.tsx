@@ -14,7 +14,7 @@ import {
 } from '@mui/material'
 import { FaArrowRight, FaFolder, FaFile, FaSortUp, FaSortDown, FaSync, FaList } from 'react-icons/fa'
 import { Treemap as DTTreemap, CONTAINER_BG, contrastEdge, divergingColor, parseColor } from '@disk-tree/react'
-import '@disk-tree/react/styles.css'
+import '@rdub/treemap/styles.css'
 import { compareScans, compareScansRecursive, fetchDiffIndexStatus, fetchScanHistory, startScan } from '../api'
 import type { CompareRecResult, CompareResult, CompareRow, ScanHistoryItem } from '../api'
 import { useScanProgress } from '../hooks/useScanProgress'

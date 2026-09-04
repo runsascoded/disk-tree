@@ -1,9 +1,9 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { DEFAULT_PALETTE } from './colors'
+import { DEFAULT_PALETTE } from '@rdub/treemap'
 import { isoScoresForData, isoScoreSegment, logDomain, logPos, logTicks, radiusFor } from './scatter'
 import { formatTbYears, pow10, SEC_PER_YEAR, TB } from './stats'
-import { useHoverPin } from './useHoverPin'
+import { useHoverPin } from '@rdub/treemap'
 
 /**
  * Log-log "triage frontier" scatter (spec: viz-widgets.md §3): one marker per

@@ -1,6 +1,6 @@
 /**
- * Color primitives for disk-tree widgets. All CSS-var-friendly so consumers
- * can theme without touching component code.
+ * Color primitives for the treemap (and disk-tree's widgets). All CSS-var-
+ * friendly so consumers can theme without touching component code.
  */
 
 import type { CellStyle } from './Treemap'
