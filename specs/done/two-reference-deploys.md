@@ -1,5 +1,12 @@
 # Two reference deploys: Flask × local scans vs Vite+CFN × cloud-store scans
 
+> **Superseded** by `cfn-demo-and-flask-localhost-peer.md` (2026-09-05). The
+> "two archs, compare the branch diff" framing was dropped in discussion: Ryan
+> has no story for a public Flask deploy, so it becomes one public **CFW demo**
+> (a fleet union over public R2: nj-crashes + ctbk) with **Flask kept as the
+> localhost peer** for laptop-disk cleaning — not a co-equal deploy. Original
+> ask preserved below for provenance.
+
 Written from the marin-gcs-usage session (2026-08-28). Context: marin runs the
 **Vite + Cloudflare Pages Functions** www arch over cloud-store scans
 (gcs.oa.dev, cw-s3.oa.dev — one long-lived branch per deployment, see marin's
