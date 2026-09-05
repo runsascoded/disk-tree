@@ -63,11 +63,26 @@ class S3BulkLister:
         if client is None:
             import boto3
 
+            from botocore.config import Config
+
             kw = {}
             if self.endpoint_url:
                 kw["endpoint_url"] = self.endpoint_url
             if self.region_name:
                 kw["region_name"] = self.region_name
+            # Throttling resilience: botocore's default (5 attempts, no
+            # client-side rate limiting) gave up under CoreWeave CAIOS
+            # `SlowDown` bursts (2026-09-01, 64 concurrent list streams) and
+            # killed the whole bulk-list. `adaptive` adds a client-side token
+            # bucket that *lowers the send rate* on throttling responses —
+            # per-client, i.e. per worker thread here, so each stream backs
+            # off independently — plus exponential-backoff retries.
+            cfg = Config(
+                retries={
+                    "mode": "adaptive",
+                    "max_attempts": int(os.environ.get("DT_S3_MAX_ATTEMPTS", "10")),
+                },
+            )
             # boto's `auto` addressing degrades to path-style for custom
             # endpoints, and CoreWeave's CAIOS rejects that outright
             # (PathStyleRequestNotAllowed). A workstation profile can carry
@@ -76,9 +91,8 @@ class S3BulkLister:
             # Batch) can match. Values: virtual | path | auto.
             style = os.environ.get("DT_S3_ADDRESSING_STYLE")
             if style:
-                from botocore.config import Config
-
-                kw["config"] = Config(s3={"addressing_style": style})
+                cfg = cfg.merge(Config(s3={"addressing_style": style}))
+            kw["config"] = cfg
             client = local.client = boto3.client("s3", **kw)
         return client
 

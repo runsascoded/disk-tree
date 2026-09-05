@@ -94,3 +94,22 @@ def test_stream_prefix_origin_start():
     assert rows == [
         BlobRow(name='p/a', size=2, created=_LM_STR, storage_class='STANDARD'),
     ]
+
+
+def test_client_retry_config(monkeypatch):
+    """The lazily-built client must carry adaptive throttling retries (the
+    2026-09-01 CoreWeave `SlowDown` fix) — with and without the addressing-
+    style env override, which must merge rather than replace it."""
+    monkeypatch.setenv('AWS_ACCESS_KEY_ID', 'x')
+    monkeypatch.setenv('AWS_SECRET_ACCESS_KEY', 'y')
+    monkeypatch.delenv('DT_S3_ADDRESSING_STYLE', raising=False)
+    cfg = S3BulkLister()._client().meta.config
+    # botocore normalizes max_attempts=10 to initial-try + 10 retries
+    assert cfg.retries == {'mode': 'adaptive', 'total_max_attempts': 11}
+    assert cfg.s3 is None
+
+    monkeypatch.setenv('DT_S3_ADDRESSING_STYLE', 'virtual')
+    monkeypatch.setenv('DT_S3_MAX_ATTEMPTS', '4')
+    cfg = S3BulkLister(endpoint_url='https://cwobject.com')._client().meta.config
+    assert cfg.retries == {'mode': 'adaptive', 'total_max_attempts': 5}
+    assert cfg.s3 == {'addressing_style': 'virtual'}
