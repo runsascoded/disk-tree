@@ -21,4 +21,4 @@ export {
   radiusFor,
 } from './scatter'
 export { BytesOverTime, TimeSeries } from './TimeSeries'
-export type { Series, TimeSeriesProps } from './TimeSeries'
+export type { Annotation, Series, TimeSeriesProps } from './TimeSeries'

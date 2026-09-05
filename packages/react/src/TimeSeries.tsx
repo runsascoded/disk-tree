@@ -26,6 +26,13 @@ export interface Series<T> {
   points: T[]
 }
 
+export interface Annotation {
+  x: number
+  y: number
+  label: string
+  below?: boolean
+}
+
 export interface TimeSeriesProps<T> {
   series: Series<T>[]
   getX: (p: T) => number
@@ -36,6 +43,10 @@ export interface TimeSeriesProps<T> {
   formatY?: (y: number) => string
   /** `linear` (default) or `log`. */
   yScale?: 'linear' | 'log'
+  /** Where the linear y-axis starts: `zero` (default) or `data` — fit the
+   *  y-range to the series (5% pad each side) so small movements in a large
+   *  total stay visible. Ignored for `log`. */
+  yFrom?: 'zero' | 'data'
   /** Y-axis label (rendered vertically). */
   yLabel?: string
   /** Approximate tick counts. */
@@ -46,6 +57,13 @@ export interface TimeSeriesProps<T> {
   yTickValues?: number[]
   /** Show area fill under each line (default true). */
   area?: boolean
+  /** Point callouts (e.g. first/last/min/max): a short text beside the point
+   *  at (x, y), above it by default (`below` flips it). Anchored away from
+   *  the nearest plot edge so labels never run off the chart. */
+  annotations?: Annotation[]
+  /** Click handler for the snapped hover x (the crosshair position) — e.g.
+   *  jump the page to that scan date. Sets a pointer cursor on the plot. */
+  onPickX?: (x: number) => void
   /** Extra CSS on the outer wrapper. */
   className?: string
   style?: CSSProperties
@@ -86,11 +104,14 @@ export function TimeSeries<T>({
   formatX = x => new Date(x).toLocaleDateString(),
   formatY = y => y.toLocaleString('en-US'),
   yScale = 'linear',
+  yFrom = 'zero',
   yLabel,
   xTicks = 5,
   yTicks = 4,
   yTickValues,
   area = true,
+  annotations,
+  onPickX,
   className,
   style,
   height,
@@ -122,13 +143,15 @@ export function TimeSeries<T>({
     if (xs.length === 0) return { xMin: 0, xMax: 1, yMin: 0, yMax: 1 }
     const yMinRaw = Math.min(...ys)
     const yMaxRaw = Math.max(...ys)
+    const fit = yScale === 'linear' && yFrom === 'data'
+    const pad = fit ? Math.max(yMaxRaw - yMinRaw, Math.abs(yMaxRaw) * 0.01) * 0.05 : 0
     return {
       xMin: Math.min(...xs),
       xMax: Math.max(...xs),
-      yMin: yScale === 'log' ? Math.max(1, yMinRaw) : 0,
-      yMax: yMaxRaw > 0 ? yMaxRaw * 1.05 : 1,
+      yMin: yScale === 'log' ? Math.max(1, yMinRaw) : fit ? yMinRaw - pad : 0,
+      yMax: fit ? yMaxRaw + pad : yMaxRaw > 0 ? yMaxRaw * 1.05 : 1,
     }
-  }, [series, getX, getY, yScale])
+  }, [series, getX, getY, yScale, yFrom])
 
   const plotW = Math.max(0, dims.w - PAD.left - PAD.right)
   const plotH = Math.max(0, dims.h - PAD.top - PAD.bottom)
@@ -196,7 +219,8 @@ export function TimeSeries<T>({
           height={dims.h}
           onMouseMove={onMove}
           onMouseLeave={() => setHoverX(null)}
-          style={{ display: 'block' }}
+          onClick={onPickX && (() => { if (hoverX != null) onPickX(hoverX) })}
+          style={{ display: 'block', cursor: onPickX ? 'pointer' : undefined }}
         >
           {/* Y grid + ticks */}
           {yTickVals.map((y, i) => (
@@ -293,6 +317,32 @@ export function TimeSeries<T>({
                   />
                 ))}
               </g>
+            )
+          })}
+          {/* Annotations: a haloed label beside the point, leaning away from
+              the nearest side edge */}
+          {annotations?.map((a, i) => {
+            const px = xToPx(a.x)
+            const py = yToPx(a.y)
+            const anchor = px < PAD.left + plotW * 0.15 ? 'start' : px > PAD.left + plotW * 0.85 ? 'end' : 'middle'
+            const dx = anchor === 'start' ? 5 : anchor === 'end' ? -5 : 0
+            const dy = a.below ? 14 : -7
+            return (
+              <text
+                key={`a${i}`}
+                x={px + dx}
+                y={py + dy}
+                textAnchor={anchor}
+                fontSize={10.5}
+                fontWeight={600}
+                fill="var(--dt-ts-anno-ink, #e6e6ea)"
+                stroke="var(--dt-ts-anno-halo, rgba(20,20,24,0.85))"
+                strokeWidth={3}
+                paintOrder="stroke"
+                pointerEvents="none"
+              >
+                {a.label}
+              </text>
             )
           })}
           {/* Hover crosshair */}
