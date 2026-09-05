@@ -81,6 +81,38 @@ def access_agg_cmd(out_parquet: str, memory_limit: str, temp_dir: str | None, ra
     )
 
 
+@access.command('sizes')
+@option('-d', '--max-depth', default=4, help='Prefix depth the rollup stops at')
+@option('-g', '--grain', default='1 hour', help="Time-bin width, e.g. '1 minute', '1 hour', '1 day'")
+@option('-M', '--memory-limit', default='4GB')
+@option('-o', '--out', 'out_parquet', required=True, help='Output layer-2b parquet path')
+@option('-T', '--temp-dir', default=None)
+@argument('raw_glob')
+def access_sizes_cmd(max_depth: int, grain: str, memory_limit: str, out_parquet: str, temp_dir: str | None, raw_glob: str):
+    """Read-size histogram of canonical rows at RAW_GLOB → layer-2b at --out.
+
+    RAW_GLOB must be layer-1a (per-request rows) — layer-2a has already summed
+    `bytes_out`, so the per-request distribution isn't recoverable from it.
+    """
+    import duckdb
+    from disk_tree.access.read_sizes import aggregate_read_sizes
+
+    con = duckdb.connect()
+    con.execute(f"SET memory_limit = '{memory_limit}'")
+    con.execute("SET preserve_insertion_order = false")
+    if temp_dir:
+        con.execute(f"SET temp_directory = '{temp_dir}'")
+
+    stats = aggregate_read_sizes(
+        con, f"(SELECT * FROM read_parquet('{raw_glob}'))", out_parquet,
+        max_depth=max_depth, grain=grain,
+    )
+    err(
+        f"{stats['n_ops']:,} reads / {stats['bytes_out']:,} bytes over {stats['bins']} {grain} bin(s) → "
+        f"{stats['rows']:,} rows across {stats['prefixes']:,} prefixes → {out_parquet}"
+    )
+
+
 @access.command('top')
 @option('-d', '--depth', default=1, help='Report at this tree depth (1 = top-level prefixes)')
 @option('-n', '--limit', default=20, help='Show top N rows')

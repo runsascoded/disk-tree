@@ -60,18 +60,21 @@ def normalize_op(method: str, operation: str = '') -> str:
     because the same HTTP method (GET) covers both GET_Object and LIST_Bucket.
     """
     op = operation.upper() if operation else method.upper()
-    # GCS-specific compound verbs
-    if op.startswith('LIST') or op.endswith('_BUCKET'):
-        # GCS: LIST_Bucket, LIST_Buckets. S3: list-type=2 (already parsed as LIST).
-        if 'LIST' in op:
-            return 'LIST'
-    if op.startswith('GET') or op == 'GET_OBJECT':
+    # GCS-specific compound verbs. Listing is spelled three ways depending on
+    # API surface — XML: GET_Bucket (an HTTP GET on the bucket); JSON:
+    # storage.objects.list / storage.buckets.list; docs' LIST_Bucket — so
+    # match on substring, plus the GET_Bucket special case.
+    if 'LIST' in op or op == 'GET_BUCKET':
+        return 'LIST'
+    if op.startswith('GET') or op.startswith('STORAGE.') and op.endswith('.GET'):
         return 'GET'
-    if op.startswith('PUT') or op in ('POST_OBJECT', 'POST_UPLOADS'):
+    if op.startswith('PUT') or op in ('POST_OBJECT', 'POST_UPLOADS') or (
+        op.startswith('STORAGE.') and (op.endswith('.INSERT') or op.endswith('.PATCH') or op.endswith('.UPDATE'))
+    ):
         return 'PUT'
     if op.startswith('HEAD'):
         return 'HEAD'
-    if op.startswith('DELETE'):
+    if op.startswith('DELETE') or (op.startswith('STORAGE.') and op.endswith('.DELETE')):
         return 'DELETE'
     if op in OPS:
         return op

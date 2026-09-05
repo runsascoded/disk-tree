@@ -1,9 +1,9 @@
-"""Layer-2a: per-path per-day per-op rollups from canonical access rows.
+"""Layer-2a: per-bucket per-path per-day per-op rollups from canonical access rows.
 
 Same bottom-up parent-synthesis machinery as size scans
 (:mod:`disk_tree.find.aggregate_duckdb`), but the accumulators are
-``n_ops`` / ``bytes_out`` / ``n_requesters`` per (path, day, op) instead of
-``size`` / ``n_desc``.
+``n_ops`` / ``bytes_out`` / ``n_requesters`` per (bucket, path, day, op)
+instead of ``size`` / ``n_desc``.
 
 Structural upshot: the widgets (treemap, series, diff) work over ops and
 egress *the same way* they work over bytes-at-rest — a treemap sized by
@@ -14,12 +14,19 @@ Output schema (canonical layer-2a parquet):
 
 ::
 
-    path, parent, depth, kind             -- tree mechanics (same as scans)
+    bucket                                 -- source bucket (tree per bucket)
+    path, parent, depth, kind              -- tree mechanics (same as scans)
     day                                    -- UTC day (DATE)
     op                                     -- GET|PUT|LIST|HEAD|DELETE|OTHER
     n_ops                                  -- request count under this path/day/op
     bytes_out, bytes_in                    -- summed byte totals
     n_requesters                           -- DISTINCT COUNT(requester)
+    last_ts                                -- MAX(request ts) — read-recency ("atime")
+
+``bucket`` is a first-class key at every level (identically-named prefixes in
+different buckets used to merge silently); each bucket gets its own tree with
+its own ``.`` root row. ``last_ts`` propagates as MAX up the parent levels, so
+any prefix's atime is the most recent request anywhere under it.
 """
 
 from __future__ import annotations
@@ -53,10 +60,15 @@ def aggregate_access(
 
     Returns a small stats dict (rows_in / paths_out / days / total_bytes_out).
     """
+    # `day` must mean *UTC* day regardless of host TZ — date_trunc over
+    # TIMESTAMPTZ truncates in the session timezone (a laptop run in EDT would
+    # shard days differently than the UTC batch job).
+    con.execute("SET TimeZone = 'UTC'")
     # Canonicalize input into a `access_in` table so subsequent SQL can spill.
     con.execute(f"""
         CREATE OR REPLACE TABLE access_in AS
         SELECT
+            ts,
             date_trunc('day', ts)::DATE AS day,
             store, bucket,
             -- Reuse the same `//` collapse policy as size-scan ingest so
@@ -70,21 +82,22 @@ def aggregate_access(
     if n_rows == 0:
         raise ValueError("no access rows in input")
 
-    # Leaf rollup: per (path, day, op). This is the "level 0" grain.
+    # Leaf rollup: per (bucket, path, day, op). This is the "level 0" grain.
     con.execute("""
         CREATE OR REPLACE TABLE access_leaf AS
         SELECT
-            path, day, op,
+            bucket, path, day, op,
             COUNT(*)::BIGINT AS n_ops,
             SUM(bytes_out)::BIGINT AS bytes_out,
             SUM(bytes_in)::BIGINT AS bytes_in,
-            COUNT(DISTINCT requester)::BIGINT AS n_requesters
+            COUNT(DISTINCT requester)::BIGINT AS n_requesters,
+            MAX(ts) AS last_ts
         FROM access_in
-        GROUP BY path, day, op
+        GROUP BY bucket, path, day, op
     """)
 
     # Bottom-up parent synthesis. Group current level's rows by parent path
-    # (+ day + op) to produce the next level, until nothing left.
+    # (+ bucket + day + op) to produce the next level, until nothing left.
     con.execute("CREATE OR REPLACE TABLE level_cur AS SELECT * FROM access_leaf")
     level = 0
     level_tables: list[str] = []
@@ -94,6 +107,7 @@ def aggregate_access(
         con.execute(f"""
             CREATE OR REPLACE TABLE {next_tbl} AS
             SELECT
+                bucket,
                 {parent_expr} AS path,
                 day, op,
                 SUM(n_ops)::BIGINT AS n_ops,
@@ -103,10 +117,11 @@ def aggregate_access(
                 -- can't recover exact distinct-count across children without
                 -- rebuilding from raw. Sum bounds it above; a HyperLogLog
                 -- sketch is the fix if this ever needs to be exact.
-                SUM(n_requesters)::BIGINT AS n_requesters
+                SUM(n_requesters)::BIGINT AS n_requesters,
+                MAX(last_ts) AS last_ts
             FROM level_cur
             WHERE path != ''
-            GROUP BY 1, 2, 3
+            GROUP BY 1, 2, 3, 4
         """)
         cnt = con.execute(f"SELECT COUNT(*) FROM {next_tbl}").fetchone()[0]
         if cnt == 0:
@@ -117,25 +132,27 @@ def aggregate_access(
 
     # Union all levels + attach kind/parent/depth for tree mechanics.
     unions = " UNION ALL ".join(
-        f"SELECT path, day, op, n_ops, bytes_out, bytes_in, n_requesters FROM {t}"
+        f"SELECT bucket, path, day, op, n_ops, bytes_out, bytes_in, n_requesters, last_ts FROM {t}"
         for t in [*level_tables, 'access_leaf']
     )
     con.execute(f"""
         CREATE OR REPLACE TABLE access_agg AS
         WITH all_levels AS ({unions})
         SELECT
+            bucket,
             CASE WHEN path = '' THEN '.' ELSE path END AS path,
             day, op,
             SUM(n_ops)::BIGINT AS n_ops,
             SUM(bytes_out)::BIGINT AS bytes_out,
             SUM(bytes_in)::BIGINT AS bytes_in,
             SUM(n_requesters)::BIGINT AS n_requesters,
+            MAX(last_ts) AS last_ts,
             -- 'dir' for the tree root and any synthesized parent; 'file' for
             -- leaf paths present in access_leaf (i.e. object keys that
             -- actually appeared in the raw log).
             CASE
                 WHEN path = '' THEN 'dir'
-                WHEN path IN (SELECT DISTINCT path FROM access_leaf) THEN 'file'
+                WHEN (bucket, path) IN (SELECT DISTINCT (bucket, path) FROM access_leaf) THEN 'file'
                 ELSE 'dir'
             END AS kind,
             CASE
@@ -144,7 +161,7 @@ def aggregate_access(
             END AS parent,
             CASE WHEN path = '' THEN 0 ELSE (length(path) - length(replace(path, '/', ''))) + 1 END AS depth
         FROM all_levels
-        GROUP BY path, day, op
+        GROUP BY bucket, path, day, op
     """)
 
     # Root-level normalization: rows with parent='' + path!='' → parent='.'
@@ -154,14 +171,14 @@ def aggregate_access(
     """)
 
     con.execute(f"""
-        COPY (SELECT path, parent, depth, kind, day, op,
-                     n_ops, bytes_out, bytes_in, n_requesters
+        COPY (SELECT bucket, path, parent, depth, kind, day, op,
+                     n_ops, bytes_out, bytes_in, n_requesters, last_ts
               FROM access_agg
-              ORDER BY depth, path, day, op)
-        TO '{out_parquet}' (FORMAT PARQUET)
+              ORDER BY bucket, depth, path, day, op)
+        TO '{out_parquet}' (FORMAT PARQUET, COMPRESSION ZSTD)
     """)
 
-    n_paths = con.execute("SELECT COUNT(DISTINCT path) FROM access_agg").fetchone()[0]
+    n_paths = con.execute("SELECT COUNT(DISTINCT (bucket, path)) FROM access_agg").fetchone()[0]
     n_days = con.execute("SELECT COUNT(DISTINCT day) FROM access_agg").fetchone()[0]
     total_out = con.execute(
         "SELECT COALESCE(SUM(bytes_out), 0) FROM access_agg WHERE path = '.'"
