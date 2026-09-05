@@ -1,5 +1,17 @@
 # CP manifest: marin's fork-side `src/disk_tree` → upstream
 
+> **Landed upstream** `5be454c` (2026-09-04). `tree_build.py` (new) +
+> `access/read_sizes.py` (new) + `dt access sizes` + the `aggregate`/
+> `parsers/gcs`/`schema` productionization, taken from `m/gcs` (upstream was ==
+> the merge-base on every file, so each is marin's additive delta only).
+> `cli/__init__.py` left untouched — `access` is already imported, so `sizes`
+> registers for free; marin's version there only *removes* upstream commands.
+> Tests: `test_tree_build.py` + `test_read_sizes.py` (new), `test_access.py`
+> refreshed for whole-record dedup. Full suite 454 pass. The "already upstream"
+> items (atomic import write, `preserve_insertion_order=false`) were confirmed
+> present. Marin can record `5be454c` in `dt-core-upstreaming.md`'s sync state.
+
+
 Written from the marin-gcs-usage session (`gcs` branch). Goal: keep upstream's
 Python core a superset of what the marin branches use, so the CP graph stays
 bidirectional (marin keeps its own copy of the engine per branch — see marin's
