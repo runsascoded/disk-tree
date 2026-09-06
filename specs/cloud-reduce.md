@@ -93,7 +93,7 @@ blob gets no manifest — the local DB already has the row. Tested: a scan
 reduced under one root, registered and `du`-read under a fresh one.
 
 **Runner.** `.github/workflows/reduce.yml`, `workflow_dispatch` with inputs
-`capture` (URL), `to` (default `r2://file-tree-demo/disk-tree/scans`),
+`capture` (URL), `to` (default `r2://disk-tree/scans`),
 `engine`, `memory_limit` (5 GB; the runner has ~7 GB RAM, 14 GB disk — a
 7M-row reduce peaks ~3.8 GB). `uv sync --extra r2`, then the plain
 `disk-tree reduce -D -e … -M … -t <to> <capture>` — the same invocation runs
@@ -103,9 +103,9 @@ standard `AWS_*` env; `AWS_DEFAULT_REGION=auto` for R2).
 
 The crisis loop, end to end:
 
-    laptop   disk-tree capture ~ -t r2://bucket/disk-tree/captures     # prints the capture URL
-    GitHub   Reduce workflow: capture=<that URL>, to=r2://bucket/disk-tree/scans
-    laptop   disk-tree scans register r2://bucket/disk-tree/scans       # DISK_TREE_SCAN_DIRS includes it
+    laptop   disk-tree capture ~ -t r2://disk-tree/captures     # prints the capture URL
+    GitHub   Reduce workflow: capture=<that URL>, to=r2://disk-tree/scans
+    laptop   disk-tree scans register r2://disk-tree/scans       # DISK_TREE_SCAN_DIRS includes it
     laptop   disk-tree du ~  /  disk-tree-server                        # served from the R2 blob
 
 Verified against R2 with the laptop standing in for the runner (2026-09-06):
@@ -142,7 +142,9 @@ server without it counts as all-on, so older Flask peers are unaffected.
   (`cfn/tests/fixtures/gen.py`), including the handlers end-to-end through a
   directory-backed fake `R2Bucket`.
 - `ui/wrangler.toml`: Pages project `disk-tree`, `dist/`, R2 binding `SCANS`
-  → `file-tree-demo`, `SCANS_PREFIX = disk-tree/scans/`; `pnpm cfn:dev` =
+  → the private `disk-tree` bucket (created 2026-09-06; laptop captures list
+  every path on the machine, so not the public demo bucket the R2 round-trip
+  tests used), `SCANS_PREFIX = scans/`; `pnpm cfn:dev` =
   `wrangler pages dev dist --port 7789` (FE 7788 + 1).
 - `aggregate_duckdb` now writes 64K-row groups (`ROW_GROUP_SIZE`): DuckDB's
   ~120K default is too fat for a Worker to decode per listing.

@@ -7,12 +7,16 @@
 # Local: `pnpm build && pnpm cfn:dev` serves dist + functions on :7789 with an
 # emulated R2 — seed it with `wrangler r2 object put --local` (see the spec).
 name = "disk-tree"
+# Pinned: `wrangler login` state is machine-global and other projects log in
+# as other accounts; without this a deploy can land in whichever account was
+# logged in last.
+account_id = "0dcad5654e9744de6616f74b8df4af63"
 compatibility_date = "2026-09-01"
 pages_build_output_dir = "dist"
 
 [[r2_buckets]]
 binding = "SCANS"
-bucket_name = "file-tree-demo"
+bucket_name = "disk-tree"
 
 [vars]
-SCANS_PREFIX = "disk-tree/scans/"
+SCANS_PREFIX = "scans/"

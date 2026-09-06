@@ -11,7 +11,7 @@ import { onRequestGet as history } from '../../functions/api/scans/history'
 import { onRequestGet as capabilities } from '../../functions/api/capabilities'
 import { onRequest as fallback } from '../../functions/api/[[path]]'
 
-const PREFIX = 'disk-tree/scans/'
+const PREFIX = 'scans/'
 const env: Env = { SCANS: dirBucket(join(__dirname, 'fixtures'), PREFIX), SCANS_PREFIX: PREFIX }
 const T = '2026-01-02T03:04:05'
 const T0 = 1_700_000_000
