@@ -36,6 +36,7 @@ from disk_tree.cli.base import cli
 @option('-s', '--scheme', default='gcs', help='URI scheme for the scan root (gcs / s3 / r2)')
 @option('-T', '--temp-dir', default=None, help='DuckDB spill directory (duckdb engine only; the stream engine is sort-free). Default: fresh per-invocation temp dir (safe under concurrent imports).')
 @option('-t', '--time', 'time_str', default=None, help='Snapshot time (ISO 8601) recorded on each Scan; default: now')
+@option('-w', '--to', default=None, help='Write the scan blob(s) to a dir or fsspec URL (`r2://bucket/prefix`) instead of the configured write dir — same as `index --to`')
 @option('-x', '--max-temp-size', default=None, help="DuckDB `max_temp_directory_size` (duckdb engine only; e.g. `500GiB`). Default: DuckDB's auto-cap = free disk at launch, a stale snapshot under concurrent writers.")
 def import_cmd(
     engine: str,
@@ -49,6 +50,7 @@ def import_cmd(
     scheme: str,
     temp_dir: str | None,
     time_str: str | None,
+    to: str | None,
     max_temp_size: str | None,
 ):
     """Import one or more buckets from listing parquet(s) as canonical scans."""
@@ -57,6 +59,9 @@ def import_cmd(
     from disk_tree.sqla.db import init
     from disk_tree.storage import get_backend
 
+    if to:
+        from disk_tree import config as _config
+        err(f"--to: writing blobs to {_config.set_write_target(to)}")
     db = init()
     db.create_all()
 
@@ -110,7 +115,10 @@ def import_bucket(
     """
     from disk_tree.sqla.model import Scan
 
-    scan_path = f'{scheme}://{bucket}'
+    from disk_tree.backends.url import canonical
+    # A `file` root collapses to the bare path, so a reduced capture's
+    # `Scan.path` is byte-identical to what `index` records for the same dir.
+    scan_path = canonical(f'{scheme}://{bucket}')
 
     if engine == 'pandas':
         from disk_tree.find.import_listing import import_listing

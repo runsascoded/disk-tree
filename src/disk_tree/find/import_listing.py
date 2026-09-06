@@ -72,7 +72,8 @@ def import_listing(
     ).df()
     if df.empty:
         raise ValueError(f"no rows for bucket {bucket!r} in listings {listings}")
-    scan_root = f'{scheme}://{bucket}'
+    from disk_tree.backends.url import canonical
+    scan_root = canonical(f'{scheme}://{bucket}')  # `file` roots → the bare path
     # Collapse `//` empty-component keys here so the parent-walking downstream
     # never sees a trailing-slash path.
     names = df['name'].astype(str).map(_canonicalize)

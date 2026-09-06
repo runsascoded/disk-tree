@@ -79,6 +79,14 @@ disk-tree index [URL]     # Scan directory or s3:// bucket
                           # exact when the scan root contains the sharing sources (home/full scan),
                           # else an upper bound. `du` shows a `frees` column when the sidecar exists
 
+disk-tree capture PATH -t URL  # The split pipeline for a ~full disk (spec `cloud-reduce.md`): gfind →
+                          # layer-1 listing shards streamed straight to a dir/URL (`r2://…`), bounded
+                          # memory, zero local disk. Files only (dirs implied; APFS dirs hold 0 blocks).
+                          # Prints the capture dir `<to>/<host>/<root>/<stamp>` (+ `_SUCCESS.json`)
+disk-tree reduce CAPTURE  # capture → layer-2 scan blob + Scan row, on any machine with disk
+  -e, --engine            # duckdb (default; handles the unsorted shards) | pandas | stream
+  -t, --to URL            # Upload the blob (same as `index --to`); `-D` skips the diff index
+
 disk-tree scans           # List cached scans (JSON)
 
 disk-tree diff ARGS       # Per-path Δ table between two scans (URI → two most recent, or two scan ids;

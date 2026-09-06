@@ -1527,7 +1527,8 @@ def aggregate_stream(
             pivot_maps.append({v: len(pivot_names) + i for i, v in enumerate(vals)})
             pivot_names.extend(pivot_col(col, v) for v in vals)
 
-        scan_root = f'{scheme}://{bucket}'
+        from disk_tree.backends.url import canonical
+        scan_root = canonical(f'{scheme}://{bucket}')  # `file` roots → the bare path
         # One merge source per sorted run (bin-packed shards are piecewise sorted).
         # When a partition's runs are globally disjoint, ordered by first key its
         # merge degrades to concatenation — O(1)/row instead of O(log n_runs)

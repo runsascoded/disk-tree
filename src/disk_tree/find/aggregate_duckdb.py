@@ -327,7 +327,8 @@ def aggregate_listing_to_parquet(
     if max_temp_size:
         con.execute(f"SET max_temp_directory_size = '{max_temp_size}'")
 
-    scan_root = f'{scheme}://{bucket}'
+    from disk_tree.backends.url import canonical
+    scan_root = canonical(f'{scheme}://{bucket}')  # `file` roots → the bare path
     # Collapse consecutive slashes + strip trailing slashes so `a//b` reads as
     # `a/b`. Keys with empty path components exist in real listings (marin's
     # 2026-08-14 west4 scan has `tokenized/…//.artifact.json`); leaving the
