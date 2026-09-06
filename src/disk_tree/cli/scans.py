@@ -46,7 +46,11 @@ def scans_move(src_dir: str | None, no_keep_latest: bool, dry_run: bool, dest: s
 
     from disk_tree import config
 
+    from disk_tree import blobfs
+
     dest = dest or config.scan_write_dir()
+    if blobfs.is_url(dest) or (src_dir and blobfs.is_url(src_dir)):
+        raise SystemExit('scans move is local-only — a remote target is chosen per scan with `index --to`')
     if not config._volume_mounted(dest):
         raise SystemExit(f'{dest} is on an unmounted volume')
     sources = [src_dir] if src_dir else [d for d in config.scan_read_dirs() if d != dest]
@@ -112,17 +116,21 @@ def scans_move(src_dir: str | None, no_keep_latest: bool, dry_run: bool, dest: s
 
 @scans.command('dirs')
 def scans_dirs():
-    """Show where blobs are written and searched for."""
-    from os.path import isdir, join
-    from glob import glob
+    """Show where blobs are written and searched for (local dirs and URLs)."""
+    from os.path import isdir
 
-    from disk_tree import config
+    from disk_tree import blobfs, config
 
     print(f'write: {config.SCANS_DIR}')
     for d in config.scan_read_dirs():
-        n = len(glob(join(d, '*.parquet'))) if isdir(d) else 0
         mark = '*' if d == config.SCANS_DIR else ' '
-        state = f'{n} blobs' if isdir(d) else 'absent'
+        if blobfs.is_url(d):
+            try:
+                state = f'{len(blobfs.list_parquets(d))} blobs, remote'
+            except Exception as e:  # unreachable store, missing driver/endpoint — report, don't die
+                state = f'unreachable: {e}'
+        else:
+            state = f'{len(blobfs.list_parquets(d))} blobs' if isdir(d) else 'absent'
         print(f'  {mark} {d}  ({state})')
 
 
@@ -192,13 +200,14 @@ def scans_info(path: str):
     print(f"Errors:       {scan.error_count or 0}")
 
     if isfile(scan.blob):
-        # Show parquet file size
-        from os.path import getsize
-        blob_size = getsize(scan.blob)
-        print(f"Blob size:    {blob_size:,} bytes")
+        # Show parquet file size (the blob may sit on any read dir, or a URL)
+        from disk_tree import blobfs
+        from disk_tree.diff import resolve_blob
+        blob_path = resolve_blob(scan.blob)
+        print(f"Blob size:    {blobfs.size(blob_path):,} bytes")
 
         # Check for chunks
-        df = pd.read_parquet(scan.blob)
+        df = blobfs.read_parquet(blob_path)
         if 'child_scan_id' in df.columns:
             chunks = df[df['child_scan_id'].notna()]
             if not chunks.empty:

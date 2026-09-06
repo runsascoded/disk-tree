@@ -7,16 +7,14 @@ Large scans are automatically split into smaller chunks:
 
 This keeps parquets small for fast updates while preserving full history.
 """
-import os
 from os import makedirs
-from os.path import exists, isabs, join
+from os.path import isabs
 from uuid import uuid4
 
 import pandas as pd
-import pyarrow.parquet as pq
 
 from .base import BLOB_ROW_GROUP_SIZE, StorageBackend, PathStats, path_prefix_bounds
-from .. import config as _config
+from .. import blobfs, config as _config
 from ..config import ROOT_DIR
 
 # Subtrees with >= this many descendants get chunked into separate parquets
@@ -34,7 +32,8 @@ class HybridBackend(StorageBackend):
         # Resolve via the config module so tests can monkeypatch SCANS_DIR at runtime.
         self.scans_dir = scans_dir or _config.SCANS_DIR
         self.chunk_threshold = chunk_threshold
-        makedirs(self.scans_dir, exist_ok=True)
+        if not blobfs.is_url(self.scans_dir):
+            makedirs(self.scans_dir, exist_ok=True)
         # Cache for loaded dataframes
         self._cache: dict[str, pd.DataFrame] = {}
 
@@ -42,6 +41,9 @@ class HybridBackend(StorageBackend):
         # Legacy absolute paths are honored; new refs are basenames.
         # Blobs may live on an external volume; search every read dir.
         return blob_ref if isabs(blob_ref) else _config.resolve_scan_blob(blob_ref, self.scans_dir)
+
+    def _exists(self, blob_ref: str) -> bool:
+        return blobfs.exists(self._resolve(blob_ref))
 
     @property
     def name(self) -> str:
@@ -144,19 +146,17 @@ class HybridBackend(StorageBackend):
     def _save_parquet(self, df: pd.DataFrame) -> str:
         """Save a single parquet file, return basename blob_ref."""
         blob_ref = f'{uuid4()}.parquet'
-        blob_path = join(self.scans_dir, blob_ref)
-        df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
+        blob_path = blobfs.join(self.scans_dir, blob_ref)
+        blobfs.write_parquet(df, blob_path, BLOB_ROW_GROUP_SIZE)
         return blob_ref
 
     def _save_parquet_arrow(self, table: 'pa.Table') -> str:
         """Write an already-constructed Arrow table; caller is expected to have
         dropped the source DataFrame so peak memory holds Arrow buffers only.
         """
-        import pyarrow.parquet as pq
-
         blob_ref = f'{uuid4()}.parquet'
-        blob_path = join(self.scans_dir, blob_ref)
-        pq.write_table(table, blob_path)
+        blob_path = blobfs.join(self.scans_dir, blob_ref)
+        blobfs.write_table(table, blob_path)
         return blob_ref
 
     def _rebase_paths(self, df: pd.DataFrame, root_path: str) -> pd.DataFrame:
@@ -220,7 +220,7 @@ class HybridBackend(StorageBackend):
         pushdown_prefix = path_prefix if not follow_refs else None
         if max_depth is not None or min_depth is not None or pushdown_prefix:
             try:
-                schema = pq.read_schema(self._resolve(blob_ref))
+                schema = blobfs.read_schema(self._resolve(blob_ref))
                 conds = []
                 if 'depth' in schema.names:
                     if max_depth is not None:
@@ -240,12 +240,12 @@ class HybridBackend(StorageBackend):
                 else:
                     filters = None
                 if filters is not None:
-                    df = pd.read_parquet(self._resolve(blob_ref), filters=filters)
+                    df = blobfs.read_parquet(self._resolve(blob_ref), filters=filters)
             except Exception:
                 pass  # Fall back to full load + pandas masks
 
         if df is None:
-            df = pd.read_parquet(self._resolve(blob_ref))
+            df = blobfs.read_parquet(self._resolve(blob_ref))
             if 'depth' in df.columns:
                 if max_depth is not None:
                     df = df[df['depth'] <= max_depth]
@@ -261,7 +261,7 @@ class HybridBackend(StorageBackend):
             for _, row in refs.iterrows():
                 child_blob_ref = row['child_scan_id']
                 child_path = row['path']
-                if exists(self._resolve(child_blob_ref)):
+                if self._exists(child_blob_ref):
                     child_df = self.load(child_blob_ref, follow_refs=True)
                     # Rebase child paths back to parent coordinate system
                     child_df = self._unbase_paths(child_df, child_path)
@@ -300,7 +300,7 @@ class HybridBackend(StorageBackend):
 
     def get_path_stats(self, blob_ref: str, rel_path: str) -> PathStats | None:
         """Get stats for a specific path, following refs if needed."""
-        df = pd.read_parquet(self._resolve(blob_ref))
+        df = blobfs.read_parquet(self._resolve(blob_ref))
 
         # Direct match
         match = df[df['path'] == rel_path]
@@ -320,7 +320,7 @@ class HybridBackend(StorageBackend):
                 if rel_path.startswith(chunk_root + '/'):
                     # Path is inside this chunk
                     child_blob_ref = row['child_scan_id']
-                    if exists(self._resolve(child_blob_ref)):
+                    if self._exists(child_blob_ref):
                         # Rebase the path relative to chunk root
                         child_rel_path = rel_path[len(chunk_root) + 1:]
                         return self.get_path_stats(child_blob_ref, child_rel_path)
@@ -330,22 +330,22 @@ class HybridBackend(StorageBackend):
     def delete(self, blob_ref: str) -> None:
         """Delete the parquet file and any child chunks."""
         blob_path = self._resolve(blob_ref)
-        if not exists(blob_path):
+        if not blobfs.exists(blob_path):
             return
 
         # Load to find child refs
         try:
-            df = pd.read_parquet(blob_path)
+            df = blobfs.read_parquet(blob_path)
             if 'child_scan_id' in df.columns:
                 for child_ref in df['child_scan_id'].dropna():
-                    if exists(self._resolve(child_ref)):
+                    if self._exists(child_ref):
                         self.delete(child_ref)  # Recursive delete
         except Exception:
             pass
 
         # Delete this parquet
-        if exists(blob_path):
-            os.remove(blob_path)
+        if blobfs.exists(blob_path):
+            blobfs.remove(blob_path)
 
         # Clear cache
         self._cache = {k: v for k, v in self._cache.items() if not k.startswith(blob_ref)}
@@ -353,7 +353,7 @@ class HybridBackend(StorageBackend):
     def _delete_path_impl(self, blob_ref: str, rel_path: str) -> PathStats | None:
         """Delete a path, updating only the affected chunk."""
         blob_path = self._resolve(blob_ref)
-        df = pd.read_parquet(blob_path)
+        df = blobfs.read_parquet(blob_path)
 
         # Check if path is in a child chunk
         if 'child_scan_id' in df.columns:
@@ -362,7 +362,7 @@ class HybridBackend(StorageBackend):
                 if rel_path == chunk_root or rel_path.startswith(chunk_root + '/'):
                     # Deletion is inside this chunk
                     child_blob_ref = row['child_scan_id']
-                    if exists(self._resolve(child_blob_ref)):
+                    if self._exists(child_blob_ref):
                         if rel_path == chunk_root:
                             # Deleting the entire chunked subtree
                             stats = PathStats(
@@ -376,7 +376,7 @@ class HybridBackend(StorageBackend):
                             df = df[df['path'] != chunk_root]
                             # Add 1 because the deleted item itself counts as a descendant
                             self._update_ancestors(df, chunk_root, stats.size, stats.n_desc + 1)
-                            df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
+                            blobfs.write_parquet(df, blob_path, BLOB_ROW_GROUP_SIZE)
                             self._cache.clear()
                             return stats
                         else:
@@ -390,7 +390,7 @@ class HybridBackend(StorageBackend):
                                 df.loc[df['path'] == chunk_root, 'n_desc'] -= (stats.n_desc + 1)
                                 # Update root ancestors
                                 self._update_ancestors(df, chunk_root, stats.size, stats.n_desc + 1)
-                                df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
+                                blobfs.write_parquet(df, blob_path, BLOB_ROW_GROUP_SIZE)
                                 self._cache.clear()
                             return stats
 
@@ -413,7 +413,7 @@ class HybridBackend(StorageBackend):
         # Update ancestors - add 1 because the deleted item itself counts as a descendant
         self._update_ancestors(df, rel_path, stats.size, stats.n_desc + 1)
 
-        df.to_parquet(blob_path, index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
+        blobfs.write_parquet(df, blob_path, BLOB_ROW_GROUP_SIZE)
         self._cache.clear()
         return stats
 
@@ -440,10 +440,10 @@ class HybridBackend(StorageBackend):
     def get_chunk_stats(self, blob_ref: str) -> dict:
         """Get info about chunking for a scan."""
         blob_path = self._resolve(blob_ref)
-        if not exists(blob_path):
+        if not blobfs.exists(blob_path):
             return {'error': 'not found'}
 
-        df = pd.read_parquet(blob_path)
+        df = blobfs.read_parquet(blob_path)
         chunks = []
         if 'child_scan_id' in df.columns:
             for _, row in df[df['child_scan_id'].notna()].iterrows():
@@ -455,7 +455,7 @@ class HybridBackend(StorageBackend):
                     'blob_ref': child_ref,
                 }
                 # Recursively get chunk stats
-                if exists(self._resolve(child_ref)):
+                if self._exists(child_ref):
                     chunk_info['nested'] = self.get_chunk_stats(child_ref)
                 chunks.append(chunk_info)
 

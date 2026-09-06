@@ -36,6 +36,9 @@ def vocab_cmd(force: bool, as_json: bool, scan_id: str | None, uri: str):
     blob = resolve_blob(scan['blob'])
     if blob.startswith(('ddb:', 'sqlite:')):
         raise SystemExit(f"scan {scan['id']} stores rows in {blob!r} — vocab sidecars require parquet blobs")
+    from disk_tree.blobfs import is_url
+    if is_url(blob):
+        raise SystemExit(f"scan {scan['id']} blob is remote ({blob}) — vocab sidecars are local-only")
 
     stats = build_vocab_sidecar(blob, force=force)
     if as_json:

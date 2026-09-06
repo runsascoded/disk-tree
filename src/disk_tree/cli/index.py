@@ -10,6 +10,40 @@ from disk_tree.sqla.db import init
 from humanize import naturalsize
 from utz import err, iec
 
+_CLOUD = ('s3://', 'gcs://', 'r2://', 'ssh://')
+LOW_SPACE_VAR = 'DISK_TREE_LOW_SPACE_BYTES'
+REMOTE_TARGET_VAR = 'DISK_TREE_REMOTE_SCAN_TARGET'
+DEFAULT_LOW_SPACE_BYTES = 5 * 2**30
+
+
+def _check_local_space(auto_remote: bool) -> None:
+    """Warn — or, with `--auto-remote`, redirect — when the local write target is
+    low on space: the crisis a remote target exists for (spec
+    `remote-scan-targets.md`). A URL target is never checked; the reduce still
+    needs *transient* local scratch either way, only the persistent blob moves.
+    """
+    from shutil import disk_usage
+    from disk_tree import blobfs, config as _config
+
+    wd = _config.scan_write_dir()
+    if blobfs.is_url(wd):
+        return
+    probe = wd
+    while not os.path.exists(probe):  # the dir may not exist yet; its volume does
+        probe = os.path.dirname(probe)
+    free = disk_usage(probe).free
+    low = int(os.environ.get(LOW_SPACE_VAR, DEFAULT_LOW_SPACE_BYTES))
+    if free >= low:
+        return
+    remote = os.environ.get(REMOTE_TARGET_VAR)
+    if auto_remote and remote:
+        target = _config.set_write_target(remote)
+        err(f"low space: {iec(free)} free on {wd} (< {iec(low)}); --auto-remote: writing blobs to {target}")
+        return
+    hint = f"--to {remote}" if remote else f"--to r2://<bucket>/<prefix> (or set {REMOTE_TARGET_VAR})"
+    tail = " — pass -R/--auto-remote to redirect automatically" if remote else ""
+    err(f"warning: only {iec(free)} free on {wd} (< {iec(low)}); consider {hint}{tail}")
+
 
 @cli.command
 @option('-C', '--no-cache-read', is_flag=True)
@@ -19,7 +53,9 @@ from utz import err, iec
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendants) per path')
 @option('-M', '--measure-memory', is_flag=True)
 @option('-q', '--no-progress', is_flag=True, help='Suppress the tqdm scan progress bar (for scheduled/redirected runs — keeps logs small)')
+@option('-R', '--auto-remote', is_flag=True, help=f'If the local write target is low on space (< ${LOW_SPACE_VAR}, default 5 GiB) and ${REMOTE_TARGET_VAR} is set, write the blob there instead (default: warn and suggest `--to`)')
 @option('-s', '--sudo', is_flag=True, help='Run `find` as sudo')
+@option('-t', '--to', default=None, help='Write this scan\'s blob to a local dir or an fsspec URL (`r2://bucket/prefix`, `s3://…`, `gs://…`) instead of the configured write dir; it joins the search path for this run')
 @option('-x', '--extents', is_flag=True, help='Also map physical extents → per-dir reclaimable bytes (APFS clones/hardlinks; writes a .reclaim sidecar). macOS, local scans only; exact when the scan root contains the sharing sources (home/full scan)')
 @argument('url', required=False)
 def index(
@@ -30,7 +66,9 @@ def index(
     mean_mtime: bool,
     measure_memory: bool,
     no_progress: bool,
+    auto_remote: bool,
     sudo: bool,
+    to: str | None,
     extents: bool,
     url: str | None,
 ):
@@ -40,6 +78,12 @@ def index(
     db.create_all()
     url = url or getcwd()
     url = url.rstrip('/') or '/'
+    if to:
+        from disk_tree import config as _config
+        target = _config.set_write_target(to)
+        err(f"--to: writing blobs to {target}")
+    elif not url.startswith(_CLOUD):
+        _check_local_space(auto_remote)
     # Scheduled scans that must land on external media: bail before doing any
     # work when the write target fell back to the boot disk (no opted-in volume
     # mounted). Exit 0 so a launchd/cron wrapper logs a skip, not a failure.
@@ -101,11 +145,11 @@ def index(
     # Blobs may live on any read dir (external volume incl.), so resolve via the
     # search path — not a naive join with the *write* dir, which stats a path
     # that need not exist (e.g. blob on the boot disk, write target on X6).
+    from disk_tree import blobfs
     from disk_tree.diff import resolve_blob
     blob_path = resolve_blob(scan.blob)
-    if os.path.exists(blob_path):
-        stat = os.stat(blob_path)
-        print(f"Scan cached path: {blob_path} ({iec(stat.st_size)})")
+    if blobfs.exists(blob_path):
+        print(f"Scan cached path: {blob_path} ({iec(blobfs.size(blob_path))})")
     else:
         print(f"Scan blob: {scan.blob}")
     if scan.error_count:
@@ -120,7 +164,9 @@ def index(
         print(f"\nTip: Run with --sudo for full access: disk-tree index --sudo {url}")
 
     if extents:
-        if os.path.exists(blob_path):
+        if blobfs.is_url(blob_path):
+            err(f"--extents writes a local sidecar beside the blob; skipping for remote blob {blob_path}")
+        elif os.path.exists(blob_path):
             _build_reclaim_sidecar(url, blob_path)
         else:
             err(f"--extents needs a resolvable blob to write the sidecar beside; skipping ({scan.blob})")

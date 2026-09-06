@@ -131,3 +131,46 @@ switchable; neither blocks shipping remote blobs first.
 3. `disk-tree index --to` + space-aware warn/suggest. Tests.
 4. CIC/manual: real `r2://` scan of a small local dir, read it back through the
    server, confirm the treemap renders from the cloud blob.
+
+## Landed — Phase 1, steps 1–3 (2026-09-06)
+
+- **`blobfs.py`** — the one local-vs-URL seam: `is_url`/`join`/`fs_for`
+  (`r2://` → s3fs with the endpoint from `DISK_TREE_R2_ENDPOINT_URL` or the
+  bucket's `buckets.yml` entry; everything else `fsspec.url_to_fs`),
+  `exists`/`size`/`mtime`/`read_schema`/`read_table`/`read_parquet`/
+  `write_parquet`/`write_table`/`remove`/`put`/`list_parquets`. fsspec is
+  imported lazily (it stays an optional extra); remote `exists` hits are
+  remembered (blobs are immutable UUIDs), misses never are.
+- **`config.py`** — URL entries in `DISK_TREE_SCAN_DIRS` (`split_dirs` splits
+  on `:` not followed by `//`), URL = always "mounted", `_ensure_dir` no-ops for
+  a URL, `resolve_scan_blob` is two-pass (local dirs first, so a local blob never
+  costs a round-trip), `set_write_target()` + `on_write_target_change` (resets
+  the backend singleton) — what `--to` uses.
+- **Backends** — `HybridBackend`/`ParquetBackend`/`adopt_parquet` route every
+  parquet read/write/exists/remove through `blobfs`; pushdown is unchanged
+  (row-group stats read from the footer, only overlapping groups fetched). A
+  chunked hybrid scan's child blobs land remotely too.
+- **`diff.py` / `diff_index.py` / `server.py`** — chunk-map, `resolve_chunk_for_path`,
+  `load_scan_table`, the server's child-chunk follow and its in-place delete
+  rewrite all go through `blobfs`, so the auto diff-index after `index --to`
+  and serving/deleting over a remote scan work.
+- **`index -t/--to`, `-R/--auto-remote`**, low-space check (`DISK_TREE_LOW_SPACE_BYTES`,
+  default 5 GiB; `DISK_TREE_REMOTE_SCAN_TARGET` names the default remote):
+  warn + suggest by default, redirect with `-R`. `scans dirs` shows URL
+  entries with blob counts / reachability; `scans move` refuses URLs.
+- **Local-only, skipped for a remote blob** (by design, not ported): the vocab
+  sidecar (`vocab` refuses; the filter's indexed path degrades to brute), the
+  reclaim sidecar / `--extents` (skips with a note), `migrate*`.
+- **Tests** (37, all offline): `test_blobfs.py`, `test_remote_scan_dirs.py`,
+  `test_remote_storage.py` (both backends × `memory://`, chunked hybrid,
+  `file://`), `test_index_remote.py` (CLI end-to-end over `file://`: `--to`,
+  read-back through `scans dirs`, low-space warn, `-R` redirect, diff index
+  over remote blobs).
+- Gotchas found: pyarrow swaps fsspec's `LocalFileSystem` for its native one on
+  write, so `auto_mkdir` is ignored — `blobfs._ensure_parent` makes the parent
+  for the local driver only. `uv.lock` pins **`s3fs 0.4.2`** (2020-era, vs
+  `fsspec 2026.7`): it imports and constructs, but is the piece step 4
+  exercises for real.
+
+Step 4 (real `r2://` round-trip + CIC) is the remaining item before this moves
+to `done/`.

@@ -67,7 +67,13 @@ disk-tree index [URL]     # Scan directory or s3:// bucket
   -m, --mean-mtime        # Emit `mtime_mean` (size-weighted mean mtime; feeds the UI age lens)
   -M, --measure-memory    # Track peak memory
   -q, --no-progress       # Suppress the tqdm progress bar (scheduled/redirected runs — keeps logs small)
+  -R, --auto-remote       # If the local write dir is low on space (< $DISK_TREE_LOW_SPACE_BYTES, 5 GiB)
+                          # and $DISK_TREE_REMOTE_SCAN_TARGET is set, write the blob there instead
+                          # (default: warn and suggest `--to`)
   -s, --sudo              # Run gfind with sudo (implies `-C`: a cached scan can't be known to be sudo)
+  -t, --to TARGET         # Write this scan's blob to a dir or fsspec URL (r2://bucket/prefix, s3://…,
+                          # gs://…) instead of the configured write dir; it joins the search path for
+                          # this run, so the scan reads back through it (spec `remote-scan-targets.md`)
   -x, --extents           # Map physical extents → per-dir reclaimable bytes (APFS clones/hardlinks),
                           # written as a `<blob>.reclaim.parquet` sidecar. macOS + local scans only;
                           # exact when the scan root contains the sharing sources (home/full scan),
@@ -235,8 +241,10 @@ Default paths (override with `DISK_TREE_ROOT`):
 
 **Blob storage is a search path, not a single directory.** The DB stays on the boot disk (small, always mounted); blobs may live anywhere on `config.scan_read_dirs()`, since `Scan.blob` holds a basename. Creating `<volume>/disk-tree/scans` on an external volume opts it in — no config needed — and it becomes the *write* target while mounted; unplugging simply drops it out of the search path. `DISK_TREE_SCAN_DIRS` (colon-separated, priority order) overrides discovery, and an explicit `DISK_TREE_ROOT` disables it entirely so tests and alternate profiles stay self-contained. A candidate under an unmounted `/Volumes/<name>` is never written to — that would silently create the directory on the boot disk.
 
-- `disk-tree scans dirs` — show the write target and every read dir, with blob counts
-- `disk-tree scans move [DEST]` — relocate blobs (no DB rewrite). Keeps each path's newest scan **and its chunk closure** on the boot disk by default (`-L` to move those too), so browsing the latest scan doesn't depend on the volume being plugged in
+A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — the remote-target story for a boot disk too full to hold scan output (spec `remote-scan-targets.md`). `index --to <url>` (or `DISK_TREE_REMOTE_SCAN_TARGET` + `-R`) writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam); the vocab/reclaim sidecars, `--extents`, and `migrate*` are local-only and skip remote blobs.
+
+- `disk-tree scans dirs` — show the write target and every read dir, with blob counts (URL entries show reachability)
+- `disk-tree scans move [DEST]` — relocate blobs between local dirs (no DB rewrite). Keeps each path's newest scan **and its chunk closure** on the boot disk by default (`-L` to move those too), so browsing the latest scan doesn't depend on the volume being plugged in
 
 Stream-engine tuning knobs (env, all with measured defaults — see the constants block in `find/aggregate_stream.py`):
 - `DISK_TREE_FLUSH_ROWS` — output row-group size (read-side: smaller = less fetched per directory browse, bigger footer)

@@ -19,6 +19,7 @@ from flask_cors import CORS
 from disk_tree import config as _config
 from disk_tree import library
 from disk_tree.config import SQLITE_PATH
+from disk_tree import blobfs
 from disk_tree.diff import ScanSource, recursive_diff, resolve_blob, resolve_chunk_for_path
 from disk_tree.diff_index import DIFF_TABLE_SQL, build_and_record, get_index, load_index_slice, serve_slice
 from disk_tree.filter import DEFAULT_DISPLAY_DEPTH, filter_scan, rebase_frame
@@ -816,9 +817,9 @@ def get_scan():
         child_scan_dfs = []
         for _, row in direct_children_df.iterrows():
             child_scan = row.get('child_scan_id')
-            if pd.notna(child_scan) and exists(resolve_blob(child_scan)):
+            if pd.notna(child_scan) and blobfs.exists(resolve_blob(child_scan)):
                 try:
-                    child_df = pd.read_parquet(resolve_blob(child_scan))
+                    child_df = blobfs.read_parquet(resolve_blob(child_scan))
                     # Only load direct children (depth=1) from child scans
                     # These become depth=2 in the parent context
                     child_df = child_df[child_df['depth'] == 1]
@@ -2221,7 +2222,7 @@ def delete_path():
                                 df.loc[mask, 'n_children'] = df.loc[mask, 'n_children'] - 1
 
                     # Rewrite parquet (this is the expensive part)
-                    df.to_parquet(resolve_blob(blob_ref), index=False, row_group_size=BLOB_ROW_GROUP_SIZE)
+                    blobfs.write_parquet(df, resolve_blob(blob_ref), BLOB_ROW_GROUP_SIZE)
 
                     # Update denormalized stats in SQLite scan metadata
                     root_row = df[df['path'] == '.']

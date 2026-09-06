@@ -1,7 +1,10 @@
+import re
 from glob import glob
 from os import environ as env, makedirs, pathsep, sep
 from os.path import expanduser, exists, ismount, join
 from typing import Callable
+
+from disk_tree.blobfs import exists as blob_exists, is_url, join as blob_join
 
 DISK_TREE_ROOT_VAR = 'DISK_TREE_ROOT'
 DISK_TREE_SCAN_DIRS_VAR = 'DISK_TREE_SCAN_DIRS'
@@ -20,6 +23,10 @@ _explicit_root = DISK_TREE_ROOT_VAR in env
 #: backend reset, cache clear). Registered by long-running consumers.
 _root_change_hooks: list[Callable[[], None]] = []
 
+#: Callbacks fired after `set_write_target` repoints the blob write dir (the
+#: backend singleton must be rebuilt against it).
+_write_target_hooks: list[Callable[[], None]] = []
+
 
 def _volume_mounted(path: str) -> bool:
     """False when `path` sits under a `/Volumes/<name>` that isn't mounted.
@@ -29,6 +36,8 @@ def _volume_mounted(path: str) -> bool:
     files vanish from view the moment the volume comes back. So an unmounted
     candidate is never a write target.
     """
+    if is_url(path):
+        return True  # reachability is an IO-time concern, not a mount
     parts = path.split(sep)
     if len(parts) > 2 and parts[1] == 'Volumes':
         return ismount(join(VOLUMES, parts[2]))
@@ -41,6 +50,8 @@ def _ensure_dir(path: str) -> None:
     Guards the makedirs-on-boot-disk trap (see specs/macos-app.md): a root under
     an absent `/Volumes/<name>` would otherwise be created on the boot disk.
     """
+    if is_url(path):
+        return  # object stores have no directories to create
     if not _volume_mounted(path):
         raise RuntimeError(
             f'{path!r} is under an unmounted volume; refusing to create it on the boot disk'
@@ -97,11 +108,21 @@ def discovered_scan_dirs() -> list[str]:
     return sorted(d for d in glob(join(VOLUMES, '*', 'disk-tree', 'scans')) if _volume_mounted(d))
 
 
+#: `:` separates entries, but `://` opens a URL — split only on a `:` that
+#: doesn't. (Object-store URLs carry no port, so that's the only case.)
+_DIRS_SEP = re.compile(re.escape(pathsep) + r'(?!//)')
+
+
+def split_dirs(raw: str) -> list[str]:
+    """Entries of a `DISK_TREE_SCAN_DIRS` value — local dirs and URLs alike."""
+    return [p for p in _DIRS_SEP.split(raw) if p]
+
+
 def configured_scan_dirs() -> list[str]:
     """Scan dirs in priority order — first writable one wins for new blobs."""
     raw = env.get(DISK_TREE_SCAN_DIRS_VAR)
     if raw:
-        return [expanduser(p) for p in raw.split(pathsep) if p]
+        return [p if is_url(p) else expanduser(p) for p in split_dirs(raw)]
     if _explicit_root or DISK_TREE_ROOT_VAR in env:
         # An explicit root — an env var, or a library opened via `set_root` — is a
         # deliberate choice; discovery must not silently redirect writes out of it.
@@ -133,16 +154,50 @@ def scan_read_dirs() -> list[str]:
 
 
 def resolve_scan_blob(name: str, prefer: str | None = None) -> str:
-    """Absolute path for a blob basename — the first read dir that has it.
+    """Path (or URL) for a blob basename — the first read dir that has it.
 
-    Falls back to the write dir so callers creating a blob get a sensible path;
-    a missing blob then fails at open time with the path it looked for.
+    Local dirs are checked first, remote ones only if none has it: a blob lives
+    in exactly one place (immutable, UUID-named), so a local hit never costs a
+    network round-trip. Falls back to the write dir so callers creating a blob
+    get a sensible path; a missing blob then fails at open time with the path
+    it looked for.
     """
-    for d in ([prefer] if prefer else []) + scan_read_dirs():
-        p = join(d, name)
-        if exists(p):
-            return p
-    return join(prefer or SCANS_DIR, name)
+    dirs = ([prefer] if prefer else []) + scan_read_dirs()
+    for d in dirs:
+        if not is_url(d) and exists(join(d, name)):
+            return join(d, name)
+    for d in dirs:
+        if is_url(d) and blob_exists(blob_join(d, name)):
+            return blob_join(d, name)
+    return blob_join(prefer or SCANS_DIR, name)
+
+
+def on_write_target_change(cb: Callable[[], None]) -> None:
+    """Register a callback to run after `set_write_target` repoints the write dir."""
+    _write_target_hooks.append(cb)
+
+
+def set_write_target(target: str) -> str:
+    """Make `target` — a local dir or a URL (`r2://bucket/prefix`) — this
+    process's blob write dir, ahead of the configured search path (so blobs
+    written there also resolve on read). A URL is validated up front (scheme,
+    driver, R2 endpoint) so a misconfiguration fails before a long scan, not
+    after it.
+    """
+    global SCANS_DIR
+    if is_url(target):
+        from disk_tree.blobfs import fs_for
+        fs_for(target)
+    else:
+        target = expanduser(target)
+        _ensure_dir(target)
+    raw = env.get(DISK_TREE_SCAN_DIRS_VAR)
+    rest = [d for d in (split_dirs(raw) if raw else configured_scan_dirs()) if d != target]
+    env[DISK_TREE_SCAN_DIRS_VAR] = pathsep.join([target, *rest])
+    SCANS_DIR = target
+    for cb in list(_write_target_hooks):
+        cb()
+    return target
 
 
 #: Bind the root-derived globals (`ROOT_DIR`, `DEFAULT_SCANS_DIR`, `SQLITE_PATH`,

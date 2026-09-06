@@ -30,7 +30,7 @@ import sqlite3
 import time as _time
 from datetime import datetime
 
-from . import config as _config
+from . import blobfs, config as _config
 from .diff import resolve_blob
 from .storage.base import BLOB_ROW_GROUP_SIZE
 
@@ -55,16 +55,16 @@ def load_scan_table(blob_ref: str) -> pa.Table:
     dropped). Arrow, not pandas: ~7M-row home scans are ~1 GB here vs ~4 GB
     as object-dtype frames."""
     path = resolve_blob(blob_ref)
-    schema = pq.read_schema(path)
+    schema = blobfs.read_schema(path)
     have = [c for c in COLS if c in schema.names]
     extra = ['child_scan_id'] if 'child_scan_id' in schema.names else []
-    tbl = pq.read_table(path, columns=have + extra)
+    tbl = blobfs.read_table(path, columns=have + extra)
     tbl = _normalize(tbl)
     if extra:
         ptr = tbl.filter(pc.is_valid(tbl['child_scan_id']))
         parts = [tbl.drop_columns(['child_scan_id'])]
         for parent_path, child_ref in zip(ptr['path'].to_pylist(), ptr['child_scan_id'].to_pylist()):
-            if exists(resolve_blob(child_ref)):
+            if blobfs.exists(resolve_blob(child_ref)):
                 child = load_scan_table(child_ref)
                 parts.append(_rebase(child, parent_path))
         tbl = pa.concat_tables(parts, promote_options='default')

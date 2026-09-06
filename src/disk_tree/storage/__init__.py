@@ -48,3 +48,4 @@ def reset_backend():
 # Opening a library must drop the backend built against the previous root.
 from .. import config as _config  # noqa: E402
 _config.on_root_change(reset_backend)
+_config.on_write_target_change(reset_backend)

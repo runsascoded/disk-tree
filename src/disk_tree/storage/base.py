@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from os.path import exists, join
+from os import remove
 from shutil import move
 from uuid import uuid4
 
 import pandas as pd
+
+from .. import blobfs
 
 # Rows are sorted (depth, path), so bounded row groups give parquet min/max
 # stats real pruning power for both the depth and path-prefix pushdowns — a
@@ -83,10 +85,15 @@ class StorageBackend(ABC):
         if scans_dir is None:
             raise NotImplementedError(f"{self.name} backend cannot adopt parquet files")
         blob_ref = f'{uuid4()}.parquet'
-        blob_path = join(scans_dir, blob_ref)
-        if exists(blob_path):
+        blob_path = blobfs.join(scans_dir, blob_ref)
+        if blobfs.exists(blob_path):
             raise RuntimeError(f"Blob path already exists: {blob_path}")
-        move(parquet_path, blob_path)
+        if blobfs.is_url(scans_dir):
+            # No cross-store rename: upload, then drop the local file.
+            blobfs.put(parquet_path, blob_path)
+            remove(parquet_path)
+        else:
+            move(parquet_path, blob_path)
         return blob_ref
 
     @abstractmethod

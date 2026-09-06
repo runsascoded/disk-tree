@@ -26,14 +26,13 @@ import heapq
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import lru_cache
-from os.path import exists, getmtime, isabs, join
+from os.path import isabs, join
 from typing import Callable, Protocol
 
 import pandas as pd
 import pyarrow.compute as pc
-import pyarrow.parquet as pq
 
-from . import config as _config
+from . import blobfs, config as _config
 
 
 def resolve_blob(blob_ref: str) -> str:
@@ -52,16 +51,16 @@ def _chunk_map(parquet_path: str) -> dict[str, str] | None:
     """path → child_scan_id for the chunk-pointer rows of a hybrid parquet
     (None when the blob has no `child_scan_id` column). Keyed on mtime because
     delete updates rewrite blobs in place."""
-    return _chunk_map_cached(parquet_path, getmtime(parquet_path))
+    return _chunk_map_cached(parquet_path, blobfs.mtime(parquet_path))
 
 
 @lru_cache(maxsize=64)
 def _chunk_map_cached(parquet_path: str, mtime: float) -> dict[str, str] | None:
-    if 'child_scan_id' not in pq.read_schema(parquet_path).names:
+    if 'child_scan_id' not in blobfs.read_schema(parquet_path).names:
         return None
     # Filter Arrow-side: converting millions of path strings to pandas just
     # to keep the few pointer rows cost ~0.4 s per blob (3× the read itself).
-    tbl = pq.read_table(parquet_path, columns=['path', 'child_scan_id'])
+    tbl = blobfs.read_table(parquet_path, columns=['path', 'child_scan_id'])
     tbl = tbl.filter(pc.is_valid(tbl['child_scan_id']))
     return dict(zip(tbl['path'].to_pylist(), tbl['child_scan_id'].to_pylist()))
 
@@ -90,7 +89,7 @@ def resolve_chunk_for_path(blob_ref: str, rel_path: str) -> tuple[str, str]:
     parts = rel_path.split('/')
     for i in range(len(parts)):
         chunk_ref = chunks.get('/'.join(parts[:i+1]))
-        if chunk_ref is not None and exists(resolve_blob(chunk_ref)):
+        if chunk_ref is not None and blobfs.exists(resolve_blob(chunk_ref)):
             # Rebase the remaining path relative to chunk root
             remaining = '/'.join(parts[i+1:]) if i + 1 < len(parts) else '.'
             # Recursively resolve in case of nested chunks
