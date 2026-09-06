@@ -172,5 +172,24 @@ switchable; neither blocks shipping remote blobs first.
   `fsspec 2026.7`): it imports and constructs, but is the piece step 4
   exercises for real.
 
-Step 4 (real `r2://` round-trip + CIC) is the remaining item before this moves
-to `done/`.
+## Step 4 — real `r2://` round-trip + CIC (done 2026-09-06)
+
+Target `r2://file-tree-demo/disk-tree/scans` (Ryan's demo bucket, isolated
+prefix), endpoint via `DISK_TREE_R2_ENDPOINT_URL` + `AWS_PROFILE=cf` (no
+`buckets.yml` on this machine), everything under an isolated `DISK_TREE_ROOT`
+so the real DB never saw the test scan:
+
+- `index -C -t r2://…` of a 3-file dir: hybrid blob (6.6 KiB) written straight
+  to R2 (`aws s3 ls` confirmed the object); **no local `scans/` dir was created
+  at all** — zero persistent local footprint for the blob.
+- Read-back: `scans dirs` → `* r2://… (1 blobs, remote)`, local `(absent)`;
+  `du` rendered the tree from the cloud blob.
+- Serve: `disk-tree-server` with `DISK_TREE_SCAN_DIRS=r2://…` listed the scan,
+  and opening it in Chrome (`/file/…/r2-src`) hit `/api/scan?…&depth=2` → 200
+  and rendered the listing + treemap from the R2 blob; no console errors.
+- This exercised `s3fs 0.4.2`'s read *and* write paths through pyarrow's
+  fsspec handler against R2 — the lock pin is fine as is.
+- Test blob deleted afterwards; prefix left empty.
+
+Phase 1 is complete. Phase 2 (capture/aggregate split + cloud reduce) and the
+metadata routes (`snapshots.json` manifest / D1) remain as scoped above.
