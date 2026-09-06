@@ -10,6 +10,7 @@ import { fetchScanDetails, fetchScanHistory, fetchHistogram, fetchFilter, startS
 import type { FilterResult, HistogramChild, Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { VoronoiTreemap } from '@rdub/treemap/voronoi'
 import { VizBoundary } from './VizBoundary'
+import { useCapabilities } from '../hooks/useCapabilities'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
@@ -288,6 +289,8 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   collapsedRows?: CollapsedRow[] | null
   tableRef?: React.RefObject<HTMLTableElement | null>
 }) {
+  const caps = useCapabilities()
+  const canDelete = supportsDelete(routeType) && caps?.delete === true
   // Track whether the collapsed (auto-expanded) rows are shown expanded
   const [collapsedExpanded, setCollapsedExpanded] = useState(true)
 
@@ -338,7 +341,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           <SortableHeader className="col-numeric" label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
           <SortableHeader className="col-numeric" label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
           <th className="col-action"></th>
-          {supportsDelete(routeType) && <th className="col-action"></th>}
+          {canDelete && <th className="col-action"></th>}
         </tr>
       </thead>
       <tbody>
@@ -364,27 +367,31 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
             )}
           </td>
           <td className="col-action" style={{ display: 'flex', gap: '4px' }}>
-            <Tooltip title={scanStatus === 'full' ? 'Rescan this directory' : 'Scan this directory'}>
-              <span>
-                <Button
-                  size="small"
-                  onClick={onRescan}
-                  disabled={isScanning}
-                  sx={{ minWidth: 0, padding: '2px 4px' }}
-                >
-                  {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
-                </Button>
-              </span>
-            </Tooltip>
-            <Tooltip title="Compare scans">
-              <Link to={`/compare${uriToPath(uri)}`}>
-                <Button size="small" sx={{ minWidth: 0, padding: '2px 4px' }}>
-                  <FaExchangeAlt size={12} />
-                </Button>
-              </Link>
-            </Tooltip>
+            {caps?.scan && (
+              <Tooltip title={scanStatus === 'full' ? 'Rescan this directory' : 'Scan this directory'}>
+                <span>
+                  <Button
+                    size="small"
+                    onClick={onRescan}
+                    disabled={isScanning}
+                    sx={{ minWidth: 0, padding: '2px 4px' }}
+                  >
+                    {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+            {caps?.compare && (
+              <Tooltip title="Compare scans">
+                <Link to={`/compare${uriToPath(uri)}`}>
+                  <Button size="small" sx={{ minWidth: 0, padding: '2px 4px' }}>
+                    <FaExchangeAlt size={12} />
+                  </Button>
+                </Link>
+              </Tooltip>
+            )}
           </td>
-          {supportsDelete(routeType) && <td className="col-action"></td>}
+          {canDelete && <td className="col-action"></td>}
         </tr>
         {/* Render collapsed/expanded parent rows (auto-expanded single-child dirs) */}
         {collapsedRows && collapsedRows.map((collapsedRow, depth) => {
@@ -426,20 +433,22 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               <td className="col-numeric">{collapsedRow.n_desc && collapsedRow.n_desc > 1 ? collapsedRow.n_desc.toLocaleString() : null}</td>
               <td className="col-numeric">{scanStatus === 'full' && scanTime ? scanTimeAgo(scanTime) : null}</td>
               <td className="col-action">
-                <Tooltip title="Rescan this directory">
-                  <span>
-                    <Button
-                      size="small"
-                      onClick={() => onScanChild(collapsedUri)}
-                      disabled={isScanning}
-                      sx={{ minWidth: 0, padding: '2px 4px' }}
-                    >
-                      {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
-                    </Button>
-                  </span>
-                </Tooltip>
+                {caps?.scan && (
+                  <Tooltip title="Rescan this directory">
+                    <span>
+                      <Button
+                        size="small"
+                        onClick={() => onScanChild(collapsedUri)}
+                        disabled={isScanning}
+                        sx={{ minWidth: 0, padding: '2px 4px' }}
+                      >
+                        {isScanning ? <CircularProgress size={14} /> : <FaSync size={12} />}
+                      </Button>
+                    </span>
+                  </Tooltip>
+                )}
               </td>
-              {supportsDelete(routeType) && (
+              {canDelete && (
                 <td className="col-action">
                   <Tooltip title="Delete directory">
                     <span>
@@ -502,7 +511,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                 />
               </td>
               <td className={`col-icon${indentPx ? ' indented' : ''}`}>
-                {routeType === 'file' ? (
+                {routeType === 'file' && caps?.reveal ? (
                   <span
                     className="reveal-icon"
                     title="Reveal in Finder"
@@ -538,7 +547,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                 <ChildScanStatus row={row} scanStatus={scanStatus} parentScanTime={scanTime} />
               </td>
               <td className="col-action" onClick={e => e.stopPropagation()}>
-                {row.kind === 'dir' && (
+                {row.kind === 'dir' && caps?.scan && (
                   <Tooltip title={row.scanned ? 'Rescan this directory' : 'Scan this directory'}>
                     <span>
                       <Button
@@ -553,7 +562,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   </Tooltip>
                 )}
               </td>
-              {supportsDelete(routeType) && (
+              {canDelete && (
                 <td className="col-action" onClick={e => e.stopPropagation()}>
                   <Tooltip title={`Delete ${row.kind === 'dir' ? 'directory' : 'file'}`}>
                     <span>
@@ -1062,11 +1071,14 @@ function VoronoiPanel({
 }
 
 function FilePreviewSection({ path }: { path: string }) {
+  const caps = useCapabilities()
   const { data: preview, isLoading, error } = useQuery({
     queryKey: ['file-preview', path],
     queryFn: () => fetchFilePreview(path),
     staleTime: 60 * 1000,
+    enabled: caps?.preview === true,
   })
+  if (!caps?.preview) return null
 
   if (isLoading) {
     return (
@@ -1206,6 +1218,8 @@ export function ScanDetails() {
 
   // Live scan progress from SSE
   const scanProgress = useScanProgress()
+  const caps = useCapabilities()
+  const canDelete = supportsDelete(routeType) && caps?.delete === true
 
   // Auto-refetch when a scan relevant to this view finishes. A completed scan
   // is *deleted* from `scan_progress` (see ScanProgress.finish), so completion
@@ -1668,7 +1682,7 @@ export function ScanDetails() {
     return (
       <div>
         <p>Error: {error}</p>
-        {error.includes('No scan found') && (
+        {error.includes('No scan found') && caps?.scan && (
           <Button
             variant="contained"
             onClick={handleRescan}
@@ -1744,7 +1758,7 @@ export function ScanDetails() {
             </select>
           </Tooltip>
         )}
-        {scanHistory && scanHistory.length > 1 && (
+        {caps?.compare && scanHistory && scanHistory.length > 1 && (
           <Button
             component={Link}
             to={`/compare${uriToPath(uri)}`}
@@ -1792,7 +1806,7 @@ export function ScanDetails() {
                 </Button>
               </Tooltip>
             )}
-            {supportsDelete(routeType) && (
+            {canDelete && (
               <Tooltip title={`Delete ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}`}>
                 <Button
                   size="small"
@@ -1911,7 +1925,7 @@ export function ScanDetails() {
           </VizBoundary>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
             <span>{viz === 'treemap' ? `${rows.length} items` : `${filteredChildren.length} children`}</span>
-            {filter.trim() && (
+            {filter.trim() && caps?.filter && (
               <Tooltip
                 title={reagg
                   ? 'Recursive server-side filter: sizes count matched bytes only, and a match inside a matched dir never double-counts. Click to switch back to display-only dimming.'
@@ -1934,7 +1948,7 @@ export function ScanDetails() {
               <select value={viz} onChange={e => setViz(e.target.value as Viz)} style={{ marginLeft: 4 }}>
                 <option value="treemap">Treemap</option>
                 <option value="scatter">Staleness</option>
-                <option value="histograms">Age histograms</option>
+                {caps?.histogram && <option value="histograms">Age histograms</option>}
                 <option value="voronoi">Voronoi</option>
               </select>
             </label>

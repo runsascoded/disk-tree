@@ -118,11 +118,46 @@ Two things only Ryan can do before this runs for real: add the secrets /
 variable, and lift the push hold (the workflow exists only once it's on
 GitHub). Then: dispatch once against a real capture, CIC the served result.
 
-## `apps/cfn/` (step 4 — open)
+## Serving from the cloud (step 4 — built, awaiting deploy)
 
-SPA + Pages Functions serving the reduced blob from R2 (Phase 1's read path;
-marin's `data/[[path]].ts` shape), deployed to `*.pages.dev`. Confirm before
-deploying. Then CIC the whole chain: laptop → R2 → cloud reduce → `pages.dev`.
+Not a second SPA (`apps/cfn/` was never needed): disk-tree's own `ui/` is
+the cloud app, with the **read subset of its `/api/*` contract implemented as
+Cloudflare Pages Functions** over the R2 bucket the reduce writes to. marin's
+demo ships whole-tree JSON; a 7M-row laptop scan can't, so the Functions read
+the parquet the way the Flask server does — `(depth, path-prefix)` row-group
+pruning from the footer stats, each group a range read (`ui/cfn/parquet.ts`,
+hyparquet). The UI is unchanged in shape; a `GET /api/capabilities` tells it
+what this server can do, and `useCapabilities()` hides the rest (scan,
+delete, reveal, histogram, filter, preview, compare, library, backend) and
+skips the SSE stream. Flask answers the same endpoint with everything on; a
+server without it counts as all-on, so older Flask peers are unaffected.
+
+- `ui/functions/api/`: `scans` (from the `*.scan.json` manifests; ids are
+  positional in `(time, blob)` order), `scan` (newest covering scan → pruned
+  read → rebased to the requested uri; `max_rows` top-N + ancestors, like the
+  server), `scans/history` (ancestor scans get the subpath row's stats),
+  `capabilities`, benign `scans/running` / `scans/progress`, `[[path]]` → 501.
+- `ui/cfn/`: the library (`parquet.ts`, `manifests.ts`, `http.ts`, `env.ts`)
+  + vitest suites (18) over a 12-row fixture in 4-row groups
+  (`cfn/tests/fixtures/gen.py`), including the handlers end-to-end through a
+  directory-backed fake `R2Bucket`.
+- `ui/wrangler.toml`: Pages project `disk-tree`, `dist/`, R2 binding `SCANS`
+  → `file-tree-demo`, `SCANS_PREFIX = disk-tree/scans/`; `pnpm cfn:dev` =
+  `wrangler pages dev dist --port 7789` (FE 7788 + 1).
+- `aggregate_duckdb` now writes 64K-row groups (`ROW_GROUP_SIZE`): DuckDB's
+  ~120K default is too fat for a Worker to decode per listing.
+
+CIC'd 2026-09-06 (`wrangler pages dev` over an emulated R2 seeded with a real
+`index --to file://` blob of `packages/`): scan list from the manifests,
+`/api/scan` → treemap with `treemap 3.2M` / `react 3.0M`, ancestor history,
+no console errors; the Flask peer still shows every control. Not yet: hybrid
+chunk following (an `index --to` scan big enough to chunk drills into empty
+subtrees), single-child auto-expand, the `/browse` file-tree page.
+
+**Deploy** (Ryan): `wrangler login` in the `0dcad…` account, then in `ui/`
+`pnpm build && pnpm exec wrangler pages deploy dist --project-name disk-tree`
+(first run creates the project; bind the R2 bucket per `wrangler.toml`). Then
+the whole chain for real: `capture` → Reduce workflow → `pages.dev`.
 
 ## Not in scope
 

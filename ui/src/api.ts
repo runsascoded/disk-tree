@@ -490,3 +490,35 @@ export async function compareScansRecursive(
   }
   return res.json()
 }
+
+/** What this server can do — `GET /api/capabilities`. Keep in sync with
+ *  `server.py` (everything on) and `functions/api/capabilities.ts` (static). */
+export type Capabilities = {
+  /** A static deployment: scans served from an object store, no live Python. */
+  static: boolean
+  scan: boolean
+  delete: boolean
+  reveal: boolean
+  histogram: boolean
+  filter: boolean
+  preview: boolean
+  compare: boolean
+  /** Live scan progress (SSE). */
+  progress: boolean
+  library: boolean
+  backend: boolean
+  s3: boolean
+}
+
+export const ALL_CAPABILITIES: Capabilities = {
+  static: false, scan: true, delete: true, reveal: true, histogram: true, filter: true,
+  preview: true, compare: true, progress: true, library: true, backend: true, s3: true,
+}
+
+/** A server without the endpoint (an older Flask) can do everything. */
+export async function fetchCapabilities(): Promise<Capabilities> {
+  const res = await fetch('/api/capabilities')
+  if (res.status === 404) return ALL_CAPABILITIES
+  if (!res.ok) throw new Error('Failed to fetch capabilities')
+  return { ...ALL_CAPABILITIES, ...(await res.json()) }
+}

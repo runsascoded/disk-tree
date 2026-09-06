@@ -486,6 +486,12 @@ def aggregate_listing_to_parquet(
     # doubles the on-disk footprint (all 92.7M file rows a second time) and
     # exhausted a ~95GiB spill budget at CW scale. `uri` is derived here rather
     # than stored per input row for the same reason.
+    # Bounded row groups (DuckDB's default is ~120K rows): the read side —
+    # server and Pages Functions alike — decodes every group overlapping a
+    # listing's (depth, path-prefix) range, and the measured optimum is 64K
+    # (`storage/base.py`). A Worker reading a 7M-row scan can't afford 120K-row
+    # groups either.
+    from disk_tree.storage.base import BLOB_ROW_GROUP_SIZE
     tmp_out = out_parquet + '.tmp'
     con.execute(f"""
         COPY (
@@ -504,7 +510,7 @@ def aggregate_listing_to_parquet(
                END::BIGINT AS depth
         FROM unioned
         ORDER BY depth, path
-        ) TO '{tmp_out}' (FORMAT PARQUET)
+        ) TO '{tmp_out}' (FORMAT PARQUET, ROW_GROUP_SIZE {BLOB_ROW_GROUP_SIZE})
     """)
     _stage("COPY done")
     rows = con.execute(f"SELECT COUNT(*) FROM read_parquet('{tmp_out}')").fetchone()[0]

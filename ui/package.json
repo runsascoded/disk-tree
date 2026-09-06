@@ -6,21 +6,25 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
     "lint": "eslint .",
-    "clean": "rm -rf node_modules/.vite dist",
+    "clean": "rm -rf node_modules/.vite dist .wrangler",
     "preview": "vite preview",
+    "cfn:dev": "wrangler pages dev dist --port 7789",
     "scrns": "scrns -c scrns.config.json -h 5001 -o ../screenshots",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@disk-tree/react": "workspace:*",
-    "@rdub/file-tree": "github:runsascoded/file-tree#49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1",
-    "@rdub/treemap": "workspace:*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/material": "^7.3.6",
+    "@rdub/file-tree": "github:runsascoded/file-tree#49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1",
+    "@rdub/treemap": "workspace:*",
     "@tanstack/react-query": "^5.90.12",
+    "hyparquet": "^1.30.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-icons": "^5.5.0",
@@ -28,6 +32,7 @@
     "use-kbd": "https://github.com/runsascoded/use-kbd#34745efff8efdfd2c46e3e39d479a708aba704b2"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260906.1",
     "@eslint/js": "^9.39.1",
     "@playwright/test": "^1.57.0",
     "@types/node": "^24.10.1",
@@ -42,6 +47,8 @@
     "scrns": "^0.3.0",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.129.0"
   }
 }

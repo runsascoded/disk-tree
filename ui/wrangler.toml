@@ -1,0 +1,18 @@
+# Cloudflare Pages: the disk-tree SPA (`dist/`) + the read subset of its
+# `/api/*` contract as Pages Functions (`functions/api/`) over an R2 bucket
+# holding reduced scans (`<uuid>.parquet` + `<uuid>.parquet.scan.json`, as
+# `disk-tree reduce --to r2://…` / `index --to r2://…` leave them). Spec
+# `specs/cloud-reduce.md` step 4.
+#
+# Local: `pnpm build && pnpm cfn:dev` serves dist + functions on :7789 with an
+# emulated R2 — seed it with `wrangler r2 object put --local` (see the spec).
+name = "disk-tree"
+compatibility_date = "2026-09-01"
+pages_build_output_dir = "dist"
+
+[[r2_buckets]]
+binding = "SCANS"
+bucket_name = "file-tree-demo"
+
+[vars]
+SCANS_PREFIX = "disk-tree/scans/"

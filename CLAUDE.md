@@ -203,6 +203,20 @@ widgets from two workspace packages:
 - `src/components/S3BucketList.tsx` — S3 bucket browser with treemap
 - `src/hooks/useScanProgress.ts` — SSE-based progress tracking
 
+**Static deployment (Cloudflare Pages)** — spec `specs/cloud-reduce.md` step 4. The same SPA, with the
+*read subset* of the `/api/*` contract implemented as Pages Functions (`ui/functions/api/`) over an R2
+bucket of reduced scans (`<uuid>.parquet` + `.scan.json`, as `reduce --to` / `index --to` leave them):
+`/api/scans` from the manifests, `/api/scan` + `/api/scans/history` by reading the blob with hyparquet
+using the server's own `(depth, path-prefix)` row-group pruning (`ui/cfn/parquet.ts` — range reads, no
+whole-file download), everything else 501. `GET /api/capabilities` (Flask: all on; Functions: mostly
+off) drives `useCapabilities()`, which hides scan/delete/reveal/histogram/filter/preview/compare/
+library/backend affordances and skips the SSE stream where they don't exist — a server without the
+endpoint counts as all-on. `ui/wrangler.toml` binds the bucket (`SCANS`, `SCANS_PREFIX`);
+`pnpm cfn:dev` serves `dist/` + Functions on :7789 over an emulated R2 (seed it with
+`wrangler r2 object put --local`); `pnpm test` runs the Functions' vitest suites over a fixture blob
+(`ui/cfn/tests/fixtures/gen.py`). Not yet served statically: hybrid chunk following, single-child
+auto-expand.
+
 ## Development
 
 ```bash

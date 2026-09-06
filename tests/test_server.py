@@ -1207,3 +1207,18 @@ class TestFilterEndpoint:
             ('b/x/demo.dat', True),
         ]
         assert (pm['total_size'], pm['n_matches']) == (730, 1)
+
+
+class TestCapabilities:
+    """GET /api/capabilities — the live server can do everything (the static
+    Pages deployment answers the same keys mostly off; `ui/src/api.ts`)."""
+
+    def test_all_on(self, test_client):
+        client, _, _ = test_client
+        response = client.get('/api/capabilities')
+        assert response.status_code == 200
+        assert response.json == {
+            'static': False,
+            'scan': True, 'delete': True, 'reveal': True, 'histogram': True, 'filter': True,
+            'preview': True, 'compare': True, 'progress': True, 'library': True, 'backend': True, 's3': True,
+        }

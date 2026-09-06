@@ -15,6 +15,7 @@ import {
 import { FaPlay } from 'react-icons/fa'
 import { fetchScans, startScan } from '../api'
 import type { Scan, ScanJob, ScanProgress } from '../api'
+import { useCapabilities } from '../hooks/useCapabilities'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { DataTable } from './DataTable'
 import type { Column } from './DataTable'
@@ -107,6 +108,9 @@ function NewScanForm({ onStarted }: { onStarted: (job: ScanJob) => void }) {
       setLoading(false)
     }
   }
+
+  const caps = useCapabilities()
+  if (!caps?.scan) return null
 
   return (
     <Paper sx={{ p: 2, mb: 2 }}>

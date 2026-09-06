@@ -4,6 +4,7 @@ import { AppBar, Toolbar, Typography, Button, Box, Tooltip, Popover, List, ListI
 import { FaCloud, FaDatabase, FaFolder, FaHistory, FaCog } from 'react-icons/fa'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAvailableBackends } from '../api'
+import { useCapabilities } from '../hooks/useCapabilities'
 import { useUnits } from '../utils/units'
 import { LibrarySwitcher } from './LibrarySwitcher'
 
@@ -26,11 +27,13 @@ export function Header() {
   }
   const backendOpen = Boolean(anchorEl)
 
-  // Fetch backend info
+  const caps = useCapabilities()
+  // Fetch backend info (not on a static deployment — nothing to switch)
   const { data: backendData } = useQuery({
     queryKey: ['available-backends'],
     queryFn: fetchAvailableBackends,
     staleTime: Infinity, // Backend doesn't change during session
+    enabled: caps?.backend === true,
   })
 
   return (
@@ -78,7 +81,7 @@ export function Header() {
           </Button>
         </Box>
 
-        <LibrarySwitcher />
+        {caps?.library && <LibrarySwitcher />}
 
         {/* Size units: SI (G = 10⁹) vs IEC (Gi = 2³⁰). Single tooltip on the
             group (wrapping each button breaks ToggleButtonGroup's value/onChange

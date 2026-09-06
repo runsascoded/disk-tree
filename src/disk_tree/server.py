@@ -2255,6 +2255,31 @@ def delete_path():
     })
 
 
+#: What this server can do — the live Flask peer can do everything. The static
+#: Cloudflare Pages deployment (`ui/functions/api/capabilities.ts`) answers the
+#: same shape with most of these off, and the UI hides those affordances. Keep
+#: in sync with `ui/src/api.ts` `Capabilities`.
+CAPABILITIES = {
+    'static': False,
+    'scan': True,
+    'delete': True,
+    'reveal': True,
+    'histogram': True,
+    'filter': True,
+    'preview': True,
+    'compare': True,
+    'progress': True,
+    'library': True,
+    'backend': True,
+    's3': True,
+}
+
+
+@app.route('/api/capabilities')
+def get_capabilities():
+    return jsonify(CAPABILITIES)
+
+
 @app.route('/api/backend', methods=['GET'])
 def get_backend_info():
     """Get information about the current storage backend.
