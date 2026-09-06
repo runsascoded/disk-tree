@@ -56,27 +56,11 @@ def _frame(root: str, names: list[str], sizes: list[int], mtimes: list[int]):
     })
 
 
-def _write_text(path: str, text: str) -> None:
-    from disk_tree import blobfs
-    if blobfs.is_url(path):
-        fs, p = blobfs.fs_for(path)
-        fs.pipe(p, text.encode())
-    else:
-        with open(path, 'w') as f:
-            f.write(text)
-
-
 def read_marker(capture: str) -> dict:
     """The capture's manifest (`_SUCCESS.json`), local or remote."""
     from disk_tree import blobfs
     path = blobfs.join(capture, MARKER)
-    if blobfs.is_url(path):
-        fs, p = blobfs.fs_for(path)
-        raw = fs.cat(p)
-    else:
-        with open(path, 'rb') as f:
-            raw = f.read()
-    m = json.loads(raw)
+    m = json.loads(blobfs.read_text(path))
     if m.get('format') != FORMAT:
         raise SystemExit(f'{path}: not a disk-tree capture (format={m.get("format")!r})')
     return m
@@ -150,7 +134,7 @@ def capture_cmd(batch_rows: int, no_progress: bool, sudo: bool, to: str, path: s
         'error_count': errors.count,
         'error_paths': errors.paths,
     }
-    _write_text(blobfs.join(out, MARKER), json.dumps(manifest, indent=2) + '\n')
+    blobfs.write_text(blobfs.join(out, MARKER), json.dumps(manifest, indent=2) + '\n')
     tail = f', {errors.count} permission errors' if errors.count else ''
     err(f'{root}: {n_rows:,} files in {n_shards} shard(s) → {out}{tail}')
     print(out)
@@ -226,7 +210,13 @@ def reduce_cmd(
     finally:
         if not temp_dir:
             shutil.rmtree(work, ignore_errors=True)
+    blob = resolve_blob(scan.blob)
+    if blobfs.is_url(blob):
+        # This DB may be a runner's throwaway; the manifest is how the scan
+        # reaches another one (`disk-tree scans register`).
+        from disk_tree.scan_manifest import write_scan_manifest
+        err(f'manifest → {write_scan_manifest(scan, blob)}')
     if not no_diff:
         from disk_tree.cli.diff_index import build_previous
         build_previous(scan.id)
-    print(f'scan {scan.id}: {scan.path} → {resolve_blob(scan.blob)}')
+    print(f'scan {scan.id}: {scan.path} → {blob}')

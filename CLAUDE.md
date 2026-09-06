@@ -85,7 +85,14 @@ disk-tree capture PATH -t URL  # The split pipeline for a ~full disk (spec `clou
                           # Prints the capture dir `<to>/<host>/<root>/<stamp>` (+ `_SUCCESS.json`)
 disk-tree reduce CAPTURE  # capture → layer-2 scan blob + Scan row, on any machine with disk
   -e, --engine            # duckdb (default; handles the unsorted shards) | pandas | stream
-  -t, --to URL            # Upload the blob (same as `index --to`); `-D` skips the diff index
+  -t, --to URL            # Upload the blob (same as `index --to`); `-D` skips the diff index.
+                          # A remote blob gets a `<blob>.scan.json` manifest beside it (so does
+                          # `index --to <url>`): the Scan row, portable — a runner's own DB is
+                          # thrown away. `.github/workflows/reduce.yml` is the cloud runner
+                          # (`workflow_dispatch`: capture URL → blob URL; needs the R2 secrets)
+disk-tree scans register SRC  # Import `*.scan.json` manifests (one file, or a dir/URL of them) into
+                          # this DB — how a cloud-reduced scan reaches the laptop. Idempotent; put
+                          # the blobs' dir on `DISK_TREE_SCAN_DIRS` so they resolve
 
 disk-tree scans           # List cached scans (JSON)
 

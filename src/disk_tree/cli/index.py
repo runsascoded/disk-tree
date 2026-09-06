@@ -152,6 +152,10 @@ def index(
         print(f"Scan cached path: {blob_path} ({iec(blobfs.size(blob_path))})")
     else:
         print(f"Scan blob: {scan.blob}")
+    if to and blobfs.is_url(blob_path):
+        # A remote blob's metadata travels with it (`disk-tree scans register`).
+        from disk_tree.scan_manifest import write_scan_manifest
+        print(f"Scan manifest: {write_scan_manifest(scan, blob_path)}")
     if scan.error_count:
         import json
         error_paths = json.loads(scan.error_paths) if scan.error_paths else []

@@ -81,13 +81,42 @@ piece: `reduce` emits `<blob>.scan.json` beside a remote blob, and
 `disk-tree scans register URL` imports it — the manifest route from
 `done/remote-scan-targets.md`, made concrete.
 
-## Reduce runner (step 3 — open)
+## Reduce runner + the scan manifest (step 3 — built, awaiting secrets + push)
 
-Recommendation: a GitHub Actions `workflow_dispatch` job (7 GB RAM covers a
-7M-row reduce's ~3.8 GB peak; zero infra; the same plain `disk-tree reduce`
-invocation runs on a VM / Batch later). Inputs: capture URL, target URL.
-Needs R2 credentials as repo secrets — Ryan's action. Alternatives if
-preferred: GCP Batch (marin's choice), any VM.
+**Manifest.** `reduce --to <url>` and `index --to <url>` write
+`<blob>.scan.json` beside a remote blob (`scan_manifest.py`: `format,
+version, time, path, blob, size, n_children, n_desc, mtime, error_count,
+error_paths`). `disk-tree scans register SRC` (one manifest, or a dir/URL of
+them) inserts the Scan rows into the local DB, idempotently (same path+blob
+→ skipped), and notes when the blobs' dir isn't on the search path. A local
+blob gets no manifest — the local DB already has the row. Tested: a scan
+reduced under one root, registered and `du`-read under a fresh one.
+
+**Runner.** `.github/workflows/reduce.yml`, `workflow_dispatch` with inputs
+`capture` (URL), `to` (default `r2://file-tree-demo/disk-tree/scans`),
+`engine`, `memory_limit` (5 GB; the runner has ~7 GB RAM, 14 GB disk — a
+7M-row reduce peaks ~3.8 GB). `uv sync --extra r2`, then the plain
+`disk-tree reduce -D -e … -M … -t <to> <capture>` — the same invocation runs
+on a VM / Batch later. Credentials from repo **secrets `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`** and **variable `R2_ENDPOINT_URL`** (s3fs reads the
+standard `AWS_*` env; `AWS_DEFAULT_REGION=auto` for R2).
+
+The crisis loop, end to end:
+
+    laptop   disk-tree capture ~ -t r2://bucket/disk-tree/captures     # prints the capture URL
+    GitHub   Reduce workflow: capture=<that URL>, to=r2://bucket/disk-tree/scans
+    laptop   disk-tree scans register r2://bucket/disk-tree/scans       # DISK_TREE_SCAN_DIRS includes it
+    laptop   disk-tree du ~  /  disk-tree-server                        # served from the R2 blob
+
+Verified against R2 with the laptop standing in for the runner (2026-09-06):
+capture → R2; a "runner" root reduced *from* R2, leaving blob (3.8 KB) +
+`.scan.json` (313 B) in R2; a *fresh* "laptop" root `scans register`ed it
+from R2 and `du` read the tree back. Each root held only its 28 K SQLite DB.
+Test objects deleted after.
+
+Two things only Ryan can do before this runs for real: add the secrets /
+variable, and lift the push hold (the workflow exists only once it's on
+GitHub). Then: dispatch once against a real capture, CIC the served result.
 
 ## `apps/cfn/` (step 4 — open)
 

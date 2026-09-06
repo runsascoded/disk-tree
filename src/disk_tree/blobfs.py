@@ -184,6 +184,25 @@ def write_parquet(df: pd.DataFrame, path: str, row_group_size: int) -> None:
     write_table(pa.Table.from_pandas(df, preserve_index=False), path, row_group_size)
 
 
+def read_text(path: str) -> str:
+    if not is_url(path):
+        with open(path) as f:
+            return f.read()
+    fs, p = fs_for(path)
+    return fs.cat(p).decode()
+
+
+def write_text(path: str, text: str) -> None:
+    if not is_url(path):
+        with open(path, 'w') as f:
+            f.write(text)
+        return
+    fs, p = fs_for(path)
+    _ensure_parent(fs, p)
+    fs.pipe(p, text.encode())
+    _known.add(path)
+
+
 def remove(path: str) -> None:
     if not is_url(path):
         os.remove(path)

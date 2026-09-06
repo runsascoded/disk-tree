@@ -114,6 +114,36 @@ def scans_move(src_dir: str | None, no_keep_latest: bool, dry_run: bool, dest: s
     err(f'moved {moved} blobs to {dest}')
 
 
+@scans.command('register')
+@argument('src')
+def scans_register(src: str):
+    """Add scans described by `*.scan.json` manifests to this DB.
+
+    SRC is one manifest, or a dir / URL holding them. A cloud reduce (or another
+    machine's `index --to`) records its Scan row in *its* DB; the manifest beside
+    the remote blob is how the scan reaches this one. Blobs resolve through the
+    search path, so put their dir on `DISK_TREE_SCAN_DIRS`. Idempotent.
+    """
+    from disk_tree import config
+    from disk_tree.scan_manifest import SUFFIX, list_scan_manifests, read_scan_manifest, register
+
+    db = init()
+    db.create_all()
+    paths = [src] if src.endswith(SUFFIX) else list_scan_manifests(src)
+    if not paths:
+        raise SystemExit(f'no *{SUFFIX} under {src}')
+    n_new = n_skip = 0
+    for p in paths:
+        scan, created = register(db, read_scan_manifest(p))
+        n_new += created
+        n_skip += not created
+        err(f"{'registered' if created else 'skipped'} scan {scan.id}: {scan.path} @ {scan.time} → {scan.blob}")
+    blobs_dir = src.rsplit('/', 1)[0] if src.endswith(SUFFIX) else src.rstrip('/')
+    if blobs_dir not in config.scan_read_dirs():
+        err(f'note: {blobs_dir} is not on the blob search path — add it to {config.DISK_TREE_SCAN_DIRS_VAR} so the blobs resolve')
+    print(f'{n_new} registered, {n_skip} skipped')
+
+
 @scans.command('dirs')
 def scans_dirs():
     """Show where blobs are written and searched for (local dirs and URLs)."""

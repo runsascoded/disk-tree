@@ -138,7 +138,8 @@ def test_reduce_reproduces_index(tree: Path, tmp_path: Path, engine: str):
     (idx,), (red,) = _scans(idx_root), _scans(red_root)
     assert r.stdout.rstrip('\n') == f'scan 1: {tree} → {red_root / "scans" / red["blob"]}'
     assert red['path'] == idx['path'] == str(tree)
-    # `Scan.time` is the capture's time, stored naive-UTC at second precision.
+    # `Scan.time` is the capture's time (naive UTC); `scans list` renders it at
+    # second precision.
     m = json.loads((Path(cap) / MARKER).read_text())
     assert datetime.fromisoformat(red['time']) == datetime.fromisoformat(m['time']).replace(tzinfo=None, microsecond=0)
     # The empty dir is invisible to a listing: it is gone, and its parent (the
