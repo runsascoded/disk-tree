@@ -397,6 +397,41 @@ def test_partitions_batch_into_bounded_cascades(tmp_path: Path):
     assert (stats['partitions'], stats['partition_keys']) == (1, 10)
 
 
+@pytest.mark.parametrize('partition_files', [
+    0,    # one key per cascade: `[a/, a0)` is exact — never lost rows
+    4,    # pairs `[A _x] [a a-v1] [a-v2 a.bak]`: `[a/, a-v10)` lost every `a/…` row
+    100,  # one batch `[A/, a.bak0)`: `a/…` sorts past `a.bak0`, lost
+])
+def test_batch_range_covers_prefix_keys(tmp_path: Path, partition_files: int):
+    """Keys sorted as bare strings put `a` before `a-v1`, but `a/…` rows sort
+    *after* `a-v1/…` (`/` is 0x2F, `-` is 0x2D), so a batch range built from
+    the bare order `[a/, a-v20)` misses every row under `a` — mgu's round-2
+    fleet gate dropped three whole subtrees this way (spec `mgu-scale-a3-gate.md`
+    ask 6). Batches must be contiguous in `key/` order, at every budget."""
+    listing = tmp_path / 'prefix-keys.parquet'
+    names = [
+        'A/f', 'A/d/f',
+        '_x/f', '_x/d/f',
+        'a/f', 'a/d/f',
+        'a-v1/f', 'a-v1/d/f',
+        'a-v2/f', 'a-v2/d/f',
+        'a.bak/f',
+    ]
+    pd.DataFrame({
+        'bucket': ['b1'] * len(names),
+        'name': names,
+        'size_bytes': list(range(1, len(names) + 1)),
+        'created': [TS] * len(names),
+        'storage_class_id': [1] * len(names),
+    }).to_parquet(listing)
+    base, base_stats = _run_ooc(str(listing), tmp_path / 'base.parquet')
+    assert (base_stats['files'], base_stats['root_size'], base_stats['root_n_files']) == (11, 66, 11)
+    got, stats = _run_ooc(str(listing), tmp_path / 'k1.parquet', partition_depth=1, partition_files=partition_files)
+    pd.testing.assert_frame_equal(base, got)
+    assert stats['partition_keys'] == 6
+    assert (stats['files'], stats['root_size'], stats['root_n_files']) == (11, 66, 11)
+
+
 def test_batch_partitions_packing():
     from disk_tree.find.aggregate_duckdb import _batch_partitions
     parts = [('a', 1), ('b', 1), ('c', 4), ('d', 1), ('e', 2), ('f', 20), ('g', 1)]

@@ -70,10 +70,11 @@ DEFAULT_PARTITION_FILES = 4_000_000
 
 
 def _batch_partitions(parts: list[tuple[str, int]], partition_files: int) -> list[list[str]]:
-    """Pack sorted `(key, n_files)` partitions into consecutive batches of at
-    most `partition_files` files each — one key per batch when `partition_files`
-    ≤ 0, and a key larger than the budget is a batch by itself. Consecutive
-    keys keep each batch's `name` range contiguous for the parquet pushdown."""
+    """Pack `(key, n_files)` partitions, sorted in `key/` order, into
+    consecutive batches of at most `partition_files` files each — one key per
+    batch when `partition_files` ≤ 0, and a key larger than the budget is a
+    batch by itself. Consecutive keys keep each batch's `name` range
+    contiguous for the parquet pushdown."""
     batches: list[list[str]] = []
     cur: list[str] = []
     cur_n = 0
@@ -633,11 +634,17 @@ def _build_partitioned(
     keys = ''.join(f', {c}' for c in group_cols)
 
     # One pass over the listing: the partition keys and their row counts.
+    # Keys are ordered as `key || '/'`, the order their *rows* sort in — not
+    # as bare strings. The two differ when a key is a proper prefix of a
+    # sibling whose next byte sorts below `/` (0x2F): `a` < `a-v1` bare, but
+    # `a-v1/…` < `a/…`, so a batch range `[a/, a-v10)` built from the bare
+    # order held no row under `a`. mgu's fleet gate lost `…/_smoke_v0`,
+    # `…-url-3` and `…-v2` whole (spec `mgu-scale-a3-gate.md` ask 6).
     parts = con.execute(f"""
         SELECT {part_of_path} AS part, COUNT(*) AS n
         FROM ({files_sql_for('')})
         GROUP BY 1
-        ORDER BY 1 NULLS FIRST
+        ORDER BY part || '/' NULLS FIRST
     """).fetchall()
     n_top = next((n for p, n in parts if p is None), 0)
     keyed = [(p, n) for p, n in parts if p is not None]
@@ -686,10 +693,12 @@ def _build_partitioned(
         first, last = _sql_lit(batch[0]), _sql_lit(batch[-1])
         lits = ', '.join(_sql_lit(key) for key in batch)
         # Clean rows (name == canonical) under a key sit in the contiguous name
-        # range [key/, key0) ('/' + 1 == '0'); a batch of consecutive keys is
-        # one range [first/, last0). Rows between two keys (files at depth ≤ k
-        # whose prefix sorts between them) fall in the range too — the exact
-        # `part IN (…)` predicate on top is what makes the range merely a hint.
+        # range [key/, key0) ('/' + 1 == '0'); a batch of keys consecutive in
+        # `key/` order is one range [first/, last0): every `key/` in it is
+        # ≥ `first/`, and < `last/` (a key is never a prefix of another key
+        # + '/'). Rows between two keys (files at depth ≤ k whose prefix sorts
+        # between them) fall in the range too — the exact `part IN (…)`
+        # predicate on top is what makes the range merely a hint.
         clean = files_sql_for(
             f" AND name = rtrim(regexp_replace(name, '/+', '/', 'g'), '/')"
             f" AND name >= {first} || '/' AND name < {last} || '0'"

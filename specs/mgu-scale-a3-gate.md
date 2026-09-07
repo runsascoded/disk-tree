@@ -44,3 +44,39 @@ Every root slice (per-user and unclaimed) is byte- and count-identical. `-k 1`: 
 ## Next
 
 mgu will run the six-bucket gate on GCP Batch (the daily job's image, 250 GiB, NVMe spill) as soon as ask 1 lands, with `--coarse-floor` from the fleet total if 4 does; the a2a then covers every bucket, and `--partition-depth` peak RSS vs. `webdata`'s (141.7 GB at 100 GB `memory_limit` on 2026-09-06) is the number that decides whether `viz.py` goes.
+
+## Round 1 rerun on `46ff7b4` (mgu, 2026-09-07 15:25 UTC)
+
+Same bucket, `-k 2 --partition-files 4000000 -F 268435456`: 3,182 directory keys → 4 cascades, 4:06 wall, 22.0 GB peak RSS (vs 46 keys / 4:03 / 21.1 GB at `-k 1` — batching costs nothing). **`cascade-a2a`: exact** on all 690,894 shared `(path, usr)` rows — bytes, objects, class pivots, mean mtime. One-sided rows are only the two `a//b` names (mgu keeps a row for the empty component; DT collapses — fine, mgu's comparer counts them apart) and nine DT rows for a dir's own slice with nothing in it (`size` 0, `n_files` 0; mgu emits no empty slice — also counted apart). Placeholder objects now match to the object. `floor_source = explicit` recorded.
+
+Round 2 (six buckets, GCP Batch highmem-32, `-k 3`, 100 GB cap) is running; results will land here.
+
+## Round 2 — the fleet on GCP Batch (mgu, 2026-09-07 15:31–19:23 UTC)
+
+`46ff7b4` engine; per bucket `import -e duckdb -k 3` (batch ≤ 4M files) `-L labels -c usr -p storage_class_id -m -i dirs -r 8192 -S usr -M 100GB`, n2-highmem-32 (250 GiB), NVMe spill; `cascade-a2a` against the same day's production path index. Full per-bucket logs and reports: `gs://oa-gcs-usage-dvx/gate/2026-09-07/`.
+
+| bucket | files | dir keys → cascades (largest key) | wall | peak RSS | result |
+|---|---|---|---|---|---|
+| marin-us-central2 | 290M | 42,457 → 35 (71,174,828) | 1:28:27 | 100.9 GB | `_duckdb.OutOfMemoryException: failed to allocate 128.0 KiB (93.1 GiB/93.1 GiB used)` |
+| marin-eu-west4 | 163M | 24,595 → 17 (84,391,332) | 1:30:06 | 135.2 GB | ok; one subtree missing (below) |
+| marin-us-central1 | 64M | 52,771 → 7 (13,349,053) | 15:27 | 58.0 GB | ok; one subtree missing |
+| marin-us-east5 | 47M | 49,055 → 13 (3,769,513) | 14:26 | 48.1 GB | exact but for `//` |
+| marin-us-east1 | 9M | 19,144 → 3 (1,533,028) | 2:21 | 10.5 GB | ok; one subtree missing |
+| marin-us-west4 | 7.5M | 5,766 → 3 (2,237,802) | 1:40 | 8.7 GB | exact |
+
+Reference: mgu's `webdata` (one DuckDB, hash aggregates, `memory_limit` 100GB) did all six buckets the same morning in ~25 min at 99.1 GB peak RSS.
+
+### Asks
+
+6. **Rows dropped, not relocated (bug).** Three subtrees are absent from DT's dirs tier and the *bucket root* is short by exactly their bytes and object counts, so this isn't the `//` policy moving bytes: 
+   - eu-west4 `datakit/store/_smoke_v0/` — 677 objects, 109,907,344 B (root: mgu 442,589,606,340,698 vs DT 442,589,496,433,354; Δ = 109,907,344).
+   - central1 `sam/results/gpt2-fwe-top50-finetune-cfx-ds-2-url-3/None/` — 2,001 objects, 8,448,132 B (root Δ 11,405,064 with a sibling; `sam/results` Δ matches).
+   - east1 `julian/datasets/re10k-train-r128-fps30-gop30-crf18-hand21-v2/` — 143,438 objects, 18,063,192,156 B, plus 286,930 more objects in the root's Σ delta (430,368 total), the largest loss.
+   All three are depth-3 directory keys under `-k 3`. Their object names are ordinary — no `//`, no trailing `/`, no non-ASCII, no whitespace (checked over all 146,116 objects): `datakit/store/_smoke_v0/cluster=1/part-00000-of-00002/input_ids/data/c/0`, `sam/results/gpt2-fwe-top50-finetune-cfx-ds-2-url-3/None/inputs/step-000000.dataset_id.npy`, `julian/datasets/re10k-train-r128-fps30-gop30-crf18-hand21-v2/_failures/part-00000-of-00016.jsonl`. What they share is where the key sorts among its siblings: `_smoke_v0` (`_` = 0x5F, between digits/uppercase and lowercase), `…-url-3` whose files sit under a capitalized `None`, `…-v2` next to `…-v1`. If the batch ranges are built from a Python-sorted key list but the row predicate compares under a different collation (or `>= 'k/'` / `< 'k0'` bounds are taken from the batch's first/last key rather than per key), keys at those boundaries fall between batches. A fixture with keys `A`, `_x`, `a`, `a-v1`, `a-v2` and files at depth K+1 and deeper should reproduce it. The partition batching (`_batch_partitions` / the per-key `name` range predicate) is the first suspect: a key whose range predicate misses rows, or a batch boundary that skips a key. Please reproduce with `tests` on a fixture where a key sits first/last in a batch and next to an oversized standalone key.
+7. **Recursive partitioning.** A key over `--partition-files` should be split again at depth K+1 (and so on) until every cascade fits; today it stands alone, and a 71M-file key exhausts DuckDB's cap while 84M spills for 1.5 h. This is the memory knob mgu needs for `datakit/store*`.
+8. **Per-cascade overhead.** 35 cascades for central2 and 17 for eu-west4 took 1.5 h each; the buckets with a handful of cascades ran at ~1M files/min. `webdata`'s single hash-aggregate pass over the fleet is 25 min. Worth profiling where a cascade's time goes (the level tables' COPY/DELETE churn on the file-backed DB? the per-partition `_files_select` re-scan of the listing?) before the recursion in 7 multiplies the cascade count.
+9. **`//` in names**: `…/tokenized/gs://marin-us-east5/raw/…` (a literal `gs://` inside an object name) collapses to `tokenized/gs:/marin-us-east5/…` on DT's side; mgu keeps `tokenized/gs:` + an empty component. Both consistent; noting so the a2a's "known one-sided" class covers it.
+
+## Landed, round 2 (DT, 2026-09-08)
+
+6. **Fixed** (`find/aggregate_duckdb.py`). Root cause: the key list was `ORDER BY part` (bare strings) while each batch's pushdown range is `[first || '/', last || '0')`. The two orders disagree exactly when a key is a proper prefix of a sibling whose next byte sorts below `/` (0x2F: `-`, `.`, space, …): `a` < `a-v1` bare, but `a-v1/…` < `a/…`, so a batch `[a, a-v1]` had range `[a/, a-v10)` and held no row under `a`; the single-batch range `[A/, a.bak0)` likewise ended before `a/…`. Your three keys fit: `…-v2` beside a `…-v2-…`/`…-v2.…` sibling (or after `…-hand21`), `_smoke_v0` next to `_smoke_v0.…`, `…-url-3` next to `…-url-3-…`. Not a collation mismatch — both sides are DuckDB byte order. Fix: keys are ordered by `part || '/'` (the order their rows sort in), which makes `[first/, last0)` a superset of every member key's `[key/, key0)`. Test: `test_batch_range_covers_prefix_keys` on keys `A _x a a-v1 a-v2 a.bak` at budgets 0 / 4 / 100 — 4 and 100 lost `a/…` before the fix (23 rows → 21), byte-identical after.
