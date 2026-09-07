@@ -375,8 +375,8 @@ def test_partitioned_cascade_is_byte_identical(tmp_path: Path, depth: int, keys:
     pd.testing.assert_frame_equal(base, got)
     stats.pop('max_rss_mb')
     base_stats.pop('max_rss_mb')
-    assert base_stats == {**_IDENTITY_STATS, 'partitions': 0, 'partition_keys': 0}
-    assert stats == {**_IDENTITY_STATS, 'partitions': keys, 'partition_keys': keys}
+    assert base_stats == {**_IDENTITY_STATS, 'partitions': 0, 'partition_keys': 0, 'partition_splits': 0}
+    assert stats == {**_IDENTITY_STATS, 'partitions': keys, 'partition_keys': keys, 'partition_splits': 0}
 
 
 def test_partitions_batch_into_bounded_cascades(tmp_path: Path):
@@ -430,6 +430,44 @@ def test_batch_range_covers_prefix_keys(tmp_path: Path, partition_files: int):
     pd.testing.assert_frame_equal(base, got)
     assert stats['partition_keys'] == 6
     assert (stats['files'], stats['root_size'], stats['root_n_files']) == (11, 66, 11)
+
+
+@pytest.mark.parametrize('partition_files, expect', [
+    # `big` (9 files) > 5 → its depth-2 dirs `d1` (3) and `d2` (4) become keys; its
+    # 2 direct files join the top cascade. Frontier in `key/` order: big/d1, big/d2,
+    # small → packed [big/d1] [big/d2 small].
+    (5, dict(partitions=2, partition_keys=3, partition_splits=1)),
+    # 4: every key stands alone.
+    (4, dict(partitions=3, partition_keys=3, partition_splits=1)),
+    # 3: `big/d2` (4) splits again into `big/d2/x` (4), which is a flat dir of 4 files
+    # — nothing to split into, so it stands alone over budget.
+    (3, dict(partitions=3, partition_keys=3, partition_splits=2)),
+])
+def test_oversized_keys_split_recursively(tmp_path: Path, partition_files: int, expect: dict):
+    """A key over `partition_files` is replaced by its sub-directories until
+    every key fits or is flat (spec `mgu-scale-a3-gate.md` ask 7); the frontier
+    is then keys at mixed depths, and the output is still byte-identical."""
+    listing = tmp_path / 'split.parquet'
+    names = [
+        'big/d1/f1', 'big/d1/f2', 'big/d1/f3',
+        'big/d2/x/f1', 'big/d2/x/f2', 'big/d2/x/f3', 'big/d2/x/f4',
+        'big/direct1', 'big/direct2',
+        'small/f',
+        'top.txt',
+    ]
+    pd.DataFrame({
+        'bucket': ['b1'] * len(names),
+        'name': names,
+        'size_bytes': list(range(1, len(names) + 1)),
+        'created': [TS] * len(names),
+        'storage_class_id': [1] * len(names),
+    }).to_parquet(listing)
+    base, _ = _run_ooc(str(listing), tmp_path / 'base.parquet')
+    got, stats = _run_ooc(str(listing), tmp_path / 'k1.parquet', partition_depth=1, partition_files=partition_files)
+    pd.testing.assert_frame_equal(base, got)
+    assert {k: stats[k] for k in expect} == expect
+    big = got.set_index('path').loc['big']
+    assert (big['size'], big['n_files'], big['n_children'], big['n_desc']) == (45, 9, 4, 13)
 
 
 def test_batch_partitions_packing():
