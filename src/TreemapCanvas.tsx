@@ -43,6 +43,8 @@ export interface TreemapCanvasProps<T> {
   getSize: (n: T) => number
   getLabel: (n: T) => string
   formatSize: (n: number) => string
+  /** Inline-size placement on a cell's first line (see `TreemapProps.sizeAlign`). */
+  sizeAlign: 'left' | 'right'
   idFor: (n: T, p: T[]) => string
   expandable: (n: T, p: T[]) => boolean
   dustTexture: boolean
@@ -72,6 +74,7 @@ interface PaintOpts<T> {
   getSize: (n: T) => number
   getLabel: (n: T) => string
   formatSize: (n: number) => string
+  sizeAlign: 'left' | 'right'
   dustTexture: boolean
 }
 
@@ -91,6 +94,7 @@ export function TreemapCanvas<T>({
   getSize,
   getLabel,
   formatSize,
+  sizeAlign,
   idFor,
   expandable,
   dustTexture,
@@ -135,7 +139,7 @@ export function TreemapCanvas<T>({
     ctx.fillStyle = CONTAINER_RGB
     ctx.fillRect(0, 0, width, height)
 
-    const opts: PaintOpts<T> = { styleOpts, getSize, getLabel, formatSize, dustTexture }
+    const opts: PaintOpts<T> = { styleOpts, getSize, getLabel, formatSize, sizeAlign, dustTexture }
     let i = 0
     let raf = 0
     // Paint until `budgetMs` elapses (clock read every 256 cells to keep it
@@ -156,7 +160,7 @@ export function TreemapCanvas<T>({
     }
     if (i < flat.length) raf = requestAnimationFrame(step)
     return () => { if (raf) cancelAnimationFrame(raf) }
-  }, [flat, width, height, styleOpts, getSize, getLabel, formatSize, dustTexture])
+  }, [flat, width, height, styleOpts, getSize, getLabel, formatSize, sizeAlign, dustTexture])
 
   /** Squarify a folded tile's children over its box, to resolve a dust hover. */
   const dustChildAt = (
@@ -329,7 +333,7 @@ export function TreemapCanvas<T>({
  * Standalone so the progressive loop can call it per cell across frames.
  */
 function paintCell<T>(ctx: CanvasRenderingContext2D, cell: PlacedCell<T>, o: PaintOpts<T>): void {
-  const { styleOpts, getSize, getLabel, formatSize, dustTexture } = o
+  const { styleOpts, getSize, getLabel, formatSize, sizeAlign, dustTexture } = o
   const { x, y, w, h, depth, mode, edge, dust, folded, showLbl, hasKids } = cell
   const shared = mode === 'shared'
   // Cell box: gaps leaves a 2px (1px dust) gutter to the container ground;
@@ -412,6 +416,10 @@ function paintCell<T>(ctx: CanvasRenderingContext2D, cell: PlacedCell<T>, o: Pai
   }
 
   // Label: name (+ inline size when there's room). Ink stays full-strength.
+  // Mirrors the DOM `.dt-treemap-lbl` / `.dt-treemap-lbl2` rules exactly:
+  // branch bars and short leaves (h ≤ 34) show the size inline when the cell
+  // is wider than 90px; a tall leaf drops it to a second line, whatever its
+  // width (the label itself already needs w > 36).
   if (showLbl) {
     const ink = rgbaAt(style.ink, 1) ?? 'rgba(230, 230, 238, 1)'
     const fs = w < 64 ? 11.5 : 13.5
@@ -433,18 +441,26 @@ function paintCell<T>(ctx: CanvasRenderingContext2D, cell: PlacedCell<T>, o: Pai
     const pad = 4
     const kidSize = folded ? (cell.node as FoldedNode<T>).size : getSize(cell.node as T)
     const inlineSize = (hasKids || h <= 34) && w > 90
+    // Same 6px name↔size gap as the DOM label's flex `gap`.
+    const gap = 6
     let nameMax = cw - 2 * pad
+    const szText = inlineSize ? formatSize(kidSize) : ''
+    const szW = inlineSize ? ctx.measureText(szText).width : 0
+    if (inlineSize) nameMax -= szW + gap
+    const name = fit(ctx, label, Math.max(0, nameMax))
+    ctx.fillText(name, x + pad, y + 2)
     if (inlineSize) {
-      const szText = formatSize(kidSize)
-      const szW = ctx.measureText(szText).width
-      nameMax -= szW + 8
+      // `left`: right after the (possibly ellipsized) name; `right`: flush
+      // with the cell's far edge — the DOM's `margin-left: auto`.
+      const sx = sizeAlign === 'right'
+        ? x + cw - pad - szW
+        : x + pad + ctx.measureText(name).width + gap
       ctx.globalAlpha = 0.75
-      ctx.fillText(szText, x + cw - pad - szW, y + 2)
+      ctx.fillText(szText, sx, y + 2)
       ctx.globalAlpha = 1
     }
-    ctx.fillText(fit(ctx, label, Math.max(0, nameMax)), x + pad, y + 2)
     // Second-line size for a tall leaf (name owns the first line).
-    if (!hasKids && !inlineSize && h > 34 && w > 40) {
+    if (!hasKids && h > 34) {
       ctx.globalAlpha = 0.75
       ctx.font = `11.5px system-ui, -apple-system, sans-serif`
       ctx.fillText(fit(ctx, formatSize(kidSize), cw - 2 * pad), x + pad, y + 2 + fs + 3)

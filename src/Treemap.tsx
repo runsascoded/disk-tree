@@ -193,6 +193,13 @@ export interface TreemapProps<T> {
   chrome?: boolean
   /** Render in-cell labels. Default: true. (`false` + `chrome={false}` ≈ a redacted/og render.) */
   showLabels?: boolean
+  /**
+   * Where the inline size sits on a cell's first line (branch title bars and
+   * short leaves — tall leaves always drop the size to a second line under the
+   * name). `'left'` (default) sets it right after the name; `'right'` pushes
+   * it to the cell's far edge. Both renderers honor it identically.
+   */
+  sizeAlign?: 'left' | 'right'
   /** Extra className on the outer wrapper. */
   className?: string
   /** Style overrides on the map area. */
@@ -236,9 +243,10 @@ export interface TreemapProps<T> {
   tiling?: Tiling | ((n: T, path: T[], depth: number, ctx: TilingCtx) => Tiling)
   /**
    * Shared-mode stroke width (CSS px) for cells at `depth` (0 = the viewed
-   * node's children). Default: `max(1, 3 − depth)` — thicker at shallow
-   * levels for hierarchy legibility, a hairline at the leaves. Dust cells
-   * (<14px) are capped at 1px.
+   * node's children). Default: `max(1, 2 − depth)` — a 2px stroke at the top
+   * level (the same width as the `gaps` gutter, so shared tiling never reads
+   * *wider* than gaps) and a hairline everywhere below. Dust cells (<14px)
+   * are capped at 1px.
    */
   borderWidth?: (depth: number, ctx: CellDims) => number
   /**
@@ -402,7 +410,7 @@ const DEFAULT_SLOTS = DEFAULT_PALETTE
 
 const defaultFormat = (n: number) => n.toLocaleString('en-US')
 
-const defaultBorderWidth = (depth: number) => Math.max(1, 3 - depth)
+const defaultBorderWidth = (depth: number) => Math.max(1, 2 - depth)
 
 const medianArea = (rs: { w: number; h: number }[]): number => {
   if (!rs.length) return 0
@@ -471,6 +479,7 @@ export function Treemap<T>({
   fullscreen = true,
   chrome = true,
   showLabels = true,
+  sizeAlign = 'left',
   className,
   mapStyle,
   depthFade = 0.82,
@@ -1115,7 +1124,7 @@ export function Treemap<T>({
                 leaf drops it to a 2nd line (below) so the name gets the full
                 first line and isn't crowded by the size. */}
             {(kids.length > 0 || r.h <= 34) && r.w > 90 && (
-              <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none' }}>
+              <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none', marginLeft: sizeAlign === 'right' ? 'auto' : undefined }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
                   <span style={{ marginLeft: 4 }}>{renderCellSubtitle(kid as T, kidPath, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 })}</span>
@@ -1289,6 +1298,7 @@ export function Treemap<T>({
                 getSize={getSize}
                 getLabel={getLabel}
                 formatSize={formatSize}
+                sizeAlign={sizeAlign}
                 idFor={idFor}
                 expandable={expandable}
                 dustTexture={dustTexture}
