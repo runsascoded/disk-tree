@@ -155,6 +155,86 @@ describe('<TimeSeries>', () => {
     expect((container.querySelector('svg') as SVGSVGElement).style.cursor).toBe('')
   })
 
+  // Brush / window geometry at 400×200: plot x-range is [56, 384] (PAD.left
+  // 56, PAD.right 16), so points t ∈ {0, 1, 2} sit at px 56 / 220 / 384 and
+  // jsdom's zero bounding rect makes clientX the plot px directly.
+  const brushSeries = [{ key: 'a', points: [{ t: 0, y: 10 }, { t: 1, y: 20 }, { t: 2, y: 30 }] }]
+  /** The window/brush band as rendered: the shaded rect + its two edge lines. */
+  function bandOf(container: HTMLElement) {
+    const g = container.querySelector('svg g[pointer-events="none"]')
+    if (!g) return null
+    const rect = g.querySelector('rect')!
+    return {
+      x: Number(rect.getAttribute('x')),
+      width: Number(rect.getAttribute('width')),
+      fill: rect.getAttribute('fill'),
+      edges: [...g.querySelectorAll('line')].map(l => [Number(l.getAttribute('x1')), l.getAttribute('stroke-dasharray')]),
+    }
+  }
+
+  it('onBrush: a drag picks the snapped x-range (ordered), painting a solid band meanwhile', () => {
+    const onBrush = vi.fn()
+    const onPickX = vi.fn()
+    const { container } = withSize(() =>
+      render(<TimeSeries series={brushSeries} getX={p => p.t} getY={p => p.y} onBrush={onBrush} onPickX={onPickX} />),
+    )
+    const svg = container.querySelector('svg') as SVGSVGElement
+    expect(svg.style.cursor).toBe('crosshair')
+    expect(bandOf(container)).toBeNull()
+    // Press near t=2, drag back to t=1: the in-progress band is solid (no dash).
+    fireEvent.mouseDown(svg, { clientX: 390, button: 0 })
+    fireEvent.mouseMove(svg, { clientX: 225 })
+    expect(svg.style.cursor).toBe('col-resize')
+    expect(bandOf(container)).toEqual({
+      x: 220,
+      width: 164,
+      fill: 'var(--dt-ts-brush, rgba(255,255,255,0.14))',
+      edges: [[220, null], [384, null]],
+    })
+    // Release past the plot's left edge: snaps to t=0, committed as (min, max).
+    fireEvent.mouseUp(window, { clientX: 10 })
+    expect(onBrush.mock.calls).toEqual([[0, 2]])
+    expect(onPickX).not.toHaveBeenCalled()
+    expect(bandOf(container)).toBeNull()
+    expect(svg.style.cursor).toBe('crosshair')
+  })
+
+  it('onBrush: a zero-width drag is a click — onPickX once, onBrush never', () => {
+    const onBrush = vi.fn()
+    const onPickX = vi.fn()
+    const { container } = withSize(() =>
+      render(<TimeSeries series={brushSeries} getX={p => p.t} getY={p => p.y} onBrush={onBrush} onPickX={onPickX} />),
+    )
+    const svg = container.querySelector('svg') as SVGSVGElement
+    fireEvent.mouseDown(svg, { clientX: 56, button: 0 })
+    fireEvent.mouseUp(window, { clientX: 60 })
+    expect(onPickX.mock.calls).toEqual([[0]])
+    expect(onBrush).not.toHaveBeenCalled()
+    // With a brush the pick resolves in mouseup only: a hover + click must not
+    // fire it a second time.
+    fireEvent.mouseMove(svg, { clientX: 225 })
+    fireEvent.click(svg)
+    expect(onPickX.mock.calls).toEqual([[0]])
+  })
+
+  it('window renders a dashed band between the two x’s', () => {
+    const { container } = withSize(() =>
+      render(<TimeSeries series={brushSeries} getX={p => p.t} getY={p => p.y} window={[0, 1]} />),
+    )
+    expect(bandOf(container)).toEqual({
+      x: 56,
+      width: 164,
+      fill: 'var(--dt-ts-window, rgba(255,255,255,0.07))',
+      edges: [[56, '2 3'], [220, '2 3']],
+    })
+    // No brush → no drag affordance, and a press does nothing.
+    const svg = container.querySelector('svg') as SVGSVGElement
+    expect(svg.style.cursor).toBe('')
+    fireEvent.mouseDown(svg, { clientX: 390, button: 0 })
+    fireEvent.mouseMove(svg, { clientX: 225 })
+    expect(bandOf(container)!.edges).toEqual([[56, '2 3'], [220, '2 3']])
+  })
+
   it('handles empty series without crashing', () => {
     interface P { t: number; y: number }
     const { container } = render(

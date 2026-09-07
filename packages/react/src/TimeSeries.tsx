@@ -64,6 +64,12 @@ export interface TimeSeriesProps<T> {
   /** Click handler for the snapped hover x (the crosshair position) — e.g.
    *  jump the page to that scan date. Sets a pointer cursor on the plot. */
   onPickX?: (x: number) => void
+  /** Drag across the plot to pick an x-range (both ends snapped to data x's);
+   *  a drag that never leaves its start x counts as a click (`onPickX`). */
+  onBrush?: (x0: number, x1: number) => void
+  /** A highlighted x-window (e.g. the diff range the page is showing), drawn
+   *  as a shaded band behind the series. */
+  window?: [number, number]
   /** Extra CSS on the outer wrapper. */
   className?: string
   style?: CSSProperties
@@ -112,6 +118,8 @@ export function TimeSeries<T>({
   area = true,
   annotations,
   onPickX,
+  onBrush,
+  window: xWindow,
   className,
   style,
   height,
@@ -191,10 +199,42 @@ export function TimeSeries<T>({
     return best
   }
 
-  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect()
-    setHoverX(snapX(e.clientX - rect.left))
+  // Brush: data-x endpoints of an in-progress drag (null = not dragging). The
+  // ref is the source of truth for the handlers — state updates flush in a
+  // microtask under createRoot, so down/move/up in quick succession would
+  // otherwise read stale closures; the state copy only drives the render.
+  const dragRef = useRef<{ x0: number; x1: number } | null>(null)
+  const [drag, setDragState] = useState<{ x0: number; x1: number } | null>(null)
+  const setDrag = (d: { x0: number; x1: number } | null) => { dragRef.current = d; setDragState(d) }
+  const svgRef = useRef<SVGSVGElement>(null)
+  const xAt = (clientX: number): number | null => {
+    const el = svgRef.current
+    return el ? snapX(clientX - el.getBoundingClientRect().left) : null
   }
+  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    const x = xAt(e.clientX)
+    setHoverX(x)
+    const d = dragRef.current
+    if (d && x != null && x !== d.x1) setDrag({ x0: d.x0, x1: x })
+  }
+  const onDown = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!onBrush || e.button !== 0) return
+    e.preventDefault() // no text selection while dragging
+    const x = xAt(e.clientX)
+    if (x == null) return
+    setDrag({ x0: x, x1: x })
+    // Commit on the release wherever it lands (a drag often ends past the
+    // plot's edge), from the pointer's own x rather than the last move.
+    window.addEventListener('mouseup', (up: MouseEvent) => {
+      const d = dragRef.current
+      if (!d) return
+      setDrag(null)
+      const x1 = xAt(up.clientX) ?? d.x1
+      if (x1 === d.x0) onPickX?.(d.x0)
+      else onBrush(Math.min(d.x0, x1), Math.max(d.x0, x1))
+    }, { once: true })
+  }
+  const band = drag ? [Math.min(drag.x0, drag.x1), Math.max(drag.x0, drag.x1)] as const : xWindow
 
   const hoverPoints: { color: string; label: string; y: number | null }[] = hoverX == null
     ? []
@@ -215,13 +255,40 @@ export function TimeSeries<T>({
     >
       {dims.w > 0 && dims.h > 0 && (
         <svg
+          ref={svgRef}
           width={dims.w}
           height={dims.h}
           onMouseMove={onMove}
           onMouseLeave={() => setHoverX(null)}
-          onClick={onPickX && (() => { if (hoverX != null) onPickX(hoverX) })}
-          style={{ display: 'block', cursor: onPickX ? 'pointer' : undefined }}
+          onMouseDown={onDown}
+          // With a brush, clicks resolve in mouseup (a zero-width drag) — a
+          // separate click handler would fire the pick twice.
+          onClick={onPickX && !onBrush ? () => { if (hoverX != null) onPickX(hoverX) } : undefined}
+          style={{ display: 'block', cursor: drag ? 'col-resize' : onBrush ? 'crosshair' : onPickX ? 'pointer' : undefined, userSelect: 'none' }}
         >
+          {/* Window band (the highlighted x-range, or the drag in progress) */}
+          {band && band[1] > band[0] && (
+            <g pointerEvents="none">
+              <rect
+                x={xToPx(band[0])}
+                y={PAD.top}
+                width={Math.max(0, xToPx(band[1]) - xToPx(band[0]))}
+                height={plotH}
+                fill={drag ? 'var(--dt-ts-brush, rgba(255,255,255,0.14))' : 'var(--dt-ts-window, rgba(255,255,255,0.07))'}
+              />
+              {[band[0], band[1]].map((x, i) => (
+                <line
+                  key={`w${i}`}
+                  x1={xToPx(x)}
+                  x2={xToPx(x)}
+                  y1={PAD.top}
+                  y2={PAD.top + plotH}
+                  stroke="var(--dt-ts-window-edge, rgba(255,255,255,0.35))"
+                  strokeDasharray={drag ? undefined : '2 3'}
+                />
+              ))}
+            </g>
+          )}
           {/* Y grid + ticks */}
           {yTickVals.map((y, i) => (
             <g key={`y${i}`}>
