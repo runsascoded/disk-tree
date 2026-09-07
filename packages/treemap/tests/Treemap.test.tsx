@@ -175,6 +175,28 @@ describe('<Treemap>', () => {
     }
   })
 
+  it('sizeAlign: the inline size sits after the name by default, at the far edge on "right"', () => {
+    const restore = withLayout()
+    try {
+      const inlineSizeMargin = (align?: 'left' | 'right') => {
+        const { container, unmount } = render(
+          <Treemap root={tree} {...accessors} formatSize={n => `${n} B`} minCellArea={null} sizeAlign={align} />,
+        )
+        const sz = container.querySelector('.dt-treemap-map > .dt-treemap-cell > .dt-treemap-lbl > .sz') as HTMLElement
+        const out = [sz.textContent, sz.style.marginLeft]
+        unmount()
+        return out
+      }
+      // `foo`'s title bar carries the only inline size; a plain flex sibling
+      // (6px gap after the name) by default, `margin-left: auto` on "right".
+      expect(inlineSizeMargin()).toEqual(['200 B', ''])
+      expect(inlineSizeMargin('left')).toEqual(['200 B', ''])
+      expect(inlineSizeMargin('right')).toEqual(['200 B', 'auto'])
+    } finally {
+      restore()
+    }
+  })
+
   it('segments render proportional makeup stripes on leaves, never on branches', () => {
     const restore = withLayout()
     try {
@@ -232,26 +254,27 @@ describe('<Treemap>', () => {
           [266.67, 300, '0'],
           [133.33, 300, '0'],
         ])
-        // depth 0: borderWidth = max(1, 3 − 0) = 3 → each neighbor paints a
-        // 1.5px inset ring, exposed by insetting the paint layer to match
-        // (a full-bleed paint layer would cover the shadow entirely). The
-        // base stays the container color — the paint layer is translucent,
-        // so tinting the base would wash the whole cell toward the stroke.
-        expect(bar.style.boxShadow).toBe('inset 0 0 0 1.5px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))')
+        // depth 0: borderWidth = max(1, 2 − 0) = 2 (the gaps gutter's width,
+        // so shared never reads wider than gaps) → each neighbor paints a 1px
+        // inset ring, exposed by insetting the paint layer to match (a
+        // full-bleed paint layer would cover the shadow entirely). The base
+        // stays the container color — the paint layer is translucent, so
+        // tinting the base would wash the whole cell toward the stroke.
+        expect(bar.style.boxShadow).toBe('inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))')
         expect(bar.style.background).toBe('var(--dt-treemap-container-bg, #202024)')
-        expect((bar.querySelector(':scope > .dt-treemap-bg') as HTMLElement).style.inset).toBe('1.5px')
+        expect((bar.querySelector(':scope > .dt-treemap-bg') as HTMLElement).style.inset).toBe('1px')
         expect(bar.classList.contains('shared')).toBe(true)
         // foo's children fill to foo's own half-stroke (below the 20px title)
-        expect((foo.querySelector(':scope > .dt-treemap-inner') as HTMLElement).style.inset).toBe('20px 1.5px 1.5px 1.5px')
-        // depth 1: stroke 2 → 1px ring; children split foo's 263.67×278.5
-        // canvas 1:1 (taller than wide → stacked)
+        expect((foo.querySelector(':scope > .dt-treemap-inner') as HTMLElement).style.inset).toBe('20px 1px 1px 1px')
+        // depth 1: stroke 1 (hairline) → 0.5px ring; children split foo's
+        // 264.67×279 canvas 1:1 (taller than wide → stacked)
         const [a, b] = [...foo.querySelectorAll(':scope > .dt-treemap-inner > .dt-treemap-cell')] as HTMLElement[]
         expect([a, b].map(el => [
           px(el.style.width), px(el.style.height),
           (el.querySelector(':scope > .dt-treemap-bg') as HTMLElement).style.inset, el.style.boxShadow,
         ])).toEqual([
-          [263.67, 139.25, '1px', 'inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
-          [263.67, 139.25, '1px', 'inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
+          [264.67, 139.5, '0.5px', 'inset 0 0 0 0.5px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
+          [264.67, 139.5, '0.5px', 'inset 0 0 0 0.5px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))'],
         ])
       } finally {
         restore()
@@ -273,11 +296,11 @@ describe('<Treemap>', () => {
           />,
         )
         const [foo, bar] = rootCells(container)
-        // depth 0 → 1.5px half-stroke; white face gets a dark stroke, black a
+        // depth 0 → 1px half-stroke; white face gets a dark stroke, black a
         // light one — grey-on-grey borders can't vanish because the color is
         // derived from each cell's own face.
-        expect(foo.style.boxShadow).toBe('inset 0 0 0 1.5px rgba(0, 0, 0, 0.55)')
-        expect(bar.style.boxShadow).toBe('inset 0 0 0 1.5px rgba(255, 255, 255, 0.42)')
+        expect(foo.style.boxShadow).toBe('inset 0 0 0 1px rgba(0, 0, 0, 0.55)')
+        expect(bar.style.boxShadow).toBe('inset 0 0 0 1px rgba(255, 255, 255, 0.42)')
       } finally {
         restore()
       }
@@ -491,7 +514,7 @@ describe('<Treemap>', () => {
           />,
         )
         expect((rootCells(container)[1] as HTMLElement).style.boxShadow).toBe(
-          'inset 0 0 0 2px rgb(120, 170, 255), inset 0 0 0 1.5px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))',
+          'inset 0 0 0 2px rgb(120, 170, 255), inset 0 0 0 1px var(--dt-treemap-edge, var(--dt-treemap-container-bg, #202024))',
         )
       } finally {
         restore()
