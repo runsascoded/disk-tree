@@ -33,11 +33,13 @@ Two things the run found: the package's `admin` flag means "in `adminEmails`", n
 
 Deployed state meanwhile: the deny-all middleware from the incident is what's live; this code fails closed without the D1 binding, and `wrangler` refuses the placeholder `database_id` anyway.
 
-## Deploy — needs Ryan (token scope + Zero Trust)
+## Deployed (2026-09-07)
 
-1. The `disk-tree-wrangler` token needs **D1 Write** (for `wrangler d1 create disk-tree-auth` + `d1 migrations apply`). Then fill `database_id` in `wrangler.toml`.
-2. Zero Trust (personal account): an Access application for `disk-tree.pages.dev/auth/sso` with an Allow policy = the same emails, login method One-time PIN (or Google). Note its **AUD** and the team domain (`https://<team>.cloudflareaccess.com`).
-3. `wrangler pages secret put` for `SESSION_SECRET` (32 random bytes), `ALLOWED_EMAILS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`.
-4. Deploy; the deny-all middleware goes away in the same deploy. Verify: anonymous 401, SSO round-trip, mint a link in `/access`, open it in a private window, revoke, watch it die.
+1. Ryan added **D1 Write** to the `disk-tree-wrangler` token; `wrangler d1 create disk-tree-auth` → `c17a63c1-1d6f-443c-9d35-f1e9c5e674ac` (ENAM), the seven migrations applied `--remote`, id filled into `wrangler.toml`.
+2. Zero Trust was already enabled on the personal account (team domain `runsascoded.cloudflareaccess.com`, one existing app). Added a self-hosted Access application **disk-tree** with the single destination `disk-tree.pages.dev/auth/sso` and a new reusable policy **disk-tree allowlist** (Allow · Include · Emails). Login methods: "accept all available identity providers" (the team's defaults). The app's AUD tag is in the secret, not here.
+3. Pages secrets set from local files (never echoed): `SESSION_SECRET` (32 random bytes hex), `ALLOWED_EMAILS`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`.
+4. `wrangler pages deploy` → the deny-all middleware is gone. Verified over curl: `/api/capabilities` 200 (`auth: true`), `/api/scans` and `/api/auth/whoami` 401, `/auth/sso` 302 to `runsascoded.cloudflareaccess.com/cdn-cgi/access/login/disk-tree.pages.dev?kid=<aud>…`, `/` 200 rendering the wall.
+
+The Access login page is on the team domain, where the Claude-in-Chrome extension has no permission — the SSO round trip itself is a manual step. Left to verify by hand: sign in, mint a link in `/access`, open it in a private window, revoke, watch it die. To allow another email: add it to the Access policy *and* to `ALLOWED_EMAILS` (both are exact-match lists).
 
 [`@open-athena/auth`]: https://github.com/Open-Athena/auth

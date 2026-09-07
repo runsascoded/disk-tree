@@ -32,5 +32,5 @@ SCANS_PREFIX = "scans/"
 [[d1_databases]]
 binding = "DB"
 database_name = "disk-tree-auth"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "c17a63c1-1d6f-443c-9d35-f1e9c5e674ac"
 migrations_dir = "migrations"
