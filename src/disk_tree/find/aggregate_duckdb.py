@@ -118,6 +118,7 @@ def _build_dirs_cascade(
     out: str = 'dirs_all',
     n_children: str = 'n_children_tbl',
     tag: str = '',
+    group_cols: tuple[str, ...] = (),
 ) -> None:
     """Bottom-up group-by cascade over `src` → `out` + `n_children` tables.
 
@@ -127,10 +128,16 @@ def _build_dirs_cascade(
     float-summation order sensitivity); consumers divide it into the
     `mtime_mean` output column (see find/agg_ext.py).
 
-    `out` holds one row per (level, path): a path's totals are the SUM over
-    its rows, so a partitioned build can append several cascades' outputs
-    (stub ancestors included) into one table and fold them in a single
-    GROUP BY. `tag` prefixes the stage log lines.
+    `group_cols` are label columns on `src` (spec mgu-scale-unification.md
+    item B) carried as additional group keys: every level groups by
+    `(parent, *group_cols)`, so a path comes out once per distinct label
+    tuple beneath it, and `n_children` counts per (path, labels-of-child).
+    NULL is an ordinary label value (one group).
+
+    `out` holds one row per (level, path[, labels]): a key's totals are the
+    SUM over its rows, so a partitioned build can append several cascades'
+    outputs (stub ancestors included) into one table and fold them in a
+    single GROUP BY. `tag` prefixes the stage log lines.
     """
     from .agg_ext import MT_WSUM
     cascade_cols = [*sum_cols, *([MT_WSUM] if mean_mtime else [])]
@@ -141,6 +148,7 @@ def _build_dirs_cascade(
         f", SUM({c})::{'HUGEINT' if c == MT_WSUM else 'BIGINT'} AS {c}"
         for c in cascade_cols
     )
+    keys = ''.join(f', {c}' for c in group_cols)
 
     parent_of_path = _PARENT_EXPR.format(col='path')
 
@@ -148,7 +156,7 @@ def _build_dirs_cascade(
     # and n_files=0 (dirs don't count as files) at its own path.
     con.execute(f"""
         CREATE OR REPLACE TABLE dirs0 AS
-        SELECT path, size, mtime, 1::BIGINT AS n_desc, 0::BIGINT AS n_files{extra_sel}
+        SELECT path{keys}, size, mtime, 1::BIGINT AS n_desc, 0::BIGINT AS n_files{extra_sel}
         FROM {src}
         WHERE kind = 'dir'
     """)
@@ -158,10 +166,10 @@ def _build_dirs_cascade(
     # (that's the scan root; it has no parent).
     con.execute(f"""
         CREATE OR REPLACE TABLE {n_children} AS
-        SELECT parent AS path, COUNT(*)::BIGINT AS n_children
+        SELECT parent AS path{keys}, COUNT(*)::BIGINT AS n_children
         FROM {src}
         WHERE path != ''
-        GROUP BY parent
+        GROUP BY parent{keys}
     """)
 
     # `cur` seed: all input rows with n_desc=1; n_files=1 for files, 0 for dirs.
@@ -169,7 +177,7 @@ def _build_dirs_cascade(
     # (bottom-up). Stop when nothing left to promote.
     con.execute(f"""
         CREATE OR REPLACE TABLE level_cur AS
-        SELECT path, size, mtime,
+        SELECT path{keys}, size, mtime,
                1::BIGINT AS n_desc,
                CASE WHEN kind = 'file' THEN 1 ELSE 0 END::BIGINT AS n_files{extra_sel}
         FROM {src}
@@ -180,14 +188,14 @@ def _build_dirs_cascade(
         next_tbl = f'level_{level}'
         con.execute(f"""
             CREATE OR REPLACE TABLE {next_tbl} AS
-            SELECT {parent_of_path} AS path,
+            SELECT {parent_of_path} AS path{keys},
                    SUM(size)::BIGINT AS size,
                    MAX(mtime)::BIGINT AS mtime,
                    SUM(n_desc)::BIGINT AS n_desc,
                    SUM(n_files)::BIGINT AS n_files{extra_sum}
             FROM level_cur
             WHERE path != ''
-            GROUP BY 1
+            GROUP BY 1{keys}
         """)
         cnt = con.execute(f"SELECT COUNT(*) FROM {next_tbl}").fetchone()[0]
         _stage(f"{tag}cascade level {level}: {cnt} rows")
@@ -199,7 +207,7 @@ def _build_dirs_cascade(
         level += 1
 
     # Union all dir levels + dirs0, group by path, attach n_children.
-    base_cols = f"path, size, mtime, n_desc, n_files{extra_sel}"
+    base_cols = f"path{keys}, size, mtime, n_desc, n_files{extra_sel}"
     if level_tables:
         levels_union = " UNION ALL ".join(
             f"SELECT {base_cols} FROM {t}" for t in level_tables
@@ -383,10 +391,14 @@ def _files_select(
     """
 
 
-def _dir_rows_insert(table: str, dir_paths: str, extra_dir_cols: str) -> str:
+def _dir_rows_insert(
+    table: str,
+    dir_paths: str,
+    extra_dir_cols: str,
+    labels: "_Labels | None" = None,
+) -> str:
     """INSERT synthesized dir rows (size/mtime 0, extras 0) for every path in `dir_paths`."""
-    return f"""
-        INSERT INTO {table}
+    rows = f"""
         SELECT
             path,
             0::BIGINT AS size,
@@ -395,6 +407,76 @@ def _dir_rows_insert(table: str, dir_paths: str, extra_dir_cols: str) -> str:
             {_PARENT_EXPR.format(col='path')} AS parent{extra_dir_cols}
         FROM {dir_paths}
     """
+    if labels is not None:
+        rows = labels.join(rows)
+    return f"INSERT INTO {table} {rows}"
+
+
+class _Labels:
+    """The attribution label table (spec mgu-scale-unification.md item B): a
+    parquet of `prefix → <label columns>`, joined onto every input row by
+    deepest matching prefix.
+
+    The join is one LEFT JOIN per distinct prefix depth present in the table
+    (a handful, against ~10⁴ prefixes — each a streaming probe with a tiny
+    build side), matching the row's depth-d prefix by equality; `COALESCE`
+    from the deepest depth down implements deepest-prefix-wins. A `''` prefix
+    (depth 0) is the catch-all default. Rows under no prefix get NULLs.
+    """
+
+    def __init__(self, con: "duckdb.DuckDBPyConnection", path: str, cols: tuple[str, ...]):
+        self.cols = cols
+        present = [r[0] for r in con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{path}') LIMIT 0"
+        ).fetchall()]
+        if 'prefix' not in present:
+            raise ValueError(f"label table {path}: no `prefix` column (has {present})")
+        if not cols:
+            cols = self.cols = tuple(c for c in present if c != 'prefix')
+        missing = [c for c in cols if c not in present]
+        if missing:
+            raise ValueError(f"label table {path}: missing label column(s) {missing} (has {present})")
+        reserved = set(_LAYER2_COLS) | {'kind', 'parent', 'uri', 'depth'}
+        clash = [c for c in cols if c in reserved]
+        if clash:
+            raise ValueError(f"label column(s) {clash} collide with layer-2 columns")
+        if not cols:
+            raise ValueError(f"label table {path}: no label columns besides `prefix`")
+        nseg = _NSEG_EXPR.format(col='prefix')
+        con.execute(f"""
+            CREATE OR REPLACE TABLE labels AS
+            SELECT prefix, {nseg} AS depth{''.join(f', {c}' for c in cols)}
+            FROM (
+                SELECT rtrim(regexp_replace(prefix, '/+', '/', 'g'), '/') AS prefix{''.join(f', {c}' for c in cols)}
+                FROM read_parquet('{path}')
+            )
+        """)
+        dupes = con.execute(
+            "SELECT prefix FROM labels GROUP BY prefix HAVING COUNT(*) > 1 ORDER BY 1 LIMIT 5"
+        ).fetchall()
+        if dupes:
+            raise ValueError(f"label table {path}: duplicate prefix(es) {[d[0] for d in dupes]}")
+        self.depths = [r[0] for r in con.execute(
+            "SELECT DISTINCT depth FROM labels ORDER BY depth DESC"
+        ).fetchall()]
+        self.n = con.execute("SELECT COUNT(*) FROM labels").fetchone()[0]
+
+    def join(self, rows_sql: str) -> str:
+        """Wrap a SELECT producing `path, …` so each row also carries its labels."""
+        picks = ''.join(
+            f", COALESCE({', '.join(f'l{d}.{c}' for d in self.depths)}) AS {c}"
+            for c in self.cols
+        )
+        joins = ''
+        for d in self.depths:
+            on = f"l{d}.depth = {d}"
+            if d > 0:
+                on += f" AND l{d}.prefix = {_part_expr('s.path', d)}"
+            joins += f" LEFT JOIN labels l{d} ON {on}"
+        return f"SELECT s.*{picks} FROM ({rows_sql}) s{joins}"
+
+
+_LAYER2_COLS = ('path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children')
 
 
 def _build_partitioned(
@@ -404,6 +486,7 @@ def _build_partitioned(
     sum_cols: tuple[str, ...],
     mean_mtime: bool,
     extra_dir_cols: str,
+    labels: "_Labels | None" = None,
 ) -> int:
     """Prefix-partitioned cascade (spec mgu-scale-unification.md A.2) → `dirs_all` + `n_children_tbl`.
 
@@ -425,6 +508,8 @@ def _build_partitioned(
     part_of_path = _part_expr('path', k)
     nseg_p = _NSEG_EXPR.format(col='p')
     parent_of_p = _PARENT_EXPR.format(col='p')
+    group_cols = labels.cols if labels is not None else ()
+    keys = ''.join(f', {c}' for c in group_cols)
 
     # One pass over the listing: the partition keys and their row counts.
     parts = con.execute(f"""
@@ -434,8 +519,8 @@ def _build_partitioned(
         ORDER BY 1 NULLS FIRST
     """).fetchall()
     n_top = next((n for p, n in parts if p is None), 0)
-    keys = [p for p, _ in parts if p is not None]
-    _stage(f"partition depth {k}: {len(keys)} partitions"
+    part_keys = [p for p, _ in parts if p is not None]
+    _stage(f"partition depth {k}: {len(part_keys)} partitions"
            f" (largest {max((n for p, n in parts if p is not None), default=0)} files), {n_top} shallow files")
 
     # Dirty keys (`a//b`) canonicalize to a different sort position than their
@@ -449,8 +534,8 @@ def _build_partitioned(
     _stage(f"{n_dirty} dirty keys held aside")
 
     con.execute("CREATE OR REPLACE TABLE partitions (part VARCHAR)")
-    if keys:
-        con.executemany("INSERT INTO partitions VALUES (?)", [(key,) for key in keys])
+    if part_keys:
+        con.executemany("INSERT INTO partitions VALUES (?)", [(key,) for key in part_keys])
 
     # Accumulators: every cascade appends its (level, path) rows here.
     con.execute("DROP TABLE IF EXISTS dirs_all")
@@ -466,7 +551,7 @@ def _build_partitioned(
         con.execute("DROP TABLE dirs_all_p")
         con.execute("DROP TABLE n_children_p")
 
-    for i, key in enumerate(keys):
+    for i, key in enumerate(part_keys):
         lit = _sql_lit(key)
         # Clean keys (name == canonical) with this prefix sit in the contiguous
         # name range [key, key] ∪ [key/, key0) ('/' + 1 == '0'); the exact
@@ -492,12 +577,12 @@ def _build_partitioned(
             )
             SELECT DISTINCT p AS path FROM anc WHERE {nseg_p} >= {k}
         """)
-        con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols))
+        con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels))
         con.execute("DROP TABLE dir_paths_p")
         _build_dirs_cascade(
             con, sum_cols=sum_cols, mean_mtime=mean_mtime,
             src='inputs_p', out='dirs_all_p', n_children='n_children_p',
-            tag=f"[{i + 1}/{len(keys)} {key}] ",
+            tag=f"[{i + 1}/{len(part_keys)} {key}] ", group_cols=group_cols,
         )
         _append(first=i == 0)
     con.execute("DROP TABLE dirty")
@@ -521,27 +606,28 @@ def _build_partitioned(
         )
         SELECT DISTINCT p AS path FROM anc
     """)
-    con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols))
+    con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels))
     con.execute("DROP TABLE dir_paths_p")
     con.execute("DROP TABLE partitions")
     _build_dirs_cascade(
         con, sum_cols=sum_cols, mean_mtime=mean_mtime,
         src='inputs_p', out='dirs_all_p', n_children='n_children_p', tag='[top] ',
+        group_cols=group_cols,
     )
-    _append(first=not keys)
+    _append(first=not part_keys)
     con.execute("DROP TABLE inputs_p")
 
     # A shallow dir's children are split across cascades (its depth-k children
     # each count from their own partition); fold to one row per path — the
     # join below multiplies rows otherwise.
-    con.execute("""
+    con.execute(f"""
         CREATE OR REPLACE TABLE n_children_tbl AS
-        SELECT path, SUM(n_children)::BIGINT AS n_children
+        SELECT path{keys}, SUM(n_children)::BIGINT AS n_children
         FROM n_children_parts
-        GROUP BY path
+        GROUP BY path{keys}
     """)
     con.execute("DROP TABLE n_children_parts")
-    return len(keys)
+    return len(part_keys)
 
 
 def aggregate_listing_to_parquet(
@@ -557,6 +643,8 @@ def aggregate_listing_to_parquet(
     mean_mtime: bool = False,
     db: str | None = None,
     partition_depth: int = 0,
+    label: str | None = None,
+    label_cols: tuple[str, ...] = (),
 ) -> dict:
     """Out-of-core: layer-1 listing (via `listing_sql`) → layer-2 parquet on disk.
 
@@ -580,6 +668,13 @@ def aggregate_listing_to_parquet(
       rather than the whole listing. 0 = one cascade over everything.
 
     Output is byte-identical for every combination.
+
+    `label` (item B): a parquet of `prefix → <label columns>` (`label_cols`;
+    default: every column but `prefix`), joined onto every input row by
+    deepest matching prefix (see :class:`_Labels`) and carried as extra group
+    keys through the cascade — the output holds one row per
+    `(path, *label_cols)`, sorted `(depth, path, *label_cols)`, label columns
+    right after `path`; Σ over a path's slices equals its unlabeled row.
     """
     import duckdb as _duckdb
     if partition_depth < 0:
@@ -637,8 +732,15 @@ def aggregate_listing_to_parquet(
     if mean_mtime:
         extra_dir_cols += f', 0::HUGEINT AS {MT_WSUM}'
 
+    labels = _Labels(con, label, label_cols) if label is not None else None
+    group_cols: tuple[str, ...] = labels.cols if labels is not None else ()
+    keys = ''.join(f', {c}' for c in group_cols)
+    if labels is not None:
+        _stage(f"labels: {labels.n} prefixes at depths {sorted(labels.depths)} → {list(group_cols)}")
+
     def files_sql_for(where: str) -> str:
-        return _files_select(listing_sql, bucket, extra_file_cols, pivot_pass, where=where)
+        sql = _files_select(listing_sql, bucket, extra_file_cols, pivot_pass, where=where)
+        return labels.join(sql) if labels is not None else sql
 
     con.execute("DROP TABLE IF EXISTS inputs")
     con.execute("DROP VIEW IF EXISTS files_src")
@@ -653,6 +755,7 @@ def aggregate_listing_to_parquet(
         n_partitions = _build_partitioned(
             con, files_sql_for, partition_depth,
             sum_cols=tuple(sum_cols), mean_mtime=mean_mtime, extra_dir_cols=extra_dir_cols,
+            labels=labels,
         )
     else:
         n_partitions = 0
@@ -675,7 +778,7 @@ def aggregate_listing_to_parquet(
             )
             SELECT DISTINCT p AS path FROM anc
         """)
-        con.execute(_dir_rows_insert('inputs', 'dir_paths', extra_dir_cols))
+        con.execute(_dir_rows_insert('inputs', 'dir_paths', extra_dir_cols, labels))
         con.execute("DROP TABLE dir_paths")
         _stage("dir rows synthesized")
 
@@ -683,7 +786,7 @@ def aggregate_listing_to_parquet(
         # file row (path/parent/uri object strings) — ~60GB RSS at 92.7M rows.
         # Here the normalization + concat + sort stay inside DuckDB (spillable) and
         # the output goes straight to parquet via COPY.
-        _build_dirs_cascade(con, sum_cols=tuple(sum_cols), mean_mtime=mean_mtime)
+        _build_dirs_cascade(con, sum_cols=tuple(sum_cols), mean_mtime=mean_mtime, group_cols=group_cols)
         con.execute("CREATE VIEW files_src AS SELECT * FROM inputs WHERE kind = 'file'")
     _stage("cascade done")
     parent_of_agg = _PARENT_EXPR.format(col='path')
@@ -710,24 +813,26 @@ def aggregate_listing_to_parquet(
     # union + sort + write. One operator at a time: v3/v4 post-mortems showed
     # the combined pipeline allocating far past `memory_limit` (63-95GB RSS
     # under 32-50GB caps) with no way to tell which operator was responsible.
+    d_keys = ''.join(f', d.{c}' for c in group_cols)
+    nc_on = ''.join(f' AND d.{c} IS NOT DISTINCT FROM nc.{c}' for c in group_cols)
     con.execute(f"""
         CREATE OR REPLACE TABLE dirs_final AS
         WITH dirs_agg AS (
             SELECT
-                d.path AS path,
+                d.path AS path{d_keys},
                 SUM(d.size)::BIGINT AS size,
                 MAX(d.mtime)::BIGINT AS mtime,
                 SUM(d.n_desc)::BIGINT AS n_desc,
                 SUM(d.n_files)::BIGINT AS n_files,
                 COALESCE(MAX(nc.n_children), 0)::BIGINT AS n_children{extra_out}
             FROM dirs_all d
-            LEFT JOIN n_children_tbl nc ON d.path = nc.path
-            GROUP BY d.path
+            LEFT JOIN n_children_tbl nc ON d.path = nc.path{nc_on}
+            GROUP BY d.path{d_keys}
         )
         -- pandas-tail parity: root row '' → path '.', parent ''; other
         -- dirs whose computed parent is '' (top-level) get parent '.'
         SELECT
-            CASE WHEN path = '' THEN '.' ELSE path END AS path,
+            CASE WHEN path = '' THEN '.' ELSE path END AS path{keys},
             size, mtime, n_desc, n_files, n_children,
             'dir' AS kind,
             CASE
@@ -757,9 +862,9 @@ def aggregate_listing_to_parquet(
     con.execute(f"""
         COPY (
         WITH unioned AS (
-            SELECT path, size, mtime, n_desc, n_files, n_children, kind, parent{extra_names}, uri FROM dirs_final
+            SELECT path{keys}, size, mtime, n_desc, n_files, n_children, kind, parent{extra_names}, uri FROM dirs_final
             UNION ALL
-            SELECT path, size, mtime,
+            SELECT path{keys}, size, mtime,
                    1::BIGINT AS n_desc, 1::BIGINT AS n_files, 0::BIGINT AS n_children,
                    kind, parent{file_extra},
                    ('{scan_root}/' || path)::VARCHAR AS uri
@@ -770,21 +875,26 @@ def aggregate_listing_to_parquet(
                     ELSE length(path) - length(replace(path, '/', '')) + 1
                END::BIGINT AS depth
         FROM unioned
-        ORDER BY depth, path
+        ORDER BY depth, path{''.join(f', {c} NULLS FIRST' for c in group_cols)}
         ) TO '{tmp_out}' (FORMAT PARQUET, ROW_GROUP_SIZE {BLOB_ROW_GROUP_SIZE})
     """)
     _stage("COPY done")
     rows = con.execute(f"SELECT COUNT(*) FROM read_parquet('{tmp_out}')").fetchone()[0]
     os.replace(tmp_out, out_parquet)
 
+    # Root stats: with labels the root is one row per slice — sum them.
     root = con.execute(f"""
-        SELECT * FROM read_parquet('{out_parquet}')
-        WHERE path = '.' LIMIT 1
+        SELECT SUM(size)::BIGINT AS size, MAX(mtime)::BIGINT AS mtime,
+               SUM(n_desc)::BIGINT AS n_desc, SUM(n_files)::BIGINT AS n_files,
+               SUM(n_children)::BIGINT AS n_children
+        FROM read_parquet('{out_parquet}')
+        WHERE path = '.'
     """).df()
-    root = root.iloc[0] if len(root) else None
+    root = root.iloc[0] if len(root) and root.iloc[0]['size'] is not None and not pd.isna(root.iloc[0]['size']) else None
     con.execute("DROP VIEW files_src")
     con.execute("DROP TABLE IF EXISTS inputs")
     con.execute("DROP TABLE dirs_final")
+    con.execute("DROP TABLE IF EXISTS labels")
     if temp_dir is None:
         import shutil
         shutil.rmtree(spill_dir, ignore_errors=True)

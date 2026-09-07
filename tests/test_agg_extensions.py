@@ -285,3 +285,159 @@ def test_extensions_survive_partitioned_cascade(tmp_path: Path, depth: int):
         partition_depth=depth, **kw,
     )
     pd.testing.assert_frame_equal(_normalize(pd.read_parquet(base)), _normalize(pd.read_parquet(part)))
+
+
+# ---------- Attribution slices as cascade group keys (spec mgu-scale-unification.md, item B) ----------
+
+_LABEL_COLS = ['team', 'usr']
+_LABEL_NUMERIC = ['size', 'mtime', 'n_desc', 'n_files', 'n_children', *EXT_COLS[:-1]]
+
+
+def _write_labels(path: Path) -> str:
+    """Deepest-prefix-wins fixture: `data/cold` overrides `data`; a trailing
+    slash and a file-level prefix are both legal; `empty/` has no label."""
+    pd.DataFrame({
+        'prefix': ['data', 'data/cold/', 'archive', 'top.txt'],
+        'team': ['t1', 't1', 't2', 't3'],
+        'usr': ['alice', 'bob', None, 'carol'],
+    }).to_parquet(path)
+    return str(path)
+
+
+def _run_labeled(tmp_path: Path, listing: str, labels: str | None, name: str, **kw) -> pd.DataFrame:
+    con = duckdb.connect()
+    out = str(tmp_path / f'{name}.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=out, con=con,
+        pivot_sums=('storage_class_id',), mean_mtime=True, label=labels, **kw,
+    )
+    return pd.read_parquet(out)
+
+
+def _slices(df: pd.DataFrame) -> list[tuple]:
+    cols = ['path', *_LABEL_COLS, *_LABEL_NUMERIC]
+    return [
+        tuple(None if pd.isna(v) else (int(v) if isinstance(v, (int, float)) else v) for v in row)
+        for row in df[cols].itertuples(index=False)
+    ]
+
+
+def test_label_slices_exact(tmp_path: Path):
+    """The whole labeled layer-2, hand-computed: one row per (path, team, usr),
+    in the output's own order `(depth, path, team, usr)` with NULLs first.
+    `n_desc` counts a dir itself in the dir's own slice; `n_children` counts a
+    child in the slice of the *child's* label."""
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    df = _run_labeled(tmp_path, listing, _write_labels(tmp_path / 'labels.parquet'), 'labeled')
+    ep = {d: int(_ts(d).timestamp()) for d in (1, 3, 5, 10, 15, 20, 25)}
+    assert list(df.columns) == [
+        'path', 'team', 'usr', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
+        *EXT_COLS, 'uri', 'depth',
+    ]
+    #                                              size  mtime   n_desc n_files n_children  c1    c2    c4
+    assert _slices(df) == [
+        ('.',                 None, None,              0, ep[15],  3, 1, 1,      0,    0,     0),
+        ('.',                 't1', 'alice',        3000, ep[20],  3, 2, 1,   1000, 2000,     0),
+        ('.',                 't1', 'bob',          4000, ep[5],   2, 1, 0,      0,    0,  4000),
+        ('.',                 't2', None,          16000, ep[3],   3, 2, 1,      0,    0, 16000),
+        ('.',                 't3', 'carol',         500, ep[25],  1, 1, 1,    500,    0,     0),
+        ('archive',           't2', None,          16000, ep[3],   3, 2, 2,      0,    0, 16000),
+        ('data',              't1', 'alice',        3000, ep[20],  3, 2, 2,   1000, 2000,     0),
+        ('data',              't1', 'bob',          4000, ep[5],   2, 1, 1,      0,    0,  4000),
+        ('empty',             None, None,              0, ep[15],  2, 1, 1,      0,    0,     0),
+        ('top.txt',           't3', 'carol',         500, ep[25],  1, 1, 0,    500,    0,     0),
+        ('archive/a.bin',     't2', None,           8000, ep[1],   1, 1, 0,      0,    0,  8000),
+        ('archive/b.bin',     't2', None,           8000, ep[3],   1, 1, 0,      0,    0,  8000),
+        ('data/cold',         't1', 'bob',          4000, ep[5],   2, 1, 1,      0,    0,  4000),
+        ('data/hot.bin',      't1', 'alice',        1000, ep[10],  1, 1, 0,   1000,    0,     0),
+        ('data/warm.bin',     't1', 'alice',        2000, ep[20],  1, 1, 0,      0, 2000,     0),
+        ('empty/marker',      None, None,              0, ep[15],  1, 1, 0,      0,    0,     0),
+        ('data/cold/old.bin', 't1', 'bob',          4000, ep[5],   1, 1, 0,      0,    0,  4000),
+    ]
+    # mtime_mean per slice: Σ mtime·size / Σ size over the slice's own files.
+    root = df[df.path == '.'].set_index(['team', 'usr'])['mtime_mean']
+    assert float(root.loc[('t1', 'alice')]) == float(ep[10] * 1000 + ep[20] * 2000) / float(3000)
+    assert float(root.loc[('t2', None)]) == float(ep[1] * 8000 + ep[3] * 8000) / float(16000)
+    assert np.isnan(root.loc[(None, None)])
+
+
+def test_label_slices_sum_to_unlabeled_rows(tmp_path: Path):
+    """Acceptance B: Σ over a path's slices == the unlabeled path row, every
+    additive column; `mtime` is the MAX."""
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    base = _run_labeled(tmp_path, listing, None, 'base')
+    lab = _run_labeled(tmp_path, listing, _write_labels(tmp_path / 'labels.parquet'), 'labeled')
+    additive = [c for c in _LABEL_NUMERIC if c != 'mtime']
+    folded = lab.groupby('path').agg({**{c: 'sum' for c in additive}, 'mtime': 'max'})
+    expect = base.set_index('path')[[*additive, 'mtime']]
+    pd.testing.assert_frame_equal(
+        folded.sort_index().astype('int64'), expect.sort_index().astype('int64'),
+    )
+    assert len(lab) == 17
+    assert len(base) == 12
+
+
+@pytest.mark.parametrize('kw', [
+    dict(partition_depth=1),
+    dict(partition_depth=2),
+    dict(partition_depth=2, db='.'),
+], ids=['k1', 'k2', 'k2+db'])
+def test_label_slices_survive_partitioning(tmp_path: Path, kw: dict):
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    labels = _write_labels(tmp_path / 'labels.parquet')
+    if kw.get('db') == '.':
+        kw = {**kw, 'db': str(tmp_path)}
+    one = _run_labeled(tmp_path, listing, labels, 'one')
+    part = _run_labeled(tmp_path, listing, labels, 'part', **kw)
+    pd.testing.assert_frame_equal(one, part)
+
+
+def test_label_cols_subset_and_root_default(tmp_path: Path):
+    """`label_cols` picks a subset; a `''` prefix is the catch-all default,
+    still overridden by deeper prefixes."""
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    labels = tmp_path / 'labels.parquet'
+    pd.DataFrame({
+        'prefix': ['', 'archive'],
+        'team': ['pool', 't2'],
+        'usr': ['nobody', 'x'],
+    }).to_parquet(labels)
+    df = _run_labeled(tmp_path, listing, str(labels), 'sub', label_cols=('team',))
+    assert 'usr' not in df.columns
+    assert [tuple(r) for r in df[df.depth <= 1][['path', 'team', 'size']].itertuples(index=False)] == [
+        ('.', 'pool', 7500),
+        ('.', 't2', 16000),
+        ('archive', 't2', 16000),
+        ('data', 'pool', 7000),
+        ('empty', 'pool', 0),
+        ('top.txt', 'pool', 500),
+    ]
+
+
+def test_label_table_validation(tmp_path: Path):
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+
+    def attempt(frame: pd.DataFrame, name: str, **kw):
+        path = tmp_path / f'{name}.parquet'
+        frame.to_parquet(path)
+        return lambda: _run_labeled(tmp_path, listing, str(path), name, **kw)
+
+    with pytest.raises(ValueError, match=r"no `prefix` column \(has \['team'\]\)"):
+        attempt(pd.DataFrame({'team': ['t']}), 'noprefix')()
+    with pytest.raises(ValueError, match=r"missing label column\(s\) \['usr'\]"):
+        attempt(pd.DataFrame({'prefix': ['a'], 'team': ['t']}), 'missing', label_cols=('usr',))()
+    with pytest.raises(ValueError, match=r"duplicate prefix\(es\) \['a'\]"):
+        attempt(pd.DataFrame({'prefix': ['a', 'a/'], 'team': ['t', 'u']}), 'dupe')()
+    with pytest.raises(ValueError, match=r"label column\(s\) \['size'\] collide"):
+        attempt(pd.DataFrame({'prefix': ['a'], 'size': [1]}), 'clash')()
+    with pytest.raises(ValueError, match=r"no label columns besides `prefix`"):
+        attempt(pd.DataFrame({'prefix': ['a']}), 'bare')()
+
+
+def test_label_requires_duckdb_engine(tmp_path: Path):
+    from disk_tree.cli.import_listing import import_bucket
+    with pytest.raises(ValueError, match="--label is a duckdb-engine feature; got engine='pandas'"):
+        import_bucket(
+            db=None, storage=None, con=None, engine='pandas', listings=('x',), bucket='b1',
+            scheme='gcs', snap_time=_ts(1), label='labels.parquet',
+        )

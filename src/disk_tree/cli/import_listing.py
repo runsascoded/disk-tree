@@ -30,6 +30,8 @@ from disk_tree.cli.base import cli
 @option('-b', '--bucket', 'buckets', multiple=True, help='Bucket to import as one scan; repeatable. Default: every distinct bucket in the listings')
 @option('-d', '--db', 'db_path', default=None, help='DuckDB engine only: run the cascade in a file-backed database (a `.duckdb` path, kept; or a directory, e.g. the spill disk, to create a temporary one in) so the level tables page to disk under `--memory-limit` instead of pinning RAM. Default: in-memory.')
 @option('-j', '--jobs', default=1, help='Stream engine only: partition the keyspace into N ranges streamed by parallel worker processes (0 = all cores). Output is byte-identical for any value.')
+@option('-L', '--label', default=None, help='DuckDB engine only: attribution label parquet (`prefix` + label columns). Every row is labeled by its deepest matching prefix and the labels become extra group keys — one output row per (path, labels); rows under no prefix get NULLs. Default: none (one row per path).')
+@option('-c', '--label-cols', default=None, help='Comma-separated label columns to carry from `--label` (default: every column but `prefix`)')
 @option('-k', '--partition-depth', default=0, help='DuckDB engine only: cascade each distinct depth-K path prefix separately (peak memory ∝ the largest partition, not the listing); 0 = one cascade. Output is byte-identical for any value.')
 @option('-M', '--memory-limit', default='8GB', help='DuckDB memory cap (duckdb engine only). Excess spills to `--temp-dir`.')
 @option('-o', '--out-dir', default=None, help="Aggregate into `<DIR>/<scheme>-<bucket>.parquet` instead of a fresh temp file. Stream engine: makes the `<out>.parts` resume token reachable across invocations, so a run that died in the finalize resumes at the merge instead of re-streaming.")
@@ -46,6 +48,8 @@ def import_cmd(
     buckets: tuple[str, ...],
     db_path: str | None,
     jobs: int,
+    label: str | None,
+    label_cols: str | None,
     partition_depth: int,
     memory_limit: str,
     mean_mtime: bool,
@@ -88,6 +92,7 @@ def import_cmd(
             max_temp_size=max_temp_size, jobs=jobs, out_dir=out_dir,
             pivot_sums=pivot_sums, mean_mtime=mean_mtime,
             duckdb_path=db_path, partition_depth=partition_depth,
+            label=label, label_cols=tuple(c for c in (label_cols or '').split(',') if c),
         )
 
 
@@ -109,6 +114,8 @@ def import_bucket(
     mean_mtime: bool = False,
     duckdb_path: str | None = None,
     partition_depth: int = 0,
+    label: str | None = None,
+    label_cols: tuple[str, ...] = (),
     replace=None,
 ):
     """Aggregate one bucket's listing → blob + Scan row.
@@ -120,11 +127,14 @@ def import_bucket(
     token is findable on a rerun (a per-invocation temp name never is).
     `duckdb_path` / `partition_depth`: the duckdb engine's fleet-scale knobs
     (file-backed cascade database; per-prefix partitioned cascade).
+    `label` / `label_cols`: attribution slices as extra group keys (duckdb only).
     Returns the Scan.
     """
     from disk_tree.sqla.model import Scan
 
     from disk_tree.backends.url import canonical
+    if label and engine != 'duckdb':
+        raise ValueError(f"--label is a duckdb-engine feature; got engine={engine!r}")
     # A `file` root collapses to the bare path, so a reduced capture's
     # `Scan.path` is byte-identical to what `index` records for the same dir.
     scan_path = canonical(f'{scheme}://{bucket}')
@@ -161,6 +171,7 @@ def import_bucket(
                     max_temp_size=max_temp_size,
                     pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                     db=duckdb_path, partition_depth=partition_depth,
+                    label=label, label_cols=label_cols,
                 )
             else:  # stream
                 from disk_tree.find.aggregate_stream import aggregate_stream

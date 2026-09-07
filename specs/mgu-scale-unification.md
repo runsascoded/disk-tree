@@ -34,6 +34,15 @@ mgu's rollup is per `(path, team, usr)`, not per path: every path row is split i
 
 This is the whole of mgu's `dir_attr` + `ptu` — once DT does it, `viz.py`'s aggregation is a CLI invocation plus the JSON overlays.
 
+**Status (DT, 2026-09-06): landed** — duckdb engine only (`aggregate_listing_to_parquet(label=, label_cols=)`, `disk-tree import -e duckdb -L/--label PARQUET [-c/--label-cols team,usr]`; pandas/stream engines raise). Tests: `tests/test_agg_extensions.py` (`test_label_*`): the full labeled layer-2 of a 7-file fixture hand-written row by row, Σ-over-slices == unlabeled row for every column, identity under `--partition-depth` / `--db`, root-default `''` prefix, validation.
+
+- Label table: `prefix` + label columns (default: all others); prefixes are canonicalized like paths (`//` → `/`, trailing `/` stripped); duplicates, missing columns, and names colliding with layer-2 columns raise.
+- Join (`_Labels.join`): one LEFT JOIN per distinct prefix *depth* in the table, matching the row's depth-d prefix (`_part_expr`, the same expression A.2 partitions on) by equality; `COALESCE` deepest-first = deepest-prefix-wins. A `''` prefix (depth 0) is the catch-all. With ~10⁴ prefixes at a handful of depths this is a few streaming hash probes over the listing, no unnest, no per-row prefix scan. Applied to files *and* synthesized dir rows (a dir's own `n_desc=1` lands in the dir's own slice).
+- Cascade: `_build_dirs_cascade(group_cols=)` groups every level by `(parent, *labels)`; `n_children` is per `(path, labels-of-child)` so it is additive too. NULL is an ordinary label value.
+- Output: label columns right after `path`; sorted `(depth, path, *labels NULLS FIRST)`; `kind` on every row; root `.` is one row per slice — `Scan` root stats are the Σ over slices. Without `--label` the output is byte-identical to before.
+- Semantics to confirm against mgu's `ptu` (the a2a in Acceptance B): `n_children` per child-label slice (vs. per path, repeated on every slice); dir self-count in the dir's own slice; NULL labels for unlabeled (mgu maps to `unattributed`). Both choices are what keeps Σ-over-slices exact.
+- Not done: DT's own server/UI don't understand sliced blobs (duplicate `path` per scan) — a labeled blob is for mgu's consumers; `import`'s pandas/stream engines don't take labels.
+
 ### C. Layer-2 written as index tiers
 
 Consumers read layer-2 over HTTP range requests (mgu's Pages Functions; DT's own server could too), so the output wants to be **sorted parquet with small row groups**, in tiers:
