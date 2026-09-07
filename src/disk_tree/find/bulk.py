@@ -35,6 +35,7 @@ import sys
 import threading
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import partial
 from multiprocessing import get_context
 from queue import Queue
@@ -305,6 +306,12 @@ def entries_to_frame(
 _ROW_GROUP_ROWS = 1 << 16
 
 
+def utc_now() -> str:
+    """ISO-8601 UTC instant for the listing marker — a scan's as-of bounds
+    (`started` ≤ every object's observation ≤ `finished`)."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 def _write_shard(out_dir: str, name: str, frame: pd.DataFrame) -> None:
     import fsspec
 
@@ -451,6 +458,7 @@ def list_bucket_to_parquet(
     reused = resolve_existing(out_fs, out_root, exists)
     if reused is not None:
         return int(reused["objects"])
+    started = utc_now()
 
     root = f"{bucket}/{prefix.strip('/')}" if prefix else bucket
     _discover = discover or generic_discover
@@ -491,7 +499,10 @@ def list_bucket_to_parquet(
             total += f.result()
     out_fs.pipe(
         f"{out_root}/{SUCCESS_MARKER}",
-        json.dumps({"bucket": bucket, "prefix": prefix, "objects": total}).encode(),
+        json.dumps({
+            "bucket": bucket, "prefix": prefix, "objects": total,
+            "started": started, "finished": utc_now(),
+        }).encode(),
     )
     err(f"{root}: {total:,} objects listed → {out_dir}")
     return total

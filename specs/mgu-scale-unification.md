@@ -57,6 +57,14 @@ Options: `--tiers dirs,objects,coarse`, `--coarse-exp E`, `--row-group-rows 8192
 
 Also: `bulk-list` should record `started` / `finished` timestamps in `_SUCCESS.json` (today: `bucket`, `prefix`, `objects` only) — the scan's as-of instant for D below.
 
+**Status (DT, 2026-09-06): landed** — `find/tiers.py` (`write_tiers`, `coarse_floor`), `disk-tree import -i/--tiers dirs,objects,coarse -O/--tiers-dir DIR [-E/--coarse-exp 24] [-r/--row-group-rows 8192] [-S/--sort-variant usr]…`; tests `tests/test_tiers.py`.
+
+- Tiers are cut from the *finished* layer-2 blob (one filtered, sorted, spillable COPY each), so they are engine-agnostic (duckdb + stream; pandas has no blob on disk and refuses) and land beside `--out-dir`'s blob as `<scheme>-<bucket>.<tier>[-by-<cols>].parquet`. Sorts: `dirs`/`coarse` `(depth, path, *labels)`, `objects` `(path, *labels)`, NULLS FIRST; a sort variant `-S usr` leads with `usr` (`(usr, depth, path, *labels)`, file `…dirs-by-usr.parquet`) and is written for the dirs and coarse tiers. Every row keeps `kind`; every file carries `tier` and `sort` in its parquet KV metadata, `coarse` also `floor_bytes` / `coarse_exp` / `total_size` (so the planner reads the floor from the footer, as mgu's `index_schema.floor_bytes` does from D1).
+- Row groups: `--row-group-rows` must be a positive multiple of 2048 — DuckDB's parquet writer cuts groups in vector steps, so "≤ N" is exact for multiples (5000 rows at 2048 → `[2048, 2048, 904]`) and silently overshoots otherwise (3000 → one 5000-row group); the 8192 default is fine.
+- Floor: `2^(round(log2 total) − E)` with Python's `round` (banker's at an exact .5 — a measure-zero case), clamped at 1; `total` = Σ root slices. With label slices the floor applies **per row** (a path can keep one slice and drop another — each slice is its own cell in a lens); the kept rows are exact.
+- `_SUCCESS.json` (both `bulk-list` modes) now carries `started` / `finished`: ISO-8601 UTC, `started` taken after the exists-policy check (a reused listing keeps its own window), `finished` just before the marker is written. Readers that took the marker as an exact dict were updated; `capture`'s marker already had `time`.
+- Not done: writing tiers straight to a URL (`--tiers-dir` is local; sync the dir), and `reduce` doesn't expose tiers.
+
 ### D. Access plane: hour grain, as-of, per-scan state
 
 `access/aggregate.py` rolls layer-1a up per `(bucket, path, UTC day, op)`. mgu needs to cut reads at the listing's as-of instant, and a day-grained row can't be split, so today's "as-of" is coarse by up to a day.

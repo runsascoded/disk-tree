@@ -314,7 +314,22 @@ def test_end_to_end_bulk_list_shards_and_writes_success(tmp_path: Path):
     assert combined['bucket'].tolist() == ['b1', 'b1', 'b1']
     # And the marker payload records the same total.
     marker = json.loads((Path(out_dir) / bulk.SUCCESS_MARKER).read_text())
-    assert marker == {'bucket': 'b1', 'prefix': None, 'objects': 3}
+    started, finished = _as_of_bounds(marker)
+    assert marker == {
+        'bucket': 'b1', 'prefix': None, 'objects': 3,
+        'started': started.isoformat(), 'finished': finished.isoformat(),
+    }
+
+
+def _as_of_bounds(marker: dict) -> tuple:
+    """The listing's as-of window: two UTC instants, `started` ≤ `finished`,
+    both within the test's own lifetime."""
+    from datetime import datetime, timezone
+    started = datetime.fromisoformat(marker['started'])
+    finished = datetime.fromisoformat(marker['finished'])
+    assert started.tzinfo == timezone.utc and finished.tzinfo == timezone.utc
+    assert started <= finished <= datetime.now(timezone.utc)
+    return started, finished
 
 
 def test_end_to_end_bulk_list_reuse_short_circuits(tmp_path: Path):

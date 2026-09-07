@@ -52,6 +52,7 @@ from disk_tree.find.bulk import (
     BATCH_ROWS,
     ROWS_PER_SHARD,
     SUCCESS_MARKER,
+    utc_now,
     BlobRow,
     entries_to_frame,
     _write_shard,
@@ -418,6 +419,7 @@ def list_bucket_adaptive(
     reused = resolve_existing(out_fs, out_root, exists)
     if reused is not None:
         return int(reused["objects"])
+    started = utc_now()
 
     pfx = prefix.strip('/') + '/' if prefix and prefix.strip('/') else None
     if warm_ranges:
@@ -485,6 +487,8 @@ def list_bucket_adaptive(
             "objects": total,
             "mode": "adaptive",
             "ranges": [[s, e, n] for s, e, n in ranges],
+            "started": started,
+            "finished": utc_now(),
         }).encode(),
     )
     err(f"{bucket}: {total:,} objects listed adaptively ({len(ranges)} final ranges) → {out_dir}")

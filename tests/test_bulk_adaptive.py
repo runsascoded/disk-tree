@@ -137,6 +137,12 @@ def test_adaptive_lists_exactly(keys, tmp_path: Path):
     assert success['mode'] == 'adaptive'
     # Ranges partition the keyspace: counts add up.
     assert sum(n for _, _, n in success['ranges']) == len(keys)
+    # The as-of window (spec mgu-scale-unification.md C): UTC, ordered, in the past.
+    from datetime import datetime, timezone
+    assert sorted(success) == ['bucket', 'finished', 'mode', 'objects', 'prefix', 'ranges', 'started']
+    started, finished = (datetime.fromisoformat(success[k]) for k in ('started', 'finished'))
+    assert started.tzinfo == timezone.utc and finished.tzinfo == timezone.utc
+    assert started <= finished <= datetime.now(timezone.utc)
 
 
 def test_splitting_actually_happens(tmp_path: Path):
