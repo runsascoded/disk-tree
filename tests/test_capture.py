@@ -143,15 +143,30 @@ def test_reduce_reproduces_index(tree: Path, tmp_path: Path, engine: str):
     m = json.loads((Path(cap) / MARKER).read_text())
     assert datetime.fromisoformat(red['time']) == datetime.fromisoformat(m['time']).replace(tzinfo=None, microsecond=0)
     # The empty dir is invisible to a listing: it is gone, and its parent (the
-    # root) has one child / one descendant fewer. Everything else is identical.
-    assert (red['size'], red['n_children'], red['n_desc']) == (idx['size'], idx['n_children'] - 1, idx['n_desc'] - 1)
+    # root) has one child / one descendant fewer. A listing has no directory
+    # rows either, so a directory's *own* blocks (0 on APFS, 4 KiB on ext4)
+    # are absent from it and every ancestor. Everything else is identical.
+    own = _dir_own_bytes(tree)
+    assert (red['size'], red['n_children'], red['n_desc']) == (idx['size'] - sum(own.values()), idx['n_children'] - 1, idx['n_desc'] - 1)
 
     a, b = _layer2(idx_root, idx['blob']), _layer2(red_root, red['blob'])
     cols = ['path', 'kind', 'parent', 'uri', 'size', 'n_desc', 'n_children', 'depth']
     expected = a[a['path'] != 'empty'][cols].reset_index(drop=True)
     root = expected['path'] == '.'
     expected.loc[root, ['n_children', 'n_desc']] -= 1
+    for i, row in expected[expected['kind'] == 'dir'].iterrows():
+        p = row['path']
+        expected.loc[i, 'size'] -= sum(v for d, v in own.items() if p == '.' or d == p or d.startswith(p + '/'))
     assert_frame_equal(b[cols], expected)
+
+
+def _dir_own_bytes(tree: Path) -> dict[str, int]:
+    """Blocks allocated to each directory *itself* under `tree`, keyed by
+    layer-2 path (`.` for the root)."""
+    return {
+        ('.' if d == tree else str(d.relative_to(tree))): _blocks(d)
+        for d in [tree, *tree.rglob('*')] if d.is_dir()
+    }
 
 
 def test_reduce_from_a_url_capture_writes_a_remote_blob(tree: Path, tmp_path: Path):
