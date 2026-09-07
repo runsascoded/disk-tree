@@ -1,5 +1,5 @@
 /**
- * The vendored half of `@open-athena/auth` (spec `specs/pages-auth.md`): the
+ * The vendored half of `@open-athena/auth` (spec `specs/done/pages-auth.md`): the
  * package ships logic-only primitives; the copy, layout and class names live
  * here. Everything is a pass-through when the server reports no `auth`
  * capability (the Flask server), so local dev never sees a wall.

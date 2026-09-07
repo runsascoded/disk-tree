@@ -1,5 +1,5 @@
 /**
- * The gate over the static deployment (spec `specs/pages-auth.md`): a laptop
+ * The gate over the static deployment (spec `specs/done/pages-auth.md`): a laptop
  * listing is private, so every `/api/*` route needs a `view` session — an SSO
  * identity on the allowlist, or a share link (`?key=`) minted by an admin.
  *

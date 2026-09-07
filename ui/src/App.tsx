@@ -39,7 +39,7 @@ function App() {
           <Header />
           <div className="app">
             {/* On the static deployment every `/api/*` needs a session
-                (specs/pages-auth.md); elsewhere `Gate` is a pass-through. */}
+                (specs/done/pages-auth.md); elsewhere `Gate` is a pass-through. */}
             <Gate>
             <Routes>
               <Route path="/" element={<ScanList />} />

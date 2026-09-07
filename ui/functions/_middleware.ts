@@ -1,4 +1,4 @@
-/** Every `/api/*` request passes the gate (spec `specs/pages-auth.md`); the
+/** Every `/api/*` request passes the gate (spec `specs/done/pages-auth.md`); the
  *  SPA shell and assets stay public so the wall has somewhere to render. */
 import { gateApi, gateFor } from '../cfn/auth'
 import type { Env } from '../cfn/env'

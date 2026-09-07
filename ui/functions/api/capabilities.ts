@@ -17,7 +17,7 @@ export const CAPABILITIES = {
   library: false,
   backend: false,
   s3: false,
-  // `/api/*` is gated (spec `specs/pages-auth.md`): the UI probes
+  // `/api/*` is gated (spec `specs/done/pages-auth.md`): the UI probes
   // `/api/auth/whoami` and shows the wall when nobody is signed in.
   auth: true,
 }

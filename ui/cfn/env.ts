@@ -4,7 +4,7 @@ export interface Env {
   SCANS: R2Bucket
   /** Key prefix within the bucket (with trailing slash). */
   SCANS_PREFIX?: string
-  /** Grants + access log for the gate (spec `specs/pages-auth.md`). */
+  /** Grants + access log for the gate (spec `specs/done/pages-auth.md`). */
   DB?: D1Database
   /** HMAC key for session cookies (Pages secret). Localhost gets a fixed dev value. */
   SESSION_SECRET?: string

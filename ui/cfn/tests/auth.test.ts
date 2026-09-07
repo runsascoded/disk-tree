@@ -1,4 +1,4 @@
-/** The gate over `/api/*` (spec `specs/pages-auth.md`), end to end through
+/** The gate over `/api/*` (spec `specs/done/pages-auth.md`), end to end through
  *  `gateApi` over the package's in-memory stores — the same code the
  *  middleware runs against D1. */
 import { beforeEach, describe, expect, it } from 'vitest'
