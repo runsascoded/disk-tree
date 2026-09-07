@@ -49,19 +49,19 @@ gcs = [
 s3 = [
     "boto3",
     "fsspec",
-    "s3fs",
+    "s3fs>=2024.10",
 ]
 r2 = [
     "boto3",
     "fsspec",
-    "s3fs",
+    "s3fs>=2024.10",
 ]
 bulk = [
     "boto3",
     "fsspec",
     "gcsfs",
     "google-cloud-storage",
-    "s3fs",
+    "s3fs>=2024.10",
 ]
 
 [project.scripts]

@@ -7,10 +7,10 @@
 # Local: `pnpm build && pnpm cfn:dev` serves dist + functions on :7789 with an
 # emulated R2 — seed it with `wrangler r2 object put --local` (see the spec).
 name = "disk-tree"
-# Pinned: `wrangler login` state is machine-global and other projects log in
-# as other accounts; without this a deploy can land in whichever account was
-# logged in last.
-account_id = "0dcad5654e9744de6616f74b8df4af63"
+# Account: Pages configs can't carry `account_id`, and `wrangler login` state
+# is machine-global (other projects log in as other accounts), so the account
+# is pinned by `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` in the repo's
+# `.envrc` — deploy via `direnv exec .. pnpm exec wrangler pages deploy`.
 compatibility_date = "2026-09-01"
 pages_build_output_dir = "dist"
 
