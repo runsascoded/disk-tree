@@ -357,25 +357,83 @@ _IDENTITY_STATS = {
 }
 
 
-@pytest.mark.parametrize('depth, partitions', [
-    # k=1: every top-level name is its own partition, root-level files included
-    (1, 13),
-    # k=2: 3 root-level files fall to the top cascade; `many/` fans out to 20
-    (2, 34),
-    # k=3: only the subtrees that reach depth 3
-    (3, 8),
+@pytest.mark.parametrize('depth, keys', [
+    # k=1: every top-level *dir* is a key (10); the 3 root-level files are top-cascade rows
+    (1, 10),
+    # k=2: the depth-2 dirs that hold files — `many/f*.dat` are files at depth 2, not keys
+    (2, 7),
+    # k=3: only `deep/very/nested` reaches depth 3 with a file beneath it
+    (3, 1),
     # deeper than the tree: everything is "shallow" → the top cascade alone
     (6, 0),
 ])
-def test_partitioned_cascade_is_byte_identical(tmp_path: Path, depth: int, partitions: int):
+def test_partitioned_cascade_is_byte_identical(tmp_path: Path, depth: int, keys: int):
     listing = _identity_listing(tmp_path)
     base, base_stats = _run_ooc(listing, tmp_path / 'base.parquet')
-    got, stats = _run_ooc(listing, tmp_path / f'k{depth}.parquet', partition_depth=depth)
+    # `partition_files=0`: one cascade per key, so every stub-merge path is exercised.
+    got, stats = _run_ooc(listing, tmp_path / f'k{depth}.parquet', partition_depth=depth, partition_files=0)
     pd.testing.assert_frame_equal(base, got)
     stats.pop('max_rss_mb')
     base_stats.pop('max_rss_mb')
-    assert base_stats == {**_IDENTITY_STATS, 'partitions': 0}
-    assert stats == {**_IDENTITY_STATS, 'partitions': partitions}
+    assert base_stats == {**_IDENTITY_STATS, 'partitions': 0, 'partition_keys': 0}
+    assert stats == {**_IDENTITY_STATS, 'partitions': keys, 'partition_keys': keys}
+
+
+def test_partitions_batch_into_bounded_cascades(tmp_path: Path):
+    """`partition_files` packs consecutive keys into cascades of ≤ N files: at
+    k=1 the keys (in order) hold .git 1, café 1, data 4, deep 1, logs 2, many
+    20, placeholder 1, single 1, tokenized 3, 日本語 1 files → at N=5 the
+    greedy packing is [.git café] [data deep] [logs] [many] [placeholder single
+    tokenized] [日本語]: 6 cascades for 10 keys, and `many` (20 > N) stands
+    alone. Output stays byte-identical."""
+    listing = _identity_listing(tmp_path)
+    base, _ = _run_ooc(listing, tmp_path / 'base.parquet')
+    got, stats = _run_ooc(listing, tmp_path / 'k1n5.parquet', partition_depth=1, partition_files=5)
+    pd.testing.assert_frame_equal(base, got)
+    assert (stats['partitions'], stats['partition_keys']) == (6, 10)
+    # The default budget swallows the whole fixture: one cascade, same rows.
+    got, stats = _run_ooc(listing, tmp_path / 'k1.parquet', partition_depth=1)
+    pd.testing.assert_frame_equal(base, got)
+    assert (stats['partitions'], stats['partition_keys']) == (1, 10)
+
+
+def test_batch_partitions_packing():
+    from disk_tree.find.aggregate_duckdb import _batch_partitions
+    parts = [('a', 1), ('b', 1), ('c', 4), ('d', 1), ('e', 2), ('f', 20), ('g', 1)]
+    assert _batch_partitions(parts, 5) == [['a', 'b'], ['c', 'd'], ['e'], ['f'], ['g']]
+    assert _batch_partitions(parts, 0) == [[k] for k, _ in parts]
+    assert _batch_partitions(parts, 100) == [[k for k, _ in parts]]
+    assert _batch_partitions([], 5) == []
+
+
+@pytest.mark.parametrize('kw', [dict(), dict(partition_depth=1, partition_files=0), dict(partition_depth=2)])
+def test_folder_placeholders_are_objects_at_their_dir(tmp_path: Path, kw: dict):
+    """A listing name ending in `/` (a folder placeholder) is an object at the
+    directory it names: the dir row carries it (`n_files`, its size/mtime), it
+    is never a file child, and it never duplicates a synthesized dir row
+    (spec mgu-scale-a3-gate.md ask 2). Same rows under every partitioning."""
+    listing = tmp_path / 'ph.parquet'
+    names = ['profile/', 'profile/1/', 'profile/1/x.bin', 'profile/2/']
+    pd.DataFrame({
+        'bucket': ['b1'] * 4,
+        'name': names,
+        'size_bytes': [0, 0, 5, 3],
+        'created': [TS] * 4,
+        'storage_class_id': [1] * 4,
+    }).to_parquet(listing)
+    df, stats = _run_ooc(str(listing), tmp_path / 'out.parquet', **kw)
+    # `n_desc` counts the row itself (this engine's convention: root 5 = itself
+    # + 3 dirs + 1 file); `n_files` counts objects — the 3 placeholders + x.bin.
+    cols = ['path', 'kind', 'size', 'n_desc', 'n_files', 'n_children', 'parent', 'depth']
+    assert df[cols].values.tolist() == [
+        ['.', 'dir', 8, 5, 4, 1, '', 0],
+        ['profile', 'dir', 8, 4, 4, 2, '.', 1],
+        ['profile/1', 'dir', 5, 2, 2, 1, 'profile', 2],
+        ['profile/2', 'dir', 3, 1, 1, 0, 'profile', 2],
+        ['profile/1/x.bin', 'file', 5, 1, 1, 0, 'profile/1', 3],
+    ]
+    assert df['mtime'].tolist() == [int(TS.timestamp())] * 5
+    assert (stats['files'], stats['root_n_files'], stats['root_n_desc'], stats['root_n_children']) == (4, 4, 5, 1)
 
 
 def test_partition_depth_negative_raises(tmp_path: Path):
@@ -390,9 +448,9 @@ def test_file_backed_db_in_directory_is_temporary(tmp_path: Path):
     base, _ = _run_ooc(listing, tmp_path / 'base.parquet')
     db_dir = tmp_path / 'spill-disk'
     db_dir.mkdir()
-    got, stats = _run_ooc(listing, tmp_path / 'db.parquet', db=str(db_dir), partition_depth=2)
+    got, stats = _run_ooc(listing, tmp_path / 'db.parquet', db=str(db_dir), partition_depth=2, partition_files=0)
     pd.testing.assert_frame_equal(base, got)
-    assert stats['partitions'] == 34
+    assert (stats['partitions'], stats['partition_keys']) == (7, 7)
     assert sorted(p.name for p in db_dir.iterdir()) == []
 
 
@@ -427,7 +485,7 @@ def test_cli_engine_duckdb_partitioned_file_backed_creates_scan(tmp_path: Path):
     r = subprocess.run(
         [sys.executable, '-m', 'disk_tree.cli.main', 'import',
          '-e', 'duckdb', '-l', str(listing), '-b', 'b1', '-t', TS.isoformat(),
-         '-k', '1', '-d', str(db_dir)],
+         '-k', '1', '-P', '1', '-d', str(db_dir)],
         env=env, capture_output=True, text=True, check=False,
     )
     assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"

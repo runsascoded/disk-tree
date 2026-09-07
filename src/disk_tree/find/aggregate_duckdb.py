@@ -48,14 +48,44 @@ _NSEG_EXPR = (
 )
 
 
-def _part_expr(col: str, k: int) -> str:
-    """Depth-`k` prefix of a canonical path (the partition key); NULL for paths
-    shallower than `k` segments (they belong to the shared top partition)."""
+def _part_expr(col: str, k: int, min_nseg: int | None = None) -> str:
+    """Depth-`k` prefix of a canonical path; NULL for paths with fewer than
+    `min_nseg` (default `k`) segments. The partitioned cascade passes
+    `min_nseg = k + 1` so a key is always a *directory* — a path at exactly
+    depth `k` is its own prefix, and keying on it made every depth-`k` file a
+    one-file partition (10,848 of them on marin-us-west4 at k = 2, spec
+    `mgu-scale-a3-gate.md` ask 1); those rows belong to the top cascade."""
     nseg = _NSEG_EXPR.format(col=col)
     return (
-        f"CASE WHEN {nseg} >= {k} "
+        f"CASE WHEN {nseg} >= {k if min_nseg is None else min_nseg} "
         f"THEN array_to_string(list_slice(string_split({col}, '/'), 1, {k}), '/') END"
     )
+
+
+#: Default batch target for the partitioned cascade: partitions are packed,
+#: in key order, into cascades of up to this many files (a bigger key stands
+#: alone). Measured 2026-09-07 (spec `mgu-scale-a3-gate.md`): 4.8M files with
+#: labels + pivots + mean mtime + size histogram peaked at 21 GB RSS.
+DEFAULT_PARTITION_FILES = 4_000_000
+
+
+def _batch_partitions(parts: list[tuple[str, int]], partition_files: int) -> list[list[str]]:
+    """Pack sorted `(key, n_files)` partitions into consecutive batches of at
+    most `partition_files` files each — one key per batch when `partition_files`
+    ≤ 0, and a key larger than the budget is a batch by itself. Consecutive
+    keys keep each batch's `name` range contiguous for the parquet pushdown."""
+    batches: list[list[str]] = []
+    cur: list[str] = []
+    cur_n = 0
+    for key, n in parts:
+        if cur and (partition_files <= 0 or cur_n + n > partition_files):
+            batches.append(cur)
+            cur, cur_n = [], 0
+        cur.append(key)
+        cur_n += n
+    if cur:
+        batches.append(cur)
+    return batches
 
 
 def _stage(msg: str) -> None:
@@ -104,7 +134,9 @@ def _register_inputs(con: "duckdb.DuckDBPyConnection", inputs: pd.DataFrame) -> 
             mtime::BIGINT AS mtime,
             kind::VARCHAR AS kind,
             COALESCE(parent, '')::VARCHAR AS parent,
-            uri::VARCHAR AS uri
+            uri::VARCHAR AS uri,
+            -- walk-emitted rows: every file is one object, dirs are none
+            CASE WHEN kind = 'file' THEN 1 ELSE 0 END::BIGINT AS obj
         FROM inputs_df
     """)
     con.unregister('inputs_df')
@@ -157,11 +189,13 @@ def _build_dirs_cascade(
 
     parent_of_path = _PARENT_EXPR.format(col='path')
 
-    # dirs0 = walk-emitted / synthesized dir rows; each contributes n_desc=1
-    # and n_files=0 (dirs don't count as files) at its own path.
+    # dirs0 = walk-emitted / synthesized dir rows; each contributes n_desc=1 at
+    # its own path, and n_files = `obj` — 0 for a synthesized dir, 1 for a
+    # folder-placeholder object (`…/` in an object store: an object, listed and
+    # billed, that names a directory — spec `mgu-scale-a3-gate.md` ask 2).
     con.execute(f"""
         CREATE OR REPLACE TABLE dirs0 AS
-        SELECT path{keys}, size, mtime, 1::BIGINT AS n_desc, 0::BIGINT AS n_files{extra_sel}
+        SELECT path{keys}, size, mtime, 1::BIGINT AS n_desc, obj::BIGINT AS n_files{extra_sel}
         FROM {src}
         WHERE kind = 'dir'
     """)
@@ -177,14 +211,15 @@ def _build_dirs_cascade(
         GROUP BY parent{keys}
     """)
 
-    # `cur` seed: all input rows with n_desc=1; n_files=1 for files, 0 for dirs.
+    # `cur` seed: all input rows with n_desc=1; n_files = `obj` (1 for every
+    # listed object — files and folder placeholders — 0 for synthesized dirs).
     # Loop group-by-parent to synthesize each subsequent level's dir rows
     # (bottom-up). Stop when nothing left to promote.
     con.execute(f"""
         CREATE OR REPLACE TABLE level_cur AS
         SELECT path{keys}, size, mtime,
                1::BIGINT AS n_desc,
-               CASE WHEN kind = 'file' THEN 1 ELSE 0 END::BIGINT AS n_files{extra_sel}
+               obj::BIGINT AS n_files{extra_sel}
         FROM {src}
     """)
     level_tables: list[str] = []
@@ -371,13 +406,22 @@ def _files_select(
     # trailing slash on the intermediate dir breaks the parent-of regex below
     # (regexp_extract fails to match a trailing-`/` string → returns '' → the
     # dir gets hoisted to the tree root, moving bytes across subtrees).
-    canonical_name = "rtrim(regexp_replace(name, '/+', '/', 'g'), '/')"
+    #
+    # A name that *ends* in `/` is a folder placeholder (TensorBoard's
+    # `plugins/profile/<ts>/`, console-made "folders"): an object — listed,
+    # billed per op, deleted by a sweep — that names a directory. It is the
+    # directory's own row (`kind = 'dir'`, at the stripped path, carrying the
+    # object's size/mtime) and counts as one object there (`obj = 1` →
+    # `n_files`), never as a file child. Spec `mgu-scale-a3-gate.md` ask 2.
+    squashed = "regexp_replace(name, '/+', '/', 'g')"
+    canonical_name = f"rtrim({squashed}, '/')"
     parent_of_name = _PARENT_EXPR.format(col='canonical')
     return f"""
         WITH canon AS (
             SELECT
                 name,
                 {canonical_name} AS canonical,
+                CASE WHEN ends_with({squashed}, '/') THEN 'dir' ELSE 'file' END::VARCHAR AS kind,
                 size_bytes,
                 created{pivot_pass}
             FROM {listing_sql}
@@ -390,8 +434,9 @@ def _files_select(
             -- convention, and the stream engine's pyarrow int-division floors —
             -- rounding here skewed ~50% of real (sub-second) timestamps +1s
             COALESCE(floor(epoch(created)), 0)::BIGINT AS mtime,
-            'file'::VARCHAR AS kind,
-            {parent_of_name} AS parent{extra_file_cols}
+            kind,
+            {parent_of_name} AS parent,
+            1::BIGINT AS obj{extra_file_cols}
         FROM canon
     """
 
@@ -402,16 +447,25 @@ def _dir_rows_insert(
     extra_dir_cols: str,
     labels: "_Labels | None" = None,
     side: "_Side | None" = None,
+    exclude: str | None = None,
 ) -> str:
-    """INSERT synthesized dir rows (size/mtime 0, extras 0) for every path in `dir_paths`."""
+    """INSERT synthesized dir rows (size/mtime 0, `obj` 0, extras 0) for every
+    path in `dir_paths` not already a dir row — a folder placeholder object is
+    that directory's row already; a second one would double its `n_desc` and
+    its parent's `n_children`. `exclude` is a parenthesized SELECT of the
+    paths to skip; default: `table`'s own dir rows. The partitioned build
+    passes the listing-wide placeholder set, since a placeholder and the
+    partition that synthesizes its ancestor row can sit in different cascades."""
     rows = f"""
         SELECT
             path,
             0::BIGINT AS size,
             0::BIGINT AS mtime,
             'dir'::VARCHAR AS kind,
-            {_PARENT_EXPR.format(col='path')} AS parent{extra_dir_cols}
+            {_PARENT_EXPR.format(col='path')} AS parent,
+            0::BIGINT AS obj{extra_dir_cols}
         FROM {dir_paths}
+        WHERE path NOT IN {exclude or f"(SELECT path FROM {table} WHERE kind = 'dir')"}
     """
     if labels is not None:
         rows = labels.join(rows)
@@ -544,7 +598,8 @@ def _build_partitioned(
     extra_dir_cols: str,
     labels: "_Labels | None" = None,
     side: "_Side | None" = None,
-) -> int:
+    partition_files: int = DEFAULT_PARTITION_FILES,
+) -> tuple[int, int]:
     """Prefix-partitioned cascade (spec mgu-scale-unification.md A.2) → `dirs_all` + `n_children_tbl`.
 
     A dir and all its descendants share their depth-`k` prefix, so each
@@ -553,16 +608,24 @@ def _build_partitioned(
     the row groups of other partitions when the shards are prefix-contiguous,
     as bulk-list's are). Each cascade climbs to the root, leaving stub rows
     for the ancestors above depth `k`; a final *top* cascade covers the rows
-    shallower than `k` (files at depth < k, and the shallow dirs' own
-    `n_desc=1` contributions). Every input row lands in exactly one cascade,
-    and `dirs_all` is one-row-per-(cascade, level, path), so the caller's
-    GROUP BY folds the stubs exactly. Peak memory ∝ the largest partition.
+    at depth ≤ `k` (files there, and the shallow dirs' own `n_desc=1`
+    contributions). Every input row lands in exactly one cascade, and
+    `dirs_all` is one-row-per-(cascade, level, path), so the caller's GROUP BY
+    folds the stubs exactly. Peak memory ∝ the largest cascade.
+
+    Keys are *directories* — the depth-`k` prefixes of rows deeper than `k`
+    (a file at exactly depth `k` is its own prefix and would be a one-file
+    partition; spec `mgu-scale-a3-gate.md` ask 1) — and are packed in key
+    order into cascades of up to `partition_files` files
+    (:func:`_batch_partitions`), so a fleet whose keys are one huge subtree
+    plus thousands of tiny ones runs as a few cascades, not thousands. Each
+    cascade costs ~50 ms of SQL on top of its data.
 
     `files_sql_for(where)` returns the canonical file-row SELECT restricted by
-    a predicate over the raw listing columns. Returns the partition count
-    (excluding top).
+    a predicate over the raw listing columns. Returns `(cascades, keys)`,
+    excluding top.
     """
-    part_of_path = _part_expr('path', k)
+    part_of_path = _part_expr('path', k, min_nseg=k + 1)
     nseg_p = _NSEG_EXPR.format(col='p')
     parent_of_p = _PARENT_EXPR.format(col='p')
     group_cols = labels.cols if labels is not None else ()
@@ -577,9 +640,12 @@ def _build_partitioned(
         ORDER BY 1 NULLS FIRST
     """).fetchall()
     n_top = next((n for p, n in parts if p is None), 0)
-    part_keys = [p for p, _ in parts if p is not None]
-    _stage(f"partition depth {k}: {len(part_keys)} partitions"
-           f" (largest {max((n for p, n in parts if p is not None), default=0)} files), {n_top} shallow files")
+    keyed = [(p, n) for p, n in parts if p is not None]
+    part_keys = [p for p, _ in keyed]
+    batches = _batch_partitions(keyed, partition_files)
+    _stage(f"partition depth {k}: {len(part_keys)} dir keys → {len(batches)} cascades"
+           f" (largest key {max((n for _, n in keyed), default=0)} files, batch ≤ {partition_files} files),"
+           f" {n_top} files at depth ≤ {k}")
 
     # Dirty keys (`a//b`) canonicalize to a different sort position than their
     # raw name, so the per-partition `name` range can miss them. They are rare;
@@ -590,6 +656,13 @@ def _build_partitioned(
     """)
     n_dirty = con.execute("SELECT COUNT(*) FROM dirty").fetchone()[0]
     _stage(f"{n_dirty} dirty keys held aside")
+    # Folder placeholders (`…/` objects) are their directory's own row, in
+    # whichever cascade their path falls; no cascade may synthesize that row.
+    con.execute(f"""
+        CREATE OR REPLACE TABLE placeholders AS
+        SELECT DISTINCT path FROM ({files_sql_for('')}) WHERE kind = 'dir'
+    """)
+    exclude = "(SELECT path FROM placeholders)"
 
     con.execute("CREATE OR REPLACE TABLE partitions (part VARCHAR)")
     if part_keys:
@@ -609,21 +682,25 @@ def _build_partitioned(
         con.execute("DROP TABLE dirs_all_p")
         con.execute("DROP TABLE n_children_p")
 
-    for i, key in enumerate(part_keys):
-        lit = _sql_lit(key)
-        # Clean keys (name == canonical) with this prefix sit in the contiguous
-        # name range [key, key] ∪ [key/, key0) ('/' + 1 == '0'); the exact
-        # `part` predicate on top of it is what makes the range merely a hint.
+    for i, batch in enumerate(batches):
+        first, last = _sql_lit(batch[0]), _sql_lit(batch[-1])
+        lits = ', '.join(_sql_lit(key) for key in batch)
+        # Clean rows (name == canonical) under a key sit in the contiguous name
+        # range [key/, key0) ('/' + 1 == '0'); a batch of consecutive keys is
+        # one range [first/, last0). Rows between two keys (files at depth ≤ k
+        # whose prefix sorts between them) fall in the range too — the exact
+        # `part IN (…)` predicate on top is what makes the range merely a hint.
         clean = files_sql_for(
             f" AND name = rtrim(regexp_replace(name, '/+', '/', 'g'), '/')"
-            f" AND (name = {lit} OR (name >= {lit} || '/' AND name < {lit} || '0'))"
+            f" AND name >= {first} || '/' AND name < {last} || '0'"
         )
         con.execute(f"""
             CREATE OR REPLACE TABLE inputs_p AS
-            SELECT * FROM ({clean}) WHERE {part_of_path} = {lit}
+            SELECT * FROM ({clean}) WHERE {part_of_path} IN ({lits})
             UNION ALL
-            SELECT * FROM dirty WHERE {part_of_path} = {lit}
+            SELECT * FROM dirty WHERE {part_of_path} IN ({lits})
         """)
+        tag = f"[{i + 1}/{len(batches)} {batch[0]}" + (f" … {batch[-1]} ({len(batch)} keys)" if len(batch) > 1 else '') + '] '
         # Ancestors inside the partition only (depth ≥ k); shallower ones are
         # the top cascade's, so their n_desc=1 is counted exactly once.
         con.execute(f"""
@@ -635,12 +712,12 @@ def _build_partitioned(
             )
             SELECT DISTINCT p AS path FROM anc WHERE {nseg_p} >= {k}
         """)
-        con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels, side))
+        con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels, side, exclude=exclude))
         con.execute("DROP TABLE dir_paths_p")
         _build_dirs_cascade(
             con, sum_cols=sum_cols, mean_mtime=mean_mtime,
             src='inputs_p', out='dirs_all_p', n_children='n_children_p',
-            tag=f"[{i + 1}/{len(part_keys)} {key}] ", group_cols=group_cols, max_cols=max_cols,
+            tag=tag, group_cols=group_cols, max_cols=max_cols,
         )
         _append(first=i == 0)
     con.execute("DROP TABLE dirty")
@@ -664,9 +741,10 @@ def _build_partitioned(
         )
         SELECT DISTINCT p AS path FROM anc
     """)
-    con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels, side))
+    con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels, side, exclude=exclude))
     con.execute("DROP TABLE dir_paths_p")
     con.execute("DROP TABLE partitions")
+    con.execute("DROP TABLE placeholders")
     _build_dirs_cascade(
         con, sum_cols=sum_cols, mean_mtime=mean_mtime,
         src='inputs_p', out='dirs_all_p', n_children='n_children_p', tag='[top] ',
@@ -685,7 +763,7 @@ def _build_partitioned(
         GROUP BY path{keys}
     """)
     con.execute("DROP TABLE n_children_parts")
-    return len(part_keys)
+    return len(batches), len(part_keys)
 
 
 def aggregate_listing_to_parquet(
@@ -706,6 +784,7 @@ def aggregate_listing_to_parquet(
     side: str | None = None,
     max_cols: tuple[str, ...] = (),
     size_hist: bool = False,
+    partition_files: int = DEFAULT_PARTITION_FILES,
 ) -> dict:
     """Out-of-core: layer-1 listing (via `listing_sql`) → layer-2 parquet on disk.
 
@@ -724,11 +803,21 @@ def aggregate_listing_to_parquet(
       buffer pool and page to disk under `memory_limit`, instead of being
       pinned in RAM as an in-memory database's base tables are. `con` is then
       only used to read the listing's schema.
-    - `partition_depth`: cascade each distinct depth-k prefix separately
-      (see :func:`_build_partitioned`) — peak memory ∝ the largest partition
-      rather than the whole listing. 0 = one cascade over everything.
+    - `partition_depth`: cascade each distinct depth-k *directory* prefix
+      separately (see :func:`_build_partitioned`) — peak memory ∝ the largest
+      cascade rather than the whole listing. 0 = one cascade over everything.
+    - `partition_files`: pack partitions, in key order, into cascades of up
+      to this many files (≤ 0: one cascade per key). The memory knob: a
+      cascade's peak is ∝ its files (~4.4 KB/file with every extension on).
 
     Output is byte-identical for every combination.
+
+    Folder placeholders — listing names ending in `/` — are objects at the
+    directory they name: that directory's own row carries them (`n_files`
+    counts them, `size`/`mtime` are theirs); they are never file children
+    (spec `mgu-scale-a3-gate.md` ask 2). `a//b` names collapse to `a/b`
+    (ask 3: the deterministic, subtree-preserving policy is to read them as
+    the path the user meant).
 
     `label` (item B): a parquet of `prefix → <label columns>` (`label_cols`;
     default: every column but `prefix`), joined onto every input row by
@@ -852,13 +941,13 @@ def aggregate_listing_to_parquet(
         _stage(f"listing: {n_files} file rows")
         if n_files == 0:
             raise ValueError(f"no rows for bucket {bucket!r}")
-        n_partitions = _build_partitioned(
+        n_partitions, n_keys = _build_partitioned(
             con, files_sql_for, partition_depth,
             sum_cols=tuple(sum_cols), mean_mtime=mean_mtime, extra_dir_cols=extra_dir_cols,
-            labels=labels, side=side_tbl,
+            labels=labels, side=side_tbl, partition_files=partition_files,
         )
     else:
-        n_partitions = 0
+        n_partitions = n_keys = 0
         # Build the `inputs` table without a pandas roundtrip: files first, then
         # synthesized dir rows for every unique ancestor path.
         con.execute(f"CREATE TABLE inputs AS {files_sql_for('')}")
@@ -988,6 +1077,7 @@ def aggregate_listing_to_parquet(
                    kind, parent{file_extra},
                    ('{scan_root}/' || path)::VARCHAR AS uri
             FROM files_src
+            WHERE kind = 'file'
         )
         SELECT *,
                CASE WHEN path = '.' THEN 0
@@ -1035,5 +1125,6 @@ def aggregate_listing_to_parquet(
         'root_n_children': int(root['n_children']) if root is not None else 0,
         'root_mtime': int(root['mtime']) if root is not None else 0,
         'partitions': int(n_partitions),
+        'partition_keys': int(n_keys),
         'max_rss_mb': round(max_rss_mb, 1),
     }

@@ -126,7 +126,7 @@ def test_tiers_are_the_layer2_rows_sorted_and_bounded(tmp_path: Path):
           if k != b'ARROW:schema'}
     assert kv == {
         'tier': 'coarse', 'sort': 'depth,path',
-        'floor_bytes': str(floor), 'coarse_exp': '4', 'total_size': str(total),
+        'floor_bytes': str(floor), 'coarse_exp': '4', 'total_size': str(total), 'floor_source': 'derived',
     }
     kv = {k.decode(): v.decode() for k, v in pq.read_metadata(f'{stem}.objects.parquet').metadata.items()
           if k != b'ARROW:schema'}
@@ -257,3 +257,27 @@ def test_cli_tiers_need_a_dir_and_a_disk_engine(tmp_path: Path):
     )
     assert r.returncode != 0
     assert r.stderr.rstrip().split('\n')[-1] == 'ValueError: --tiers needs --tiers-dir (or --out-dir)'
+
+
+def test_explicit_coarse_floor(tmp_path: Path):
+    """`coarse_floor_bytes` pins the floor (a fleet-wide value, spec
+    mgu-scale-a3-gate.md ask 4) instead of deriving it from this import's
+    total; the metadata records which it was."""
+    layer2 = _layer2(tmp_path)
+    stem = str(tmp_path / 'gcs-b1')
+    # Dir sizes are 15·(d+1)·_UNIT: d0=15, d1=30, d2=45, d3=60, d4=75, d5=90 (× _UNIT):
+    # a floor of 50·_UNIT keeps d3..d5 and the root.
+    floor = 50 * _UNIT
+    written = write_tiers(layer2, stem, tiers=('coarse',), coarse_floor_bytes=floor)
+    out = f'{stem}.coarse.parquet'
+    assert written == {out: 4}
+    assert pd.read_parquet(out)['path'].tolist() == ['.', 'd3', 'd4', 'd5']
+    total = int(pd.read_parquet(layer2).query("path == '.'")['size'].sum())
+    kv = {k.decode(): v.decode() for k, v in pq.read_metadata(out).metadata.items() if k != b'ARROW:schema'}
+    assert kv == {
+        'tier': 'coarse', 'sort': 'depth,path',
+        'floor_bytes': str(floor), 'coarse_exp': str(DEFAULT_COARSE_EXP), 'total_size': str(total),
+        'floor_source': 'explicit',
+    }
+    with pytest.raises(ValueError, match='coarse_floor_bytes must be >= 0; got -1'):
+        write_tiers(layer2, stem, tiers=('coarse',), coarse_floor_bytes=-1)
