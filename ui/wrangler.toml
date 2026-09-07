@@ -20,3 +20,17 @@ bucket_name = "disk-tree"
 
 [vars]
 SCANS_PREFIX = "scans/"
+
+# The gate (spec `specs/pages-auth.md`): grants + access log. Created with
+# `wrangler d1 create disk-tree-auth` (fill `database_id` from its output),
+# schema via `wrangler d1 migrations apply disk-tree-auth` (`--local` for
+# `cfn:dev`, which uses a local SQLite file and needs no id).
+#
+# Identity-bearing config is Pages secrets (`wrangler pages secret put`), not
+# vars in this public file: SESSION_SECRET, ALLOWED_EMAILS, ACCESS_TEAM_DOMAIN,
+# ACCESS_AUD.
+[[d1_databases]]
+binding = "DB"
+database_name = "disk-tree-auth"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

@@ -121,3 +121,40 @@ tr.root {
     --muted: #999;
   }
 }
+
+/* Auth (specs/pages-auth.md): the wall, the header chip, the /access page. */
+.auth-wall {
+  max-width: 480px;
+  margin: 15vh auto 0;
+  text-align: center;
+
+  .signin-title { font-size: 1.2rem; margin-bottom: 1rem; }
+  .signin-btn {
+    display: inline-block;
+    padding: 6px 18px;
+    border-radius: 4px;
+    background: #1976d2;
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+  }
+}
+.dim { opacity: 0.6; }
+.linkish {
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.whoami { display: inline-flex; gap: 6px; align-items: center; }
+.access-table {
+  border-collapse: collapse;
+  font-size: 0.85rem;
+
+  th, td { padding: 3px 10px; text-align: left; border-bottom: 1px solid var(--border, #333); }
+  .num { text-align: right; }
+  tr.dim td { opacity: 0.55; }
+}

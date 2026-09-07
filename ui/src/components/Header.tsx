@@ -7,6 +7,7 @@ import { fetchAvailableBackends } from '../api'
 import { useCapabilities } from '../hooks/useCapabilities'
 import { useUnits } from '../utils/units'
 import { LibrarySwitcher } from './LibrarySwitcher'
+import { WhoamiChip } from '../auth'
 
 export function Header() {
   const location = useLocation()
@@ -82,6 +83,7 @@ export function Header() {
         </Box>
 
         {caps?.library && <LibrarySwitcher />}
+        <WhoamiChip />
 
         {/* Size units: SI (G = 10⁹) vs IEC (Gi = 2³⁰). Single tooltip on the
             group (wrapping each button breaks ToggleButtonGroup's value/onChange

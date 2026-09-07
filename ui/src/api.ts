@@ -508,11 +508,14 @@ export type Capabilities = {
   library: boolean
   backend: boolean
   s3: boolean
+  /** `/api/*` needs a session (`/api/auth/whoami`); the UI shows a sign-in wall otherwise. */
+  auth: boolean
 }
 
 export const ALL_CAPABILITIES: Capabilities = {
   static: false, scan: true, delete: true, reveal: true, histogram: true, filter: true,
   preview: true, compare: true, progress: true, library: true, backend: true, s3: true,
+  auth: false,
 }
 
 /** A server without the endpoint (an older Flask) can do everything. */

@@ -102,6 +102,9 @@ importers:
       '@mui/material':
         specifier: ^7.3.6
         version: 7.3.11(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8))(@emotion/styled@11.14.1(@emotion/react@11.14.0(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react@19.2.8))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@open-athena/auth':
+        specifier: github:Open-Athena/auth#43bf9598898d820475b539c985f141e46067b54f
+        version: https://codeload.github.com/Open-Athena/auth/tar.gz/43bf9598898d820475b539c985f141e46067b54f(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)
       '@rdub/file-tree':
         specifier: github:runsascoded/file-tree#49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1
         version: https://codeload.github.com/runsascoded/file-tree/tar.gz/49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1(@disk-tree/react@packages+react)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.4.1(react@19.2.8))(wa-sqlite@1.0.0)(yaml@1.10.3)
@@ -1017,6 +1020,21 @@ packages:
     engines: {node: ^22.20 || ^24.12 || >=25}
     cpu: [x64]
     os: [linux]
+
+  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/43bf9598898d820475b539c985f141e46067b54f':
+    resolution: {tarball: https://codeload.github.com/Open-Athena/auth/tar.gz/43bf9598898d820475b539c985f141e46067b54f}
+    version: 0.1.0-dist.9809e57
+    peerDependencies:
+      '@cloudflare/workers-types': '*'
+      '@tanstack/react-query': ^5.0.0
+      react: ^18.0.0 || ^19.0.0
+    peerDependenciesMeta:
+      '@cloudflare/workers-types':
+        optional: true
+      '@tanstack/react-query':
+        optional: true
+      react:
+        optional: true
 
   '@parcel/watcher-android-arm64@2.6.0':
     resolution: {integrity: sha512-trgpLSCKRC/huFjXX/Smh+0sWe4+YtKfktIToiMl59ghz7z+qkH6kMvNnUbLyRs9N11t8l4svSCs1+5B3rOAhA==}
@@ -3929,6 +3947,12 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
+
+  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/43bf9598898d820475b539c985f141e46067b54f(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)':
+    optionalDependencies:
+      '@cloudflare/workers-types': 5.20260906.1
+      '@tanstack/react-query': 5.101.4(react@19.2.8)
+      react: 19.2.8
 
   '@parcel/watcher-android-arm64@2.6.0':
     optional: true

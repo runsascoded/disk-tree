@@ -10,6 +10,8 @@ import { S3BucketList } from './components/S3BucketList'
 import { RecentList } from './components/RecentList'
 import { CompareView } from './components/CompareView'
 import { BrowsePage } from './components/BrowsePage'
+import { AccessPage } from './components/AccessPage'
+import { Gate } from './auth'
 import './App.scss'
 import type { ReactNode } from 'react'
 import { useUnits } from './utils/units'
@@ -36,8 +38,12 @@ function App() {
         <BrowserRouter>
           <Header />
           <div className="app">
+            {/* On the static deployment every `/api/*` needs a session
+                (specs/pages-auth.md); elsewhere `Gate` is a pass-through. */}
+            <Gate>
             <Routes>
               <Route path="/" element={<ScanList />} />
+              <Route path="/access" element={<AccessPage />} />
               <Route path="/file/*" element={<ScanDetails />} />
               <Route path="/s3" element={<S3BucketList />} />
               <Route path="/s3/*" element={<ScanDetails />} />
@@ -50,6 +56,7 @@ function App() {
                   API, beside the hand-rolled table (nothing retired yet). */}
               <Route path="/browse/*" element={<BrowsePage />} />
             </Routes>
+            </Gate>
           </div>
           <ShortcutsModal
             editable
