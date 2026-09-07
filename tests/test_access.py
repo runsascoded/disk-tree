@@ -321,15 +321,15 @@ def test_agg_produces_layer2a_tree(tmp_path: Path):
     out = str(tmp_path / 'agg.parquet')
     stats = aggregate_access(con, f"(SELECT * FROM read_parquet('{raw}'))", out)
 
-    assert stats['rows_in'] == 7
-    assert stats['days'] == 2
+    assert stats == {'rows_in': 7, 'paths_out': 10, 'hours': 2, 'total_bytes_out': 9150}
 
     df = pd.read_parquet(out)
-    # Two days in the fixture; capture them from the data rather than assuming
-    # a specific TZ boundary (date_trunc uses UTC).
-    days = sorted(df['day'].unique())
-    assert len(days) == 2
-    day1, day2 = days
+    # Hour grain (spec mgu-scale-unification.md D.1), UTC, naive TIMESTAMP.
+    assert df['hour'].dtype == 'datetime64[us]'
+    assert sorted(df['hour'].unique()) == [
+        pd.Timestamp('2025-08-16 00:00:00'), pd.Timestamp('2025-08-17 00:00:00'),
+    ]
+    day1, day2 = sorted(df['hour'].unique())
 
     # Bucket is a first-class key on every row.
     assert set(df['bucket'].unique()) == {'b1'}
@@ -349,7 +349,7 @@ def test_agg_produces_layer2a_tree(tmp_path: Path):
     assert tf['last_ts'] == tok['last_ts']
     assert int(tf['last_ts'].timestamp() * 1e6) == 1755302400_000_000 + 300
     # Root (`.`): day1 GET total = 3 (tokenized) + 1 (logs) = 4; bytes_out 9100.
-    root_get_d1 = df[(df.path == '.') & (df.op == 'GET') & (df.day == day1)]
+    root_get_d1 = df[(df.path == '.') & (df.op == 'GET') & (df.hour == day1)]
     assert len(root_get_d1) == 1
     assert int(root_get_d1.iloc[0]['n_ops']) == 4
     assert int(root_get_d1.iloc[0]['bytes_out']) == 9100
@@ -357,9 +357,202 @@ def test_agg_produces_layer2a_tree(tmp_path: Path):
     # targeted path='').
     assert root_get_d1.iloc[0]['kind'] == 'dir'
     # day2 uploads: 2 PUTs, 10000 bytes_in.
-    ul = df[(df.path == 'uploads') & (df.op == 'PUT') & (df.day == day2)].iloc[0]
+    ul = df[(df.path == 'uploads') & (df.op == 'PUT') & (df.hour == day2)].iloc[0]
     assert int(ul['n_ops']) == 2
     assert int(ul['bytes_in']) == 10000
+
+
+def test_agg_hour_grain_splits_a_day(tmp_path: Path):
+    """Requests an hour apart land in separate rows; `last_ts` stays exact."""
+    from disk_tree.access.aggregate import aggregate_access
+    from disk_tree.access.parsers.gcs import parse
+
+    t0 = 1755302400_000_000  # 2025-08-16T00:00:00Z
+    h = 3_600_000_000
+    csv_path = tmp_path / 'usage.csv'
+    _write_gcs_csv(csv_path, [
+        _gcs_row(t0 + 5, '10.0.0.1', 'GET', 'GET_Object', 'b1', 'p/a', sc_bytes=10, req_id='r1'),
+        _gcs_row(t0 + h - 1, '10.0.0.1', 'GET', 'GET_Object', 'b1', 'p/a', sc_bytes=20, req_id='r2'),
+        _gcs_row(t0 + h, '10.0.0.1', 'GET', 'GET_Object', 'b1', 'p/b', sc_bytes=30, req_id='r3'),
+        _gcs_row(t0 + 2 * h + 7, '10.0.0.2', 'GET', 'GET_Object', 'b1', 'p/a', sc_bytes=40, req_id='r4'),
+    ])
+    con = duckdb.connect()
+    raw = str(tmp_path / 'raw.parquet')
+    parse(str(csv_path), con=con).write_parquet(raw)
+    out = str(tmp_path / 'agg.parquet')
+    stats = aggregate_access(con, f"(SELECT * FROM read_parquet('{raw}'))", out)
+    assert stats == {'rows_in': 4, 'paths_out': 4, 'hours': 3, 'total_bytes_out': 100}
+    df = pd.read_parquet(out)
+    rows = [
+        (r.path, r.hour.isoformat(), r.n_ops, r.bytes_out, int(r.last_ts.timestamp() * 1e6) - t0)
+        for r in df[df.path.isin(['p', 'p/a'])].itertuples()
+    ]
+    assert rows == [
+        ('p', '2025-08-16T00:00:00', 2, 30, h - 1),
+        ('p', '2025-08-16T01:00:00', 1, 30, h),
+        ('p', '2025-08-16T02:00:00', 1, 40, 2 * h + 7),
+        ('p/a', '2025-08-16T00:00:00', 2, 30, h - 1),
+        ('p/a', '2025-08-16T02:00:00', 1, 40, 2 * h + 7),
+    ]
+    import pyarrow.parquet as pq
+    assert {k: v for k, v in pq.read_metadata(out).metadata.items() if k != b'ARROW:schema'} == {b'grain': b'hour'}
+
+
+def test_agg_as_of_cuts_at_the_instant(tmp_path: Path):
+    """`as_of` drops requests at/after the instant — exact on the raw rows, so a
+    mid-hour cut keeps only the earlier part of that hour (spec D.2)."""
+    from disk_tree.access.aggregate import aggregate_access
+    from disk_tree.access.parsers.gcs import parse
+
+    t0 = 1755302400_000_000  # 2025-08-16T00:00:00Z
+    m = 60_000_000
+    csv_path = tmp_path / 'usage.csv'
+    _write_gcs_csv(csv_path, [
+        _gcs_row(t0 + 10 * m, '10.0.0.1', 'GET', 'GET_Object', 'b1', 'p/a', sc_bytes=1, req_id='r1'),
+        _gcs_row(t0 + 30 * m, '10.0.0.1', 'GET', 'GET_Object', 'b1', 'p/a', sc_bytes=2, req_id='r2'),
+        _gcs_row(t0 + 30 * m, '10.0.0.1', 'GET', 'GET_Object', 'b1', 'p/b', sc_bytes=4, req_id='r3'),
+        _gcs_row(t0 + 90 * m, '10.0.0.1', 'GET', 'GET_Object', 'b1', 'p/a', sc_bytes=8, req_id='r4'),
+    ])
+    con = duckdb.connect()
+    raw = str(tmp_path / 'raw.parquet')
+    parse(str(csv_path), con=con).write_parquet(raw)
+
+    def root_at(as_of, name):
+        out = str(tmp_path / f'{name}.parquet')
+        stats = aggregate_access(con, f"(SELECT * FROM read_parquet('{raw}'))", out, as_of=as_of)
+        df = pd.read_parquet(out)
+        import pyarrow.parquet as pq
+        md = {k.decode(): v.decode() for k, v in pq.read_metadata(out).metadata.items() if k != b'ARROW:schema'}
+        return stats, [(r.hour.isoformat(), r.n_ops, r.bytes_out) for r in df[df.path == '.'].itertuples()], md
+
+    # Mid-hour: the 00:30 requests are excluded, 00:10 stays; the row is still the 00:00 hour.
+    assert root_at('2025-08-16T00:30:00Z', 'a') == (
+        {'rows_in': 1, 'paths_out': 3, 'hours': 1, 'total_bytes_out': 1},
+        [('2025-08-16T00:00:00', 1, 1)],
+        {'grain': 'hour', 'as_of': '2025-08-16T00:30:00+00:00'},
+    )
+    # One microsecond later: the two 00:30 requests are in.
+    assert root_at('2025-08-16T00:30:00.000001Z', 'b')[1] == [('2025-08-16T00:00:00', 3, 7)]
+    # Hour-aligned: exactly the first hour. A naive instant is taken as UTC.
+    assert root_at('2025-08-16T01:00:00', 'c')[1] == [('2025-08-16T00:00:00', 3, 7)]
+    # Everything.
+    assert root_at('2025-08-17T00:00:00Z', 'd')[1] == [('2025-08-16T00:00:00', 3, 7), ('2025-08-16T01:00:00', 1, 8)]
+    with pytest.raises(ValueError, match="no access rows in input before 2025-08-16T00:00:00\\+00:00"):
+        root_at('2025-08-16T00:00:00Z', 'e')
+
+
+# ---------- Per-scan state (spec D.3) ----------
+
+def _write_layer2(path: Path, bucket: str, dirs: list[str]) -> str:
+    """A minimal dirs tier: root + the given dirs, with the `uri` the state builder keys on."""
+    rows = [('.', 'dir', f'gcs://{bucket}')] + [(d, 'dir', f'gcs://{bucket}/{d}') for d in dirs]
+    pd.DataFrame({
+        'path': [r[0] for r in rows], 'size': 0, 'kind': [r[1] for r in rows], 'uri': [r[2] for r in rows],
+    }).to_parquet(path)
+    return str(path)
+
+
+def _state_rows(path: str) -> list[tuple]:
+    from disk_tree.access.state import STATE_COLUMNS
+    df = pd.read_parquet(path)
+    assert list(df.columns) == list(STATE_COLUMNS)
+    return [
+        (r.bucket, r.path, None if pd.isna(r.last_ts) else r.last_ts.isoformat(), r.read_ops, r.read_bytes,
+         r.n_ops_get, r.bytes_out_get, r.n_ops_put, r.bytes_in_put, r.n_ops_list)
+        for r in df.itertuples()
+    ]
+
+
+def _state_md(path: str) -> dict:
+    import pyarrow.parquet as pq
+    return {k.decode(): v.decode() for k, v in pq.read_metadata(path).metadata.items() if k != b'ARROW:schema'}
+
+
+def test_state_is_live_dirs_with_history_built_incrementally(tmp_path: Path):
+    """Day 1's state, then day 2's from it: reads fold per dir, PUTs count but
+    are not reads, dead dirs drop out, the window is `[prev_as_of, as_of)`."""
+    from disk_tree.access.aggregate import aggregate_access
+    from disk_tree.access.parsers.gcs import parse
+    from disk_tree.access.state import build_state
+
+    csv_path = tmp_path / 'usage.csv'
+    _write_multiday_fixture(csv_path)
+    con = duckdb.connect()
+    raw = str(tmp_path / 'raw.parquet')
+    parse(str(csv_path), con=con).write_parquet(raw)
+    agg = str(tmp_path / 'agg.parquet')
+    aggregate_access(con, f"(SELECT * FROM read_parquet('{raw}'))", agg)
+    shards = f"(SELECT * FROM read_parquet('{agg}'))"
+
+    # Scan 1 (as-of end of day 1): `tokenized/finemath`, `logs` and `uploads` exist.
+    live1 = _write_layer2(tmp_path / 'live1.parquet', 'b1', ['tokenized', 'tokenized/finemath', 'logs', 'uploads'])
+    s1 = str(tmp_path / 'state1.parquet')
+    stats1 = build_state(con, shards, s1, as_of='2025-08-17T00:00:00Z', live=(live1,))
+    assert stats1 == {
+        'rows': 4, 'live_dirs': 5, 'new': 4, 'carried': 0, 'dropped': 0,
+        'as_of': '2025-08-17T00:00:00+00:00', 'prev_as_of': None,
+    }
+    t = lambda us: pd.Timestamp(1755302400_000_000 + us, unit='us', tz='UTC').isoformat()
+    assert _state_rows(s1) == [
+        # bucket path  last_ts  read_ops read_bytes  n_get bytes_get n_put bytes_in_put n_list
+        ('b1', '.',                  t(400), 4, 9100, 4, 9100, 0, 0, 1),
+        ('b1', 'logs',               t(400), 1,  100, 1,  100, 0, 0, 0),
+        ('b1', 'tokenized',          t(300), 3, 9000, 3, 9000, 0, 0, 0),
+        ('b1', 'tokenized/finemath', t(300), 3, 9000, 3, 9000, 0, 0, 0),
+    ]
+    assert _state_md(s1) == {'as_of': '2025-08-17T00:00:00+00:00', 'prev_as_of': '', 'grain': 'hour'}
+
+    # Scan 2 (as-of end of day 2): `logs` was deleted; day-2 PUTs to `uploads`
+    # give it history (not reads); day-1 rows carry forward.
+    live2 = _write_layer2(tmp_path / 'live2.parquet', 'b1', ['tokenized', 'tokenized/finemath', 'uploads'])
+    s2 = str(tmp_path / 'state2.parquet')
+    stats2 = build_state(con, shards, s2, as_of='2025-08-18T00:00:00Z', live=(live2,), prev=s1)
+    assert stats2 == {
+        'rows': 4, 'live_dirs': 4, 'new': 2, 'carried': 3, 'dropped': 1,
+        'as_of': '2025-08-18T00:00:00+00:00', 'prev_as_of': '2025-08-17T00:00:00+00:00',
+    }
+    assert _state_rows(s2) == [
+        ('b1', '.',                  t(400), 4, 9100, 4, 9100, 2, 10000, 1),
+        ('b1', 'tokenized',          t(300), 3, 9000, 3, 9000, 0, 0, 0),
+        ('b1', 'tokenized/finemath', t(300), 3, 9000, 3, 9000, 0, 0, 0),
+        ('b1', 'uploads',            None,   0,    0, 0,    0, 2, 10000, 0),
+    ]
+    assert _state_md(s2) == {
+        'as_of': '2025-08-18T00:00:00+00:00', 'prev_as_of': '2025-08-17T00:00:00+00:00', 'grain': 'hour',
+    }
+
+    # The same as-of from scratch (no prev) equals the incremental build.
+    s2b = str(tmp_path / 'state2b.parquet')
+    build_state(con, shards, s2b, as_of='2025-08-18T00:00:00Z', live=(live2,))
+    assert _state_rows(s2b) == _state_rows(s2)
+
+
+def test_state_validation(tmp_path: Path):
+    from disk_tree.access.state import build_state, live_bucket
+
+    con = duckdb.connect()
+    live = _write_layer2(tmp_path / 'live.parquet', 'b1', ['x'])
+    assert live_bucket(con, live) == 'b1'
+    empty = tmp_path / 'empty-agg.parquet'
+    pd.DataFrame({
+        'bucket': pd.Series([], dtype='str'), 'path': pd.Series([], dtype='str'),
+        'hour': pd.Series([], dtype='datetime64[us]'), 'op': pd.Series([], dtype='str'),
+        'n_ops': pd.Series([], dtype='int64'), 'bytes_out': pd.Series([], dtype='int64'),
+        'bytes_in': pd.Series([], dtype='int64'), 'last_ts': pd.Series([], dtype='datetime64[us, UTC]'),
+    }).to_parquet(empty)
+    shards = f"(SELECT * FROM read_parquet('{empty}'))"
+    with pytest.raises(ValueError, match="at least one --live dirs tier is required"):
+        build_state(con, shards, str(tmp_path / 'o.parquet'), as_of='2025-01-02T00:00:00Z', live=())
+    with pytest.raises(ValueError, match="bucket 'b1' given twice in --live"):
+        build_state(con, shards, str(tmp_path / 'o.parquet'), as_of='2025-01-02T00:00:00Z', live=(live, live))
+    s1 = str(tmp_path / 's1.parquet')
+    build_state(con, shards, s1, as_of='2025-01-02T00:00:00Z', live=(live,))
+    with pytest.raises(ValueError, match="--as-of 2025-01-01T00:00:00\\+00:00 is not after the previous state's 2025-01-02T00:00:00\\+00:00"):
+        build_state(con, shards, str(tmp_path / 'o.parquet'), as_of='2025-01-01T00:00:00Z', live=(live,), prev=s1)
+    local = tmp_path / 'local.parquet'
+    pd.DataFrame({'path': ['.'], 'kind': ['dir'], 'uri': ['/Users/x']}).to_parquet(local)
+    with pytest.raises(ValueError, match="root uri '/Users/x' has no scheme"):
+        live_bucket(con, str(local))
 
 
 def test_top_hot_prefixes(tmp_path: Path):

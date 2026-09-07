@@ -29,6 +29,8 @@ from disk_tree.cli.base import cli
 @option('-E', '--coarse-exp', default=24, help='Tiers: the `coarse` floor exponent — F = 2^(round(log2 total_size) − E) (default 24: 256 MiB at 3 PiB)')
 @option('-e', '--engine', type=Choice(['pandas', 'duckdb', 'stream']), default='pandas', help='Aggregation engine: `pandas` (in-memory; small), `duckdb` (out-of-core; big), or `stream` (O(depth) over sorted listings; biggest)')
 @option('-l', '--listing', 'listings', required=True, multiple=True, help='Listing parquet glob(s) — raw / SII / S3-Inventory; repeatable, earlier sources win per bucket')
+@option('-A', '--max-col', 'max_cols', multiple=True, help='DuckDB engine only: a `--side` column folded through the cascade as a subtree MAX (e.g. `last_ts`); repeatable')
+@option('-a', '--side', default=None, help='DuckDB engine only: side parquet keyed by `path` (`.` = root; optional `bucket`), e.g. `disk-tree access state` output, joined onto every row by exact path for `--max-col`')
 @option('-b', '--bucket', 'buckets', multiple=True, help='Bucket to import as one scan; repeatable. Default: every distinct bucket in the listings')
 @option('-d', '--db', 'db_path', default=None, help='DuckDB engine only: run the cascade in a file-backed database (a `.duckdb` path, kept; or a directory, e.g. the spill disk, to create a temporary one in) so the level tables page to disk under `--memory-limit` instead of pinning RAM. Default: in-memory.')
 @option('-i', '--tiers', default=None, help='Also write layer-2 as index tiers (`dirs,objects,coarse`, any subset) under `--tiers-dir` as `<scheme>-<bucket>.<tier>.parquet`: sorted, small row groups, floor in the parquet metadata (spec mgu-scale-unification.md C). duckdb/stream engines only.')
@@ -49,6 +51,8 @@ from disk_tree.cli.base import cli
 @option('-w', '--to', default=None, help='Write the scan blob(s) to a dir or fsspec URL (`r2://bucket/prefix`) instead of the configured write dir — same as `index --to`')
 @option('-x', '--max-temp-size', default=None, help="DuckDB `max_temp_directory_size` (duckdb engine only; e.g. `500GiB`). Default: DuckDB's auto-cap = free disk at launch, a stale snapshot under concurrent writers.")
 def import_cmd(
+    max_cols: tuple[str, ...],
+    side: str | None,
     coarse_exp: int,
     engine: str,
     listings: tuple[str, ...],
@@ -115,7 +119,7 @@ def import_cmd(
             pivot_sums=pivot_sums, mean_mtime=mean_mtime,
             duckdb_path=db_path, partition_depth=partition_depth,
             label=label, label_cols=tuple(c for c in (label_cols or '').split(',') if c),
-            tier_opts=tier_opts,
+            tier_opts=tier_opts, side=side, max_cols=max_cols,
         )
 
 
@@ -150,6 +154,8 @@ def import_bucket(
     label: str | None = None,
     label_cols: tuple[str, ...] = (),
     tier_opts: TierOpts | None = None,
+    side: str | None = None,
+    max_cols: tuple[str, ...] = (),
     replace=None,
 ):
     """Aggregate one bucket's listing → blob + Scan row.
@@ -163,6 +169,7 @@ def import_bucket(
     (file-backed cascade database; per-prefix partitioned cascade).
     `label` / `label_cols`: attribution slices as extra group keys (duckdb only).
     `tier_opts`: also cut the finished blob into index tiers (duckdb/stream).
+    `side` / `max_cols`: subtree-MAX columns from a path-keyed side table (duckdb only).
     Returns the Scan.
     """
     from disk_tree.sqla.model import Scan
@@ -170,6 +177,8 @@ def import_bucket(
     from disk_tree.backends.url import canonical
     if label and engine != 'duckdb':
         raise ValueError(f"--label is a duckdb-engine feature; got engine={engine!r}")
+    if (side or max_cols) and engine != 'duckdb':
+        raise ValueError(f"--side/--max-col is a duckdb-engine feature; got engine={engine!r}")
     if tier_opts is not None and engine == 'pandas':
         raise ValueError("--tiers needs a blob on disk: use the duckdb or stream engine")
     # A `file` root collapses to the bare path, so a reduced capture's
@@ -209,6 +218,7 @@ def import_bucket(
                     pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                     db=duckdb_path, partition_depth=partition_depth,
                     label=label, label_cols=label_cols,
+                    side=side, max_cols=max_cols,
                 )
             else:  # stream
                 from disk_tree.find.aggregate_stream import aggregate_stream

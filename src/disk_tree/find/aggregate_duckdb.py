@@ -119,8 +119,13 @@ def _build_dirs_cascade(
     n_children: str = 'n_children_tbl',
     tag: str = '',
     group_cols: tuple[str, ...] = (),
+    max_cols: tuple[str, ...] = (),
 ) -> None:
     """Bottom-up group-by cascade over `src` → `out` + `n_children` tables.
+
+    `max_cols` are columns on `src` folded with MAX at every level, like
+    `mtime` (spec mgu-scale-unification.md D.4: a subtree-max last-read from
+    a side table); NULL where nothing beneath carries a value.
 
     `sum_cols` are extra monoid columns on `src` (per-file contributions;
     0 on dir rows) summed through the cascade unchanged. With `mean_mtime`,
@@ -141,13 +146,13 @@ def _build_dirs_cascade(
     """
     from .agg_ext import MT_WSUM
     cascade_cols = [*sum_cols, *([MT_WSUM] if mean_mtime else [])]
-    extra_sel = ''.join(f', {c}' for c in cascade_cols)
+    extra_sel = ''.join(f', {c}' for c in [*cascade_cols, *max_cols])
     # SUM(BIGINT) widens to HUGEINT in DuckDB — cast the pivot sums back down
     # (they're bounded by total size); mt_wsum genuinely needs the width.
     extra_sum = ''.join(
         f", SUM({c})::{'HUGEINT' if c == MT_WSUM else 'BIGINT'} AS {c}"
         for c in cascade_cols
-    )
+    ) + ''.join(f", MAX({c}) AS {c}" for c in max_cols)
     keys = ''.join(f', {c}' for c in group_cols)
 
     parent_of_path = _PARENT_EXPR.format(col='path')
@@ -396,6 +401,7 @@ def _dir_rows_insert(
     dir_paths: str,
     extra_dir_cols: str,
     labels: "_Labels | None" = None,
+    side: "_Side | None" = None,
 ) -> str:
     """INSERT synthesized dir rows (size/mtime 0, extras 0) for every path in `dir_paths`."""
     rows = f"""
@@ -409,6 +415,8 @@ def _dir_rows_insert(
     """
     if labels is not None:
         rows = labels.join(rows)
+    if side is not None:
+        rows = side.join(rows)
     return f"INSERT INTO {table} {rows}"
 
 
@@ -479,6 +487,54 @@ class _Labels:
 _LAYER2_COLS = ('path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children')
 
 
+class _Side:
+    """A side table keyed by `path` (spec mgu-scale-unification.md D.4): the
+    access plane's per-scan state, joined onto every input row by exact path
+    so `max_cols` (e.g. `last_ts`) can fold through the cascade as a
+    subtree MAX. The side's root is `.` (the 2a convention); inputs use `''`.
+    A `bucket` column, if present, restricts the side to the imported bucket.
+    """
+
+    def __init__(
+        self,
+        con: "duckdb.DuckDBPyConnection",
+        path: str,
+        cols: tuple[str, ...],
+        bucket: str,
+    ):
+        if not cols:
+            raise ValueError("--side needs at least one --max-col")
+        present = [r[0] for r in con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{path}') LIMIT 0"
+        ).fetchall()]
+        if 'path' not in present:
+            raise ValueError(f"side table {path}: no `path` column (has {present})")
+        missing = [c for c in cols if c not in present]
+        if missing:
+            raise ValueError(f"side table {path}: missing column(s) {missing} (has {present})")
+        reserved = set(_LAYER2_COLS) | {'kind', 'parent', 'uri', 'depth'}
+        clash = [c for c in cols if c in reserved]
+        if clash:
+            raise ValueError(f"side column(s) {clash} collide with layer-2 columns")
+        self.cols = cols
+        where = f" WHERE bucket = {_sql_lit(bucket)}" if 'bucket' in present else ''
+        con.execute(f"""
+            CREATE OR REPLACE TABLE side AS
+            SELECT CASE WHEN path = '.' THEN '' ELSE path END AS path{''.join(f', {c}' for c in cols)}
+            FROM read_parquet('{path}'){where}
+        """)
+        dupes = con.execute(
+            "SELECT path FROM side GROUP BY path HAVING COUNT(*) > 1 ORDER BY 1 LIMIT 5"
+        ).fetchall()
+        if dupes:
+            raise ValueError(f"side table {path}: duplicate path(s) {[d[0] for d in dupes]}")
+        self.n = con.execute("SELECT COUNT(*) FROM side").fetchone()[0]
+
+    def join(self, rows_sql: str) -> str:
+        picks = ''.join(f', side.{c}' for c in self.cols)
+        return f"SELECT s.*{picks} FROM ({rows_sql}) s LEFT JOIN side ON side.path = s.path"
+
+
 def _build_partitioned(
     con: "duckdb.DuckDBPyConnection",
     files_sql_for: "Callable[[str], str]",
@@ -487,6 +543,7 @@ def _build_partitioned(
     mean_mtime: bool,
     extra_dir_cols: str,
     labels: "_Labels | None" = None,
+    side: "_Side | None" = None,
 ) -> int:
     """Prefix-partitioned cascade (spec mgu-scale-unification.md A.2) → `dirs_all` + `n_children_tbl`.
 
@@ -509,6 +566,7 @@ def _build_partitioned(
     nseg_p = _NSEG_EXPR.format(col='p')
     parent_of_p = _PARENT_EXPR.format(col='p')
     group_cols = labels.cols if labels is not None else ()
+    max_cols = side.cols if side is not None else ()
     keys = ''.join(f', {c}' for c in group_cols)
 
     # One pass over the listing: the partition keys and their row counts.
@@ -577,12 +635,12 @@ def _build_partitioned(
             )
             SELECT DISTINCT p AS path FROM anc WHERE {nseg_p} >= {k}
         """)
-        con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels))
+        con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels, side))
         con.execute("DROP TABLE dir_paths_p")
         _build_dirs_cascade(
             con, sum_cols=sum_cols, mean_mtime=mean_mtime,
             src='inputs_p', out='dirs_all_p', n_children='n_children_p',
-            tag=f"[{i + 1}/{len(part_keys)} {key}] ", group_cols=group_cols,
+            tag=f"[{i + 1}/{len(part_keys)} {key}] ", group_cols=group_cols, max_cols=max_cols,
         )
         _append(first=i == 0)
     con.execute("DROP TABLE dirty")
@@ -606,13 +664,13 @@ def _build_partitioned(
         )
         SELECT DISTINCT p AS path FROM anc
     """)
-    con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels))
+    con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols, labels, side))
     con.execute("DROP TABLE dir_paths_p")
     con.execute("DROP TABLE partitions")
     _build_dirs_cascade(
         con, sum_cols=sum_cols, mean_mtime=mean_mtime,
         src='inputs_p', out='dirs_all_p', n_children='n_children_p', tag='[top] ',
-        group_cols=group_cols,
+        group_cols=group_cols, max_cols=max_cols,
     )
     _append(first=not part_keys)
     con.execute("DROP TABLE inputs_p")
@@ -645,6 +703,8 @@ def aggregate_listing_to_parquet(
     partition_depth: int = 0,
     label: str | None = None,
     label_cols: tuple[str, ...] = (),
+    side: str | None = None,
+    max_cols: tuple[str, ...] = (),
 ) -> dict:
     """Out-of-core: layer-1 listing (via `listing_sql`) → layer-2 parquet on disk.
 
@@ -675,6 +735,12 @@ def aggregate_listing_to_parquet(
     keys through the cascade — the output holds one row per
     `(path, *label_cols)`, sorted `(depth, path, *label_cols)`, label columns
     right after `path`; Σ over a path's slices equals its unlabeled row.
+
+    `side` + `max_cols` (item D.4): a parquet keyed by `path` (`.` = root;
+    optional `bucket`) whose `max_cols` are joined onto every row by exact
+    path and folded with MAX through the cascade — a dir's value is the max
+    over itself and its subtree (e.g. `last_ts` from `access state`). The
+    columns land after the extension columns, before `uri`.
     """
     import duckdb as _duckdb
     if partition_depth < 0:
@@ -738,9 +804,20 @@ def aggregate_listing_to_parquet(
     if labels is not None:
         _stage(f"labels: {labels.n} prefixes at depths {sorted(labels.depths)} → {list(group_cols)}")
 
+    side_tbl = _Side(con, side, max_cols, bucket) if side is not None else None
+    if side_tbl is None and max_cols:
+        raise ValueError("--max-col needs --side")
+    max_names = ''.join(f', {c}' for c in max_cols)
+    if side_tbl is not None:
+        _stage(f"side: {side_tbl.n} rows for {bucket} → MAX({list(max_cols)})")
+
     def files_sql_for(where: str) -> str:
         sql = _files_select(listing_sql, bucket, extra_file_cols, pivot_pass, where=where)
-        return labels.join(sql) if labels is not None else sql
+        if labels is not None:
+            sql = labels.join(sql)
+        if side_tbl is not None:
+            sql = side_tbl.join(sql)
+        return sql
 
     con.execute("DROP TABLE IF EXISTS inputs")
     con.execute("DROP VIEW IF EXISTS files_src")
@@ -755,7 +832,7 @@ def aggregate_listing_to_parquet(
         n_partitions = _build_partitioned(
             con, files_sql_for, partition_depth,
             sum_cols=tuple(sum_cols), mean_mtime=mean_mtime, extra_dir_cols=extra_dir_cols,
-            labels=labels,
+            labels=labels, side=side_tbl,
         )
     else:
         n_partitions = 0
@@ -778,7 +855,7 @@ def aggregate_listing_to_parquet(
             )
             SELECT DISTINCT p AS path FROM anc
         """)
-        con.execute(_dir_rows_insert('inputs', 'dir_paths', extra_dir_cols, labels))
+        con.execute(_dir_rows_insert('inputs', 'dir_paths', extra_dir_cols, labels, side_tbl))
         con.execute("DROP TABLE dir_paths")
         _stage("dir rows synthesized")
 
@@ -786,7 +863,10 @@ def aggregate_listing_to_parquet(
         # file row (path/parent/uri object strings) — ~60GB RSS at 92.7M rows.
         # Here the normalization + concat + sort stay inside DuckDB (spillable) and
         # the output goes straight to parquet via COPY.
-        _build_dirs_cascade(con, sum_cols=tuple(sum_cols), mean_mtime=mean_mtime, group_cols=group_cols)
+        _build_dirs_cascade(
+            con, sum_cols=tuple(sum_cols), mean_mtime=mean_mtime,
+            group_cols=group_cols, max_cols=max_cols,
+        )
         con.execute("CREATE VIEW files_src AS SELECT * FROM inputs WHERE kind = 'file'")
     _stage("cascade done")
     parent_of_agg = _PARENT_EXPR.format(col='path')
@@ -804,10 +884,12 @@ def aggregate_listing_to_parquet(
             f" THEN SUM(d.{MT_WSUM})::VARCHAR::DOUBLE / SUM(d.size)::DOUBLE"
             f" END AS {MTIME_MEAN}"
         )
-    extra_names = ''.join(f', {c}' for c in [*sum_cols, *([MTIME_MEAN] if mean_mtime else [])])
+    extra_out += ''.join(f', MAX(d.{c}) AS {c}' for c in max_cols)
+    extra_names = ''.join(f', {c}' for c in [*sum_cols, *([MTIME_MEAN] if mean_mtime else [])]) + max_names
     file_extra = ''.join(f', {c}' for c in sum_cols)
     if mean_mtime:
         file_extra += f', mtime::DOUBLE AS {MTIME_MEAN}'
+    file_extra += max_names
     # Materialize the (small — one row per dir) aggregated dir table first, so
     # the join + group-by run alone; the giant COPY below is then a pure
     # union + sort + write. One operator at a time: v3/v4 post-mortems showed
@@ -895,6 +977,7 @@ def aggregate_listing_to_parquet(
     con.execute("DROP TABLE IF EXISTS inputs")
     con.execute("DROP TABLE dirs_final")
     con.execute("DROP TABLE IF EXISTS labels")
+    con.execute("DROP TABLE IF EXISTS side")
     if temp_dir is None:
         import shutil
         shutil.rmtree(spill_dir, ignore_errors=True)

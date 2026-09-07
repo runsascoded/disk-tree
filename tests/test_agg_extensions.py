@@ -441,3 +441,113 @@ def test_label_requires_duckdb_engine(tmp_path: Path):
             db=None, storage=None, con=None, engine='pandas', listings=('x',), bucket='b1',
             scheme='gcs', snap_time=_ts(1), label='labels.parquet',
         )
+
+
+# ---------- Side table → subtree MAX columns (spec mgu-scale-unification.md, item D.4) ----------
+
+def _write_side(path: Path) -> str:
+    """A per-scan access state: `.` is the root (2a convention); a `bucket`
+    column restricts the join; `top.txt` is a file with its own read."""
+    pd.DataFrame({
+        'bucket': ['b1', 'b1', 'b1', 'b1', 'b2'],
+        'path': ['.', 'data/cold/old.bin', 'data/hot.bin', 'top.txt', 'archive'],
+        'last_ts': [_ts(2), _ts(9), _ts(12), _ts(7), _ts(30)],
+        'read_ops': [10, 1, 2, 3, 99],
+    }).to_parquet(path)
+    return str(path)
+
+
+def _run_side(tmp_path: Path, listing: str, side: str | None, name: str, max_cols=('last_ts',), **kw) -> pd.DataFrame:
+    con = duckdb.connect()
+    out = str(tmp_path / f'{name}.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=out, con=con,
+        pivot_sums=('storage_class_id',), mean_mtime=True, side=side, max_cols=max_cols, **kw,
+    )
+    return pd.read_parquet(out)
+
+
+def test_side_max_col_is_subtree_max(tmp_path: Path):
+    """`last_ts` per path = MAX over the path's own side row and its subtree;
+    NULL where nothing beneath was read; the `b2` row is ignored."""
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    df = _run_side(tmp_path, listing, _write_side(tmp_path / 'side.parquet'), 'side')
+    assert list(df.columns) == [
+        'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
+        *EXT_COLS, 'last_ts', 'uri', 'depth',
+    ]
+    got = [(r.path, None if pd.isna(r.last_ts) else r.last_ts.to_pydatetime()) for r in df.itertuples()]
+    assert got == [
+        ('.', _ts(12)),
+        ('archive', None),
+        ('data', _ts(12)),
+        ('empty', None),
+        ('top.txt', _ts(7)),
+        ('archive/a.bin', None),
+        ('archive/b.bin', None),
+        ('data/cold', _ts(9)),
+        ('data/hot.bin', _ts(12)),
+        ('data/warm.bin', None),
+        ('empty/marker', None),
+        ('data/cold/old.bin', _ts(9)),
+    ]
+    # Everything else is untouched by the side table.
+    base = _run_side(tmp_path, listing, None, 'base', max_cols=())
+    pd.testing.assert_frame_equal(df.drop(columns=['last_ts']), base)
+
+
+def test_side_max_cols_with_labels_and_partitions(tmp_path: Path):
+    """Two MAX columns, sliced by labels, under the partitioned cascade: each
+    slice's max is over its own rows (slices are disjoint), identical for every
+    partition depth."""
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    side = _write_side(tmp_path / 'side.parquet')
+    labels = _write_labels(tmp_path / 'labels.parquet')
+    one = _run_side(tmp_path, listing, side, 'one', max_cols=('last_ts', 'read_ops'), label=labels)
+    for k in (1, 2):
+        part = _run_side(tmp_path, listing, side, f'k{k}', max_cols=('last_ts', 'read_ops'), label=labels, partition_depth=k)
+        pd.testing.assert_frame_equal(one, part)
+    rows = [
+        (r.path, r.team, r.usr, None if pd.isna(r.last_ts) else r.last_ts.to_pydatetime(),
+         None if pd.isna(r.read_ops) else int(r.read_ops))
+        for r in one[one.depth <= 1].itertuples()
+    ]
+    assert rows == [
+        # the root's own read (10 ops, day 2) lands in the root dir's own slice (NULL, NULL)
+        ('.', None, None, _ts(2), 10),
+        ('.', 't1', 'alice', _ts(12), 2),
+        ('.', 't1', 'bob', _ts(9), 1),
+        ('.', 't2', None, None, None),
+        ('.', 't3', 'carol', _ts(7), 3),
+        ('archive', 't2', None, None, None),
+        ('data', 't1', 'alice', _ts(12), 2),
+        ('data', 't1', 'bob', _ts(9), 1),
+        ('empty', None, None, None, None),
+        ('top.txt', 't3', 'carol', _ts(7), 3),
+    ]
+
+
+def test_side_validation(tmp_path: Path):
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    side = _write_side(tmp_path / 'side.parquet')
+    with pytest.raises(ValueError, match="--max-col needs --side"):
+        _run_side(tmp_path, listing, None, 'x')
+    with pytest.raises(ValueError, match="--side needs at least one --max-col"):
+        _run_side(tmp_path, listing, side, 'x', max_cols=())
+    with pytest.raises(ValueError, match=r"side table .*: missing column\(s\) \['nope'\]"):
+        _run_side(tmp_path, listing, side, 'x', max_cols=('nope',))
+    with pytest.raises(ValueError, match=r"side column\(s\) \['size'\] collide"):
+        pd.DataFrame({'path': ['.'], 'size': [1]}).to_parquet(tmp_path / 'clash.parquet')
+        _run_side(tmp_path, listing, str(tmp_path / 'clash.parquet'), 'x', max_cols=('size',))
+    pd.DataFrame({'path': ['a', 'a'], 'last_ts': [_ts(1), _ts(2)]}).to_parquet(tmp_path / 'dupe.parquet')
+    with pytest.raises(ValueError, match=r"duplicate path\(s\) \['a'\]"):
+        _run_side(tmp_path, listing, str(tmp_path / 'dupe.parquet'), 'x')
+    pd.DataFrame({'p': ['a']}).to_parquet(tmp_path / 'nopath.parquet')
+    with pytest.raises(ValueError, match=r"no `path` column \(has \['p'\]\)"):
+        _run_side(tmp_path, listing, str(tmp_path / 'nopath.parquet'), 'x', max_cols=('p',))
+    from disk_tree.cli.import_listing import import_bucket
+    with pytest.raises(ValueError, match="--side/--max-col is a duckdb-engine feature; got engine='stream'"):
+        import_bucket(
+            db=None, storage=None, con=None, engine='stream', listings=('x',), bucket='b1',
+            scheme='gcs', snap_time=_ts(1), side=side, max_cols=('last_ts',),
+        )

@@ -55,12 +55,13 @@ def access_import_cmd(out_parquet: str, store: str, memory_limit: str, temp_dir:
 
 
 @access.command('agg')
+@option('-a', '--as-of', default=None, help='Drop requests at/after this instant (ISO 8601; naive = UTC) — the listing\'s as-of, e.g. `_SUCCESS.json` `started`')
 @option('-o', '--out', 'out_parquet', required=True, help='Output layer-2a parquet path')
 @option('-M', '--memory-limit', default='4GB')
 @option('-T', '--temp-dir', default=None)
 @argument('raw_glob')
-def access_agg_cmd(out_parquet: str, memory_limit: str, temp_dir: str | None, raw_glob: str):
-    """Aggregate canonical rows at RAW_GLOB → layer-2a per-path per-day per-op tree at --out."""
+def access_agg_cmd(as_of: str | None, out_parquet: str, memory_limit: str, temp_dir: str | None, raw_glob: str):
+    """Aggregate canonical rows at RAW_GLOB → layer-2a per-path per-hour per-op tree at --out."""
     import duckdb
     from disk_tree.access.aggregate import aggregate_access
 
@@ -73,11 +74,53 @@ def access_agg_cmd(out_parquet: str, memory_limit: str, temp_dir: str | None, ra
     if temp_dir:
         con.execute(f"SET temp_directory = '{temp_dir}'")
 
-    stats = aggregate_access(con, f"(SELECT * FROM read_parquet('{raw_glob}'))", out_parquet)
+    stats = aggregate_access(con, f"(SELECT * FROM read_parquet('{raw_glob}'))", out_parquet, as_of=as_of)
     err(
-        f"aggregated {stats['rows_in']:,} rows over {stats['days']} day(s) → "
+        f"aggregated {stats['rows_in']:,} rows over {stats['hours']} hour(s) → "
         f"{stats['paths_out']:,} paths, {stats['total_bytes_out']:,} bytes_out at root "
         f"→ {out_parquet}"
+    )
+
+
+@access.command('state')
+@option('-a', '--as-of', required=True, help="The scan's as-of instant (ISO 8601; naive = UTC): state covers reads before it")
+@option('-l', '--live', 'live', required=True, multiple=True, help="The scan's dirs tier (or layer-2 blob), one per bucket; repeatable. Only these dirs are kept")
+@option('-M', '--memory-limit', default='4GB')
+@option('-o', '--out', 'out_parquet', required=True, help='Output state parquet path')
+@option('-p', '--prev', default=None, help='Previous state parquet: carried forward (minus dead dirs); its `as_of` opens the window')
+@option('-T', '--temp-dir', default=None)
+@argument('agg_glob')
+def access_state_cmd(
+    as_of: str,
+    live: tuple[str, ...],
+    memory_limit: str,
+    out_parquet: str,
+    prev: str | None,
+    temp_dir: str | None,
+    agg_glob: str,
+):
+    """Per-scan read state — one row per live dir with any read history — from layer-2a AGG_GLOB.
+
+    `import --side <state> --max-col last_ts` joins it into the size cascade
+    as a subtree-max column.
+    """
+    import duckdb
+    from disk_tree.access.state import build_state
+
+    con = duckdb.connect()
+    con.execute(f"SET memory_limit = '{memory_limit}'")
+    con.execute("SET preserve_insertion_order = false")
+    if temp_dir:
+        con.execute(f"SET temp_directory = '{temp_dir}'")
+
+    stats = build_state(
+        con, f"(SELECT * FROM read_parquet('{agg_glob}'))", out_parquet,
+        as_of=as_of, live=live, prev=prev,
+    )
+    err(
+        f"state @ {stats['as_of']}: {stats['rows']:,} read dirs of {stats['live_dirs']:,} live "
+        f"({stats['carried']:,} carried, {stats['dropped']:,} dropped, {stats['new']:,} touched since "
+        f"{stats['prev_as_of'] or 'the beginning'}) → {out_parquet}"
     )
 
 
