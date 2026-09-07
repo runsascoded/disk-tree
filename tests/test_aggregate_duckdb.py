@@ -316,3 +316,123 @@ def test_cli_engine_duckdb_creates_scan(tmp_path: Path):
     conn.close()
     # Matches the pandas-engine test's expected shape (byte-parity is enforced elsewhere)
     assert rows == [('gcs://b1', 300, 2, 4)]
+
+
+# ---------- Fleet-scale cascade (spec mgu-scale-unification.md, item A) ----------
+#
+# Both knobs are pure memory levers: output must stay byte-identical to the
+# single in-memory cascade for every `partition_depth` and `db` setting. The
+# identity listing is the fixture — its `//` keys are exactly the rows a
+# name-range pushdown would miss without the dirty-key side table.
+
+def _identity_listing(tmp_path: Path) -> str:
+    listing = tmp_path / 'identity-listing.parquet'
+    pd.DataFrame({
+        'bucket': ['b1'] * len(_IDENTITY_LISTING),
+        'name': [n for n, _ in _IDENTITY_LISTING],
+        'size_bytes': [s for _, s in _IDENTITY_LISTING],
+        'created': [TS] * len(_IDENTITY_LISTING),
+        'storage_class_id': [1] * len(_IDENTITY_LISTING),
+    }).to_parquet(listing)
+    return str(listing)
+
+
+def _run_ooc(listing: str, out: Path, **kw) -> tuple[pd.DataFrame, dict]:
+    con = duckdb.connect()
+    stats = aggregate_listing_to_parquet(
+        prepare_listing(con, (listing,)),
+        bucket='b1', scheme='gcs', out_parquet=str(out), con=con, **kw,
+    )
+    return _normalize(pd.read_parquet(out)), stats
+
+
+_IDENTITY_STATS = {
+    'rows': 57,
+    'files': 38,
+    'root_size': 23837,
+    'root_n_desc': 57,
+    'root_n_files': 38,
+    'root_n_children': 13,
+    'root_mtime': int(TS.timestamp()),
+}
+
+
+@pytest.mark.parametrize('depth, partitions', [
+    # k=1: every top-level name is its own partition, root-level files included
+    (1, 13),
+    # k=2: 3 root-level files fall to the top cascade; `many/` fans out to 20
+    (2, 34),
+    # k=3: only the subtrees that reach depth 3
+    (3, 8),
+    # deeper than the tree: everything is "shallow" → the top cascade alone
+    (6, 0),
+])
+def test_partitioned_cascade_is_byte_identical(tmp_path: Path, depth: int, partitions: int):
+    listing = _identity_listing(tmp_path)
+    base, base_stats = _run_ooc(listing, tmp_path / 'base.parquet')
+    got, stats = _run_ooc(listing, tmp_path / f'k{depth}.parquet', partition_depth=depth)
+    pd.testing.assert_frame_equal(base, got)
+    stats.pop('max_rss_mb')
+    base_stats.pop('max_rss_mb')
+    assert base_stats == {**_IDENTITY_STATS, 'partitions': 0}
+    assert stats == {**_IDENTITY_STATS, 'partitions': partitions}
+
+
+def test_partition_depth_negative_raises(tmp_path: Path):
+    listing = _identity_listing(tmp_path)
+    with pytest.raises(ValueError, match="partition_depth must be >= 0; got -1"):
+        _run_ooc(listing, tmp_path / 'x.parquet', partition_depth=-1)
+
+
+def test_file_backed_db_in_directory_is_temporary(tmp_path: Path):
+    """`db=<dir>`: the cascade runs in a fresh database file under it, removed on success."""
+    listing = _identity_listing(tmp_path)
+    base, _ = _run_ooc(listing, tmp_path / 'base.parquet')
+    db_dir = tmp_path / 'spill-disk'
+    db_dir.mkdir()
+    got, stats = _run_ooc(listing, tmp_path / 'db.parquet', db=str(db_dir), partition_depth=2)
+    pd.testing.assert_frame_equal(base, got)
+    assert stats['partitions'] == 34
+    assert sorted(p.name for p in db_dir.iterdir()) == []
+
+
+def test_file_backed_db_path_is_kept_and_left_empty(tmp_path: Path):
+    """`db=<file>`: the database is the user's (post-mortems); every working
+    table is dropped by the end, so a clean run leaves it empty."""
+    listing = _identity_listing(tmp_path)
+    base, _ = _run_ooc(listing, tmp_path / 'base.parquet')
+    db_file = tmp_path / 'cascade.duckdb'
+    got, _ = _run_ooc(listing, tmp_path / 'db.parquet', db=str(db_file))
+    pd.testing.assert_frame_equal(base, got)
+    assert db_file.exists()
+    con = duckdb.connect(str(db_file))
+    assert con.execute("SELECT table_name FROM duckdb_tables() ORDER BY 1").fetchall() == []
+    assert con.execute("SELECT view_name FROM duckdb_views() WHERE NOT internal ORDER BY 1").fetchall() == []
+    con.close()
+
+
+def test_cli_engine_duckdb_partitioned_file_backed_creates_scan(tmp_path: Path):
+    listing = tmp_path / 'listing.parquet'
+    pd.DataFrame({
+        'bucket': ['b1', 'b1', 'b1'],
+        'name': ['a.txt', 'sub/b.txt', 'sub/deep/c.txt'],
+        'size_bytes': [100, 200, 300],
+        'created': [TS, TS, TS],
+        'storage_class_id': [1, 1, 1],
+    }).to_parquet(listing)
+    root = tmp_path / 'dt-root'
+    db_dir = tmp_path / 'db'
+    db_dir.mkdir()
+    env = {**os.environ, 'DISK_TREE_ROOT': str(root)}
+    r = subprocess.run(
+        [sys.executable, '-m', 'disk_tree.cli.main', 'import',
+         '-e', 'duckdb', '-l', str(listing), '-b', 'b1', '-t', TS.isoformat(),
+         '-k', '1', '-d', str(db_dir)],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert r.returncode == 0, f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    conn = sqlite3.connect(root / 'disk-tree.db')
+    rows = conn.execute("SELECT path, size, n_children, n_desc FROM scan").fetchall()
+    conn.close()
+    assert rows == [('gcs://b1', 600, 2, 6)]
+    assert sorted(p.name for p in db_dir.iterdir()) == []

@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import sys
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import pandas as pd
 
@@ -40,11 +40,55 @@ _PARENT_EXPR = (
     "ELSE '' END"
 )
 
+# Segment count of a canonical path: '' → 0, 'a' → 1, 'a/b' → 2 — the same
+# arithmetic the output's `depth` column uses.
+_NSEG_EXPR = (
+    "CASE WHEN {col} = '' THEN 0 "
+    "ELSE length({col}) - length(replace({col}, '/', '')) + 1 END"
+)
+
+
+def _part_expr(col: str, k: int) -> str:
+    """Depth-`k` prefix of a canonical path (the partition key); NULL for paths
+    shallower than `k` segments (they belong to the shared top partition)."""
+    nseg = _NSEG_EXPR.format(col=col)
+    return (
+        f"CASE WHEN {nseg} >= {k} "
+        f"THEN array_to_string(list_slice(string_split({col}, '/'), 1, {k}), '/') END"
+    )
+
 
 def _stage(msg: str) -> None:
     """Stage-boundary log line (stderr): OOM post-mortems need to know which
     statement was in flight — a SIGKILL leaves no traceback."""
     print(f"[agg {datetime.now().isoformat(timespec='seconds')}] {msg}", file=sys.stderr, flush=True)
+
+
+def _max_rss_mb() -> float:
+    """Peak RSS of this process (MiB) — the number the fleet-scale gate reports."""
+    import resource
+    rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # Linux reports KiB, macOS bytes.
+    return rss / 1024 if sys.platform == 'linux' else rss / (1024 * 1024)
+
+
+def _open_db(db: str | None) -> "tuple[duckdb.DuckDBPyConnection | None, str | None]":
+    """Open the cascade's database when `db` asks for a file-backed one.
+
+    `db` is a DuckDB database file (created if missing; left in place, so a
+    post-mortem can inspect what the cascade left behind) or an existing
+    directory, in which case a fresh file is created inside it and removed
+    once the aggregation succeeds. `None` → in-memory (the caller's
+    connection is used as-is).
+    """
+    if db is None:
+        return None, None
+    import duckdb as _duckdb
+    if os.path.isdir(db):
+        from uuid import uuid4
+        path = os.path.join(db, f'disk-tree-agg-{uuid4().hex}.duckdb')
+        return _duckdb.connect(path), path
+    return _duckdb.connect(db), None
 
 
 def _register_inputs(con: "duckdb.DuckDBPyConnection", inputs: pd.DataFrame) -> None:
@@ -70,14 +114,23 @@ def _build_dirs_cascade(
     con: "duckdb.DuckDBPyConnection",
     sum_cols: tuple[str, ...] = (),
     mean_mtime: bool = False,
+    src: str = 'inputs',
+    out: str = 'dirs_all',
+    n_children: str = 'n_children_tbl',
+    tag: str = '',
 ) -> None:
-    """Bottom-up group-by cascade over `inputs` → `dirs_all` + `n_children_tbl` tables.
+    """Bottom-up group-by cascade over `src` → `out` + `n_children` tables.
 
-    `sum_cols` are extra monoid columns on `inputs` (per-file contributions;
+    `sum_cols` are extra monoid columns on `src` (per-file contributions;
     0 on dir rows) summed through the cascade unchanged. With `mean_mtime`,
-    `inputs` must carry `mt_wsum` (HUGEINT Σ mtime·size partials — exact, no
+    `src` must carry `mt_wsum` (HUGEINT Σ mtime·size partials — exact, no
     float-summation order sensitivity); consumers divide it into the
     `mtime_mean` output column (see find/agg_ext.py).
+
+    `out` holds one row per (level, path): a path's totals are the SUM over
+    its rows, so a partitioned build can append several cascades' outputs
+    (stub ancestors included) into one table and fold them in a single
+    GROUP BY. `tag` prefixes the stage log lines.
     """
     from .agg_ext import MT_WSUM
     cascade_cols = [*sum_cols, *([MT_WSUM] if mean_mtime else [])]
@@ -96,7 +149,7 @@ def _build_dirs_cascade(
     con.execute(f"""
         CREATE OR REPLACE TABLE dirs0 AS
         SELECT path, size, mtime, 1::BIGINT AS n_desc, 0::BIGINT AS n_files{extra_sel}
-        FROM inputs
+        FROM {src}
         WHERE kind = 'dir'
     """)
 
@@ -104,9 +157,9 @@ def _build_dirs_cascade(
     # Faithful to pandas `grouped.size()` at level 0 (only). Rows with path='' don't count
     # (that's the scan root; it has no parent).
     con.execute(f"""
-        CREATE OR REPLACE TABLE n_children_tbl AS
+        CREATE OR REPLACE TABLE {n_children} AS
         SELECT parent AS path, COUNT(*)::BIGINT AS n_children
-        FROM inputs
+        FROM {src}
         WHERE path != ''
         GROUP BY parent
     """)
@@ -119,7 +172,7 @@ def _build_dirs_cascade(
         SELECT path, size, mtime,
                1::BIGINT AS n_desc,
                CASE WHEN kind = 'file' THEN 1 ELSE 0 END::BIGINT AS n_files{extra_sel}
-        FROM inputs
+        FROM {src}
     """)
     level_tables: list[str] = []
     level = 0
@@ -137,7 +190,7 @@ def _build_dirs_cascade(
             GROUP BY 1
         """)
         cnt = con.execute(f"SELECT COUNT(*) FROM {next_tbl}").fetchone()[0]
-        _stage(f"cascade level {level}: {cnt} rows")
+        _stage(f"{tag}cascade level {level}: {cnt} rows")
         if cnt == 0:
             break
         level_tables.append(next_tbl)
@@ -152,20 +205,21 @@ def _build_dirs_cascade(
             f"SELECT {base_cols} FROM {t}" for t in level_tables
         )
         con.execute(f"""
-            CREATE OR REPLACE TABLE dirs_all AS
+            CREATE OR REPLACE TABLE {out} AS
             SELECT {base_cols} FROM dirs0
             UNION ALL
             {levels_union}
         """)
     else:
         con.execute(f"""
-            CREATE OR REPLACE TABLE dirs_all AS
+            CREATE OR REPLACE TABLE {out} AS
             SELECT {base_cols} FROM dirs0
         """)
 
-    # The level tables are folded into dirs_all; keeping them alive doubles the
+    # The level tables are folded into `out`; keeping them alive doubles the
     # cascade's disk footprint (spill exhaustion at the 92.7M-row scale).
-    for t in ['dirs0', 'level_cur', *level_tables]:
+    # `next_tbl` is the empty level that ended the loop.
+    for t in ['dirs0', 'level_cur', *level_tables, next_tbl]:
         con.execute(f"DROP TABLE IF EXISTS {t}")
 
 
@@ -284,6 +338,212 @@ def _sql_lit(v) -> str:
     return f"'{escaped}'"
 
 
+def _files_select(
+    listing_sql: str,
+    bucket: str,
+    extra_file_cols: str,
+    pivot_pass: str,
+    where: str = '',
+) -> str:
+    """Canonical file rows (`path, size, mtime, kind, parent, <extras>`) straight
+    off the listing — the one place the layer-1 → input-row mapping lives.
+
+    `where` is an extra predicate over the raw listing columns (`name`,
+    `canonical`), used by the partitioned build to hand DuckDB a range on
+    `name` it can push into the parquet row-group statistics.
+    """
+    # Collapse consecutive slashes + strip trailing slashes so `a//b` reads as
+    # `a/b`. Keys with empty path components exist in real listings (marin's
+    # 2026-08-14 west4 scan has `tokenized/…//.artifact.json`); leaving the
+    # trailing slash on the intermediate dir breaks the parent-of regex below
+    # (regexp_extract fails to match a trailing-`/` string → returns '' → the
+    # dir gets hoisted to the tree root, moving bytes across subtrees).
+    canonical_name = "rtrim(regexp_replace(name, '/+', '/', 'g'), '/')"
+    parent_of_name = _PARENT_EXPR.format(col='canonical')
+    return f"""
+        WITH canon AS (
+            SELECT
+                name,
+                {canonical_name} AS canonical,
+                size_bytes,
+                created{pivot_pass}
+            FROM {listing_sql}
+            WHERE bucket = '{bucket}'{where}
+        )
+        SELECT
+            canonical AS path,
+            size_bytes::BIGINT AS size,
+            -- floor, not ::BIGINT (which rounds): epoch-seconds truncate by
+            -- convention, and the stream engine's pyarrow int-division floors —
+            -- rounding here skewed ~50% of real (sub-second) timestamps +1s
+            COALESCE(floor(epoch(created)), 0)::BIGINT AS mtime,
+            'file'::VARCHAR AS kind,
+            {parent_of_name} AS parent{extra_file_cols}
+        FROM canon
+    """
+
+
+def _dir_rows_insert(table: str, dir_paths: str, extra_dir_cols: str) -> str:
+    """INSERT synthesized dir rows (size/mtime 0, extras 0) for every path in `dir_paths`."""
+    return f"""
+        INSERT INTO {table}
+        SELECT
+            path,
+            0::BIGINT AS size,
+            0::BIGINT AS mtime,
+            'dir'::VARCHAR AS kind,
+            {_PARENT_EXPR.format(col='path')} AS parent{extra_dir_cols}
+        FROM {dir_paths}
+    """
+
+
+def _build_partitioned(
+    con: "duckdb.DuckDBPyConnection",
+    files_sql_for: "Callable[[str], str]",
+    k: int,
+    sum_cols: tuple[str, ...],
+    mean_mtime: bool,
+    extra_dir_cols: str,
+) -> int:
+    """Prefix-partitioned cascade (spec mgu-scale-unification.md A.2) → `dirs_all` + `n_children_tbl`.
+
+    A dir and all its descendants share their depth-`k` prefix, so each
+    distinct prefix is cascaded on its own from a partition-sized input table
+    built straight off the listing (a `name` range predicate lets DuckDB skip
+    the row groups of other partitions when the shards are prefix-contiguous,
+    as bulk-list's are). Each cascade climbs to the root, leaving stub rows
+    for the ancestors above depth `k`; a final *top* cascade covers the rows
+    shallower than `k` (files at depth < k, and the shallow dirs' own
+    `n_desc=1` contributions). Every input row lands in exactly one cascade,
+    and `dirs_all` is one-row-per-(cascade, level, path), so the caller's
+    GROUP BY folds the stubs exactly. Peak memory ∝ the largest partition.
+
+    `files_sql_for(where)` returns the canonical file-row SELECT restricted by
+    a predicate over the raw listing columns. Returns the partition count
+    (excluding top).
+    """
+    part_of_path = _part_expr('path', k)
+    nseg_p = _NSEG_EXPR.format(col='p')
+    parent_of_p = _PARENT_EXPR.format(col='p')
+
+    # One pass over the listing: the partition keys and their row counts.
+    parts = con.execute(f"""
+        SELECT {part_of_path} AS part, COUNT(*) AS n
+        FROM ({files_sql_for('')})
+        GROUP BY 1
+        ORDER BY 1 NULLS FIRST
+    """).fetchall()
+    n_top = next((n for p, n in parts if p is None), 0)
+    keys = [p for p, _ in parts if p is not None]
+    _stage(f"partition depth {k}: {len(keys)} partitions"
+           f" (largest {max((n for p, n in parts if p is not None), default=0)} files), {n_top} shallow files")
+
+    # Dirty keys (`a//b`) canonicalize to a different sort position than their
+    # raw name, so the per-partition `name` range can miss them. They are rare;
+    # gather them once and give every partition its share by exact key.
+    con.execute(f"""
+        CREATE OR REPLACE TABLE dirty AS
+        {files_sql_for(' AND name <> ' + "rtrim(regexp_replace(name, '/+', '/', 'g'), '/')")}
+    """)
+    n_dirty = con.execute("SELECT COUNT(*) FROM dirty").fetchone()[0]
+    _stage(f"{n_dirty} dirty keys held aside")
+
+    con.execute("CREATE OR REPLACE TABLE partitions (part VARCHAR)")
+    if keys:
+        con.executemany("INSERT INTO partitions VALUES (?)", [(key,) for key in keys])
+
+    # Accumulators: every cascade appends its (level, path) rows here.
+    con.execute("DROP TABLE IF EXISTS dirs_all")
+    con.execute("DROP TABLE IF EXISTS n_children_parts")
+
+    def _append(first: bool) -> None:
+        if first:
+            con.execute("CREATE TABLE dirs_all AS SELECT * FROM dirs_all_p")
+            con.execute("CREATE TABLE n_children_parts AS SELECT * FROM n_children_p")
+        else:
+            con.execute("INSERT INTO dirs_all SELECT * FROM dirs_all_p")
+            con.execute("INSERT INTO n_children_parts SELECT * FROM n_children_p")
+        con.execute("DROP TABLE dirs_all_p")
+        con.execute("DROP TABLE n_children_p")
+
+    for i, key in enumerate(keys):
+        lit = _sql_lit(key)
+        # Clean keys (name == canonical) with this prefix sit in the contiguous
+        # name range [key, key] ∪ [key/, key0) ('/' + 1 == '0'); the exact
+        # `part` predicate on top of it is what makes the range merely a hint.
+        clean = files_sql_for(
+            f" AND name = rtrim(regexp_replace(name, '/+', '/', 'g'), '/')"
+            f" AND (name = {lit} OR (name >= {lit} || '/' AND name < {lit} || '0'))"
+        )
+        con.execute(f"""
+            CREATE OR REPLACE TABLE inputs_p AS
+            SELECT * FROM ({clean}) WHERE {part_of_path} = {lit}
+            UNION ALL
+            SELECT * FROM dirty WHERE {part_of_path} = {lit}
+        """)
+        # Ancestors inside the partition only (depth ≥ k); shallower ones are
+        # the top cascade's, so their n_desc=1 is counted exactly once.
+        con.execute(f"""
+            CREATE OR REPLACE TABLE dir_paths_p AS
+            WITH RECURSIVE anc(p) AS (
+                SELECT DISTINCT parent FROM inputs_p
+                UNION
+                SELECT {parent_of_p} FROM anc WHERE {nseg_p} > {k}
+            )
+            SELECT DISTINCT p AS path FROM anc WHERE {nseg_p} >= {k}
+        """)
+        con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols))
+        con.execute("DROP TABLE dir_paths_p")
+        _build_dirs_cascade(
+            con, sum_cols=sum_cols, mean_mtime=mean_mtime,
+            src='inputs_p', out='dirs_all_p', n_children='n_children_p',
+            tag=f"[{i + 1}/{len(keys)} {key}] ",
+        )
+        _append(first=i == 0)
+    con.execute("DROP TABLE dirty")
+
+    # Top cascade: files shallower than k, plus every shallow dir — the
+    # ancestors of the partition keys and of the shallow files, and the root.
+    con.execute(f"""
+        CREATE OR REPLACE TABLE inputs_p AS
+        SELECT * FROM ({files_sql_for('')}) WHERE {part_of_path} IS NULL
+    """)
+    con.execute(f"""
+        CREATE OR REPLACE TABLE dir_paths_p AS
+        WITH RECURSIVE anc(p) AS (
+            SELECT DISTINCT parent FROM inputs_p
+            UNION
+            SELECT DISTINCT {_PARENT_EXPR.format(col='part')} FROM partitions
+            UNION
+            SELECT '' AS p
+            UNION
+            SELECT {parent_of_p} FROM anc WHERE p != ''
+        )
+        SELECT DISTINCT p AS path FROM anc
+    """)
+    con.execute(_dir_rows_insert('inputs_p', 'dir_paths_p', extra_dir_cols))
+    con.execute("DROP TABLE dir_paths_p")
+    con.execute("DROP TABLE partitions")
+    _build_dirs_cascade(
+        con, sum_cols=sum_cols, mean_mtime=mean_mtime,
+        src='inputs_p', out='dirs_all_p', n_children='n_children_p', tag='[top] ',
+    )
+    _append(first=not keys)
+    con.execute("DROP TABLE inputs_p")
+
+    # A shallow dir's children are split across cascades (its depth-k children
+    # each count from their own partition); fold to one row per path — the
+    # join below multiplies rows otherwise.
+    con.execute("""
+        CREATE OR REPLACE TABLE n_children_tbl AS
+        SELECT path, SUM(n_children)::BIGINT AS n_children
+        FROM n_children_parts
+        GROUP BY path
+    """)
+    con.execute("DROP TABLE n_children_parts")
+    return len(keys)
+
+
 def aggregate_listing_to_parquet(
     listing_sql: str,
     bucket: str,
@@ -295,6 +555,8 @@ def aggregate_listing_to_parquet(
     max_temp_size: str | None = None,
     pivot_sums: tuple[str, ...] = (),
     mean_mtime: bool = False,
+    db: str | None = None,
+    partition_depth: int = 0,
 ) -> dict:
     """Out-of-core: layer-1 listing (via `listing_sql`) → layer-2 parquet on disk.
 
@@ -305,9 +567,27 @@ def aggregate_listing_to_parquet(
     to `temp_dir` under `memory_limit`. Writes the final canonical DataFrame
     (files + synthesized dirs, n_desc/n_children/depth attached) as a single
     parquet at `out_parquet`. Returns a small stats dict for the caller.
+
+    Fleet-scale knobs (spec mgu-scale-unification.md, item A):
+
+    - `db`: run the cascade in a file-backed database (a `.duckdb` path, or a
+      directory to create a temporary one in) so the level tables live in the
+      buffer pool and page to disk under `memory_limit`, instead of being
+      pinned in RAM as an in-memory database's base tables are. `con` is then
+      only used to read the listing's schema.
+    - `partition_depth`: cascade each distinct depth-k prefix separately
+      (see :func:`_build_partitioned`) — peak memory ∝ the largest partition
+      rather than the whole listing. 0 = one cascade over everything.
+
+    Output is byte-identical for every combination.
     """
     import duckdb as _duckdb
-    if con is None:
+    if partition_depth < 0:
+        raise ValueError(f"partition_depth must be >= 0; got {partition_depth}")
+    db_con, db_tmp = _open_db(db)
+    if db_con is not None:
+        con = db_con
+    elif con is None:
         con = _duckdb.connect()
     con.execute(f"SET memory_limit = '{memory_limit}'")
     con.execute("SET preserve_insertion_order = false")
@@ -329,14 +609,6 @@ def aggregate_listing_to_parquet(
 
     from disk_tree.backends.url import canonical
     scan_root = canonical(f'{scheme}://{bucket}')  # `file` roots → the bare path
-    # Collapse consecutive slashes + strip trailing slashes so `a//b` reads as
-    # `a/b`. Keys with empty path components exist in real listings (marin's
-    # 2026-08-14 west4 scan has `tokenized/…//.artifact.json`); leaving the
-    # trailing slash on the intermediate dir breaks the parent-of regex below
-    # (regexp_extract fails to match a trailing-`/` string → returns '' → the
-    # dir gets hoisted to the tree root, moving bytes across subtrees).
-    canonical_name = "rtrim(regexp_replace(name, '/+', '/', 'g'), '/')"
-    parent_of_name = _PARENT_EXPR.format(col='canonical')
 
     # Extension columns (see find/agg_ext.py): per-pivot-value byte sums as
     # file-level contributions, plus the exact HUGEINT Σ mtime·size partial.
@@ -361,69 +633,58 @@ def aggregate_listing_to_parquet(
             f", (COALESCE(floor(epoch(created)), 0)::BIGINT::HUGEINT * size_bytes::HUGEINT) AS {MT_WSUM}"
         )
     pivot_pass = ''.join(f', {col}' for col in pivot_sums)
-
-    # Build the `inputs` table without a pandas roundtrip: files first, then
-    # synthesized dir rows for every unique ancestor path.
-    con.execute(f"""
-        DROP TABLE IF EXISTS inputs;
-        CREATE TABLE inputs AS
-        WITH canon AS (
-            SELECT
-                {canonical_name} AS canonical,
-                size_bytes,
-                created{pivot_pass}
-            FROM {listing_sql}
-            WHERE bucket = '{bucket}'
-        )
-        SELECT
-            canonical AS path,
-            size_bytes::BIGINT AS size,
-            -- floor, not ::BIGINT (which rounds): epoch-seconds truncate by
-            -- convention, and the stream engine's pyarrow int-division floors —
-            -- rounding here skewed ~50% of real (sub-second) timestamps +1s
-            COALESCE(floor(epoch(created)), 0)::BIGINT AS mtime,
-            'file'::VARCHAR AS kind,
-            {parent_of_name} AS parent{extra_file_cols}
-        FROM canon
-    """)
-
-    n_files = con.execute("SELECT COUNT(*) FROM inputs").fetchone()[0]
-    _stage(f"inputs table: {n_files} file rows")
-    if n_files == 0:
-        raise ValueError(f"no rows for bucket {bucket!r}")
-
-    # Synthesized dir rows: recursively enumerate all unique ancestor paths (incl. '' root).
-    parent_of_p = _PARENT_EXPR.format(col='p')
-    con.execute(f"""
-        CREATE OR REPLACE TABLE dir_paths AS
-        WITH RECURSIVE anc(p) AS (
-            SELECT DISTINCT parent FROM inputs
-            UNION
-            SELECT {parent_of_p} FROM anc WHERE p != ''
-        )
-        SELECT DISTINCT p AS path FROM anc
-    """)
     extra_dir_cols = ''.join(f', 0::BIGINT AS {c}' for c in sum_cols)
     if mean_mtime:
         extra_dir_cols += f', 0::HUGEINT AS {MT_WSUM}'
-    con.execute(f"""
-        INSERT INTO inputs
-        SELECT
-            path,
-            0::BIGINT AS size,
-            0::BIGINT AS mtime,
-            'dir'::VARCHAR AS kind,
-            {_PARENT_EXPR.format(col='path')} AS parent{extra_dir_cols}
-        FROM dir_paths
-    """)
-    con.execute("DROP TABLE dir_paths")
-    _stage("dir rows synthesized")
 
-    # SQL-only tail: the pandas tail in `_aggregate_shared` materializes every
-    # file row (path/parent/uri object strings) — ~60GB RSS at 92.7M rows.
-    # Here the normalization + concat + sort stay inside DuckDB (spillable) and
-    # the output goes straight to parquet via COPY.
-    _build_dirs_cascade(con, sum_cols=tuple(sum_cols), mean_mtime=mean_mtime)
+    def files_sql_for(where: str) -> str:
+        return _files_select(listing_sql, bucket, extra_file_cols, pivot_pass, where=where)
+
+    con.execute("DROP TABLE IF EXISTS inputs")
+    con.execute("DROP VIEW IF EXISTS files_src")
+    if partition_depth:
+        # The listing is never materialized whole: each partition (and the
+        # final COPY's file leg) reads it back through `files_src`.
+        con.execute(f"CREATE VIEW files_src AS {files_sql_for('')}")
+        n_files = con.execute("SELECT COUNT(*) FROM files_src").fetchone()[0]
+        _stage(f"listing: {n_files} file rows")
+        if n_files == 0:
+            raise ValueError(f"no rows for bucket {bucket!r}")
+        n_partitions = _build_partitioned(
+            con, files_sql_for, partition_depth,
+            sum_cols=tuple(sum_cols), mean_mtime=mean_mtime, extra_dir_cols=extra_dir_cols,
+        )
+    else:
+        n_partitions = 0
+        # Build the `inputs` table without a pandas roundtrip: files first, then
+        # synthesized dir rows for every unique ancestor path.
+        con.execute(f"CREATE TABLE inputs AS {files_sql_for('')}")
+        n_files = con.execute("SELECT COUNT(*) FROM inputs").fetchone()[0]
+        _stage(f"inputs table: {n_files} file rows")
+        if n_files == 0:
+            raise ValueError(f"no rows for bucket {bucket!r}")
+
+        # Synthesized dir rows: recursively enumerate all unique ancestor paths (incl. '' root).
+        parent_of_p = _PARENT_EXPR.format(col='p')
+        con.execute(f"""
+            CREATE OR REPLACE TABLE dir_paths AS
+            WITH RECURSIVE anc(p) AS (
+                SELECT DISTINCT parent FROM inputs
+                UNION
+                SELECT {parent_of_p} FROM anc WHERE p != ''
+            )
+            SELECT DISTINCT p AS path FROM anc
+        """)
+        con.execute(_dir_rows_insert('inputs', 'dir_paths', extra_dir_cols))
+        con.execute("DROP TABLE dir_paths")
+        _stage("dir rows synthesized")
+
+        # SQL-only tail: the pandas tail in `_aggregate_shared` materializes every
+        # file row (path/parent/uri object strings) — ~60GB RSS at 92.7M rows.
+        # Here the normalization + concat + sort stay inside DuckDB (spillable) and
+        # the output goes straight to parquet via COPY.
+        _build_dirs_cascade(con, sum_cols=tuple(sum_cols), mean_mtime=mean_mtime)
+        con.execute("CREATE VIEW files_src AS SELECT * FROM inputs WHERE kind = 'file'")
     _stage("cascade done")
     parent_of_agg = _PARENT_EXPR.format(col='path')
     # Extension outputs mirror `_aggregate_shared`'s: pivot sums pass through as
@@ -502,7 +763,7 @@ def aggregate_listing_to_parquet(
                    1::BIGINT AS n_desc, 1::BIGINT AS n_files, 0::BIGINT AS n_children,
                    kind, parent{file_extra},
                    ('{scan_root}/' || path)::VARCHAR AS uri
-            FROM inputs WHERE kind = 'file'
+            FROM files_src
         )
         SELECT *,
                CASE WHEN path = '.' THEN 0
@@ -521,9 +782,20 @@ def aggregate_listing_to_parquet(
         WHERE path = '.' LIMIT 1
     """).df()
     root = root.iloc[0] if len(root) else None
+    con.execute("DROP VIEW files_src")
+    con.execute("DROP TABLE IF EXISTS inputs")
+    con.execute("DROP TABLE dirs_final")
     if temp_dir is None:
         import shutil
         shutil.rmtree(spill_dir, ignore_errors=True)
+    if db_con is not None:
+        db_con.close()
+        if db_tmp is not None:
+            for p in (db_tmp, db_tmp + '.wal'):
+                if os.path.exists(p):
+                    os.remove(p)
+    max_rss_mb = _max_rss_mb()
+    _stage(f"done: peak RSS {max_rss_mb:,.0f} MiB")
     return {
         'rows': int(rows),
         'files': int(n_files),
@@ -532,4 +804,6 @@ def aggregate_listing_to_parquet(
         'root_n_files': int(root['n_files']) if root is not None else 0,
         'root_n_children': int(root['n_children']) if root is not None else 0,
         'root_mtime': int(root['mtime']) if root is not None else 0,
+        'partitions': int(n_partitions),
+        'max_rss_mb': round(max_rss_mb, 1),
     }

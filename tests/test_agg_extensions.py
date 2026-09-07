@@ -266,3 +266,22 @@ def test_mtime_mean_hugeint_rounding(tmp_path):
     dd = pd.read_parquet(out_d).set_index('path')['mtime_mean']
     assert ds['d'] == exact
     assert dd['d'] == exact
+
+
+@pytest.mark.parametrize('depth', [1, 2])
+def test_extensions_survive_partitioned_cascade(tmp_path: Path, depth: int):
+    """Pivot sums and the exact `mt_wsum` partial must fold across partition
+    stubs exactly as they do through one cascade (spec mgu-scale-unification.md A.2)."""
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    kw = dict(pivot_sums=('storage_class_id',), mean_mtime=True)
+    con = duckdb.connect()
+    base = str(tmp_path / 'base.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=base, con=con, **kw,
+    )
+    part = str(tmp_path / 'part.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=part, con=con,
+        partition_depth=depth, **kw,
+    )
+    pd.testing.assert_frame_equal(_normalize(pd.read_parquet(base)), _normalize(pd.read_parquet(part)))
