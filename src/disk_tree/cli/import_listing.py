@@ -33,6 +33,7 @@ from disk_tree.cli.base import cli
 @option('-a', '--side', default=None, help='DuckDB engine only: side parquet keyed by `path` (`.` = root; optional `bucket`), e.g. `disk-tree access state` output, joined onto every row by exact path for `--max-col`')
 @option('-b', '--bucket', 'buckets', multiple=True, help='Bucket to import as one scan; repeatable. Default: every distinct bucket in the listings')
 @option('-d', '--db', 'db_path', default=None, help='DuckDB engine only: run the cascade in a file-backed database (a `.duckdb` path, kept; or a directory, e.g. the spill disk, to create a temporary one in) so the level tables page to disk under `--memory-limit` instead of pinning RAM. Default: in-memory.')
+@option('-G', '--groups', is_flag=True, help='Tiers: also write each tier\'s group manifest `<tier>.groups.json` beside it — the footer precomputed as compact JSON (schema + per-row-group stats/offsets) for a serverless range reader (spec mgu-engine-audit-2026-09-07.md §4)')
 @option('-H', '--size-hist', is_flag=True, help='DuckDB engine only: emit `size_hist_n` / `size_hist_bytes` — per path, a log2 histogram (41 bins) of descendant files by size, counts and bytes per bin')
 @option('-i', '--tiers', default=None, help='Also write layer-2 as index tiers (`dirs,objects,coarse`, any subset) under `--tiers-dir` as `<scheme>-<bucket>.<tier>.parquet`: sorted, small row groups, floor in the parquet metadata (spec mgu-scale-unification.md C). duckdb/stream engines only.')
 @option('-j', '--jobs', default=1, help='Stream engine only: partition the keyspace into N ranges streamed by parallel worker processes (0 = all cores). Output is byte-identical for any value.')
@@ -59,6 +60,7 @@ def import_cmd(
     listings: tuple[str, ...],
     buckets: tuple[str, ...],
     db_path: str | None,
+    groups: bool,
     size_hist: bool,
     tiers: str | None,
     jobs: int,
@@ -108,7 +110,10 @@ def import_cmd(
             tiers=parse_tiers(tiers), out_dir=tiers_dir or out_dir, coarse_exp=coarse_exp,
             row_group_rows=row_group_rows,
             sort_variants=tuple(tuple(c for c in v.split(',') if c) for v in sort_variants),
+            groups=groups,
         )
+    elif groups:
+        raise ValueError("--groups needs --tiers")
 
     storage = get_backend()
     for bucket in buckets:
@@ -133,6 +138,8 @@ class TierOpts:
     coarse_exp: int = 24
     row_group_rows: int = 8192
     sort_variants: tuple[tuple[str, ...], ...] = ()
+    #: Write `<tier>.groups.json` beside each tier (`find/groups.py`).
+    groups: bool = False
 
 
 def import_bucket(
@@ -241,10 +248,10 @@ def import_bucket(
                     out_parquet, stem=os.path.join(tier_opts.out_dir, f'{scheme}-{bucket}'),
                     tiers=tier_opts.tiers, coarse_exp=tier_opts.coarse_exp,
                     row_group_rows=tier_opts.row_group_rows, sort_variants=tier_opts.sort_variants,
-                    con=con,
+                    con=con, groups=tier_opts.groups,
                 )
                 for path, n in written.items():
-                    err(f"  tier {os.path.basename(path)}: {n:,} rows")
+                    err(f"  tier {os.path.basename(path)}: {n:,} rows" + (" (+ groups manifest)" if tier_opts.groups else ""))
             # Hand the file itself to the storage backend — reading a
             # 92.7M-object bucket's layer-2 (185M rows) back into pandas
             # here OOM-killed a 64GB node after the aggregation had

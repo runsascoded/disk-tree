@@ -76,6 +76,7 @@ def write_tiers(
     row_group_rows: int = DEFAULT_ROW_GROUP_ROWS,
     sort_variants: tuple[tuple[str, ...], ...] = (),
     con: "duckdb.DuckDBPyConnection | None" = None,
+    groups: bool = False,
 ) -> dict[str, int]:
     """Cut `tiers` (+ `sort_variants` of the dirs/coarse tiers) from the layer-2
     parquet at `layer2` into `<stem>.<tier>[-by-<cols>].parquet`.
@@ -83,7 +84,9 @@ def write_tiers(
     Returns `{output path: row count}` in write order. Each file carries
     `tier` / `sort` (and, for coarse, `floor_bytes` / `coarse_exp` /
     `total_size`) in its parquet key-value metadata so a planner can read the
-    floor without a sidecar.
+    floor without a sidecar. With `groups`, each tier also gets its group
+    manifest `<tier>.groups.json` beside it (:mod:`disk_tree.find.groups`) —
+    the precomputed footer a serverless reader plans range reads from.
     """
     import duckdb as _duckdb
     if con is None:
@@ -134,6 +137,9 @@ def write_tiers(
         """)
         os.replace(tmp, out)
         written[out] = int(con.execute(f"SELECT COUNT(*) FROM read_parquet('{out}')").fetchone()[0])
+        if groups:
+            from disk_tree.find.groups import write_groups
+            write_groups(out)
 
     coarse_kv = {'floor_bytes': floor, 'coarse_exp': coarse_exp, 'total_size': int(total_size)}
     for tier in tiers:
