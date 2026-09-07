@@ -551,3 +551,115 @@ def test_side_validation(tmp_path: Path):
             db=None, storage=None, con=None, engine='stream', listings=('x',), bucket='b1',
             scheme='gcs', snap_time=_ts(1), side=side, max_cols=('last_ts',),
         )
+
+
+# ---------- Size histogram column (spec mgu-scale-unification.md, item E) ----------
+
+from disk_tree.find.agg_ext import SIZE_HIST_BINS, size_bin
+
+# Sizes at every edge that matters: 0, both sides of several powers of two,
+# both sides of the last closed bin's top (2^39) and the open-ended last bin.
+_HIST_LISTING = [
+    ('a/zero', 0), ('a/one', 1), ('a/two', 2), ('a/three', 3), ('a/four', 4),
+    ('a/b/seven', 7), ('a/b/eight', 8), ('a/b/k1', 1023), ('a/b/k2', 1024),
+    ('c/p39m', (1 << 39) - 1), ('c/p39', 1 << 39), ('c/p39p', (1 << 39) + 1),
+    ('c/bigger', (1 << 40) + 5), ('c/d/huge', 1 << 62),
+    ('top', 5),
+]
+
+
+def test_size_bin():
+    assert [size_bin(s) for _, s in _HIST_LISTING] == [0, 1, 2, 2, 3, 3, 4, 10, 11, 39, 40, 40, 40, 40, 3]
+    assert size_bin((1 << 53) + 1) == 40
+    assert SIZE_HIST_BINS == 41
+    with pytest.raises(ValueError, match="negative size -1"):
+        size_bin(-1)
+
+
+def _expected_hists() -> dict[str, tuple[list[int], list[int]]]:
+    """Direct computation over the listing, per path (acceptance E)."""
+    out: dict[str, tuple[list[int], list[int]]] = {}
+    for name, size in _HIST_LISTING:
+        b = min(size_bin(size), SIZE_HIST_BINS - 1)
+        parts = name.split('/')
+        paths = ['.'] + ['/'.join(parts[:i]) for i in range(1, len(parts) + 1)]
+        for p in paths:
+            n, by = out.setdefault(p, ([0] * SIZE_HIST_BINS, [0] * SIZE_HIST_BINS))
+            n[b] += 1
+            by[b] += size
+    return out
+
+
+def test_size_hist_matches_direct_computation(tmp_path: Path):
+    listing = tmp_path / 'l.parquet'
+    pd.DataFrame({
+        'bucket': ['b1'] * len(_HIST_LISTING),
+        'name': [n for n, _ in _HIST_LISTING],
+        'size_bytes': [s for _, s in _HIST_LISTING],
+        'created': [_ts(1)] * len(_HIST_LISTING),
+        'storage_class_id': [1] * len(_HIST_LISTING),
+    }).to_parquet(listing)
+    con = duckdb.connect()
+    out = str(tmp_path / 'h.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (str(listing),)), bucket='b1', scheme='gcs', out_parquet=out, con=con,
+        size_hist=True, pivot_sums=('storage_class_id',),
+    )
+    df = pd.read_parquet(out)
+    assert list(df.columns) == [
+        'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
+        'sum_storage_class_id_1', 'size_hist_n', 'size_hist_bytes', 'uri', 'depth',
+    ]
+    got = {r.path: ([int(v) for v in r.size_hist_n], [int(v) for v in r.size_hist_bytes]) for r in df.itertuples()}
+    assert sorted(got) == sorted(_expected_hists())
+    assert got == _expected_hists()
+    # A file's histogram is its own single bin; the top closed bin's edge is exact.
+    assert got['c/p39m'][0].index(1) == 39 and got['c/p39'][0].index(1) == 40 and got['c/p39p'][0].index(1) == 40
+    assert got['c/d/huge'] == ([0] * 40 + [1], [0] * 40 + [1 << 62])
+    assert got['c'] == (
+        [0] * 39 + [1, 4],
+        [0] * 39 + [(1 << 39) - 1, (1 << 39) + ((1 << 39) + 1) + ((1 << 40) + 5) + (1 << 62)],
+    )
+    # Root totals reconcile with the plain columns.
+    root = df[df.path == '.'].iloc[0]
+    assert sum(got['.'][0]) == int(root['n_files']) == len(_HIST_LISTING)
+    assert sum(got['.'][1]) == int(root['size']) == sum(s for _, s in _HIST_LISTING)
+    # Without the flag: no histogram columns (schema regression guard).
+    plain = str(tmp_path / 'p.parquet')
+    aggregate_listing_to_parquet(
+        prepare_listing(con, (str(listing),)), bucket='b1', scheme='gcs', out_parquet=plain, con=con,
+    )
+    assert [c for c in pd.read_parquet(plain).columns if c.startswith('size_hist')] == []
+
+
+def test_size_hist_under_labels_and_partitions(tmp_path: Path):
+    listing = _write_ext_listing(tmp_path / 'l.parquet')
+    labels = _write_labels(tmp_path / 'labels.parquet')
+    con = duckdb.connect()
+
+    def run(name: str, **kw) -> pd.DataFrame:
+        out = str(tmp_path / f'{name}.parquet')
+        aggregate_listing_to_parquet(
+            prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=out, con=con,
+            size_hist=True, mean_mtime=True, label=labels, **kw,
+        )
+        return pd.read_parquet(out)
+
+    one = run('one')
+    for k in (1, 2):
+        pd.testing.assert_frame_equal(one, run(f'k{k}', partition_depth=k))
+    # Each slice's histogram is over its own files: data/(t1,alice) = hot 1000 (bin 10) + warm 2000 (bin 11).
+    row = one[(one.path == 'data') & (one.usr == 'alice')].iloc[0]
+    n = [int(v) for v in row['size_hist_n']]
+    by = [int(v) for v in row['size_hist_bytes']]
+    assert (n[10], n[11], sum(n)) == (1, 1, 2)
+    assert (by[10], by[11], sum(by)) == (1000, 2000, 3000)
+
+
+def test_size_hist_requires_duckdb_engine():
+    from disk_tree.cli.import_listing import import_bucket
+    with pytest.raises(ValueError, match="--size-hist is a duckdb-engine feature; got engine='pandas'"):
+        import_bucket(
+            db=None, storage=None, con=None, engine='pandas', listings=('x',), bucket='b1',
+            scheme='gcs', snap_time=_ts(1), size_hist=True,
+        )

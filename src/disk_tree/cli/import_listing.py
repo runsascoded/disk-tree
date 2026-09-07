@@ -33,6 +33,7 @@ from disk_tree.cli.base import cli
 @option('-a', '--side', default=None, help='DuckDB engine only: side parquet keyed by `path` (`.` = root; optional `bucket`), e.g. `disk-tree access state` output, joined onto every row by exact path for `--max-col`')
 @option('-b', '--bucket', 'buckets', multiple=True, help='Bucket to import as one scan; repeatable. Default: every distinct bucket in the listings')
 @option('-d', '--db', 'db_path', default=None, help='DuckDB engine only: run the cascade in a file-backed database (a `.duckdb` path, kept; or a directory, e.g. the spill disk, to create a temporary one in) so the level tables page to disk under `--memory-limit` instead of pinning RAM. Default: in-memory.')
+@option('-H', '--size-hist', is_flag=True, help='DuckDB engine only: emit `size_hist_n` / `size_hist_bytes` — per path, a log2 histogram (41 bins) of descendant files by size, counts and bytes per bin')
 @option('-i', '--tiers', default=None, help='Also write layer-2 as index tiers (`dirs,objects,coarse`, any subset) under `--tiers-dir` as `<scheme>-<bucket>.<tier>.parquet`: sorted, small row groups, floor in the parquet metadata (spec mgu-scale-unification.md C). duckdb/stream engines only.')
 @option('-j', '--jobs', default=1, help='Stream engine only: partition the keyspace into N ranges streamed by parallel worker processes (0 = all cores). Output is byte-identical for any value.')
 @option('-L', '--label', default=None, help='DuckDB engine only: attribution label parquet (`prefix` + label columns). Every row is labeled by its deepest matching prefix and the labels become extra group keys — one output row per (path, labels); rows under no prefix get NULLs. Default: none (one row per path).')
@@ -58,6 +59,7 @@ def import_cmd(
     listings: tuple[str, ...],
     buckets: tuple[str, ...],
     db_path: str | None,
+    size_hist: bool,
     tiers: str | None,
     jobs: int,
     label: str | None,
@@ -119,7 +121,7 @@ def import_cmd(
             pivot_sums=pivot_sums, mean_mtime=mean_mtime,
             duckdb_path=db_path, partition_depth=partition_depth,
             label=label, label_cols=tuple(c for c in (label_cols or '').split(',') if c),
-            tier_opts=tier_opts, side=side, max_cols=max_cols,
+            tier_opts=tier_opts, side=side, max_cols=max_cols, size_hist=size_hist,
         )
 
 
@@ -156,6 +158,7 @@ def import_bucket(
     tier_opts: TierOpts | None = None,
     side: str | None = None,
     max_cols: tuple[str, ...] = (),
+    size_hist: bool = False,
     replace=None,
 ):
     """Aggregate one bucket's listing → blob + Scan row.
@@ -170,6 +173,7 @@ def import_bucket(
     `label` / `label_cols`: attribution slices as extra group keys (duckdb only).
     `tier_opts`: also cut the finished blob into index tiers (duckdb/stream).
     `side` / `max_cols`: subtree-MAX columns from a path-keyed side table (duckdb only).
+    `size_hist`: per-path log2 size histogram columns (duckdb only).
     Returns the Scan.
     """
     from disk_tree.sqla.model import Scan
@@ -179,6 +183,8 @@ def import_bucket(
         raise ValueError(f"--label is a duckdb-engine feature; got engine={engine!r}")
     if (side or max_cols) and engine != 'duckdb':
         raise ValueError(f"--side/--max-col is a duckdb-engine feature; got engine={engine!r}")
+    if size_hist and engine != 'duckdb':
+        raise ValueError(f"--size-hist is a duckdb-engine feature; got engine={engine!r}")
     if tier_opts is not None and engine == 'pandas':
         raise ValueError("--tiers needs a blob on disk: use the duckdb or stream engine")
     # A `file` root collapses to the bare path, so a reduced capture's
@@ -218,7 +224,7 @@ def import_bucket(
                     pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                     db=duckdb_path, partition_depth=partition_depth,
                     label=label, label_cols=label_cols,
-                    side=side, max_cols=max_cols,
+                    side=side, max_cols=max_cols, size_hist=size_hist,
                 )
             else:  # stream
                 from disk_tree.find.aggregate_stream import aggregate_stream

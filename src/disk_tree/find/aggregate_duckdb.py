@@ -705,6 +705,7 @@ def aggregate_listing_to_parquet(
     label_cols: tuple[str, ...] = (),
     side: str | None = None,
     max_cols: tuple[str, ...] = (),
+    size_hist: bool = False,
 ) -> dict:
     """Out-of-core: layer-1 listing (via `listing_sql`) → layer-2 parquet on disk.
 
@@ -741,6 +742,11 @@ def aggregate_listing_to_parquet(
     path and folded with MAX through the cascade — a dir's value is the max
     over itself and its subtree (e.g. `last_ts` from `access state`). The
     columns land after the extension columns, before `uri`.
+
+    `size_hist` (item E): per path, a log2 histogram of descendant files by
+    size as `size_hist_n` / `size_hist_bytes` (LIST(BIGINT) of
+    `SIZE_HIST_BINS` each; see `agg_ext.size_bin`). Additive, so it rides the
+    cascade as one count and one byte column per bin.
     """
     import duckdb as _duckdb
     if partition_depth < 0:
@@ -793,6 +799,23 @@ def aggregate_listing_to_parquet(
         extra_file_cols += (
             f", (COALESCE(floor(epoch(created)), 0)::BIGINT::HUGEINT * size_bytes::HUGEINT) AS {MT_WSUM}"
         )
+    hist_n: list[str] = []
+    hist_b: list[str] = []
+    if size_hist:
+        from .agg_ext import SIZE_HIST_BINS, size_hist_cols
+        hist_n, hist_b = size_hist_cols()
+        # bit_length(size) for size > 0; log2 is exact at powers of two, and
+        # `floor(log2(2^k − 1))` = k−1 for k ≤ 53 — the test locks both edges.
+        bin_expr = (
+            "CASE WHEN size_bytes <= 0 THEN 0 "
+            f"ELSE LEAST(floor(log2(size_bytes))::INTEGER + 1, {SIZE_HIST_BINS - 1}) END"
+        )
+        for b, (cn, cb) in enumerate(zip(hist_n, hist_b)):
+            extra_file_cols += (
+                f", CASE WHEN {bin_expr} = {b} THEN 1 ELSE 0 END::BIGINT AS {cn}"
+                f", CASE WHEN {bin_expr} = {b} THEN size_bytes ELSE 0 END::BIGINT AS {cb}"
+            )
+        sum_cols.extend([*hist_n, *hist_b])
     pivot_pass = ''.join(f', {col}' for col in pivot_sums)
     extra_dir_cols = ''.join(f', 0::BIGINT AS {c}' for c in sum_cols)
     if mean_mtime:
@@ -885,11 +908,25 @@ def aggregate_listing_to_parquet(
             f" END AS {MTIME_MEAN}"
         )
     extra_out += ''.join(f', MAX(d.{c}) AS {c}' for c in max_cols)
-    extra_names = ''.join(f', {c}' for c in [*sum_cols, *([MTIME_MEAN] if mean_mtime else [])]) + max_names
-    file_extra = ''.join(f', {c}' for c in sum_cols)
+    # The histogram's per-bin cascade columns pack into two LIST columns on
+    # the way out; the pivot sums stay as they are.
+    hist_set = set(hist_n) | set(hist_b)
+    plain_sums = [c for c in sum_cols if c not in hist_set]
+    hist_pack = ''
+    if size_hist:
+        from .agg_ext import SIZE_HIST_BYTES, SIZE_HIST_N
+        hist_pack = (
+            f", [{', '.join(hist_n)}]::BIGINT[] AS {SIZE_HIST_N}"
+            f", [{', '.join(hist_b)}]::BIGINT[] AS {SIZE_HIST_BYTES}"
+        )
+    # `dirs_final` packs the histogram; the COPY then reads the packed names.
+    base_names = ''.join(f', {c}' for c in [*plain_sums, *([MTIME_MEAN] if mean_mtime else [])])
+    extra_final = base_names + hist_pack + max_names
+    extra_names = base_names + (f', {SIZE_HIST_N}, {SIZE_HIST_BYTES}' if size_hist else '') + max_names
+    file_extra = ''.join(f', {c}' for c in plain_sums)
     if mean_mtime:
         file_extra += f', mtime::DOUBLE AS {MTIME_MEAN}'
-    file_extra += max_names
+    file_extra += hist_pack + max_names
     # Materialize the (small — one row per dir) aggregated dir table first, so
     # the join + group-by run alone; the giant COPY below is then a pure
     # union + sort + write. One operator at a time: v3/v4 post-mortems showed
@@ -921,7 +958,7 @@ def aggregate_listing_to_parquet(
                 WHEN path = '' THEN ''
                 WHEN {parent_of_agg} = '' THEN '.'
                 ELSE {parent_of_agg}
-            END AS parent{extra_names},
+            END AS parent{extra_final},
             CASE WHEN path = '' THEN '{scan_root}' ELSE '{scan_root}/' || path END AS uri
         FROM dirs_agg
     """)

@@ -26,6 +26,33 @@ PIVOT_MAX = 32
 MT_WSUM = 'mt_wsum'
 MTIME_MEAN = 'mtime_mean'
 
+# ``--size-hist`` (spec mgu-scale-unification.md item E): per path, a log2
+# histogram of descendant files by size — bin 0 holds zero-byte files, bin b
+# (1 ≤ b < SIZE_HIST_BINS) holds sizes in [2^(b−1), 2^b), and the last bin
+# is open-ended (≥ 2^(SIZE_HIST_BINS−2) = 512 GiB). Additive through the
+# cascade: one count column and one byte column per bin ride `sum_cols`, and
+# the output packs them into two LIST(BIGINT) columns.
+SIZE_HIST_BINS = 41
+SIZE_HIST_N = 'size_hist_n'
+SIZE_HIST_BYTES = 'size_hist_bytes'
+
+
+def size_bin(size: int) -> int:
+    """The histogram bin of a file size (the Python twin of the SQL in the duckdb engine)."""
+    if size < 0:
+        raise ValueError(f"negative size {size}")
+    if size == 0:
+        return 0
+    return min(size.bit_length(), SIZE_HIST_BINS - 1)
+
+
+def size_hist_cols() -> tuple[list[str], list[str]]:
+    """Cascade column names: (`sh_n_<b>`…, `sh_b_<b>`…)."""
+    return (
+        [f'sh_n_{b}' for b in range(SIZE_HIST_BINS)],
+        [f'sh_b_{b}' for b in range(SIZE_HIST_BINS)],
+    )
+
 
 def pivot_col(col: str, v) -> str:
     return f'sum_{col}_{v}'

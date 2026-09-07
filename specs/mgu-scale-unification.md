@@ -86,6 +86,12 @@ Also: `bulk-list` should record `started` / `finished` timestamps in `_SUCCESS.j
 
 Per path, a log2 histogram of descendant files by size — counts and bytes per bin (≈40 bins). It is additive through the cascade (children are disjoint sets), so it costs one vector-sum per level. `histogram.py` does the same idea for byte-weighted mtime per child at query time; this is the size axis, materialized. mgu wants it for an on-page "what sizes are the files under this path" chart that follows drills and scopes.
 
+**Status (DT, 2026-09-06): landed** — `import -e duckdb -H/--size-hist` (`aggregate_listing_to_parquet(size_hist=True)`); `find/agg_ext.py` (`SIZE_HIST_BINS`, `size_bin`); tests `tests/test_agg_extensions.py` (`test_size_*`: every path's histogram equals a direct computation over the listing, edges at 2^k ± 1 up to 2^62, slices, partitions).
+
+- Bins: 41. Bin 0 = zero-byte files; bin b (1 ≤ b ≤ 39) = sizes in [2^(b−1), 2^b) (i.e. `bit_length(size)`); bin 40 is open-ended (≥ 512 GiB). Output: `size_hist_n` and `size_hist_bytes`, `LIST(BIGINT)` of 41, placed after the pivot/`mtime_mean` columns (before `--max-col` columns and `uri`); a file's histogram is its own single bin. Per label slice under `--label`; byte-identical under `--partition-depth`.
+- Mechanism: exactly the spec's — one count and one byte column per bin (82 `BIGINT`s) ride the existing `sum_cols` cascade and are packed into the two lists at the final COPY. The cost worth watching at fleet scale: 82 extra columns on every level table (~650 B/row uncompressed — DuckDB's per-column RLE/constant compression handles the all-zero-but-one pattern well, but it is not free). If that shows up in the A.3 gate, the alternative is a sparse `(parent, bin)` level-0 rollup packed to a list, which trades width for a 41× unnest.
+- pandas/stream engines refuse the flag.
+
 ## Non-goals
 
 Attribution *content* (identities, rules, W&B mining), the marks ledger and its fold, storage-class pricing, the CF site — all stay mgu-side. Naming: DT columns stay long-form (`read_ops`, not `ro`); mgu's wire abbreviations are its serializer's business.
@@ -97,3 +103,17 @@ Attribution *content* (identities, rules, W&B mining), the marks ledger and its 
 - C: tiers are sorted as declared, row groups ≤ N rows, `coarse` ⊂ `dirs` with exact sums; `_SUCCESS.json` carries timestamps.
 - D: hour-grained shards; `--as-of` excludes exactly the rows at/after the instant; state file row count = live read dirs.
 - E: histogram sums per level equal a direct computation over the listing for a sample of paths.
+
+## Status (DT session, 2026-09-06)
+
+Landed on branch `mgu-scale`, one commit per item so mgu can cherry-pick each (all additive to `find/aggregate_duckdb.py`, `find/agg_ext.py`, `find/tiers.py`, `find/bulk*.py`, `access/*`, `cli/import_listing.py`, `cli/access.py`; every new option is a no-op when absent and the existing 505 tests stayed byte-identical, 543 after):
+
+| item | state | what's tested at small scale | still open |
+|---|---|---|---|
+| A | `--db`, `--partition-depth` landed | byte-identity vs the single in-memory cascade at k = 1/2/3/6, with extensions, through the CLI | **A.3 gate** — needs the EC2 node and the 9/5 listing: peak RSS (`max_rss_mb` in the stats / last `[agg]` line), wall, rows per level; compare `--db` on/off at one cap (DuckDB ≥ 1.1 can offload in-memory tables too); pick K |
+| B | `--label` landed | hand-written labeled layer-2, Σ-over-slices exactness, partitions, root default | mgu's `ptu` a2a; the two semantic choices flagged under B (per-child-label `n_children`, dir self-count in its own slice) |
+| C | tiers + `_SUCCESS.json` timestamps landed | sorted, ≤ N (multiples of 2048), coarse ⊂ dirs exact, KV metadata, variants over slices | tiers to a URL; `reduce` |
+| D | hour grain, `--as-of`, `access state`, `--side/--max-col` landed | exact as-of cut, incremental == from-scratch state, dead dirs drop, subtree MAX under slices/partitions | mgu re-aggregates its raw shards at hour grain; `n_requesters` still a bound |
+| E | `--size-hist` landed | every path == direct computation, 2^k ± 1 edges, slices, partitions | width cost (82 columns) at the A.3 gate |
+
+Not moved to `specs/done/` because the A.3 gate is the acceptance for A and everything below it was built to that scale on paper only.
