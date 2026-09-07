@@ -86,6 +86,8 @@ webdata / batch-submit / identities  marin batch + attribution layers  STRIP
 
 ## Sequence
 
+**Step 1 status (DT, 2026-09-07).** Corpus sized via the `cf` profile: `nj-crashes` 1,354 objects / 5.32 GB; `jc-taxes` 70,343 objects / 3.65 GB; `ctbk` is large — the first 20,000 objects alone are 239 GB and the listing is truncated there (full count unknown; awaiting go per below). Both small buckets are listed and imported as dated scans (`disk-tree pull -c <buckets.yml>` over the bulk lister: 1,409 and 70,620 layer-2 rows, ~30 s each) and browse in the Flask UI at `/r2/<bucket>`. Found on the way: `disk-tree index r2://…` silently fell through to the *local* backend and recorded an empty scan — now `r2://` lists live through `S3Backend` with the bucket's endpoint (`r2://` uris), and `gcs://` refuses loudly instead of faking success. The union itself (one fleet root) is not built yet: `tree_build.build_tree` produces marin's layer-3 `{n, b, o, …}` JSON, which marin's SPA no longer reads (it moved to `/api/subtree` over the path index + D1), so the "serve statically, confirm the treemap" leg needs a re-survey of what to seed `apps/cfn/` from before it's meaningful.
+
 1. **Prove the union locally (CIC).** `disk-tree` list both R2 buckets (bounded
    first — check ctbk's scale before a full recursive scan), `build_tree` them
    into one fleet snapshot to a local dir, serve statically, confirm the treemap

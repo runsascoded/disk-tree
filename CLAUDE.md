@@ -59,7 +59,10 @@ Key goals:
 
 **CLI** (`cli/`):
 ```bash
-disk-tree index [URL]     # Scan directory or s3:// bucket
+disk-tree index [URL]     # Scan a directory, an s3:// bucket, or an r2:// bucket (S3-compatible: lists
+                          # through the bucket's endpoint — `DISK_TREE_R2_ENDPOINT_URL` or its
+                          # buckets.yml `endpoint_url` — with `r2://` uris). gcs:// has no live lister
+                          # and refuses (`UnsupportedBackend`): use `pull` / `import` for it
   -C, --no-cache-read     # Force fresh scan (`index` otherwise returns any cached scan unconditionally)
   -e, --require-external  # Skip (exit 0) if the write target is the boot disk (no opted-in external
                           # volume mounted). For scheduled scans that must land on external media

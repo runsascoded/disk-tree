@@ -19,16 +19,29 @@ WS = re.compile(r'\s+')
 
 
 class S3Backend(Backend):
-    """S3 (or S3-compatible) bucket, scanned via `aws s3 ls --recursive`."""
+    """S3 (or S3-compatible) bucket, scanned via `aws s3 ls --recursive`.
 
-    scheme = 's3'
+    `scheme` is the URL scheme this instance answers for: `s3` (the default),
+    or an S3-compatible store addressed by its own scheme — `r2://bucket` is
+    listed through `endpoint_url` (the bucket's Cloudflare endpoint, resolved
+    by `backend_for`), and every emitted `uri` keeps the caller's scheme so a
+    scan's rows say `r2://…`, not `s3://…`. The aws CLI only speaks `s3://`,
+    so URLs are rewritten to that on the way out (`_s3_url`).
+    """
 
-    def __init__(self, endpoint_url: str | None = None, profile: str | None = None):
-        # Support for S3-compatible endpoints (R2, MinIO, ...) — wired later via config
+    scheme = 's3'  # the instance's `scheme` may shadow this (`r2`)
+
+    def __init__(self, endpoint_url: str | None = None, profile: str | None = None, scheme: str = 's3'):
         self.endpoint_url = endpoint_url
         self.profile = profile
+        self.scheme = scheme
 
     def _aws_cmd(self, subcmd: list[str]) -> list[str]:
+        if self.scheme != 's3' and not self.endpoint_url:
+            raise RuntimeError(
+                f"{self.scheme}:// needs an S3 endpoint — set DISK_TREE_R2_ENDPOINT_URL, or give the bucket an "
+                "`endpoint_url` in buckets.yml"
+            )
         cmd = ['aws']
         if self.profile:
             cmd.extend(['--profile', self.profile])
@@ -36,6 +49,12 @@ class S3Backend(Backend):
             cmd.extend(['--endpoint-url', self.endpoint_url])
         cmd.extend(subcmd)
         return cmd
+
+    @staticmethod
+    def _s3_url(url: str) -> str:
+        """`r2://bucket/prefix` → `s3://bucket/prefix` (identity for `s3://`)."""
+        p = urlparse(url)
+        return f's3://{p.netloc}{p.path}'
 
     def list(
         self,
@@ -46,9 +65,10 @@ class S3Backend(Backend):
         sudo: bool = False,
         progress: bool = True,
     ) -> Iterator[dict]:
-        cmd = self._aws_cmd(['s3', 'ls', '--recursive', url])
+        cmd = self._aws_cmd(['s3', 'ls', '--recursive', self._s3_url(url)])
         proc = subprocess.Popen(cmd, stdout=PIPE, stderr=PIPE, text=True)
         parsed = urlparse(url)
+        scheme = self.scheme
         bkt = parsed.netloc
         key0 = parsed.path.lstrip('/')
         dirs = set()
@@ -89,7 +109,7 @@ class S3Backend(Backend):
                         mtime=0,
                         kind='dir',
                         parent=dirname(d) if d else None,
-                        uri=f's3://{bkt}/{key0}/{d}' if key0 else f's3://{bkt}/{d}',
+                        uri=f'{scheme}://{bkt}/{key0}/{d}' if key0 else f'{scheme}://{bkt}/{d}',
                     )
                 yield o(
                     path=relpath,
@@ -97,13 +117,13 @@ class S3Backend(Backend):
                     mtime=mtime,
                     kind='file',
                     parent=dirname(relpath),
-                    uri=f's3://{bkt}/{key}',
+                    uri=f'{scheme}://{bkt}/{key}',
                 )
 
     def delete(self, url: str) -> None:
-        cmd = self._aws_cmd(['s3', 'rm', '--recursive', url])
+        cmd = self._aws_cmd(['s3', 'rm', '--recursive', self._s3_url(url)])
         subprocess.run(cmd, check=True)
 
     def exists(self, url: str) -> bool:
-        cmd = self._aws_cmd(['s3', 'ls', url])
+        cmd = self._aws_cmd(['s3', 'ls', self._s3_url(url)])
         return subprocess.run(cmd, capture_output=True).returncode == 0
