@@ -66,7 +66,9 @@ export async function loadScans(store: Store, prefix: string): Promise<Scan[]> {
   const keys = (await store.keys(prefix)).filter(k => k.endsWith(SUFFIX))
   const manifests = await Promise.all(keys.map(async k => JSON.parse(await store.text(k)) as Manifest))
   const valid = manifests.filter(m => m.format === 'disk-tree-scan')
-  valid.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : a.blob < b.blob ? -1 : a.blob > b.blob ? 1 : 0))
+  // Manifests carry offset-aware times (a cloud runner writes `+00:00`, a
+  // laptop its own zone), so order by instant, not string.
+  valid.sort((a, b) => (at(a) - at(b)) || (a.blob < b.blob ? -1 : a.blob > b.blob ? 1 : 0))
   return valid.map((m, i) => ({
     id: i + 1,
     path: m.path,
@@ -101,10 +103,12 @@ export function latestPerPath(scans: Scan[]): Scan[] {
   const by = new Map<string, Scan>()
   for (const s of scans) {
     const cur = by.get(s.path)
-    if (!cur || s.time > cur.time) by.set(s.path, s)
+    if (!cur || at(s) > at(cur)) by.set(s.path, s)
   }
-  return [...by.values()].sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0))
+  return [...by.values()].sort((a, b) => at(b) - at(a))
 }
+
+const at = (s: { time: string }): number => Date.parse(s.time)
 
 /** Parent of a scan path — `backends.url.url_parent`: `null` at a root
  *  (`/`, or a bucket root for `scheme://bucket`). */

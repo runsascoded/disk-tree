@@ -26,7 +26,11 @@ def manifest_path(blob_url: str) -> str:
 
 
 def scan_manifest(scan) -> dict:
-    m = {'format': FORMAT, 'version': VERSION, 'time': scan.time.isoformat()}
+    # `Scan.time` is naive wall-clock time in the writer's zone (`index` stamps
+    # `now().astimezone()`, SQLite drops the offset). The manifest crosses
+    # machines — a UTC cloud runner writes, a laptop registers — so it carries
+    # the offset; `register` converts back to the reader's local wall clock.
+    m = {'format': FORMAT, 'version': VERSION, 'time': scan.time.astimezone().isoformat()}
     for f in FIELDS:
         m[f] = getattr(scan, f)
     # Stored as JSON text on the row; a manifest is JSON already.
@@ -66,9 +70,12 @@ def register(db, m: dict):
     existing = db.session.query(Scan).filter_by(path=m['path'], blob=m['blob']).first()
     if existing is not None:
         return existing, False
+    time = datetime.fromisoformat(m['time'])
+    if time.tzinfo is not None:
+        time = time.astimezone().replace(tzinfo=None)
     scan = Scan(
         path=m['path'],
-        time=datetime.fromisoformat(m['time']),
+        time=time,
         blob=m['blob'],
         error_count=m.get('error_count'),
         error_paths=json.dumps(m['error_paths']) if m.get('error_paths') is not None else None,

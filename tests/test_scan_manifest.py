@@ -62,13 +62,15 @@ def test_reduce_to_url_writes_a_manifest_that_register_imports(tree: Path, tmp_p
     (scan_a,) = _scans(a)
     manifest = tmp_path / 'blobs' / f'{scan_a["blob"]}{SUFFIX}'
     assert r.stderr.rstrip('\n').split('\n')[-1] == f'manifest → {blobs}/{scan_a["blob"]}{SUFFIX}'
-    # `time` is the capture's, at full precision (naive UTC as the row stores
-    # it); `scans list` renders rows at second precision, hence the source here.
-    captured_at = json.loads((Path(cap) / '_SUCCESS.json').read_text())['time']
-    full_time = datetime.fromisoformat(captured_at).replace(tzinfo=None)
+    # `time` is the capture's instant, at full precision: the row stores it as
+    # naive local wall clock (like `index`), the manifest carries the offset so
+    # another zone can register it. `scans list` renders rows at second
+    # precision, hence the source here.
+    captured_at = datetime.fromisoformat(json.loads((Path(cap) / '_SUCCESS.json').read_text())['time'])
+    full_time = captured_at.astimezone().replace(tzinfo=None)
     assert json.loads(manifest.read_text()) == {
         'format': 'disk-tree-scan', 'version': 1,
-        'time': full_time.isoformat(),
+        'time': captured_at.astimezone().isoformat(),
         'path': str(tree), 'blob': scan_a['blob'],
         'size': scan_a['size'], 'n_children': scan_a['n_children'], 'n_desc': scan_a['n_desc'],
         'mtime': scan_a['mtime'], 'error_count': None, 'error_paths': None,

@@ -200,7 +200,8 @@ def reduce_cmd(
             db=db, storage=get_backend(), con=duckdb.connect(),
             engine=engine, listings=(listing,),
             bucket=m['root'], scheme=m['scheme'],
-            snap_time=datetime.fromisoformat(m['time']),
+            # Local wall clock, like `index` rows (SQLite drops the offset).
+            snap_time=datetime.fromisoformat(m['time']).astimezone(),
             memory_limit=memory_limit, temp_dir=spill, jobs=jobs, mean_mtime=mean_mtime,
         )
         if m.get('error_count'):
