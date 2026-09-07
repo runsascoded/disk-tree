@@ -81,7 +81,7 @@ piece: `reduce` emits `<blob>.scan.json` beside a remote blob, and
 `disk-tree scans register URL` imports it — the manifest route from
 `done/remote-scan-targets.md`, made concrete.
 
-## Reduce runner + the scan manifest (step 3 — built, awaiting secrets + push)
+## Reduce runner + the scan manifest (step 3)
 
 **Manifest.** `reduce --to <url>` and `index --to <url>` write
 `<blob>.scan.json` beside a remote blob (`scan_manifest.py`: `format,
@@ -114,11 +114,22 @@ capture → R2; a "runner" root reduced *from* R2, leaving blob (3.8 KB) +
 from R2 and `du` read the tree back. Each root held only its 28 K SQLite DB.
 Test objects deleted after.
 
-Two things only Ryan can do before this runs for real: add the secrets /
-variable, and lift the push hold (the workflow exists only once it's on
-GitHub). Then: dispatch once against a real capture, CIC the served result.
+Credentials: an R2 API token `disk-tree-reduce-GHA` scoped Object Read &
+Write to the `disk-tree` bucket only (bucket is R2's tightest scope; verified
+`file-tree-demo` → AccessDenied). On the laptop the same env applies:
+`DISK_TREE_R2_ENDPOINT_URL` for `blobfs` (the `.envrc`'s `R2_ENDPOINT_URL`
+is the GHA variable's name, not the one the code reads) and S3 credentials
+botocore can see — `AWS_PROFILE=cf` (the admin R2 profile), or the `R2_*`
+pair exported as `AWS_*`; a plain `AWS_PROFILE` pointing at an AWS account
+fails with "access key has length 20, should be 32".
 
-## Serving from the cloud (step 4 — built, awaiting deploy)
+Manifest times: `Scan.time` is naive *local* wall clock (`index` stamps
+`now().astimezone()`, SQLite drops the offset, the UI parses naive as local),
+so the manifest carries the writer's offset (a UTC runner → `+00:00`) and
+`register` converts to the reader's local wall clock. Before this, a
+cloud-reduced scan showed "Scanned -13941s ago" everywhere.
+
+## Serving from the cloud (step 4)
 
 Not a second SPA (`apps/cfn/` was never needed): disk-tree's own `ui/` is
 the cloud app, with the **read subset of its `/api/*` contract implemented as
@@ -156,10 +167,45 @@ no console errors; the Flask peer still shows every control. Not yet: hybrid
 chunk following (an `index --to` scan big enough to chunk drills into empty
 subtrees), single-child auto-expand, the `/browse` file-tree page.
 
-**Deploy** (Ryan): `wrangler login` in the `0dcad…` account, then in `ui/`
-`pnpm build && pnpm exec wrangler pages deploy dist --project-name disk-tree`
-(first run creates the project; bind the R2 bucket per `wrangler.toml`). Then
-the whole chain for real: `capture` → Reduce workflow → `pages.dev`.
+**Deploy**: in `ui/`, `direnv exec .. pnpm build && direnv exec .. pnpm exec
+wrangler pages deploy --project-name disk-tree --branch main`. Auth is the
+`disk-tree-wrangler` Account API token (Pages Write + Workers R2 Storage
+Read) as `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` in the repo's
+`.envrc` — `wrangler login` state is one machine-global file that every
+long-running `wrangler dev` rewrites with its own identity (this is how the
+first `disk-tree` bucket landed in the OA account), and a Pages config can't
+pin `account_id`. Project created 2026-09-06; the R2 binding comes from
+`wrangler.toml` on each deploy.
+
+## Landed — the chain for real (2026-09-06)
+
+    laptop   disk-tree capture ~ -t r2://disk-tree/captures
+             5,819,971 files → 30 shards, 123 MB, ~5 min, 1 permission error
+             (`~/.config/htop`); local footprint: none
+    GitHub   Reduce (duckdb, 5 GB cap): 62 s wall, incl. `uv sync` + fetching
+             the shards → 270 MB blob + `.scan.json` in r2://disk-tree/scans
+    laptop   scans register r2://disk-tree/scans under a *fresh* root: 28 K
+             SQLite; `du ~` read 374 GiB / 100 children back from R2 in 14 s
+    Pages    disk-tree.pages.dev: /api/scans 0.46 s; /api/scan depth=2,
+             2000 rows: 0.85 s, 450 KB; CIC'd scan list → listing → drill to
+             `~/c` (84 children) → treemap (1731 cells), no console errors
+
+What the real run shook out, each its own commit: unbounded `s3fs` resolved
+to 0.4.2 (latest `boto3` conflicts with `aiobotocore`) whose empty
+`x-amz-acl` R2 rejects on multipart — every shard past ~5 MB failed, so
+`s3fs>=2024.10`; `LocalBackend` falls back to `find` (GNU on Linux) so the
+CLI tests run on CI; ext4 directories hold 4 KiB each, so the `index`
+equivalence test subtracts dir-own blocks; the manifest time convention
+above; `wrangler pages deploy` rejects `account_id`.
+
+Not done here: the laptop's *real* DB was not registered — the newest
+`/Users/ryan` scan would then resolve only through `DISK_TREE_SCAN_DIRS`
+= `r2://…` + R2 creds, which the LaunchAgent and `disk-tree-server` don't
+have in their env; that's a `scans register` away once the env is
+persistent. The first (failed) capture's two shards remain under
+`captures/…/2026-09-07T02-25-58Z/` (delete needs a human). The static nav
+still shows the Local / S3 / Recent tabs; `s3: false` in capabilities isn't
+wired to them.
 
 ## Not in scope
 
