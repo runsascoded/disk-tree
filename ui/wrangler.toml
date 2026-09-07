@@ -2,7 +2,7 @@
 # `/api/*` contract as Pages Functions (`functions/api/`) over an R2 bucket
 # holding reduced scans (`<uuid>.parquet` + `<uuid>.parquet.scan.json`, as
 # `disk-tree reduce --to r2://…` / `index --to r2://…` leave them). Spec
-# `specs/cloud-reduce.md` step 4.
+# `specs/done/cloud-reduce.md` step 4.
 #
 # Local: `pnpm build && pnpm cfn:dev` serves dist + functions on :7789 with an
 # emulated R2 — seed it with `wrangler r2 object put --local` (see the spec).

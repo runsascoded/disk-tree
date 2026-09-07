@@ -203,7 +203,7 @@ widgets from two workspace packages:
 - `src/components/S3BucketList.tsx` — S3 bucket browser with treemap
 - `src/hooks/useScanProgress.ts` — SSE-based progress tracking
 
-**Static deployment (Cloudflare Pages)** — spec `specs/cloud-reduce.md` step 4. The same SPA, with the
+**Static deployment (Cloudflare Pages)** — spec `specs/done/cloud-reduce.md` step 4. The same SPA, with the
 *read subset* of the `/api/*` contract implemented as Pages Functions (`ui/functions/api/`) over an R2
 bucket of reduced scans (`<uuid>.parquet` + `.scan.json`, as `reduce --to` / `index --to` leave them):
 `/api/scans` from the manifests, `/api/scan` + `/api/scans/history` by reading the blob with hyparquet

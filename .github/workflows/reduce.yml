@@ -1,4 +1,4 @@
-# The cloud reduce runner (spec `specs/cloud-reduce.md`, step 3): turn a
+# The cloud reduce runner (spec `specs/done/cloud-reduce.md`, step 3): turn a
 # `disk-tree capture` that a laptop streamed to R2 into a scan blob, on a
 # machine that has disk. The same plain `disk-tree reduce` invocation runs on
 # a VM or Batch later; GHA is just the zero-infra host.
