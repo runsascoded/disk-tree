@@ -14,6 +14,10 @@ CLOUDSTORAGE_PATHS = [
     os.path.expanduser('~/Library/CloudStorage'),
 ]
 
+#: GNU find: `gfind` where it's Homebrew's findutils (macOS), else the system
+#: `find` (Linux, where it's already GNU and has `-printf`).
+FIND = shutil.which('gfind') and 'gfind' or 'find'
+
 
 class LocalBackend(Backend):
     """Local filesystem, scanned via `gfind`."""
@@ -40,7 +44,7 @@ class LocalBackend(Backend):
         progress: bool = True,
     ) -> Iterator[dict]:
         path0 = abspath(url)
-        cmd = ['gfind', path0]
+        cmd = [FIND, path0]
 
         if excludes is None:
             excludes = CLOUDSTORAGE_PATHS
