@@ -880,6 +880,7 @@ def aggregate_listing_to_parquet(
     max_cols: tuple[str, ...] = (),
     size_hist: bool = False,
     partition_files: int = DEFAULT_PARTITION_FILES,
+    threads: int = 8,
 ) -> dict:
     """Out-of-core: layer-1 listing (via `listing_sql`) → layer-2 parquet on disk.
 
@@ -905,6 +906,12 @@ def aggregate_listing_to_parquet(
       the budget into its sub-directories, recursively, until every key
       fits or is a flat directory of that many files. The memory knob: a
       cascade's peak is ∝ its files (~4.4 KB/file with every extension on).
+
+    - `threads`: DuckDB's thread count. Fewer → fewer concurrent per-operator
+      buffers (sort runs + parquet-writer row groups scale with it and sit
+      largely outside `memory_limit` accounting); more → a faster final
+      sort + parquet write, which is the largest statement at scale (~50%
+      of wall at 10M rows on 8 threads).
 
     Output is byte-identical for every combination.
 
@@ -943,10 +950,7 @@ def aggregate_listing_to_parquet(
         con = _duckdb.connect()
     con.execute(f"SET memory_limit = '{memory_limit}'")
     con.execute("SET preserve_insertion_order = false")
-    # Fewer threads → fewer concurrent per-operator buffers (sort runs +
-    # parquet-writer row groups scale with thread count and sit largely
-    # outside `memory_limit` accounting).
-    con.execute("SET threads = 8")
+    con.execute(f"SET threads = {int(threads)}")
     # Per-invocation spill dir: DuckDB's default temp_directory is a *relative*
     # `.tmp/`, so concurrent imports sharing a cwd corrupt each other's spill
     # files. On failure the dir is left in place (spill files may still be

@@ -43,6 +43,7 @@ from disk_tree.find.aggregate_duckdb import DEFAULT_PARTITION_FILES
 @option('-F', '--coarse-floor', 'coarse_floor', default=None, type=int, help='Tiers: pin the `coarse` floor to this many bytes instead of deriving it from this import\'s total (a fleet imports per bucket but plans tiers with one fleet-wide floor: pass `2^(round(log2 fleet_total) − E)`). Recorded as `floor_source = explicit`')
 @option('-k', '--partition-depth', default=0, help='DuckDB engine only: cascade each distinct depth-K *directory* prefix separately (peak memory ∝ the largest cascade, not the listing); rows at depth ≤ K go to the top cascade; 0 = one cascade. Output is byte-identical for any value.')
 @option('-P', '--partition-files', default=None, type=int, help=f'DuckDB engine only, with `-k`: pack partitions (in key order) into cascades of up to N files — the memory knob (~4.4 KB/file with every extension on); a key over N is split into its sub-directories, recursively, until it fits or is a flat dir of N+ files; 0 = one cascade per key, no splitting. Default {DEFAULT_PARTITION_FILES:,}')
+@option('-n', '--threads', default=8, help='DuckDB engine only: DuckDB `threads` (default 8: fewer → fewer concurrent per-operator buffers; on a big node, more → a faster final sort + parquet write, the largest statement at scale)')
 @option('-M', '--memory-limit', default='8GB', help='DuckDB memory cap (duckdb engine only). Excess spills to `--temp-dir`.')
 @option('-o', '--out-dir', default=None, help="Aggregate into `<DIR>/<scheme>-<bucket>.parquet` instead of a fresh temp file. Stream engine: makes the `<out>.parts` resume token reachable across invocations, so a run that died in the finalize resumes at the merge instead of re-streaming.")
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendant files) per path')
@@ -72,6 +73,7 @@ def import_cmd(
     label_cols: str | None,
     partition_depth: int,
     partition_files: int | None,
+    threads: int,
     memory_limit: str,
     mean_mtime: bool,
     out_dir: str | None,
@@ -127,7 +129,7 @@ def import_cmd(
             db=db, storage=storage, con=con,
             engine=engine, listings=listings, bucket=bucket, scheme=scheme,
             snap_time=snap_time, memory_limit=memory_limit, temp_dir=temp_dir,
-            max_temp_size=max_temp_size, jobs=jobs, out_dir=out_dir,
+            max_temp_size=max_temp_size, jobs=jobs, threads=threads, out_dir=out_dir,
             pivot_sums=pivot_sums, mean_mtime=mean_mtime,
             duckdb_path=db_path, partition_depth=partition_depth,
             partition_files=DEFAULT_PARTITION_FILES if partition_files is None else partition_files,
@@ -163,6 +165,7 @@ def import_bucket(
     temp_dir: str | None = None,
     max_temp_size: str | None = None,
     jobs: int = 1,
+    threads: int = 8,
     out_dir: str | None = None,
     pivot_sums: tuple[str, ...] = (),
     mean_mtime: bool = False,
@@ -184,8 +187,9 @@ def import_bucket(
     `out_dir`: aggregate into a deterministic `<out_dir>/<scheme>-<bucket>.parquet`
     rather than a fresh temp name, so the stream engine's `<out>.parts` resume
     token is findable on a rerun (a per-invocation temp name never is).
-    `duckdb_path` / `partition_depth`: the duckdb engine's fleet-scale knobs
-    (file-backed cascade database; per-prefix partitioned cascade).
+    `duckdb_path` / `partition_depth` / `partition_files` / `threads`: the
+    duckdb engine's fleet-scale knobs (file-backed cascade database — inert;
+    per-prefix partitioned cascade; DuckDB thread count).
     `label` / `label_cols`: attribution slices as extra group keys (duckdb only).
     `tier_opts`: also cut the finished blob into index tiers (duckdb/stream).
     `side` / `max_cols`: subtree-MAX columns from a path-keyed side table (duckdb only).
@@ -236,7 +240,7 @@ def import_bucket(
                 stats = aggregate_listing_to_parquet(
                     src, bucket=bucket, scheme=scheme, out_parquet=out_parquet,
                     con=con, memory_limit=memory_limit, temp_dir=temp_dir,
-                    max_temp_size=max_temp_size,
+                    max_temp_size=max_temp_size, threads=threads,
                     pivot_sums=pivot_sums, mean_mtime=mean_mtime,
                     db=duckdb_path, partition_depth=partition_depth, partition_files=partition_files,
                     label=label, label_cols=label_cols,
