@@ -375,8 +375,13 @@ def test_partitioned_cascade_is_byte_identical(tmp_path: Path, depth: int, keys:
     pd.testing.assert_frame_equal(base, got)
     stats.pop('max_rss_mb')
     base_stats.pop('max_rss_mb')
-    assert base_stats == {**_IDENTITY_STATS, 'partitions': 0, 'partition_keys': 0, 'partition_splits': 0}
-    assert stats == {**_IDENTITY_STATS, 'partitions': keys, 'partition_keys': keys, 'partition_splits': 0}
+    assert base_stats == {**_IDENTITY_STATS, 'partitions': 0, 'partition_keys': 0, 'partition_splits': 0, 'sort_ranges': 0}
+    # ≥ 2 cascades → the final sort runs per range: one per cascade + the
+    # rows before the first key (`_write_ranged`); a single cascade sorts globally.
+    assert stats == {
+        **_IDENTITY_STATS, 'partitions': keys, 'partition_keys': keys, 'partition_splits': 0,
+        'sort_ranges': keys + 1 if keys >= 2 else 0,
+    }
 
 
 def test_partitions_batch_into_bounded_cascades(tmp_path: Path):
@@ -567,3 +572,91 @@ def test_cli_engine_duckdb_partitioned_file_backed_creates_scan(tmp_path: Path):
     conn.close()
     assert rows == [('gcs://b1', 600, 2, 6)]
     assert sorted(p.name for p in db_dir.iterdir()) == []
+
+
+# ---------- Seeded random listings: every partition config is byte-identical ----------
+
+#: Segments chosen so keys are string-prefixes of siblings with the next byte
+#: on either side of `/` (0x2F): `a` vs `a-v1` (`-` < `/`), `a` vs `a0`/`ab`
+#: (> `/`) — the ordering that dropped subtrees in the batched cascade (spec
+#: `mgu-scale-a3-gate.md` ask 6) and that the ranged final sort's bounds rest
+#: on; plus space, unicode, a `gs:` segment (`gs://` inside names, ask 9).
+_RANDOM_SEGMENTS = ['a', 'a-v1', 'a.bak', 'a0', 'ab', '_x', 'A', ' ', 'b', 'z', '日本', 'gs:']
+
+
+def _random_listing(tmp_path: Path, seed: int, n: int = 60) -> tuple[str, str, str]:
+    """A listing of `n` distinct names 1–6 segments deep off `_RANDOM_SEGMENTS`,
+    ~5% with a `//` inside (dirty: canonical path ≠ listing name), ~5% folder
+    placeholders (trailing `/`), zero sizes and spread `created`; a label
+    table over random 1–3-segment prefixes (some with trailing `/`, some
+    unlabeled); a side table over random canonical paths (root included).
+    Returns `(listing, labels, side)` parquet paths."""
+    import random
+    rng = random.Random(seed)
+    names: set[str] = set()
+    while len(names) < n:
+        segs = [rng.choice(_RANDOM_SEGMENTS) for _ in range(rng.randint(1, 6))]
+        name = '/'.join(segs)
+        r = rng.random()
+        if r < 0.05 and len(segs) > 1:
+            i = rng.randrange(1, len(segs))
+            name = '/'.join(segs[:i]) + '//' + '/'.join(segs[i:])
+        elif r < 0.10:
+            name += '/'
+        names.add(name)
+    rows = sorted(names)
+    listing = tmp_path / f'random-{seed}.parquet'
+    pd.DataFrame({
+        'bucket': ['b1'] * n,
+        'name': rows,
+        'size_bytes': [rng.choice([0, rng.randint(1, 10_000)]) for _ in rows],
+        'created': [TS + dt.timedelta(seconds=rng.randint(0, 10**7)) for _ in rows],
+        'storage_class_id': [rng.randint(1, 3) for _ in rows],
+    }).to_parquet(listing)
+
+    def canonical(name: str) -> str:
+        import re
+        return re.sub('/+', '/', name).rstrip('/')
+
+    prefixes = sorted({'/'.join(canonical(nm).split('/')[:k]) for nm in rows for k in (1, 2, 3)} - {''})
+    chosen = rng.sample(prefixes, k=min(len(prefixes), 12))
+    labels = tmp_path / f'labels-{seed}.parquet'
+    pd.DataFrame({
+        'prefix': [p + ('/' if rng.random() < 0.3 else '') for p in chosen],
+        'usr': [rng.choice(['u1', 'u2', None]) for _ in chosen],
+    }).to_parquet(labels)
+    paths = sorted({canonical(nm) for nm in rows} | set(prefixes)) + ['.']
+    picked = rng.sample(paths, k=min(len(paths), 20))
+    side = tmp_path / f'side-{seed}.parquet'
+    pd.DataFrame({
+        'path': picked,
+        'last_ts': [TS + dt.timedelta(seconds=rng.randint(0, 10**7)) for _ in picked],
+    }).to_parquet(side)
+    return str(listing), str(labels), str(side)
+
+
+@pytest.mark.parametrize('seed', [1, 2])
+def test_random_listings_are_byte_identical_across_partition_configs(tmp_path: Path, seed: int):
+    """The one-cascade output is the reference; every `(k, partition_files)`
+    config — including one cascade per key and budgets that pack a few keys
+    per cascade, hence a ranged final sort — must reproduce it row for row,
+    with labels, pivots, mean mtime, size histogram and a side MAX column all
+    on. Guards the whole partition/sort machinery against the input shapes
+    the hand-written fixtures happen not to contain."""
+    listing, labels, side = _random_listing(tmp_path, seed)
+    ext = dict(
+        pivot_sums=('storage_class_id',), mean_mtime=True, size_hist=True,
+        label=labels, label_cols=('usr',), side=side, max_cols=('last_ts',),
+    )
+    base, base_stats = _run_ooc(listing, tmp_path / 'base.parquet', **ext)
+    assert base_stats['sort_ranges'] == 0
+    ranged = 0
+    for k in (1, 2, 3):
+        for partition_files in (0, 5, 10**6):
+            got, stats = _run_ooc(listing, tmp_path / f'k{k}-p{partition_files}.parquet',
+                                  partition_depth=k, partition_files=partition_files, **ext)
+            pd.testing.assert_frame_equal(base, got)
+            expect = stats['partitions'] + 1 if stats['partitions'] >= 2 else 0
+            assert stats['sort_ranges'] == expect, (k, partition_files, stats)
+            ranged += stats['sort_ranges'] > 0
+    assert ranged >= 4

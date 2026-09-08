@@ -100,10 +100,44 @@ def _batch_partitions(parts: list[tuple[str, int]], partition_files: int) -> lis
     return batches
 
 
+#: Set by :func:`aggregate_listing_to_parquet` for its duration: a callable
+#: returning the memory suffix for stage lines (see :func:`_mem_probe`).
+_mem_probe: "Callable[[], str] | None" = None
+
+
 def _stage(msg: str) -> None:
     """Stage-boundary log line (stderr): OOM post-mortems need to know which
-    statement was in flight — a SIGKILL leaves no traceback."""
-    print(f"[agg {datetime.now().isoformat(timespec='seconds')}] {msg}", file=sys.stderr, flush=True)
+    statement was in flight — a SIGKILL leaves no traceback. While an
+    aggregation runs, each line also carries the process RSS against what
+    DuckDB accounts for (spec `mgu-scale-a3-gate.md` ask 11: the two drift
+    apart by tens of GB at fleet scale)."""
+    mem = f"  {_mem_probe()}" if _mem_probe is not None else ''
+    print(f"[agg {datetime.now().isoformat(timespec='seconds')}] {msg}{mem}", file=sys.stderr, flush=True)
+
+
+def _rss_mb() -> tuple[str, float]:
+    """`('rss', current RSS)` on Linux (`/proc`, where the fleet runs); the
+    process peak elsewhere — reading the current figure there costs a `ps`
+    fork per stage line, hundreds of them in a partitioned run."""
+    if sys.platform == 'linux':
+        with open('/proc/self/statm') as f:
+            return 'rss', int(f.read().split()[1]) * os.sysconf('SC_PAGE_SIZE') / (1024 * 1024)
+    return 'peak', _max_rss_mb()
+
+
+def _mem_probe_for(con: "duckdb.DuckDBPyConnection") -> "Callable[[], str]":
+    """`rss X duck Y spill Z` (GiB): process RSS vs the buffer manager's
+    accounted allocations (`duckdb_memory()`, what `memory_limit` caps) and
+    what it has paged to `temp_directory`. RSS − duck is the unaccounted part:
+    allocator retention, parquet writer/reader buffers, Python."""
+    def probe() -> str:
+        duck, spill = con.execute(
+            "SELECT COALESCE(SUM(memory_usage_bytes), 0), COALESCE(SUM(temporary_storage_bytes), 0) FROM duckdb_memory()"
+        ).fetchone()
+        g = 1024 ** 3
+        label, rss = _rss_mb()
+        return f"[{label} {rss / 1024:.1f}G duck {duck / g:.1f}G spill {spill / g:.1f}G]"
+    return probe
 
 
 def _max_rss_mb() -> float:
@@ -701,7 +735,7 @@ def _build_partitioned(
     labels: "_Labels | None" = None,
     side: "_Side | None" = None,
     partition_files: int = DEFAULT_PARTITION_FILES,
-) -> tuple[int, int, int]:
+) -> tuple[list[list[str]], int, int]:
     """Prefix-partitioned cascade (spec mgu-scale-unification.md A.2) → `dirs_all` + `n_children_tbl`.
 
     A dir and all its descendants share their depth-`k` prefix, so each
@@ -729,8 +763,11 @@ def _build_partitioned(
     cascade costs ~50 ms of SQL on top of its data.
 
     `files_sql_for(where)` returns the canonical file-row SELECT restricted by
-    a predicate over the raw listing columns. Returns `(cascades, keys,
-    splits)`, excluding top.
+    a predicate over the raw listing columns. Returns `(batches, keys,
+    splits)`: the cascades' key lists in `key/` order (the final sort ranges
+    over them; see :func:`_write_ranged`), excluding top. The `dirty` table
+    (rows whose canonical path is not their listing name) is left for that
+    sort to read.
     """
     parent_of_p = _PARENT_EXPR.format(col='p')
     group_cols = labels.cols if labels is not None else ()
@@ -816,7 +853,6 @@ def _build_partitioned(
             src='inputs_p', out='dirs_all', n_children='n_children_parts',
             tag=tag, group_cols=group_cols, max_cols=max_cols, append=i > 0,
         )
-    con.execute("DROP TABLE dirty")
 
     # Top cascade: rows under no key, plus every shallow dir — the ancestors
     # of the keys and of the top rows, and the root.
@@ -858,7 +894,83 @@ def _build_partitioned(
         GROUP BY path{keys}
     """)
     con.execute("DROP TABLE n_children_parts")
-    return len(batches), len(part_keys), n_split
+    return batches, len(part_keys), n_split
+
+
+def _write_ranged(
+    con: "duckdb.DuckDBPyConnection",
+    range_select: "Callable[[str | None, str | None], str]",
+    bounds: list[str],
+    sort_keys: list[str],
+    out: str,
+    run_dir: str,
+    row_group_size: int,
+) -> int:
+    """Write the output sorted `(depth, path, …)` without one global sort:
+    sort each *path range* on its own, then concatenate the ranges depth by
+    depth (spec `mgu-scale-a3-gate.md` ask 10).
+
+    The global `ORDER BY` over every output row is the one statement whose
+    memory does not follow the partition size, and DuckDB's sort over-commits
+    against `memory_limit` instead of spilling: 289M file rows + 25M dirs
+    died at a 100 GB cap after every cascade had finished — and the 10M
+    synthetic finishes under a 2.5 GB cap but dies under 4 GB, so it is not a
+    matter of headroom.
+
+    `bounds` are the cascades' first keys + `/`, in `key/` order — which *is*
+    byte order for those strings. Every row under a batch's keys lies in
+    `[first/, last0)` (the cascade's own scan range), and a later batch's
+    `first/` is ≥ this batch's `last0` (`_build_partitioned`), so the range
+    `[bounds[j], bounds[j+1])` holds batch `j`'s rows plus whatever top-cascade
+    rows and key/ancestor dir rows fall between — a sort of about one
+    cascade's rows, the same bound the cascade itself has. Rows below
+    `bounds[0]` (the root `.`, shallow dirs, files sorting before the first
+    key) form range 0. Within any depth, the ranges' slices concatenate in
+    range order into the global order — so each range is materialized once
+    (a spillable TEMP table) and written as one *cell* file per depth, sorted
+    by the remaining key; the final pass is one `read_parquet` over the cells
+    in `(depth, range)` order under `preserve_insertion_order` (DuckDB keeps
+    file-list order there): no sort, bounded by the reader/writer buffers.
+    (Per-range run files + a `UNION ALL` of `depth = d` arms wrote the same
+    bytes, but the ordered arms run one after another: 6.8 s vs 2.3 s for
+    the cells at 15M rows.) `sort_keys` is the full output order, `depth`
+    first. Returns the number of ranges.
+    """
+    import shutil
+    os.makedirs(run_dir, exist_ok=True)
+    edges: list[str | None] = [None, *bounds, None]
+    cells: dict[tuple[int, int], str] = {}
+    total = 0
+    within = f"ORDER BY {', '.join(sort_keys[1:])}"
+    for j in range(len(edges) - 1):
+        lo, hi = edges[j], edges[j + 1]
+        con.execute(f"CREATE OR REPLACE TEMP TABLE sort_range AS {range_select(lo, hi)}")
+        depths = [d for (d,) in con.execute("SELECT DISTINCT depth FROM sort_range ORDER BY depth").fetchall()]
+        n_range = 0
+        for d in depths:
+            cell = os.path.join(run_dir, f'{d:03d}-{j:05d}.parquet')
+            (n,) = con.execute(
+                f"COPY (SELECT * FROM sort_range WHERE depth = {d} {within})"
+                f" TO '{cell}' (FORMAT PARQUET, ROW_GROUP_SIZE {row_group_size})"
+            ).fetchone()
+            cells[(d, j)] = cell
+            n_range += n
+        total += n_range
+        _stage(f"[range {j + 1}/{len(edges) - 1}] {n_range} rows sorted into {len(depths)} depth cells")
+    con.execute("DROP TABLE IF EXISTS sort_range")
+    lst = '[' + ', '.join(f"'{cells[k]}'" for k in sorted(cells)) + ']'
+    con.execute("SET preserve_insertion_order = true")
+    try:
+        (n,) = con.execute(
+            f"COPY (SELECT * FROM read_parquet({lst})) TO '{out}' (FORMAT PARQUET, ROW_GROUP_SIZE {row_group_size})"
+        ).fetchone()
+    finally:
+        con.execute("SET preserve_insertion_order = false")
+    if n != total:
+        raise RuntimeError(f"ranged sort wrote {n} rows from {total} sorted")
+    _stage(f"{len(cells)} cells concatenated ({len(edges) - 1} ranges × depths)")
+    shutil.rmtree(run_dir)
+    return len(edges) - 1
 
 
 def aggregate_listing_to_parquet(
@@ -951,6 +1063,44 @@ def aggregate_listing_to_parquet(
     con.execute(f"SET memory_limit = '{memory_limit}'")
     con.execute("SET preserve_insertion_order = false")
     con.execute(f"SET threads = {int(threads)}")
+    # Hand freed blocks back to the OS between statements (jemalloc on the
+    # Linux wheels purges lazily otherwise): `memory_limit` bounds what the
+    # buffer manager holds, not what the allocator keeps (ask 11).
+    con.execute("SET allocator_background_threads = true")
+    global _mem_probe
+    _mem_probe = _mem_probe_for(con)
+    try:
+        return _aggregate_listing_to_parquet(
+            listing_sql, bucket, scheme, out_parquet, con,
+            temp_dir=temp_dir, max_temp_size=max_temp_size, pivot_sums=pivot_sums,
+            mean_mtime=mean_mtime, db_con=db_con, db_tmp=db_tmp, partition_depth=partition_depth,
+            label=label, label_cols=label_cols, side=side, max_cols=max_cols, size_hist=size_hist,
+            partition_files=partition_files,
+        )
+    finally:
+        _mem_probe = None
+
+
+def _aggregate_listing_to_parquet(
+    listing_sql: str,
+    bucket: str,
+    scheme: str,
+    out_parquet: str,
+    con: "duckdb.DuckDBPyConnection",
+    temp_dir: str | None,
+    max_temp_size: str | None,
+    pivot_sums: tuple[str, ...],
+    mean_mtime: bool,
+    db_con: "duckdb.DuckDBPyConnection | None",
+    db_tmp: str | None,
+    partition_depth: int,
+    label: str | None,
+    label_cols: tuple[str, ...],
+    side: str | None,
+    max_cols: tuple[str, ...],
+    size_hist: bool,
+    partition_files: int,
+) -> dict:
     # Per-invocation spill dir: DuckDB's default temp_directory is a *relative*
     # `.tmp/`, so concurrent imports sharing a cwd corrupt each other's spill
     # files. On failure the dir is left in place (spill files may still be
@@ -1040,12 +1190,14 @@ def aggregate_listing_to_parquet(
         _stage(f"listing: {n_files} file rows")
         if n_files == 0:
             raise ValueError(f"no rows for bucket {bucket!r}")
-        n_partitions, n_keys, n_splits = _build_partitioned(
+        batches, n_keys, n_splits = _build_partitioned(
             con, files_sql_for, partition_depth,
             sum_cols=tuple(sum_cols), mean_mtime=mean_mtime, extra_dir_cols=extra_dir_cols,
             labels=labels, side=side_tbl, partition_files=partition_files,
         )
+        n_partitions = len(batches)
     else:
+        batches = []
         n_partitions = n_keys = n_splits = 0
         # Build the `inputs` table without a pandas roundtrip: files first, then
         # synthesized dir rows for every unique ancestor path.
@@ -1166,26 +1318,61 @@ def aggregate_listing_to_parquet(
     # groups either.
     from disk_tree.storage.base import BLOB_ROW_GROUP_SIZE
     tmp_out = out_parquet + '.tmp'
-    con.execute(f"""
-        COPY (
-        WITH unioned AS (
-            SELECT path{keys}, size, mtime, n_desc, n_files, n_children, kind, parent{extra_names}, uri FROM dirs_final
-            UNION ALL
-            SELECT path{keys}, size, mtime,
-                   1::BIGINT AS n_desc, 1::BIGINT AS n_files, 0::BIGINT AS n_children,
-                   kind, parent{file_extra},
-                   ('{scan_root}/' || path)::VARCHAR AS uri
-            FROM files_src
-            WHERE kind = 'file'
+    # Two listing names can canonicalize to one path (`a//b` and `a/b` both
+    # exist in real buckets; a folder placeholder `a/b/` beside a file `a/b`),
+    # so `(depth, path, labels)` is not unique: the trailing keys make the
+    # order — and the output bytes — deterministic run to run.
+    sort_keys = ['depth', 'path', *(f'{c} NULLS FIRST' for c in group_cols), 'kind', 'size', 'mtime']
+    order_by = f"ORDER BY {', '.join(sort_keys)}"
+
+    def final_select(dirs_where: str, files_from: str) -> str:
+        """The output rows: aggregated dirs ∪ file rows, `depth` attached."""
+        return f"""
+            WITH unioned AS (
+                SELECT path{keys}, size, mtime, n_desc, n_files, n_children, kind, parent{extra_names}, uri
+                FROM dirs_final{dirs_where}
+                UNION ALL
+                SELECT path{keys}, size, mtime,
+                       1::BIGINT AS n_desc, 1::BIGINT AS n_files, 0::BIGINT AS n_children,
+                       kind, parent{file_extra},
+                       ('{scan_root}/' || path)::VARCHAR AS uri
+                FROM {files_from}
+                WHERE kind = 'file'
+            )
+            SELECT *,
+                   CASE WHEN path = '.' THEN 0
+                        ELSE length(path) - length(replace(path, '/', '')) + 1
+                   END::BIGINT AS depth
+            FROM unioned
+        """
+
+    n_ranges = 0
+    if len(batches) >= 2:
+        # Each cascade's rows sort into their own range (see `_write_ranged`):
+        # the batch's clean rows straight off the listing (a `name` range the
+        # parquet pushdown prunes on, as the cascade's own input scan did) plus
+        # its dirty rows by canonical path.
+        def range_select(lo: str | None, hi: str | None) -> str:
+            def between(col: str) -> str:
+                return ''.join([
+                    f" AND {col} >= {_sql_lit(lo)}" if lo is not None else '',
+                    f" AND {col} < {_sql_lit(hi)}" if hi is not None else '',
+                ])
+            clean = files_sql_for(f" AND {_CLEAN_NAME}{between('name')}")
+            files_from = (
+                f"(SELECT * FROM ({clean}) UNION ALL SELECT * EXCLUDE (part) FROM dirty WHERE true{between('path')})"
+            )
+            return final_select(f" WHERE true{between('path')}", files_from)
+
+        n_ranges = _write_ranged(
+            con, range_select, [batch[0] + '/' for batch in batches], sort_keys,
+            out=tmp_out, run_dir=os.path.join(spill_dir, 'runs'), row_group_size=BLOB_ROW_GROUP_SIZE,
         )
-        SELECT *,
-               CASE WHEN path = '.' THEN 0
-                    ELSE length(path) - length(replace(path, '/', '')) + 1
-               END::BIGINT AS depth
-        FROM unioned
-        ORDER BY depth, path{''.join(f', {c} NULLS FIRST' for c in group_cols)}
-        ) TO '{tmp_out}' (FORMAT PARQUET, ROW_GROUP_SIZE {BLOB_ROW_GROUP_SIZE})
-    """)
+    else:
+        con.execute(
+            f"COPY ({final_select('', 'files_src')} {order_by})"
+            f" TO '{tmp_out}' (FORMAT PARQUET, ROW_GROUP_SIZE {BLOB_ROW_GROUP_SIZE})"
+        )
     _stage("COPY done")
     rows = con.execute(f"SELECT COUNT(*) FROM read_parquet('{tmp_out}')").fetchone()[0]
     os.replace(tmp_out, out_parquet)
@@ -1201,20 +1388,21 @@ def aggregate_listing_to_parquet(
     root = root.iloc[0] if len(root) and root.iloc[0]['size'] is not None and not pd.isna(root.iloc[0]['size']) else None
     con.execute("DROP VIEW files_src")
     con.execute("DROP TABLE IF EXISTS inputs")
+    con.execute("DROP TABLE IF EXISTS dirty")
     con.execute("DROP TABLE dirs_final")
     con.execute("DROP TABLE IF EXISTS labels")
     con.execute("DROP TABLE IF EXISTS side")
     if temp_dir is None:
         import shutil
         shutil.rmtree(spill_dir, ignore_errors=True)
+    max_rss_mb = _max_rss_mb()
+    _stage(f"done: peak RSS {max_rss_mb:,.0f} MiB")
     if db_con is not None:
         db_con.close()
         if db_tmp is not None:
             for p in (db_tmp, db_tmp + '.wal'):
                 if os.path.exists(p):
                     os.remove(p)
-    max_rss_mb = _max_rss_mb()
-    _stage(f"done: peak RSS {max_rss_mb:,.0f} MiB")
     return {
         'rows': int(rows),
         'files': int(n_files),
@@ -1226,5 +1414,6 @@ def aggregate_listing_to_parquet(
         'partitions': int(n_partitions),
         'partition_keys': int(n_keys),
         'partition_splits': int(n_splits),
+        'sort_ranges': int(n_ranges),
         'max_rss_mb': round(max_rss_mb, 1),
     }
