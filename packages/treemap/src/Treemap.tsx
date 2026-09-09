@@ -430,6 +430,11 @@ export interface CellCtx extends CellDims {
   /** Background opacity applied at this depth (the depth fade), so consumers
    * can compute what their color actually composites to on screen. */
   fade: number
+  /** With `collapseChains`, how many single-child levels this cell collapsed
+   * beyond its first (0 = not a chain): `path` ends at the deepest node, so
+   * the cell's own top node is `path[path.length - 1 - chain]`. Passed to
+   * `renderCellExtra` only. */
+  chain?: number
 }
 
 const DEFAULT_SLOTS = DEFAULT_PALETTE
@@ -1203,7 +1208,7 @@ export function Treemap<T>({
             )}
           </div>
         )}
-        {!folded && renderCellExtra && renderCellExtra(kid as T, kidPath, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 })}
+        {!folded && renderCellExtra && renderCellExtra(kid as T, kidPath, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0, chain: chainLabels ? chainLabels.length - 1 : 0 })}
         {kids.length > 0 && kidChildren && (
           <div
             className="dt-treemap-inner"
