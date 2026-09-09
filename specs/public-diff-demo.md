@@ -70,15 +70,41 @@ compute is bounded either way. Phase 3's Function implements (B) first; the
 cache is a later, transparent fast-path (Function checks for a persisted index,
 else recomputes).
 
-### Phase 3 — serverless compare Function
+### Phase 3 — serverless compare Function (the convergent optimum)
 
-`ui/functions/api/compare.ts` (+ `/api/diff/status` if kept), the direct analog
-of `scan.ts`: read the diff blob (A) or the two scan blobs (B) from R2, rebase
-to the requested `uri`, apply `max_rows`/`min_frac`. Flip `compare: true` in
-`capabilities.ts`. `CompareView` already renders the core widgets and calls
-`compareScans`/`compareScansRecursive`/`fetchDiffIndexStatus`; wire those to the
-Function (with (A) the progressive walk→index refetch collapses to a single
-index read). Surface a compare entry point in the demo nav.
+**Fleet finding (why not depth-by-depth streaming):** neither deployment
+streams the diff to the client. disk-tree `/api/compare` is a best-first |Δ|
+heap walk (`diff.py:251 recursive_diff`, `budget` expansions) + persisted-index
+3 s poll-and-refetch; marin `site/functions/api/diff.ts` is a level-by-level BFS
+(for lookup *parallelism*) over a shared byte-floor, returned as one edge-cached
+JSON blob. Depth-ordered iterative deepening exists only in
+`/api/filter/stream` (single scan, SSE) and build-side in `iter_diff_depths`
+(→ parquet). Streaming depth-by-depth over the wire **fights edge-caching** (a
+`ReadableStream` is awkward to `cache.put`) and the treemap only needs ~2
+visible levels to first-paint — so the optimum is a *synthesis*, not streaming:
+
+- **Shared byte-floor bound** (from marin): `threshold = max(rootA,rootB) ·
+  minArea/(w·h)` — viewport-relative and deterministic, so the edge-cache key is
+  exact and `min_frac` (undrawable cells: bytes *and* |Δ| both under floor)
+  becomes the primary prune, never walked.
+- **Depth-≤2 slice + lazy drill** (from `scan.ts`): return the viewed uri's diff
+  to depth 2 in one cacheable request; `DiffTreemap.fetchSubtree` re-requests
+  rooted at a drilled node (each independently cacheable). First paint in one
+  round-trip, deep work deferred *and* cached.
+- **Best-first |Δ| frontier ordering** + a `top` cut (both deployments already
+  do this at emit) so `truncated` is meaningful.
+
+`ui/functions/api/compare.ts`: read the path-prefix slice of *both* scans at the
+viewed uri (via `ui/cfn/parquet.ts` pushdown, exactly as `scan.ts`), outer-join
+per path → status (added/removed/changed/touched/unchanged) + Δsize/Δcount, drop
+undrawable rows, order + cut. Flip `compare: true`; adapt `CompareView` so a
+static (no-persisted-index) response is final — skip the 3 s index poll. Surface
+a compare entry point in the demo nav.
+
+**Fleet alignment:** this Function is the reference the whole fleet converges on.
+marin/cw-s3 are already close (byte-floor bound present); aligning them —
+best-first frontier ordering + depth-slice-and-drill instead of one full walk —
+is a follow-up spec handoff to those sessions, not part of this repo's build.
 
 ### Phase 4 — union `path` / `hbt`
 
