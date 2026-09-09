@@ -785,6 +785,7 @@ function Treemap({
         root={filterTree ?? tree}
         tiling={tiling}
         renderer={renderer}
+        nestedHues
         renderLegend={() => (
           <span style={{ display: 'inline-flex', gap: 8, fontSize: '0.8rem' }}>
             <span style={{ display: 'inline-flex', gap: 2 }}>

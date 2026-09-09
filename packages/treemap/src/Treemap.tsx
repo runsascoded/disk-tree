@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { contrastEdge, DEFAULT_PALETTE } from './colors'
+import { contrastEdge, DEFAULT_PALETTE, slotColor } from './colors'
 import { DustHatch } from './DustHatch'
 import type { FoldedNode, LayoutConfig } from './layout'
 import { edgeEmphFactor, isFolded, layoutCells } from './layout'
@@ -8,7 +8,7 @@ import { foldSmall, foldThin, squarify, squarifyRemainder } from './squarify'
 import { TreemapCanvas, type CanvasHit } from './TreemapCanvas'
 import { OutlineOverlay } from './OutlineOverlay'
 import type { OutlineGroups } from './outlines'
-import { resolveRing, type StyleOpts } from './cellStyle'
+import { categoricalStyle, resolveRing, type StyleOpts } from './cellStyle'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -283,6 +283,15 @@ export interface TreemapProps<T> {
    */
   dustTexture?: boolean
   /**
+   * Hierarchical default coloring (no effect when `colorForCell` is set): each
+   * top-level dir keeps its categorical "macro" hue, its descendants get a
+   * per-L2-subtree "micro" variation of it (so sibling subtrees read as
+   * related-but-distinct), and container cells are tinted a recessed shade of
+   * their hue instead of a flat grey — so directory headers carry color. Off by
+   * default (the neutral-container look is unchanged); opt in per consumer.
+   */
+  nestedHues?: boolean
+  /**
    * Render a "detail" slider in the chrome bar that scales the fold thresholds
    * live (`minCellArea` and `minCellSide`), so a viewer can trade legibility
    * against completeness without a code change — drag toward *fine* to split
@@ -500,6 +509,7 @@ export function Treemap<T>({
   edgeEmphasis = 0,
   edgeContrast = true,
   dustTexture = true,
+  nestedHues = false,
   foldControl = false,
   remainderTail = false,
   renderer = 'dom',
@@ -668,7 +678,7 @@ export function Treemap<T>({
   // Categorical color slots by top-level index (used when no colorForCell is given).
   const topLevelSlot = useMemo(() => {
     const kids = childrenOf(root, [root]) ?? []
-    return new Map(kids.map((k, i) => [getLabel(k), DEFAULT_SLOTS[i % DEFAULT_SLOTS.length]]))
+    return new Map(kids.map((k, i) => [getLabel(k), slotColor(i, DEFAULT_SLOTS)]))
   }, [root, childrenOf, getLabel])
 
   // Build a folded stand-in from a set of small/thin items: consumer
@@ -781,8 +791,8 @@ export function Treemap<T>({
   // change none of these inputs (consumer props keep their identity across
   // internal state changes), so a hover never re-triggers a full repaint.
   const styleOpts = useMemo<StyleOpts<T>>(
-    () => ({ colorForCell, lens, getLabel, topLevelSlot, defaultSlots: DEFAULT_SLOTS, dustTexture, edgeContrast, fadeAt }),
-    [colorForCell, lens, getLabel, topLevelSlot, dustTexture, edgeContrast, fadeAt],
+    () => ({ colorForCell, lens, getLabel, topLevelSlot, defaultSlots: DEFAULT_SLOTS, dustTexture, edgeContrast, nestedHues, fadeAt }),
+    [colorForCell, lens, getLabel, topLevelSlot, dustTexture, edgeContrast, nestedHues, fadeAt],
   )
 
   // Hit → action, shared by both renderers: a DOM cell's event and a canvas
@@ -916,11 +926,7 @@ export function Treemap<T>({
         ? { bg: 'var(--dt-treemap-folded-ground, rgba(120, 120, 135, 0.12))', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
         : { bg: 'var(--dt-treemap-folded, #4a4a52)', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
     } else {
-      const top = kidPath[1] // path[0] = root; [1] is the top-level bucket-of-the-current-drill
-      const slot = top ? topLevelSlot.get(getLabel(top)) : undefined
-      style = kids.length > 0
-        ? { bg: 'var(--dt-treemap-container-bg, #202024)', ink: 'var(--dt-treemap-ink, #d0d0d8)' }
-        : { bg: slot ?? DEFAULT_SLOTS[0], ink: '#fff' }
+      style = categoricalStyle(kidPath, kids.length > 0, getLabel, topLevelSlot, DEFAULT_SLOTS, nestedHues)
     }
     if (lens && !folded) {
       style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 }, style) ?? style
