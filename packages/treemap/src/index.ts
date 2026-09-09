@@ -16,3 +16,34 @@ export { age01, ageDomain, ageFade, CONTAINER_BG, contrastEdge, DEFAULT_PALETTE,
 export type { AgeFadeOpts } from './colors'
 export { dimUnmatched, filterNodes, parseQuery } from './filter'
 export type { DimOpts, QueryOpts } from './filter'
+// Diff widgets: a treemap + table pair over a compared tree (green grew / red
+// shrank, Δ-by-area). Accessor/slot-based, disk-agnostic.
+export { DiffTreemap, DiffTable, buildDiffTree, churn, fetchable, mapMinFrac, MIN_CELL_PX } from './diff'
+export {
+  GREW_GREEN,
+  SHRANK_RED,
+  NEUTRAL,
+  UNCHANGED_GREY,
+  UNCHANGED_SWATCH,
+  TOUCHED_HATCH,
+  deltaColor,
+  deltaTextColor,
+  statusColors,
+} from './diff'
+export type {
+  DiffStatus,
+  DiffNodeStatus,
+  DiffKind,
+  DiffAreaMode,
+  DiffNode,
+  DiffRecRow,
+  DiffFlatRow,
+  DiffIndexInfo,
+  DiffInput,
+  DiffSubtree,
+  DiffTreemapProps,
+  DiffMetric,
+  DiffRowValues,
+  DiffTableRow,
+  DiffTableProps,
+} from './diff'
