@@ -114,4 +114,23 @@ describe('OutlineOverlay rendering (DOM renderer)', () => {
     const spy = mount(() => 'rgb(9, 8, 7)')
     expect(spy.strokeStyles).toEqual(['rgb(9, 8, 7)'])
   })
+
+  it('calls onDrawn with the keys that produced ≥1 segment', () => {
+    // Follow-on §2: the legend keys only the groups actually on screen. The
+    // two same-key top cells form one visible group → `['mk']`.
+    const { restore } = spyCanvas()
+    const layout = withLayout()
+    restores.push(restore, layout)
+    const drawn: string[][] = []
+    render(
+      <Treemap
+        root={tree}
+        {...accessors}
+        renderer="dom"
+        minCellArea={null}
+        outlineGroups={{ key: (n: Node) => (n.n === 'root' ? null : 'mk'), color: () => '#ff00aa', onDrawn: keys => drawn.push(keys) }}
+      />,
+    )
+    expect(drawn.at(-1)).toEqual(['mk'])
+  })
 })

@@ -22,6 +22,7 @@ export { OutlineOverlay } from './OutlineOverlay'
 export type { OutlineOverlayProps } from './OutlineOverlay'
 export { groupOutlines, groupRects, unionOutline } from './outlines'
 export type { OutlineGroups, OutlinePath, OutlineSeg } from './outlines'
+export { colorResolver, cssColor } from './cssColor'
 // Diff widgets: a treemap + table pair over a compared tree (green grew / red
 // shrank, Δ-by-area). Accessor/slot-based, disk-agnostic.
 export { DiffTreemap, DiffTable, buildDiffTree, churn, fetchable, mapMinFrac, MIN_CELL_PX } from './diff'

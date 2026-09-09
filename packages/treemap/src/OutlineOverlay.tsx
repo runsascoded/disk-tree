@@ -8,27 +8,13 @@
 import { useEffect, useRef } from 'react'
 import { type PlacedCell } from './layout'
 import { type OutlineGroups, groupOutlines } from './outlines'
+import { colorResolver } from './cssColor'
 
 export interface OutlineOverlayProps<T> {
   cells: PlacedCell<T>[]
   width: number
   height: number
   groups: OutlineGroups<T>
-}
-
-/**
- * Resolve a `var(--name[, fallback])` reference against `el`'s computed style;
- * pass any other color string through unchanged. A canvas `strokeStyle`
- * silently ignores a custom-property reference (painting black), but a themed
- * consumer's natural way to name a color is a CSS variable — so resolve it here
- * in the core rather than in every consumer.
- */
-function cssColor(el: Element, color: string): string {
-  const m = /^\s*var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)\s*$/.exec(color)
-  if (!m) return color
-  const [, name, fallback] = m
-  const v = getComputedStyle(el).getPropertyValue(name).trim()
-  return v || (fallback != null ? fallback.trim() : color)
 }
 
 export function OutlineOverlay<T>({ cells, width, height, groups }: OutlineOverlayProps<T>) {
@@ -56,8 +42,12 @@ export function OutlineOverlay<T>({ cells, width, height, groups }: OutlineOverl
     // own cells rather than straddling into neighbors.
     const off = groups.inset === false ? 0 : lw / 2
 
-    for (const { color, segs } of groupOutlines(cells, groups)) {
-      ctx.strokeStyle = cssColor(cv, color)
+    const resolve = colorResolver(cv)
+    const drawn: string[] = []
+    for (const { key, color, segs } of groupOutlines(cells, groups)) {
+      if (segs.length === 0) continue
+      drawn.push(key)
+      ctx.strokeStyle = resolve(color)
       ctx.beginPath()
       for (const s of segs) {
         const dx = s.nx * off
@@ -67,6 +57,7 @@ export function OutlineOverlay<T>({ cells, width, height, groups }: OutlineOverl
       }
       ctx.stroke()
     }
+    groups.onDrawn?.(drawn)
   }, [cells, width, height, groups])
 
   return (

@@ -23,6 +23,14 @@ export interface OutlineGroups<T> {
   width?: number
   /** Stroke just inside the union (default) or centered on its boundary. */
   inset?: boolean
+  /**
+   * Called after each paint with the keys that produced at least one segment
+   * — what is actually on screen, so a consumer's key/legend can list only
+   * the groups a viewer can see (a group whose cells all fold below the
+   * pixel budget has no outline to explain). Keep it cheap and idempotent:
+   * it runs on every relayout.
+   */
+  onDrawn?: (keys: string[]) => void
 }
 
 export interface Rect {

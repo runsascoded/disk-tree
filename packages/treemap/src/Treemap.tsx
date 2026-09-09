@@ -202,6 +202,13 @@ export interface TreemapProps<T> {
    * it to the cell's far edge. Both renderers honor it identically.
    */
   sizeAlign?: 'left' | 'right'
+  /**
+   * Minimum cell width (CSS px) at which a branch title-bar or short leaf
+   * shows its size *inline* beside the name. Below it the name gets the whole
+   * line (the size stays in the tooltip, and on a tall leaf's 2nd line).
+   * Raise it when names matter more than sizes (long paths). Default: 90.
+   */
+  inlineSizeMinWidth?: number
   /** Extra className on the outer wrapper. */
   className?: string
   /** Style overrides on the map area. */
@@ -499,6 +506,7 @@ export function Treemap<T>({
   chrome = true,
   showLabels = true,
   sizeAlign = 'left',
+  inlineSizeMinWidth = 90,
   className,
   mapStyle,
   depthFade = 0.82,
@@ -816,6 +824,25 @@ export function Treemap<T>({
       onCellHover?.(null, [])
     }
   }
+  // Stray-tip guard: a hover tip that outlived its cell (the pointer left via
+  // a path no mouseleave covered — a re-laid tip under the cursor, the window
+  // edge, a portal boundary) would otherwise sit there until the next cell
+  // hover. Any pointer movement outside a cell, the tip, or the map clears it;
+  // a pinned tip is the pin's business (outside click / Esc).
+  useEffect(() => {
+    if (!tip || pinnedTip) return
+    const onMove = (e: MouseEvent) => {
+      const t = e.target as Element | null
+      if (t?.closest?.('.dt-treemap-cell, .dt-treemap-tip, .dt-treemap-map, .dt-treemap-canvas')) return
+      cancelTipClear()
+      pin.hover(null)
+      clearHover()
+      setTip(null)
+    }
+    document.addEventListener('mousemove', onMove)
+    return () => document.removeEventListener('mousemove', onMove)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!tip, !!pinnedTip])
   const activatePin = (node: T, path: T[], key: string, x: number, y: number) => {
     // Reuse the hover tip's anchor for the same cell, so pinning doesn't jump
     // the tooltip from the cell to the click point.
@@ -1143,7 +1170,7 @@ export function Treemap<T>({
             {/* Inline size only for branch title-bars and short leaves; a tall
                 leaf drops it to a 2nd line (below) so the name gets the full
                 first line and isn't crowded by the size. */}
-            {(kids.length > 0 || r.h <= 34) && r.w > 90 && (
+            {(kids.length > 0 || r.h <= 34) && r.w > inlineSizeMinWidth && (
               <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none', marginLeft: sizeAlign === 'right' ? 'auto' : undefined }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
@@ -1323,6 +1350,7 @@ export function Treemap<T>({
                 expandable={expandable}
                 dustTexture={dustTexture}
                 cellHref={cellHref}
+                inlineSizeMinWidth={inlineSizeMinWidth}
                 a11yLinks={a11yLinks}
                 a11yMaxCells={a11yMaxCells}
                 a11yMinSide={a11yMinSide}
