@@ -36,9 +36,17 @@ Daily cron + `workflow_dispatch`: for each demo bucket,
 adds a `<uuid>.parquet` + `.scan.json` under `scans/`; the Functions already
 list newest-per-path and expose `/api/scans/history`, so dated points just
 accumulate. Same R2 auth as `reduce.yml`. `-D` because a stateless runner has no
-prior scan locally (diff indexes are Phase 2). **Needs the user to enable the
-schedule / first-run it; cron time (`23 8 * * *`) is a guess — align with
-nj-crashes' daily refresh.**
+prior scan locally (diff indexes are Phase 2). Cron time (`23 8 * * *`) is a
+guess — align with nj-crashes' daily refresh.
+
+**Blocker found on first dispatch (run 34400284520):** the scan of `r2://ctbk`
+succeeded but writing the blob to `r2://disk-tree-demo/scans/` failed with
+`PermissionError: Access Denied` (s3fs `put_object`). The GHA R2 token
+(`R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`) can **read** the source buckets but
+lacks **write** on `disk-tree-demo`. Fix (account-side, user): grant that token
+Object Read **& Write** on `disk-tree-demo` (or scope it to all four buckets),
+then re-dispatch. Until then no second scan accumulates, so compare stays
+live-blocked.
 
 ### Phase 2 — diff computation  ⟵ OPEN DECISION (storage policy)
 
@@ -130,12 +138,19 @@ ways in, both cloud/GHA-friendly (no laptop dependency):
   `r2://hbt` (or a shared bucket), then they join the loop under the existing R2
   credential, no extra secret.
 
-### Phase 5 — demo UX
+### Phase 5 — demo UX ✅ (compare action on the Scans table)
 
-A discoverable compare/diff entry point (nav item or a default landing on the
-freshest diff), analogous to marin's `#diff` section. The marking / ownership /
-sweep machinery of mgu/cw-s3 is checkpoint-domain-specific and out of scope;
-disk-tree's demo angle is treemap + diff + age-lens + filter over public data.
+A discoverable compare/diff entry point. Landed as a per-row **⇄ compare
+action** on the Scans landing table (`ui/src/components/ScanList.tsx`,
+`compareColumn`), gated on `caps?.compare` — so the demo (compare on) shows it
+and the Flask default keeps it, while a deployment without compare hides it.
+Each links to `/compare/<path>`, where `CompareView` auto-selects the latest two
+scans of that path (and self-handles the "only one scan yet" case). Compare was
+already reachable from *within* a scan (`ScanDetails` ⇄ button + header
+Compare); this adds it to the landing page so a diff is one click from the root.
+The marking / ownership / sweep machinery of mgu/cw-s3 is checkpoint-domain-
+specific and out of scope; disk-tree's demo angle is treemap + diff + age-lens +
+filter over public data.
 
 ## Decisions
 

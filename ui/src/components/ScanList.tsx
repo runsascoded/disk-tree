@@ -12,7 +12,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
-import { FaPlay } from 'react-icons/fa'
+import { FaPlay, FaExchangeAlt } from 'react-icons/fa'
 import { fetchScans, startScan } from '../api'
 import type { Scan, ScanJob, ScanProgress } from '../api'
 import { useCapabilities } from '../hooks/useCapabilities'
@@ -38,6 +38,26 @@ const scanColumns: Column<Scan>[] = [
   { key: 'n_children', label: 'Children', type: 'count' },
   { key: 'time', label: 'Scanned', type: 'time' },
 ]
+
+/** Compare-action column — a jump straight from the landing table into a path's
+ *  diff view (`/compare/<path>`, CompareView auto-selects the latest two scans).
+ *  Appended only where the deployment serves compare (`caps?.compare`); the
+ *  target handles the "only one scan yet" case itself. */
+const compareColumn: Column<Scan> = {
+  key: 'compare',
+  label: '',
+  align: 'center',
+  shrink: true,
+  render: scan => (
+    <Tooltip title="Compare scans of this path">
+      <Link to={`/compare${uriToPath(scan.path)}`}>
+        <Button size="small" sx={{ minWidth: 0, padding: '2px 6px' }}>
+          <FaExchangeAlt size={12} />
+        </Button>
+      </Link>
+    </Tooltip>
+  ),
+}
 
 function LiveScanProgress({ progress }: { progress: ScanProgress[] }) {
   const activeScans = progress.filter(p => p.status === 'running')
@@ -150,6 +170,12 @@ export function ScanList() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState(50)
 
+  const caps = useCapabilities()
+  const columns = useMemo(
+    () => (caps?.compare ? [...scanColumns, compareColumn] : scanColumns),
+    [caps?.compare],
+  )
+
   // Live progress from SSE
   const scanProgress = useScanProgress()
 
@@ -208,7 +234,7 @@ export function ScanList() {
         <Typography variant="subtitle2" sx={{ mb: 1, mt: 2 }}>Completed Scans</Typography>
       </Tooltip>
       <DataTable<Scan>
-        columns={scanColumns}
+        columns={columns}
         data={paginatedScans}
         rowKey={scan => scan.id}
       />
