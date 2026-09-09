@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { contrastEdge, DEFAULT_PALETTE } from './colors'
+import { contrastEdge, DEFAULT_PALETTE, slotColor } from './colors'
 import { DustHatch } from './DustHatch'
 import type { FoldedNode, LayoutConfig } from './layout'
 import { edgeEmphFactor, isFolded, layoutCells } from './layout'
 import { foldSmall, foldThin, squarify, squarifyRemainder } from './squarify'
 import { TreemapCanvas, type CanvasHit } from './TreemapCanvas'
-import { resolveRing, type StyleOpts } from './cellStyle'
+import { OutlineOverlay } from './OutlineOverlay'
+import type { OutlineGroups } from './outlines'
+import { categoricalStyle, resolveRing, type StyleOpts } from './cellStyle'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -200,6 +202,13 @@ export interface TreemapProps<T> {
    * it to the cell's far edge. Both renderers honor it identically.
    */
   sizeAlign?: 'left' | 'right'
+  /**
+   * Minimum cell width (CSS px) at which a branch title-bar or short leaf
+   * shows its size *inline* beside the name. Below it the name gets the whole
+   * line (the size stays in the tooltip, and on a tall leaf's 2nd line).
+   * Raise it when names matter more than sizes (long paths). Default: 90.
+   */
+  inlineSizeMinWidth?: number
   /** Extra className on the outer wrapper. */
   className?: string
   /** Style overrides on the map area. */
@@ -281,6 +290,15 @@ export interface TreemapProps<T> {
    */
   dustTexture?: boolean
   /**
+   * Hierarchical default coloring (no effect when `colorForCell` is set): each
+   * top-level dir keeps its categorical "macro" hue, its descendants get a
+   * per-L2-subtree "micro" variation of it (so sibling subtrees read as
+   * related-but-distinct), and container cells are tinted a recessed shade of
+   * their hue instead of a flat grey — so directory headers carry color. Off by
+   * default (the neutral-container look is unchanged); opt in per consumer.
+   */
+  nestedHues?: boolean
+  /**
    * Render a "detail" slider in the chrome bar that scales the fold thresholds
    * live (`minCellArea` and `minCellSide`), so a viewer can trade legibility
    * against completeness without a code change — drag toward *fine* to split
@@ -339,6 +357,14 @@ export interface TreemapProps<T> {
    * to mirror only the comfortably-clickable cells. Default: 0.
    */
   a11yMinSide?: number
+  /**
+   * Stroke, once, the outer perimeter of the union of rendered cells sharing a
+   * consumer-supplied group key — so a run of adjacent same-mark siblings reads
+   * as one bordered region instead of a lattice of doubled cell frames (spec
+   * `specs/treemap-mark-union-outlines.md`). An overlay above the fills, below
+   * tooltips, `pointer-events:none`; redrawn with layout. Off when unset.
+   */
+  outlineGroups?: OutlineGroups<T>
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -404,6 +430,11 @@ export interface CellCtx extends CellDims {
   /** Background opacity applied at this depth (the depth fade), so consumers
    * can compute what their color actually composites to on screen. */
   fade: number
+  /** With `collapseChains`, how many single-child levels this cell collapsed
+   * beyond its first (0 = not a chain): `path` ends at the deepest node, so
+   * the cell's own top node is `path[path.length - 1 - chain]`. Passed to
+   * `renderCellExtra` only. */
+  chain?: number
 }
 
 const DEFAULT_SLOTS = DEFAULT_PALETTE
@@ -480,6 +511,7 @@ export function Treemap<T>({
   chrome = true,
   showLabels = true,
   sizeAlign = 'left',
+  inlineSizeMinWidth = 90,
   className,
   mapStyle,
   depthFade = 0.82,
@@ -490,12 +522,14 @@ export function Treemap<T>({
   edgeEmphasis = 0,
   edgeContrast = true,
   dustTexture = true,
+  nestedHues = false,
   foldControl = false,
   remainderTail = false,
   renderer = 'dom',
   a11yLinks = true,
   a11yMaxCells = 400,
   a11yMinSide = 0,
+  outlineGroups,
 }: TreemapProps<T>) {
   // Live fold-threshold multiplier driven by the optional "detail" slider:
   // >1 folds more (coarser), <1 folds less (finer). Scales area linearly and
@@ -657,7 +691,7 @@ export function Treemap<T>({
   // Categorical color slots by top-level index (used when no colorForCell is given).
   const topLevelSlot = useMemo(() => {
     const kids = childrenOf(root, [root]) ?? []
-    return new Map(kids.map((k, i) => [getLabel(k), DEFAULT_SLOTS[i % DEFAULT_SLOTS.length]]))
+    return new Map(kids.map((k, i) => [getLabel(k), slotColor(i, DEFAULT_SLOTS)]))
   }, [root, childrenOf, getLabel])
 
   // Build a folded stand-in from a set of small/thin items: consumer
@@ -752,13 +786,16 @@ export function Treemap<T>({
   // Canvas renderer: the placed-cell tree (geometry only) for the whole map,
   // laid once and reused for paint + hit-test. Only built in canvas mode.
   const placedCells = useMemo(() => {
-    if (renderer !== 'canvas') return []
+    // The canvas renderer paints from these; the DOM renderer doesn't, but the
+    // outline overlay needs the geometry either way — so build them whenever an
+    // `outlineGroups` overlay is present, not only for the canvas renderer.
+    if (renderer !== 'canvas' && !outlineGroups) return []
     const cfg: LayoutConfig<T> = {
       getSize, getLabel, childrenOf, showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
     }
     return layoutCells(rects, path, rootMode, cfg)
   }, [
-    renderer, rects, path, rootMode, getSize, getLabel, childrenOf,
+    renderer, !!outlineGroups, rects, path, rootMode, getSize, getLabel, childrenOf,
     showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
   ])
 
@@ -767,8 +804,8 @@ export function Treemap<T>({
   // change none of these inputs (consumer props keep their identity across
   // internal state changes), so a hover never re-triggers a full repaint.
   const styleOpts = useMemo<StyleOpts<T>>(
-    () => ({ colorForCell, lens, getLabel, topLevelSlot, defaultSlots: DEFAULT_SLOTS, dustTexture, edgeContrast, fadeAt }),
-    [colorForCell, lens, getLabel, topLevelSlot, dustTexture, edgeContrast, fadeAt],
+    () => ({ colorForCell, lens, getLabel, topLevelSlot, defaultSlots: DEFAULT_SLOTS, dustTexture, edgeContrast, nestedHues, fadeAt }),
+    [colorForCell, lens, getLabel, topLevelSlot, dustTexture, edgeContrast, nestedHues, fadeAt],
   )
 
   // Hit → action, shared by both renderers: a DOM cell's event and a canvas
@@ -792,6 +829,25 @@ export function Treemap<T>({
       onCellHover?.(null, [])
     }
   }
+  // Stray-tip guard: a hover tip that outlived its cell (the pointer left via
+  // a path no mouseleave covered — a re-laid tip under the cursor, the window
+  // edge, a portal boundary) would otherwise sit there until the next cell
+  // hover. Any pointer movement outside a cell, the tip, or the map clears it;
+  // a pinned tip is the pin's business (outside click / Esc).
+  useEffect(() => {
+    if (!tip || pinnedTip) return
+    const onMove = (e: MouseEvent) => {
+      const t = e.target as Element | null
+      if (t?.closest?.('.dt-treemap-cell, .dt-treemap-tip, .dt-treemap-map, .dt-treemap-canvas')) return
+      cancelTipClear()
+      pin.hover(null)
+      clearHover()
+      setTip(null)
+    }
+    document.addEventListener('mousemove', onMove)
+    return () => document.removeEventListener('mousemove', onMove)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!tip, !!pinnedTip])
   const activatePin = (node: T, path: T[], key: string, x: number, y: number) => {
     // Reuse the hover tip's anchor for the same cell, so pinning doesn't jump
     // the tooltip from the cell to the click point.
@@ -902,11 +958,7 @@ export function Treemap<T>({
         ? { bg: 'var(--dt-treemap-folded-ground, rgba(120, 120, 135, 0.12))', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
         : { bg: 'var(--dt-treemap-folded, #4a4a52)', ink: 'var(--dt-treemap-folded-ink, #d0d0d8)' }
     } else {
-      const top = kidPath[1] // path[0] = root; [1] is the top-level bucket-of-the-current-drill
-      const slot = top ? topLevelSlot.get(getLabel(top)) : undefined
-      style = kids.length > 0
-        ? { bg: 'var(--dt-treemap-container-bg, #202024)', ink: 'var(--dt-treemap-ink, #d0d0d8)' }
-        : { bg: slot ?? DEFAULT_SLOTS[0], ink: '#fff' }
+      style = categoricalStyle(kidPath, kids.length > 0, getLabel, topLevelSlot, DEFAULT_SLOTS, nestedHues)
     }
     if (lens && !folded) {
       style = lens(kid as T, kidPath, depth, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 }, style) ?? style
@@ -1123,7 +1175,7 @@ export function Treemap<T>({
             {/* Inline size only for branch title-bars and short leaves; a tall
                 leaf drops it to a 2nd line (below) so the name gets the full
                 first line and isn't crowded by the size. */}
-            {(kids.length > 0 || r.h <= 34) && r.w > 90 && (
+            {(kids.length > 0 || r.h <= 34) && r.w > inlineSizeMinWidth && (
               <span className="sz" style={{ opacity: 0.75, whiteSpace: 'nowrap', flex: 'none', marginLeft: sizeAlign === 'right' ? 'auto' : undefined }}>
                 {formatSize(kidSize)}
                 {!folded && renderCellSubtitle && (
@@ -1156,7 +1208,7 @@ export function Treemap<T>({
             )}
           </div>
         )}
-        {!folded && renderCellExtra && renderCellExtra(kid as T, kidPath, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0 })}
+        {!folded && renderCellExtra && renderCellExtra(kid as T, kidPath, { w: r.w, h: r.h, fade: fadeAt(depth), hasKids: kids.length > 0, chain: chainLabels ? chainLabels.length - 1 : 0 })}
         {kids.length > 0 && kidChildren && (
           <div
             className="dt-treemap-inner"
@@ -1303,6 +1355,7 @@ export function Treemap<T>({
                 expandable={expandable}
                 dustTexture={dustTexture}
                 cellHref={cellHref}
+                inlineSizeMinWidth={inlineSizeMinWidth}
                 a11yLinks={a11yLinks}
                 a11yMaxCells={a11yMaxCells}
                 a11yMinSide={a11yMinSide}
@@ -1319,6 +1372,9 @@ export function Treemap<T>({
               />
             ))
           : rects.filter(r => r.w >= 3 && r.h >= 3).map(r => cell(r.it, isFolded(r.it) ? path : [...path, r.it as T], r, 0, rootMode))}
+        {outlineGroups && size.w > 0 && size.h > 0 && (
+          <OutlineOverlay<T> cells={placedCells} width={size.w} height={size.h} groups={outlineGroups} />
+        )}
         {failed?.key === viewKey ? (
           <div className="dt-treemap-status error" style={STATUS_STYLE}>
             {renderLoadError
