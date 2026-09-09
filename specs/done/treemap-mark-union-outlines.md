@@ -34,3 +34,31 @@ outlineGroups?: {
 
 - Non-rectilinear outlines, rounded corners.
 - Changing default rendering; with no `outlineGroups` nothing changes.
+
+## Landed (DT, 2026-09-09)
+
+Shipped as specified. `outlineGroups?: OutlineGroups<T>` on `<Treemap>`:
+
+- **Geometry** (`packages/treemap/src/outlines.ts`, pure + unit-tested):
+  `groupRects` buckets placed cells by `key`, keeping only the *outermost* cell
+  per key on any path (a same-key descendant is already covered by its ancestor —
+  the nesting rule), so a group's rects never overlap. `unionOutline` derives the
+  boundary by symmetric-difference of the occupancy intervals at each edge line
+  (a vertical line borders the group where a rect ends but none begins, and vice
+  versa), returning segments with inward normals — handles partial edge overlaps
+  and disjoint islands, no polygon library. `tests/outlines.test.ts`: exact
+  segment lists for single / adjacent-merge / disjoint / L-shape(partial-overlap)
+  rects + the nesting and sibling grouping.
+- **Overlay** (`OutlineOverlay.tsx`): a `<canvas>` over the map area,
+  `pointer-events:none`, above fills, below tooltips; strokes each group's
+  segments, offset inward by `width/2` by default (square caps close corners),
+  redrawn on layout change (placed cells / dims). DPR-scaled.
+- Renderer-agnostic (reads the shared placed cells); exports added to
+  `@rdub/treemap` (`OutlineGroups`/`OutlineSeg`/`OutlinePath` types,
+  `groupOutlines`/`groupRects`/`unionOutline`, `OutlineOverlay`); additive, no
+  BIC. Verified: package `tsc` clean, 137 tests pass, and CIC of a DT scan
+  treemap keyed by top-level subtree — each subtree drew one inset perimeter,
+  adjacent same-group siblings merged (`dist`'s two children under one border),
+  nested children didn't double-outline.
+
+mgu's side (wiring keep/sweep marks to `key`/`color`) is theirs to add.

@@ -6,6 +6,8 @@ import type { FoldedNode, LayoutConfig } from './layout'
 import { edgeEmphFactor, isFolded, layoutCells } from './layout'
 import { foldSmall, foldThin, squarify, squarifyRemainder } from './squarify'
 import { TreemapCanvas, type CanvasHit } from './TreemapCanvas'
+import { OutlineOverlay } from './OutlineOverlay'
+import type { OutlineGroups } from './outlines'
 import { resolveRing, type StyleOpts } from './cellStyle'
 import { useHoverPin } from './useHoverPin'
 
@@ -339,6 +341,14 @@ export interface TreemapProps<T> {
    * to mirror only the comfortably-clickable cells. Default: 0.
    */
   a11yMinSide?: number
+  /**
+   * Stroke, once, the outer perimeter of the union of rendered cells sharing a
+   * consumer-supplied group key — so a run of adjacent same-mark siblings reads
+   * as one bordered region instead of a lattice of doubled cell frames (spec
+   * `specs/treemap-mark-union-outlines.md`). An overlay above the fills, below
+   * tooltips, `pointer-events:none`; redrawn with layout. Off when unset.
+   */
+  outlineGroups?: OutlineGroups<T>
 }
 
 export type Tiling = 'gaps' | 'shared'
@@ -496,6 +506,7 @@ export function Treemap<T>({
   a11yLinks = true,
   a11yMaxCells = 400,
   a11yMinSide = 0,
+  outlineGroups,
 }: TreemapProps<T>) {
   // Live fold-threshold multiplier driven by the optional "detail" slider:
   // >1 folds more (coarser), <1 folds less (finer). Scales area linearly and
@@ -1319,6 +1330,9 @@ export function Treemap<T>({
               />
             ))
           : rects.filter(r => r.w >= 3 && r.h >= 3).map(r => cell(r.it, isFolded(r.it) ? path : [...path, r.it as T], r, 0, rootMode))}
+        {outlineGroups && size.w > 0 && size.h > 0 && (
+          <OutlineOverlay<T> cells={placedCells} width={size.w} height={size.h} groups={outlineGroups} />
+        )}
         {failed?.key === viewKey ? (
           <div className="dt-treemap-status error" style={STATUS_STYLE}>
             {renderLoadError

@@ -16,6 +16,12 @@ export { age01, ageDomain, ageFade, CONTAINER_BG, contrastEdge, DEFAULT_PALETTE,
 export type { AgeFadeOpts } from './colors'
 export { dimUnmatched, filterNodes, parseQuery } from './filter'
 export type { DimOpts, QueryOpts } from './filter'
+// Grouped-outline overlay: stroke the union perimeter of same-key cells once
+// (adjacent same-mark siblings → one region, not a doubled-line lattice).
+export { OutlineOverlay } from './OutlineOverlay'
+export type { OutlineOverlayProps } from './OutlineOverlay'
+export { groupOutlines, groupRects, unionOutline } from './outlines'
+export type { OutlineGroups, OutlinePath, OutlineSeg } from './outlines'
 // Diff widgets: a treemap + table pair over a compared tree (green grew / red
 // shrank, Δ-by-area). Accessor/slot-based, disk-agnostic.
 export { DiffTreemap, DiffTable, buildDiffTree, churn, fetchable, mapMinFrac, MIN_CELL_PX } from './diff'
