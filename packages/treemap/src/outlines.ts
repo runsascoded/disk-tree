@@ -85,6 +85,11 @@ function symDiff(a: Iv[], b: Iv[]): { lo: number; hi: number; side: 'a' | 'b' }[
   return out
 }
 
+/** Snap a coordinate to ⅛ px. Squarify hands neighbors seams that agree only
+ *  to float epsilon; without snapping, the two rects bucket onto *different*
+ *  lines and the shared seam strokes twice (a doubled bar, inset each way). */
+const q = (v: number): number => Math.round(v * 8) / 8
+
 /**
  * The boundary of the union of `rects` (assumed non-overlapping) as a set of
  * segments with inward normals. Vertical lines first, then horizontal.
@@ -102,11 +107,13 @@ export function unionOutline(rects: Rect[]): OutlineSeg[] {
     return e
   }
   for (const r of rects) {
-    atX(r.x).right.push([r.y, r.y + r.h])
-    atX(r.x + r.w).left.push([r.y, r.y + r.h])
+    const iv: Iv = [q(r.y), q(r.y + r.h)]
+    atX(q(r.x)).right.push(iv)
+    atX(q(r.x + r.w)).left.push(iv)
   }
   for (const [x, { left, right }] of byX) {
     for (const { lo, hi, side } of symDiff(mergeIntervals(left), mergeIntervals(right))) {
+      if (hi <= lo) continue
       segs.push({ x1: x, y1: lo, x2: x, y2: hi, nx: side === 'a' ? -1 : 1, ny: 0 })
     }
   }
@@ -120,11 +127,13 @@ export function unionOutline(rects: Rect[]): OutlineSeg[] {
     return e
   }
   for (const r of rects) {
-    atY(r.y).below.push([r.x, r.x + r.w])
-    atY(r.y + r.h).above.push([r.x, r.x + r.w])
+    const iv: Iv = [q(r.x), q(r.x + r.w)]
+    atY(q(r.y)).below.push(iv)
+    atY(q(r.y + r.h)).above.push(iv)
   }
   for (const [y, { above, below }] of byY) {
     for (const { lo, hi, side } of symDiff(mergeIntervals(above), mergeIntervals(below))) {
+      if (hi <= lo) continue
       segs.push({ x1: lo, y1: y, x2: hi, y2: y, nx: 0, ny: side === 'a' ? -1 : 1 })
     }
   }

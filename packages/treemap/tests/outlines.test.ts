@@ -41,6 +41,29 @@ describe('unionOutline', () => {
       { x1: 10, y1: 20, x2: 20, y2: 20, nx: 0, ny: -1 },
     ])
   })
+
+  it('float-epsilon seams: neighbors whose shared seam differs by ε → the shared edge still cancels', () => {
+    // Squarify hands the left rect a right edge and the right rect a left edge
+    // that agree only to float epsilon. Without ⅛-px snapping they bucket onto
+    // two distinct lines and the seam strokes twice; snapped, it cancels and the
+    // union is the same clean perimeter as the exactly-adjacent case.
+    const eps = 1e-9
+    expect(unionOutline([r(0, 0, 10, 10), r(10 + eps, 0, 10 - eps, 10)])).toEqual([
+      { x1: 0, y1: 0, x2: 0, y2: 10, nx: 1, ny: 0 },
+      { x1: 20, y1: 0, x2: 20, y2: 10, nx: -1, ny: 0 },
+      { x1: 0, y1: 0, x2: 20, y2: 0, nx: 0, ny: 1 },
+      { x1: 0, y1: 10, x2: 20, y2: 10, nx: 0, ny: -1 },
+    ])
+  })
+
+  it('float-epsilon seams: no zero-length segment survives at a snapped-collinear seam', () => {
+    // A seam offset by less than ½ of ⅛ px snaps flush; the symmetric-difference
+    // there is empty, so no `hi <= lo` segment (which square caps would paint as
+    // an lw×lw dot) is emitted.
+    const segs = unionOutline([r(0, 0, 10, 10), r(9.99, 0, 10, 10)])
+    expect(segs.every(s => s.x1 !== s.x2 || s.y1 !== s.y2)).toBe(true)
+    expect(segs.filter(s => s.x1 === s.x2).map(s => s.x1).sort((a, b) => a - b)).toEqual([0, 20])
+  })
 })
 
 function pc(

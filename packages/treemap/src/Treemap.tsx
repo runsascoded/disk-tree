@@ -763,13 +763,16 @@ export function Treemap<T>({
   // Canvas renderer: the placed-cell tree (geometry only) for the whole map,
   // laid once and reused for paint + hit-test. Only built in canvas mode.
   const placedCells = useMemo(() => {
-    if (renderer !== 'canvas') return []
+    // The canvas renderer paints from these; the DOM renderer doesn't, but the
+    // outline overlay needs the geometry either way — so build them whenever an
+    // `outlineGroups` overlay is present, not only for the canvas renderer.
+    if (renderer !== 'canvas' && !outlineGroups) return []
     const cfg: LayoutConfig<T> = {
       getSize, getLabel, childrenOf, showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
     }
     return layoutCells(rects, path, rootMode, cfg)
   }, [
-    renderer, rects, path, rootMode, getSize, getLabel, childrenOf,
+    renderer, !!outlineGroups, rects, path, rootMode, getSize, getLabel, childrenOf,
     showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
   ])
 

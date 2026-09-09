@@ -16,6 +16,21 @@ export interface OutlineOverlayProps<T> {
   groups: OutlineGroups<T>
 }
 
+/**
+ * Resolve a `var(--name[, fallback])` reference against `el`'s computed style;
+ * pass any other color string through unchanged. A canvas `strokeStyle`
+ * silently ignores a custom-property reference (painting black), but a themed
+ * consumer's natural way to name a color is a CSS variable — so resolve it here
+ * in the core rather than in every consumer.
+ */
+function cssColor(el: Element, color: string): string {
+  const m = /^\s*var\(\s*(--[\w-]+)\s*(?:,\s*([^)]*))?\)\s*$/.exec(color)
+  if (!m) return color
+  const [, name, fallback] = m
+  const v = getComputedStyle(el).getPropertyValue(name).trim()
+  return v || (fallback != null ? fallback.trim() : color)
+}
+
 export function OutlineOverlay<T>({ cells, width, height, groups }: OutlineOverlayProps<T>) {
   const ref = useRef<HTMLCanvasElement | null>(null)
 
@@ -42,7 +57,7 @@ export function OutlineOverlay<T>({ cells, width, height, groups }: OutlineOverl
     const off = groups.inset === false ? 0 : lw / 2
 
     for (const { color, segs } of groupOutlines(cells, groups)) {
-      ctx.strokeStyle = color
+      ctx.strokeStyle = cssColor(cv, color)
       ctx.beginPath()
       for (const s of segs) {
         const dx = s.nx * off
