@@ -1175,10 +1175,16 @@ export function ScanDetails() {
   const [treemapMaxRows, setTreemapMaxRows] = useState(DEFAULT_MAX_ROWS)
   const [ageLens, setAgeLens] = useState(false)
   const [viz, setViz] = useState<Viz>('treemap')
+  const caps = useCapabilities()
+  // A static deployment has no live scanner, so `/file/` (uri `/`) can never
+  // resolve — don't fire the request (it would 404 and retry, spinning on
+  // "Loading…"); render a friendly note instead.
+  const localBrowseUnavailable = routeType === 'file' && isSchemeRoot(uri) && caps?.filesystem === false
   const { data: details, isLoading, error: queryError, refetch } = useQuery({
     queryKey: ['scan-details', uri, selectedScanId, treemapMaxRows],
     queryFn: () => fetchScanDetails(uri, selectedScanId, 2, treemapMaxRows),
     staleTime: 60 * 1000, // 1 minute - scan details don't change frequently
+    enabled: !localBrowseUnavailable,
   })
   const [mutationError, setMutationError] = useState<string | null>(null)
   const error = queryError?.message || mutationError
@@ -1215,7 +1221,6 @@ export function ScanDetails() {
 
   // Live scan progress from SSE
   const scanProgress = useScanProgress()
-  const caps = useCapabilities()
   const canDelete = supportsDelete(routeType) && caps?.delete === true
 
   // Auto-refetch when a scan relevant to this view finishes. A completed scan
@@ -1674,6 +1679,16 @@ export function ScanDetails() {
       .map(([path]) => path)
   )
 
+  if (localBrowseUnavailable) {
+    return (
+      <div style={{ padding: '1.5rem 0' }}>
+        <p>Local filesystem browsing isn't available in this deployment.</p>
+        <p style={{ opacity: 0.75 }}>
+          Head to <Link to="/">Scans</Link> to browse the published scans.
+        </p>
+      </div>
+    )
+  }
   if (isLoading) return <div>Loading...</div>
   if (error && !details) {
     return (

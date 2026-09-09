@@ -18,6 +18,7 @@ export const CAPABILITIES = {
   library: false,
   backend: false,
   s3: false,
+  filesystem: false,
   // `/api/*` is gated (spec `specs/done/pages-auth.md`): the UI probes
   // `/api/auth/whoami` and shows the wall when nobody is signed in. An open
   // demo (`PUBLIC_OPEN`) reports `auth: false`, so the UI skips both.

@@ -53,24 +53,31 @@ export function Header() {
           >
             Scans
           </Button>
-          <Button
-            component={Link}
-            to="/file/"
-            startIcon={<FaFolder />}
-            variant={isLocalPage ? 'contained' : 'text'}
-            size="small"
-          >
-            Local
-          </Button>
-          <Button
-            component={Link}
-            to="/s3/"
-            startIcon={<FaCloud />}
-            variant={isS3Page ? 'contained' : 'text'}
-            size="small"
-          >
-            S3
-          </Button>
+          {/* Local + S3 lead to a live scanner / bucket lister the static
+              deployment doesn't run; hide them when the capability is off
+              (`undefined` while caps load → shown, matching the Flask default). */}
+          {caps?.filesystem !== false && (
+            <Button
+              component={Link}
+              to="/file/"
+              startIcon={<FaFolder />}
+              variant={isLocalPage ? 'contained' : 'text'}
+              size="small"
+            >
+              Local
+            </Button>
+          )}
+          {caps?.s3 !== false && (
+            <Button
+              component={Link}
+              to="/s3/"
+              startIcon={<FaCloud />}
+              variant={isS3Page ? 'contained' : 'text'}
+              size="small"
+            >
+              S3
+            </Button>
+          )}
           <Button
             component={Link}
             to="/recent"

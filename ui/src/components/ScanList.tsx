@@ -19,6 +19,7 @@ import { useCapabilities } from '../hooks/useCapabilities'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { DataTable } from './DataTable'
 import type { Column } from './DataTable'
+import { UnionTreemap } from './UnionTreemap'
 import { elapsed, formatCount } from '../utils/format'
 import { uriToPath } from '../schemes'
 
@@ -197,8 +198,14 @@ export function ScanList() {
       <h1>Scans</h1>
       <NewScanForm onStarted={handleNewScan} />
       <LiveScanProgress progress={scanProgress} />
+      {/* Union of every scan as one treemap — each cell drills into that scan,
+          so the separate rows below read as a single top-level map. */}
+      <UnionTreemap
+        items={scans.map(s => ({ name: s.path, size: s.size ?? 0, path: s.path }))}
+        rootName="all scans"
+      />
       <Tooltip title="Previously completed scans. Click a path to browse its contents.">
-        <Typography variant="subtitle2" sx={{ mb: 1 }}>Completed Scans</Typography>
+        <Typography variant="subtitle2" sx={{ mb: 1, mt: 2 }}>Completed Scans</Typography>
       </Tooltip>
       <DataTable<Scan>
         columns={scanColumns}
