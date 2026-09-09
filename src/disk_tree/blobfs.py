@@ -77,7 +77,11 @@ def r2_endpoint(bucket: str) -> str | None:
 @lru_cache(maxsize=None)
 def _s3fs(endpoint_url: str):
     import s3fs
-    return s3fs.S3FileSystem(client_kwargs={'endpoint_url': endpoint_url})
+    # Cloudflare R2 requires all non-trailing multipart parts to be the same
+    # length; s3fs only guarantees that under `fixed_upload_size=True`. Without
+    # it, a blob large enough to go multipart fails `CompleteMultipartUpload`
+    # with `InvalidPart` (leaking the in-flight upload). Harmless for real S3.
+    return s3fs.S3FileSystem(client_kwargs={'endpoint_url': endpoint_url}, fixed_upload_size=True)
 
 
 def fs_for(url: str):

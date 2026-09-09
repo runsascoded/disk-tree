@@ -495,12 +495,16 @@ def build_and_record(scan_a: int, blob_a: str, scan_b: int, blob_b: str) -> dict
 
 
 def previous_scan(con: sqlite3.Connection, scan_id: int) -> sqlite3.Row | None:
-    """The most recent earlier scan of the same path (the pair `sync`/`index`
-    build by default)."""
+    """The most recent earlier scan of the same path whose blob is *reachable*
+    (the pair `sync`/`index` build by default). Skipping unreachable blobs (a
+    prior scan whose parquet is on an unmounted volume) keeps the post-scan diff
+    step from crashing on a blob it can't read — see spec `r2-scan-target.md`."""
+    from disk_tree.config import blob_reachable
     s = con.execute('SELECT * FROM scan WHERE id = ?', (scan_id,)).fetchone()
     if s is None:
         return None
-    return con.execute(
-        'SELECT * FROM scan WHERE path = ? AND time < ? ORDER BY time DESC LIMIT 1',
+    rows = con.execute(
+        'SELECT * FROM scan WHERE path = ? AND time < ? ORDER BY time DESC',
         (s['path'], s['time']),
-    ).fetchone()
+    ).fetchall()
+    return next((r for r in rows if blob_reachable(r['blob'])), None)

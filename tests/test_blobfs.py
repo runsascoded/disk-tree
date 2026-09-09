@@ -69,6 +69,22 @@ def test_fs_for_r2_without_endpoint_is_a_pointed_error(monkeypatch, tmp_path: Pa
     )
 
 
+def test_s3fs_sets_fixed_upload_size_for_r2(monkeypatch):
+    """R2 rejects varying-length multipart parts; s3fs only guarantees fixed
+    lengths under `fixed_upload_size=True` (spec `r2-scan-target.md`)."""
+    import s3fs
+    captured: dict = {}
+
+    class Fake:
+        def __init__(self, **kw):
+            captured.update(kw)
+
+    monkeypatch.setattr(s3fs, 'S3FileSystem', Fake)
+    ep = f'https://ep-{uuid4()}.example'  # fresh endpoint dodges the lru_cache
+    blobfs._s3fs(ep)
+    assert captured == {'client_kwargs': {'endpoint_url': ep}, 'fixed_upload_size': True}
+
+
 def test_remote_write_read_list_put_remove(tmp_path: Path):
     d = f'memory://{uuid4()}'
     df = pd.DataFrame({'path': ['.', 'a'], 'depth': [0, 1], 'size': [3, 2]})
