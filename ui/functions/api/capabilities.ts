@@ -13,7 +13,10 @@ export const CAPABILITIES = {
   histogram: false,
   filter: false,
   preview: false,
-  compare: false,
+  // On-the-fly diff of two scan slices (`functions/api/compare.ts`); no
+  // persisted diff index, so the response carries no `index` field and the
+  // client treats it as final (spec `specs/public-diff-demo.md`).
+  compare: true,
   progress: false,
   library: false,
   backend: false,

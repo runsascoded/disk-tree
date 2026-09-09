@@ -70,7 +70,18 @@ compute is bounded either way. Phase 3's Function implements (B) first; the
 cache is a later, transparent fast-path (Function checks for a persisted index,
 else recomputes).
 
-### Phase 3 — serverless compare Function (the convergent optimum)
+### Phase 3 — serverless compare Function (the convergent optimum) ✅ built
+
+Landed: `ui/functions/api/compare.ts` + the pure `ui/cfn/diff.ts` (join + status +
+byte-floor + depth-≤2 frontier) over the shared `ui/cfn/scanRead.ts` (extracted
+from `scan.ts`, chunk-following reused). `compare: true`; the response omits
+`index`, so `CompareView` treats it as final (no 3 s poll). `cfn/tests/compare.test.ts`
+covers flat + recursive + added-subtree drill over a two-scan fixture. **Live-
+blocked** on Phase 1 producing a *second* scan of a bucket (a diff needs two)
+and a nav entry (Phase 5) to reach `/compare/*`.
+
+Design below.
+
 
 **Fleet finding (why not depth-by-depth streaming):** neither deployment
 streams the diff to the client. disk-tree `/api/compare` is a best-first |Δ|
