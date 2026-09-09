@@ -14,6 +14,22 @@ Called after each overlay paint with the keys that produced ≥ 1 segment — th
 
 mgu's copy is the reference (`packages/treemap/src/{cssColor.ts,TreemapCanvas.tsx,OutlineOverlay.tsx,outlines.ts,index.ts}`); diff against `main` after `522fa2d`.
 
+### Landed (dt)
+
+All four items ported to disk-tree's canonical `packages/treemap`:
+
+1. **Canvas `var()` fills** — new `src/cssColor.ts` (`cssColor` + memoizing `colorResolver`). `TreemapCanvas` sets a module-level `resolveVar = colorResolver(cv)` per paint effect; `rgbaAt` resolves through it before `parseColor`. `OutlineOverlay`'s inline resolver is replaced by the shared one. **Also exported from `index.ts`** (`cssColor`, `colorResolver`) — the spec asked for it; mgu's own index didn't, but the public API is the right home.
+2. **`OutlineGroups.onDrawn?`** — added to the interface; `OutlineOverlay` collects the keys that produced ≥1 segment and calls it after each paint.
+3. **Stray hover-tip guard** — the `document` mousemove `useEffect` in `Treemap.tsx`, active only while an unpinned tip shows.
+4. **Canvas↔DOM parity** — `TreemapCanvas` reads `--dt-treemap-lbl-fs`/`-sm` (px or rem) per pass and threads `inlineSizeMinWidth` (new `TreemapProps` field, default 90) through `PaintOpts`; the DOM label uses the same threshold.
+
+**Deviations from mgu's mirror (applied only the four spec deltas):**
+- `outlines.ts`'s seam-snap block differs cosmetically (mgu inlined the comment and renamed `iv→span`) — same fix already landed here as `522fa2d`, left as-is.
+- mgu's unrelated `CellCtx.chain?` / `renderCellExtra` addition is **not** part of this spec — skipped.
+- disk-tree's `nestedHues` (b771fac) is dt-only and untouched.
+
+Tests: `tests/cssColor.test.ts` (6, exact-equality) + an `onDrawn` case in `OutlineOverlay.render.test.tsx`. Full suite 158/158, `tsc -b` clean (package + ui consumer). Items 1 (canvas) & 4 (label sizes) are canvas-paint behaviors jsdom can't render, and mgu already CIC-verified its copy; not re-CIC'd here.
+
 ## 3. Stray hover-tip guard (`Treemap.tsx`)
 
 A hover tip occasionally outlived its cell in mgu (the pointer left by a path no `mouseleave` covered — a tip re-laid under the cursor, the window edge, the portal boundary) and then sat there until the next cell hover; clicking away did nothing because it wasn't pinned. mgu's copy adds a `document` `mousemove` listener, active only while an unpinned tip is showing, that clears the tip when the pointer is outside `.dt-treemap-cell / .dt-treemap-tip / .dt-treemap-map / .dt-treemap-canvas`. Pinned tips are untouched (the pin already clears on outside mousedown / Esc).
