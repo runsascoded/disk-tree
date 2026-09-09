@@ -40,31 +40,35 @@ prior scan locally (diff indexes are Phase 2). **Needs the user to enable the
 schedule / first-run it; cron time (`23 8 * * *`) is a guess — align with
 nj-crashes' daily refresh.**
 
-### Phase 2 — publish diff indexes  ⟵ OPEN DECISION
+### Phase 2 — diff computation  ⟵ OPEN DECISION (storage policy)
 
-The compare view needs a per-pair diff. Two serverless mechanisms:
+A diff index `<a>-<b>.parquet` is the per-path outer join of two scans (old/new
+size+count + status, sorted `(depth,path)`); its size ≈ **one scan**,
+independent of N. The only question is *how many pairs we persist* — a policy
+choice, not inherent to any mechanism. **Never pre-build all i×j pairs (O(N²),
+unbounded).** Options, from least to most caching:
 
-- **(A) Persisted-index slice (recommended).** Publish a `<a>-<b>.parquet` diff
-  index (same layout as a scan blob, so `ui/cfn/parquet.ts` pushdown reuses) +
-  a small manifest into the demo bucket, and Phase 3's Function slices it with
-  range reads. *Fastest per request.* Infra cost: the re-scan runner must know
-  the previous scan to build the index — bootstrap by
-  `disk-tree scans register r2://disk-tree-demo/scans/` (imports the bucket's
-  existing manifests) before `index` (drop `-D`), then **upload the built diff
-  index** (`~/.config/disk-tree/diffs/<a>-<b>.parquet`) to the bucket. Needs a
-  publish step: either teach `index --to` to also upload the diff index it
-  builds, or a small `diff-index --to <url>` (mirrors `snapshots --diffs`, which
-  today writes the *file-tree* snapshot layout, not this scans-manifest tier).
-- **(B) Recompute in the Function (marin's way).** No persisted index: the
-  compare Function reads both scan blobs from R2 and computes the diff at
-  request time (edge-cached per `(scan1,scan2,path,budget)`), as
-  `site/functions/api/diff.ts` does in marin. Lower publish infra, heavier per
-  request (bounded — it reads only the path-prefix slice of each scan, not the
-  whole blob).
+- **(B) Pure on-the-fly (default).** No persisted diff index. The compare
+  Function reads the path-prefix *slice* of both scans from R2 and outer-joins
+  them at request time (bounded per request — thousands of rows for a subtree,
+  not the whole blob), edge-cached per `(scan1,scan2,path,budget)`. This is what
+  marin's `site/functions/api/diff.ts` does. **O(1) diff storage**, bounded
+  compute. The "compute diffs on the fly" reading.
+- **(A-consecutive) Cache consecutive pairs only.** Persist just scan_i↔scan_{i+1}
+  — exactly what `disk-tree index` already builds ("diff index against the
+  path's *previous* scan"): **one** new index per re-scan → **O(N)** total, each
+  O(scan), GC the oldest (keep last K). Makes the default "latest vs previous"
+  view an instant slice (`ui/cfn/parquet.ts` pushdown, like `scan.ts`).
+  Non-adjacent pairs still fall through to (B). Publish step needed: teach
+  `index --to` to also upload the diff index it builds, or a `diff-index --to
+  <url>` (mirrors `snapshots --diffs`, which writes the *file-tree* layout, not
+  this scans-manifest tier).
 
-Recommendation: **(A)** — flat per-request cost, reuses `scan.ts`/`parquet.ts`,
-matches disk-tree's own diff-index architecture. (B) is the lower-infra fallback
-if the diff-index publish step proves fiddly.
+**Recommendation: start with (B)**, add the (A-consecutive) O(N) cache only if
+the default diff feels slow. Storage stays O(1)→O(N), never O(N²); per-request
+compute is bounded either way. Phase 3's Function implements (B) first; the
+cache is a later, transparent fast-path (Function checks for a persisted index,
+else recomputes).
 
 ### Phase 3 — serverless compare Function
 
@@ -76,19 +80,18 @@ to the requested `uri`, apply `max_rows`/`min_frac`. Flip `compare: true` in
 Function (with (A) the progressive walk→index refetch collapses to a single
 index read). Surface a compare entry point in the demo nav.
 
-### Phase 4 — union `path` / `hbt`  ⟵ OPEN: data source
+### Phase 4 — union `path` / `hbt`
 
-`~/c/hccs/{path,hbt}` are public-data projects (like `crashes`/`ctbk`) but have
-**no R2 bucket** (unlike `nj-crashes`/`ctbk`/`jc-taxes`). To include them the
-source must be decided:
+Both are DVC projects publishing to **S3**: `s3://hudcostreets/path/.dvc/cache`
+and `s3://hudcostreets/hbt/.dvc/cache` (same DVC-cache shape as `ctbk`). Two
+ways in, both cloud/GHA-friendly (no laptop dependency):
 
-- If their published data lives in a bucket / at a URL, scan *that* (cloud,
-  GHA-friendly — just add to the Phase 1 loop).
-- If it's the **laptop working dir** (`~/c/hccs/{path,hbt}`, 3.3 G / 1.2 G), a
-  GHA runner can't reach it → the scan must run laptop-side (a launchd job or a
-  manual `index --to r2://disk-tree-demo/scans/`), and the listing includes
-  repo internals (`.git`, `node_modules`, build artifacts) — fine for a
-  disk-usage demo, but confirm scope (whole dir vs a subpath).
+- **Scan S3 directly** — add `s3://hudcostreets/path` / `…/hbt` to the Phase 1
+  loop; disk-tree lists `s3://` natively. Needs the `hudcostreets` bucket's AWS
+  creds in the runner (a second credential alongside the R2 token).
+- **Migrate to R2 first** (user is handling separately) — copy to `r2://path` /
+  `r2://hbt` (or a shared bucket), then they join the loop under the existing R2
+  credential, no extra secret.
 
 ### Phase 5 — demo UX
 
@@ -97,10 +100,13 @@ freshest diff), analogous to marin's `#diff` section. The marking / ownership /
 sweep machinery of mgu/cw-s3 is checkpoint-domain-specific and out of scope;
 disk-tree's demo angle is treemap + diff + age-lens + filter over public data.
 
-## Open decisions (need user input)
+## Decisions
 
-1. Phase 2 mechanism: **(A) persisted-index slice** (recommended) vs (B)
-   recompute-in-Function.
-2. Phase 4 source for `path`/`hbt`: a public bucket/URL (cloud) vs the laptop
-   working dir (laptop-side scan); and, if the latter, scan scope.
-3. Phase 1 cron cadence/time (daily assumed; align with nj-crashes' refresh).
+1. **Phase 2 storage policy** — start **(B) pure on-the-fly** (O(1) storage,
+   bounded compute, edge-cached); add the **(A-consecutive) O(N) cache** later
+   only if the default diff feels slow. Never O(N²). *(Resolved: on-the-fly
+   default per user; the persisted set, if any, is O(N) consecutive.)*
+2. **Phase 4 source** — `s3://hudcostreets/{path,hbt}` (DVC/S3). Scan S3 directly
+   (extra AWS cred) or user migrates to R2 first (user handling separately).
+3. **Phase 1 cadence** — daily; time non-critical (nj-crashes' GHA drifts hours),
+   so no tight alignment needed.
