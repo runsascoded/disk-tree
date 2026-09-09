@@ -104,3 +104,38 @@ webdata / batch-submit / identities  marin batch + attribution layers  STRIP
 
 Flask keeps all its localhost powers (in-UI delete/rescan/ad-hoc filter over big
 indexes). The CFW demo is read-first; its mutate story (step 4) follows marin.
+
+## Landed: public open demo at `r2.rbw.sh` (DT, 2026-09-08)
+
+The read-subset CFW arch (`ui/` SPA + `ui/functions/api/*` over R2, from
+`specs/done/cloud-reduce.md` step 4) is now deployed as a **public, no-auth**
+demo — not the `apps/cfn/` fleet-union scaffold, which stays unbuilt; this reuses
+the existing `ui/` deployment verbatim, pointed at a public corpus with the gate
+off. The gated `disk-tree.pages.dev` (private `/Users/ryan` laptop scan) is
+untouched — a separate project, so the open demo can never expose it.
+
+- **Open-gate mode.** New `PUBLIC_OPEN` env flag + `isOpen(env)` (`ui/cfn/env.ts`):
+  `_middleware.ts` serves every `/api/*` without a session, and
+  `/api/capabilities` reports `auth: false` (the UI's `useAuthEnabled` then skips
+  the wall *and* the `whoami` probe). No `DB`/`SESSION_SECRET` needed. Covered by
+  `cfn/tests/api.test.ts` ("open demo (PUBLIC_OPEN)").
+- **Corpus** — three *public* R2 buckets, each `disk-tree index r2://<b> --to
+  r2://disk-tree-demo/scans/` (blob + `.scan.json` per bucket; Functions list
+  from the manifests, read blobs by range): `nj-crashes` (1.4K obj / 5.3 GB),
+  `jc-taxes` (70.6K / 3.6 GB), `ctbk` (920.9K / 853 GiB, ~8 min to list). All in
+  CF account `0dcad…` ("Open Athena"), the same account that holds the `rbw.sh`
+  zone and the source buckets.
+- **Deploy.** New Pages project `disk-tree-demo` (`disk-tree-demo.pages.dev`),
+  config `ui/wrangler.demo.toml` (binds `disk-tree-demo`, `PUBLIC_OPEN=1`, no D1).
+  Pages rejects a non-`wrangler.toml` config name, so deploy temp-swaps it in:
+  `cp wrangler.demo.toml wrangler.toml && wrangler pages deploy dist` (restore
+  after). Custom domain `r2.rbw.sh` attached via the CF API (`pages/projects/…
+  /domains`), same-account so the DNS record auto-provisions.
+- **Verified** on `disk-tree-demo.pages.dev`: `auth:false`, `/api/scans` serves
+  the three buckets unauthenticated, treemap + drill render over `r2://ctbk`.
+
+Still open: `gcs.rbw.sh` needs a net-new GCS read path (Functions read R2 by
+binding; GCS has no binding and no live lister — hyparquet range reads over
+GCS HTTP + a GCS corpus). The `apps/cfn/` fleet-union (one synthetic root over
+all three buckets via `build_tree`, per above) is likewise still unbuilt — the
+open demo lists the buckets as sibling scans, not one fleet tree.

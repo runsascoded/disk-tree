@@ -10,6 +10,7 @@ import { onRequestGet as scan } from '../../functions/api/scan'
 import { onRequestGet as history } from '../../functions/api/scans/history'
 import { onRequestGet as capabilities } from '../../functions/api/capabilities'
 import { onRequest as fallback } from '../../functions/api/[[path]]'
+import { onRequest as middleware } from '../../functions/_middleware'
 
 const PREFIX = 'scans/'
 const env: Env = { SCANS: dirBucket(join(__dirname, 'fixtures'), PREFIX), SCANS_PREFIX: PREFIX }
@@ -101,5 +102,21 @@ describe('capabilities + fallback', () => {
     expect(await call(fallback, '/api/histogram?uri=/x')).toEqual({
       status: 501, body: { error: 'not available in the static (cloud) deployment', path: '/api/histogram' },
     })
+  })
+})
+
+describe('open demo (PUBLIC_OPEN)', () => {
+  const openEnv: Env = { ...env, PUBLIC_OPEN: '1' }
+  const gated = async (req: Request) =>
+    middleware({ request: req, env: openEnv, next: async () => new Response('served', { status: 200 }) } as never)
+
+  it('reports auth: false so the UI shows no wall', async () => {
+    const res = await capabilities({ request: new Request('http://x/api/capabilities'), env: openEnv, params: {} } as never)
+    expect(Object.entries(await res.json()).filter(([, v]) => v)).toEqual([['static', true]])
+  })
+
+  it('serves every /api/* route without a session (no gate, no DB)', async () => {
+    const res = await gated(new Request('http://x/api/scans'))
+    expect({ status: res.status, body: await res.text() }).toEqual({ status: 200, body: 'served' })
   })
 })

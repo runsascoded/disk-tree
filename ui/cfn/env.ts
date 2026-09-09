@@ -14,6 +14,15 @@ export interface Env {
   ACCESS_TEAM_DOMAIN?: string
   /** The Access application's AUD tag. */
   ACCESS_AUD?: string
+  /** When set (any non-empty value), this is a public **open** demo: no auth
+   *  gate, and `/api/capabilities` reports `auth: false`. A corpus of public
+   *  data only — never point an open deployment at a private (e.g. laptop)
+   *  scan. Needs no `DB`/`SESSION_SECRET`. */
+  PUBLIC_OPEN?: string
 }
 
 export const scansPrefix = (env: Env): string => env.SCANS_PREFIX ?? ''
+
+/** Public open demo (see `PUBLIC_OPEN`): the gate is off and every `/api/*`
+ *  route is served without a session. */
+export const isOpen = (env: Env): boolean => !!env.PUBLIC_OPEN
