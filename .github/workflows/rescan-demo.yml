@@ -1,0 +1,62 @@
+# Periodic re-scan of the public demo buckets → a fresh dated scan per bucket in
+# `disk-tree-demo` (served at r2.rbw.sh), so scans accumulate over time and the
+# compare/diff view has something to diff (today each bucket has a single
+# one-time scan). Same R2 auth as `reduce.yml`; the source buckets and
+# `disk-tree-demo` share one account, so one credential reads and writes.
+#
+# Needs, in this repo's settings:
+#   secrets  R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY   (an R2 API token)
+#   variable R2_ENDPOINT_URL                          (https://<acct>.r2.cloudflarestorage.com)
+#
+# `index --to` drops a `<uuid>.parquet` blob + its `.scan.json` manifest under
+# `scans/`; the Pages Functions list newest-per-path and expose history, so each
+# run just adds a new dated point. Diff *indexes* are a separate step (spec
+# `specs/public-diff-demo.md`, Phase 2) — this workflow only produces scans.
+name: Rescan demo buckets
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Daily at 08:23 UTC — after nj-crashes' daily data refresh (adjust freely).
+    - cron: '23 8 * * *'
+
+# One run at a time; a slow scan shouldn't overlap the next day's.
+concurrency:
+  group: rescan-demo
+  cancel-in-progress: false
+
+jobs:
+  rescan:
+    name: Re-scan demo buckets
+    runs-on: ubuntu-latest
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      DISK_TREE_R2_ENDPOINT_URL: ${{ vars.R2_ENDPOINT_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Create empty ui/dist for editable install
+        run: mkdir -p ui/dist
+
+      - name: Install disk-tree (+ R2 driver)
+        run: uv sync --extra r2
+
+      - name: Re-scan each demo bucket → disk-tree-demo
+        # `-C` forces a fresh listing (no cache read), `-q` keeps the log small,
+        # `-D` skips the local diff-index build (no prior scan in a stateless
+        # runner; diff indexes are published separately, Phase 2).
+        run: |
+          set -euo pipefail
+          for b in nj-crashes jc-taxes ctbk; do
+            echo "::group::index r2://$b"
+            uv run disk-tree index -C -q -D "r2://$b" --to r2://disk-tree-demo/scans/
+            echo "::endgroup::"
+          done
