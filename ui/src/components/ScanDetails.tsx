@@ -788,25 +788,23 @@ function Treemap({
         nestedHues
         renderLegend={() => (
           <span style={{ display: 'inline-flex', gap: 8, fontSize: '0.8rem' }}>
-            <span style={{ display: 'inline-flex', gap: 2 }}>
-              {(['gaps', 'shared'] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={e => { e.stopPropagation(); setTiling(t) }}
-                  title={t === 'gaps'
-                    ? '2px gutters and rounded corners; dense leaf fields under-paint by ~perimeter/area'
-                    : 'Cells abut, one stroke per boundary — areas exact (a 6×6px cell with 2px gutters paints only 4×4)'}
-                  style={{
-                    cursor: 'pointer', fontSize: '0.75rem', padding: '1px 7px', borderRadius: 3,
-                    border: '1px solid var(--dt-border, #444)',
-                    background: tiling === t ? 'var(--dt-accent-bg, #30363d)' : 'transparent',
-                    color: 'inherit', fontWeight: tiling === t ? 600 : 400,
-                  }}
-                >
-                  {t}
-                </button>
-              ))}
-            </span>
+            {/* One control, not a gaps|shared pair: cells abut and share one
+                stroke by default (areas exact); check `gaps` for the 2px-gutter
+                look (which under-paints dense leaf fields by ~perimeter/area). */}
+            <Tooltip title="Off (default): cells abut, one stroke per boundary — areas exact. On: 2px gutters and rounded corners, but a dense leaf field under-paints by ~perimeter/area (a 6×6px cell with 2px gutters paints only 4×4).">
+              <label
+                onClick={e => e.stopPropagation()}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 3, cursor: 'pointer', fontSize: '0.75rem' }}
+              >
+                <input
+                  type="checkbox"
+                  checked={tiling === 'gaps'}
+                  onChange={e => setTiling(e.target.checked ? 'gaps' : 'shared')}
+                  style={{ margin: 0, verticalAlign: 'middle' }}
+                />
+                gaps
+              </label>
+            </Tooltip>
             <span style={{ display: 'inline-flex', gap: 2 }}>
               {(['dom', 'canvas'] as const).map(r => (
                 <button
@@ -1734,6 +1732,89 @@ export function ScanDetails() {
     return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ` ${timeFormatted}`
   }
 
+  // The viz panel (treemap / scatter / histograms / voronoi) + its controls,
+  // rendered *above* the table so the map is visible without scrolling past a
+  // long directory listing (a bucket root can be dozens of rows).
+  const vizPanel = rows.length > 0 ? (
+    <Box sx={{ mt: 2, mb: 2 }}>
+      <VizBoundary label={VIZ_LABELS[viz]}>
+        {viz === 'treemap' ? (
+          <Treemap
+            root={root}
+            rows={rows}
+            ageLens={ageLens}
+            query={filter}
+            scanId={selectedScanId}
+            filterResult={filterActive ? filterResult : undefined}
+          />
+        ) : viz === 'scatter' ? (
+          <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
+        ) : viz === 'histograms' ? (
+          <HistogramPanel uri={uri} scanId={selectedScanId} query={filter} />
+        ) : (
+          <VoronoiPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
+        )}
+      </VizBoundary>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
+        <span>{viz === 'treemap' ? `${rows.length} items` : `${filteredChildren.length} children`}</span>
+        {filter.trim() && caps?.filter && (
+          <Tooltip
+            title={reagg
+              ? 'Recursive server-side filter: sizes count matched bytes only, and a match inside a matched dir never double-counts. Click to switch back to display-only dimming.'
+              : "The filter highlights and re-lays-out what's shown at this level; directory sizes still include children the filter hides. Click to re-aggregate: sizes count only what matches, recursively."}
+          >
+            <span
+              onClick={() => setReagg(r => !r)}
+              style={{ fontStyle: 'italic', cursor: 'pointer', textDecoration: 'underline dotted' }}
+            >
+              {reagg
+                ? filterResult
+                  ? `filtered (re-aggregated): ${formatSize(filterResult.total_size)} in ${filterResult.n_matches.toLocaleString()} match${filterResult.n_matches === 1 ? '' : 'es'}${filterFetching ? ' …' : ''}`
+                  : 'filtered (re-aggregating…)'
+                : 'filtered (display only)'}
+            </span>
+          </Tooltip>
+        )}
+        <label>
+          View:
+          <select value={viz} onChange={e => setViz(e.target.value as Viz)} style={{ marginLeft: 4 }}>
+            <option value="treemap">Treemap</option>
+            <option value="scatter">Staleness</option>
+            {caps?.histogram && <option value="histograms">Age histograms</option>}
+            <option value="voronoi">Voronoi</option>
+          </select>
+        </label>
+        {viz === 'treemap' && (
+          <Tooltip title="Fade cells by age (size-weighted mean mtime when the scan has it, else newest descendant) — older fades toward the background">
+            <label style={{ cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={ageLens}
+                onChange={e => setAgeLens(e.target.checked)}
+                style={{ marginRight: 4, verticalAlign: 'middle' }}
+              />
+              Age lens
+            </label>
+          </Tooltip>
+        )}
+        <label>
+          Max:
+          <select
+            value={treemapMaxRows}
+            onChange={e => setTreemapMaxRows(Number(e.target.value))}
+            style={{ marginLeft: 4 }}
+          >
+            <option value={500}>500</option>
+            <option value={1000}>1,000</option>
+            <option value={2000}>2,000</option>
+            <option value={5000}>5,000</option>
+            <option value={0}>All</option>
+          </select>
+        </label>
+      </Box>
+    </Box>
+  ) : null
+
   return (
     <div ref={wrapperRef} tabIndex={0} style={{ outline: 'none' }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1, flexWrap: 'wrap' }}>
@@ -1845,6 +1926,7 @@ export function ScanDetails() {
           </Box>
         )}
       </Box>
+      {vizPanel}
       {/* The table x-scrolls inside its own box on narrow screens; the page
           itself never scrolls sideways. */}
       <div style={{ overflowX: 'auto' }}>
@@ -1913,85 +1995,6 @@ export function ScanDetails() {
               points={scanHistory.map(h => ({ time: h.time, bytes: h.size ?? null }))}
               formatBytes={formatSize}
             />
-          </Box>
-        </Box>
-      )}
-      {rows.length > 0 && (
-        <Box sx={{ mt: 2 }}>
-          <VizBoundary label={VIZ_LABELS[viz]}>
-            {viz === 'treemap' ? (
-              <Treemap
-                root={root}
-                rows={rows}
-                ageLens={ageLens}
-                query={filter}
-                scanId={selectedScanId}
-                filterResult={filterActive ? filterResult : undefined}
-              />
-            ) : viz === 'scatter' ? (
-              <StalenessPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
-            ) : viz === 'histograms' ? (
-              <HistogramPanel uri={uri} scanId={selectedScanId} query={filter} />
-            ) : (
-              <VoronoiPanel nodes={filteredChildren} uri={uri} collapsedRows={collapsed_rows} />
-            )}
-          </VizBoundary>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 1, fontSize: '0.85rem', opacity: 0.7 }}>
-            <span>{viz === 'treemap' ? `${rows.length} items` : `${filteredChildren.length} children`}</span>
-            {filter.trim() && caps?.filter && (
-              <Tooltip
-                title={reagg
-                  ? 'Recursive server-side filter: sizes count matched bytes only, and a match inside a matched dir never double-counts. Click to switch back to display-only dimming.'
-                  : "The filter highlights and re-lays-out what's shown at this level; directory sizes still include children the filter hides. Click to re-aggregate: sizes count only what matches, recursively."}
-              >
-                <span
-                  onClick={() => setReagg(r => !r)}
-                  style={{ fontStyle: 'italic', cursor: 'pointer', textDecoration: 'underline dotted' }}
-                >
-                  {reagg
-                    ? filterResult
-                      ? `filtered (re-aggregated): ${formatSize(filterResult.total_size)} in ${filterResult.n_matches.toLocaleString()} match${filterResult.n_matches === 1 ? '' : 'es'}${filterFetching ? ' …' : ''}`
-                      : 'filtered (re-aggregating…)'
-                    : 'filtered (display only)'}
-                </span>
-              </Tooltip>
-            )}
-            <label>
-              View:
-              <select value={viz} onChange={e => setViz(e.target.value as Viz)} style={{ marginLeft: 4 }}>
-                <option value="treemap">Treemap</option>
-                <option value="scatter">Staleness</option>
-                {caps?.histogram && <option value="histograms">Age histograms</option>}
-                <option value="voronoi">Voronoi</option>
-              </select>
-            </label>
-            {viz === 'treemap' && (
-              <Tooltip title="Fade cells by age (size-weighted mean mtime when the scan has it, else newest descendant) — older fades toward the background">
-                <label style={{ cursor: 'pointer' }}>
-                  <input
-                    type="checkbox"
-                    checked={ageLens}
-                    onChange={e => setAgeLens(e.target.checked)}
-                    style={{ marginRight: 4, verticalAlign: 'middle' }}
-                  />
-                  Age lens
-                </label>
-              </Tooltip>
-            )}
-            <label>
-              Max:
-              <select
-                value={treemapMaxRows}
-                onChange={e => setTreemapMaxRows(Number(e.target.value))}
-                style={{ marginLeft: 4 }}
-              >
-                <option value={500}>500</option>
-                <option value={1000}>1,000</option>
-                <option value={2000}>2,000</option>
-                <option value={5000}>5,000</option>
-                <option value={0}>All</option>
-              </select>
-            </label>
           </Box>
         </Box>
       )}
