@@ -23,9 +23,12 @@ inherent perf penalty. The two candidate mechanisms (below) are both serverless.
 - Compare is **not served statically**: `ui/functions/api/capabilities.ts` says
   `compare: false`; there is no `/api/compare` / `/api/diff/status` Function, so
   those routes 501. `CompareView` works fully against the Flask server only.
-- The core `DiffTreemap` + `DiffTable` are complete (`packages/treemap/src/diff/`)
-  and consumed by `CompareView` — the widgets are *ahead* of what marin ships
-  (marin's site diff-treemap is a bespoke reimplementation with no diff table).
+- The core `DiffTreemap` + `DiffTable` are complete (`packages/treemap/src/diff/`,
+  shared via `@rdub/treemap`) and **wired** by `CompareView` (treemap + table).
+  mgu's `gcs` FE renders only the treemap (no table wired) though the shared
+  widget is available; `cw-s3`/`factored` FE do wire the table. So this is a
+  wiring detail of one shared widget, flowing bidirectionally (see
+  `serverless-reference.md`), not a capability dt owns alone.
 
 ## Phases
 
@@ -91,18 +94,21 @@ and a nav entry (Phase 5) to reach `/compare/*`.
 Design below.
 
 
-**Fleet finding (why not depth-by-depth streaming):** neither deployment
-streams the diff to the client. disk-tree `/api/compare` is a best-first |Δ|
-heap walk (`diff.py:251 recursive_diff`, `budget` expansions) + persisted-index
-3 s poll-and-refetch; marin `site/functions/api/diff.ts` is a level-by-level BFS
-(for lookup *parallelism*) over a shared byte-floor, returned as one edge-cached
-JSON blob. Depth-ordered iterative deepening exists only in
-`/api/filter/stream` (single scan, SSE) and build-side in `iter_diff_depths`
-(→ parquet). Streaming depth-by-depth over the wire **fights edge-caching** (a
-`ReadableStream` is awkward to `cache.put`) and the treemap only needs ~2
-visible levels to first-paint — so the optimum is a *synthesis*, not streaming:
+**Fleet finding (why not depth-by-depth streaming; refreshed 2026-09-10):**
+neither deployment streams the diff to the client. disk-tree `/api/compare` is a
+best-first |Δ| heap walk (`diff.py:251 recursive_diff`, `budget` expansions) +
+persisted-index 3 s poll-and-refetch; **mgu** `site/functions/api/diff.ts` reads
+*both* scans' index tiers at one shared byte-floor and returns table-ready rows
+as an edge-cached JSON *response* (not a precomputed blob — mgu's read layer is
+on-the-fly hyparquet slicing, and in fact a generation ahead of dt's: D1-stored
+row-group footers, multi-tier coarse floors; see `serverless-reference.md`).
+Depth-ordered iterative deepening exists only in `/api/filter/stream` (single
+scan, SSE) and build-side in `iter_diff_depths` (→ parquet). Streaming
+depth-by-depth over the wire **fights edge-caching** (a `ReadableStream` is
+awkward to `cache.put`) and the treemap only needs ~2 visible levels to
+first-paint — so the optimum is a *synthesis*, not streaming:
 
-- **Shared byte-floor bound** (from marin): `threshold = max(rootA,rootB) ·
+- **Shared byte-floor bound** (from mgu): `threshold = max(rootA,rootB) ·
   minArea/(w·h)` — viewport-relative and deterministic, so the edge-cache key is
   exact and `min_frac` (undrawable cells: bytes *and* |Δ| both under floor)
   becomes the primary prune, never walked.
@@ -120,10 +126,12 @@ undrawable rows, order + cut. Flip `compare: true`; adapt `CompareView` so a
 static (no-persisted-index) response is final — skip the 3 s index poll. Surface
 a compare entry point in the demo nav.
 
-**Fleet alignment:** this Function is the reference the whole fleet converges on.
-marin/cw-s3 are already close (byte-floor bound present); aligning them —
-best-first frontier ordering + depth-slice-and-drill instead of one full walk —
-is a follow-up spec handoff to those sessions, not part of this repo's build.
+**Fleet alignment (bidirectional, not dt-canonical):** convergence pulls the best
+of each — dt's `CompareView` diff-table wiring + best-first frontier ordering,
+mgu's superior read layer (D1-footer + coarse tiers). This isn't "the fleet
+converges on dt"; core evolves in mgu first and CPs to dt (`dt-core-upstreaming.md`),
+and dt's biggest pull is mgu's read layer, not the reverse. The full sort is in
+`serverless-reference.md`.
 
 ### Phase 4 — union `path` / `hbt` (cross-account)
 
@@ -161,10 +169,13 @@ R2 *binding* isn't possible (bindings are same-account), so it'd fetch via the
 bucket's public/custom-domain URL — a deliberate future feature, not part of
 this pipeline.
 
-Migration order (user handling): the three current sources still live in RAC, so
-today's rescan is single-account (one RAC token, RO sources + RW demo). As
-buckets move to HCCS, give each its HCCS `profile` + endpoint and the RO HCCS
-credential; the RW RAC credential stays for `disk-tree-demo` alone.
+Credentials (as of 2026-09-10): the HCCS **Object Read-only** R2 pair is in
+`.envrc` — `CF_HCCS_R2_ACCESS_KEY_ID` / `CF_HCCS_R2_SECRET_ACCESS_KEY`
+(`CF_HCCS_R2_RO_TOKEN`) — so the source *read* side is ready (bind the `hccs`
+profile to it). The `disk-tree-demo` *write* side still needs a RAC key with
+Object R&W (widen `disk-tree-wrangler` from "Admin Read only"). Open: run the
+publish locally (`.envrc` carries both) or in GHA (add the HCCS RO pair as repo
+secrets beside the RAC RW pair).
 
 ### Phase 5 — demo UX ✅ (compare action on the Scans table)
 
