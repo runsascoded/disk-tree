@@ -217,6 +217,11 @@ def reduce_cmd(
         # reaches another one (`disk-tree scans register`).
         from disk_tree.scan_manifest import write_scan_manifest
         err(f'manifest → {write_scan_manifest(scan, blob)}')
+        # Footer sidecar for the serverless reader (see `find/groups.py`).
+        from disk_tree.find.groups import write_groups_sidecar
+        gs = write_groups_sidecar(blob)
+        if gs:
+            err(f'groups → {gs.path} ({gs.n_groups} groups)')
     if not no_diff:
         from disk_tree.cli.diff_index import build_previous
         build_previous(scan.id)

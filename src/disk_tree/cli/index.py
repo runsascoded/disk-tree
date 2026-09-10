@@ -156,6 +156,12 @@ def index(
         # A remote blob's metadata travels with it (`disk-tree scans register`).
         from disk_tree.scan_manifest import write_scan_manifest
         print(f"Scan manifest: {write_scan_manifest(scan, blob_path)}")
+        # Precompute the footer as a `.groups.json` sidecar so the serverless
+        # reader (`ui/cfn`) plans range reads without a cold thrift-footer parse.
+        from disk_tree.find.groups import write_groups_sidecar
+        gs = write_groups_sidecar(blob_path)
+        if gs:
+            print(f"Scan groups: {gs.path} ({gs.n_groups} groups, {iec(gs.n_bytes)})")
     if scan.error_count:
         import json
         error_paths = json.loads(scan.error_paths) if scan.error_paths else []

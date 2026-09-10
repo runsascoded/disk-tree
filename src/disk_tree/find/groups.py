@@ -190,3 +190,18 @@ def write_groups(parquet_path: str) -> GroupsStats:
     out = groups_path(parquet_path)
     blobfs.write_text(out, text)
     return GroupsStats(path=out, n_groups=len(rows), n_bytes=len(text.encode()))
+
+
+def write_groups_sidecar(parquet_path: str) -> GroupsStats | None:
+    """Emit the ``.groups.json`` footer beside a freshly-published blob, so the
+    serverless reader (``ui/cfn``) plans range reads without a cold thrift-footer
+    parse. It is a pure *optimization*: the blob still reads through its own
+    footer if the sidecar is absent, so a failure here (a blob without row-group
+    stats, a transient write error) is non-fatal — warn and return ``None``
+    rather than abort a publish whose scan blob + manifest are already valid."""
+    try:
+        return write_groups(parquet_path)
+    except Exception as e:
+        from utz import err
+        err(f"groups.json sidecar skipped for {parquet_path}: {type(e).__name__}: {e}")
+        return None
