@@ -57,6 +57,20 @@ def main() -> None:
         f.write('\n')
     print(df.to_string())
 
+    # The `.groups.json` footer sidecar the serverless reader consumes instead
+    # of parsing the thrift footer (`disk_tree.find.groups`; spec
+    # `serverless-tier-reads.md`). Best-effort: this uv-script's shebang isolates
+    # deps, so `disk_tree` imports only when run in the project venv — where a
+    # full regen belongs. `groups.test.ts` asserts it reads identically to the
+    # footer, so a stale sidecar fails loudly.
+    try:
+        from disk_tree.find.groups import write_groups
+    except ImportError:
+        print('disk_tree not importable — skipped fixture.groups.json (run in the project venv)')
+    else:
+        gs = write_groups(join(here, 'fixture.parquet'))
+        print(f'groups → {gs.path} ({gs.n_groups} groups)')
+
 
 if __name__ == '__main__':
     main()

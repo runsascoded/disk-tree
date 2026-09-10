@@ -8,6 +8,7 @@ import { scansPrefix } from './env'
 import type { Scan } from './manifests'
 import { r2Buffer, readChunkPointers, readRows } from './parquet'
 import type { TreeRow } from './parquet'
+import { metaFor } from './groups'
 
 /** A scan row rebased to the viewed uri: `path`/`parent` relative (`.` = uri),
  *  `depth` relative, `uri` absolute. */
@@ -32,7 +33,7 @@ async function resolveChunk(env: Env, blob: string, rel: string, chunkRootRel = 
   const key = scansPrefix(env) + blob
   const head = await env.SCANS.head(key)
   if (!head) return { blob, rebased: rel, chunkRootRel }
-  const pointers = await readChunkPointers(r2Buffer(env.SCANS, key, head.size))
+  const pointers = await readChunkPointers(r2Buffer(env.SCANS, key, head.size), await metaFor(env.SCANS, key))
   if (pointers.size === 0) return { blob, rebased: rel, chunkRootRel }
   const parts = rel.split('/')
   for (let i = 0; i < parts.length; i++) {
@@ -81,7 +82,7 @@ export async function readScanSlice(env: Env, scan: Scan, uri: string, depth: nu
   const rawRows = await readRows(r2Buffer(env.SCANS, key, head.size), {
     maxDepth: depthOf(rebased) + depth,
     prefix: rebased === '.' ? null : rebased,
-  })
+  }, await metaFor(env.SCANS, key))
   const stored = rawRows.map(r => toScanAbs(r, chunkRootRel, rootDepth))
 
   const rootRow = stored.find(r => r.path === rel)
@@ -104,7 +105,7 @@ export async function readScanSlice(env: Env, scan: Scan, uri: string, depth: nu
     const cKey = scansPrefix(env) + c.child_scan_id
     const cHead = await env.SCANS.head(cKey)
     if (!cHead) continue
-    const cRows = await readRows(r2Buffer(env.SCANS, cKey, cHead.size), { maxDepth: 1 })
+    const cRows = await readRows(r2Buffer(env.SCANS, cKey, cHead.size), { maxDepth: 1 }, await metaFor(env.SCANS, cKey))
     for (const cr of cRows) {
       if (cr.depth !== 1) continue
       rows.push({ ...cr, path: `${c.path}/${cr.path}`, parent: c.path, depth: c.depth + 1, uri: `${c.uri}/${cr.path}` })
