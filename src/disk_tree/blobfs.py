@@ -55,33 +55,59 @@ def _fsspec():
     return fsspec
 
 
+def _buckets_yml() -> dict:
+    """The parsed `~/.config/disk-tree/buckets.yml` (or `{}` if absent). Read
+    fresh each call — reads are cheap and `_s3fs` memoizes the filesystem."""
+    from . import config as _config
+    cfg_path = _local_join(_config.ROOT_DIR, 'buckets.yml')
+    if not _local_exists(cfg_path):
+        return {}
+    import yaml
+    with open(cfg_path) as f:
+        return yaml.safe_load(f) or {}
+
+
+def _bucket_field(bucket: str, field: str) -> str | None:
+    """A per-bucket field from `buckets.yml` — the matching `buckets[…].<field>`,
+    else `defaults.<field>`. Only a truthy per-bucket value wins; otherwise the
+    lookup falls through to `defaults`."""
+    raw = _buckets_yml()
+    for e in raw.get('buckets') or []:
+        if isinstance(e, dict) and urlparse(e.get('uri', '')).netloc == bucket and e.get(field):
+            return e[field]
+    return (raw.get('defaults') or {}).get(field)
+
+
 def r2_endpoint(bucket: str) -> str | None:
     """Cloudflare R2's S3 endpoint for `bucket`: `DISK_TREE_R2_ENDPOINT_URL`, else
     the bucket's (or `defaults`) `endpoint_url` in `~/.config/disk-tree/buckets.yml`."""
     ep = os.environ.get(R2_ENDPOINT_VAR)
     if ep:
         return ep
-    from . import config as _config
-    cfg_path = _local_join(_config.ROOT_DIR, 'buckets.yml')
-    if not _local_exists(cfg_path):
-        return None
-    import yaml
-    with open(cfg_path) as f:
-        raw = yaml.safe_load(f) or {}
-    for e in raw.get('buckets') or []:
-        if isinstance(e, dict) and e.get('endpoint_url') and urlparse(e.get('uri', '')).netloc == bucket:
-            return e['endpoint_url']
-    return (raw.get('defaults') or {}).get('endpoint_url')
+    return _bucket_field(bucket, 'endpoint_url')
+
+
+def bucket_profile(bucket: str) -> str | None:
+    """The AWS credential profile a bucket authenticates with, from `buckets.yml`
+    (per-bucket, else `defaults`). This is how a source and a target in *different*
+    accounts each pick their own key within one `index --to` run — every S3/R2
+    seam (this module's `s3fs`, the `aws` CLI lister, the `boto3` bulk lister)
+    honors a named profile. `None` → ambient credentials (env / default profile),
+    the single-account default."""
+    return _bucket_field(bucket, 'profile')
 
 
 @lru_cache(maxsize=None)
-def _s3fs(endpoint_url: str):
+def _s3fs(endpoint_url: str, profile: str | None = None):
     import s3fs
     # Cloudflare R2 requires all non-trailing multipart parts to be the same
     # length; s3fs only guarantees that under `fixed_upload_size=True`. Without
     # it, a blob large enough to go multipart fails `CompleteMultipartUpload`
     # with `InvalidPart` (leaking the in-flight upload). Harmless for real S3.
-    return s3fs.S3FileSystem(client_kwargs={'endpoint_url': endpoint_url}, fixed_upload_size=True)
+    kw = {'client_kwargs': {'endpoint_url': endpoint_url}, 'fixed_upload_size': True}
+    if profile:
+        kw['profile'] = profile
+    return s3fs.S3FileSystem(**kw)
 
 
 def fs_for(url: str):
@@ -94,7 +120,7 @@ def fs_for(url: str):
                 f"r2://{p.netloc}: no endpoint — set {R2_ENDPOINT_VAR}, or give the bucket an "
                 "`endpoint_url` in buckets.yml"
             )
-        return _s3fs(ep), f"{p.netloc}{p.path}"
+        return _s3fs(ep, bucket_profile(p.netloc)), f"{p.netloc}{p.path}"
     return _fsspec().core.url_to_fs(url)
 
 

@@ -125,18 +125,46 @@ marin/cw-s3 are already close (byte-floor bound present); aligning them —
 best-first frontier ordering + depth-slice-and-drill instead of one full walk —
 is a follow-up spec handoff to those sessions, not part of this repo's build.
 
-### Phase 4 — union `path` / `hbt`
+### Phase 4 — union `path` / `hbt` (cross-account)
 
-Both are DVC projects publishing to **S3**: `s3://hudcostreets/path/.dvc/cache`
-and `s3://hudcostreets/hbt/.dvc/cache` (same DVC-cache shape as `ctbk`). Two
-ways in, both cloud/GHA-friendly (no laptop dependency):
+`path`/`hbt` are separate public-data projects. They'll land in the **HCCS
+Cloudflare account** (a *different* account from `disk-tree-demo`, which lives in
+the personal/RAC account), so publishing a scan of them into `disk-tree-demo` is
+inherently **cross-account**: the source read uses the HCCS key + HCCS endpoint,
+the blob write uses the RAC key + RAC endpoint, in one `index --to` process.
 
-- **Scan S3 directly** — add `s3://hudcostreets/path` / `…/hbt` to the Phase 1
-  loop; disk-tree lists `s3://` natively. Needs the `hudcostreets` bucket's AWS
-  creds in the runner (a second credential alongside the R2 token).
-- **Migrate to R2 first** (user is handling separately) — copy to `r2://path` /
-  `r2://hbt` (or a shared bucket), then they join the loop under the existing R2
-  credential, no extra secret.
+**Per-bucket credentials (built).** A single `index --to` process now selects
+its key per bucket via a `profile:` in `buckets.yml` (`blobfs.bucket_profile`,
+threaded through the s3fs blob IO, the `aws`-CLI lister, and the `boto3` bulk
+lister). So the topology is:
+
+```yaml
+buckets:
+  - uri: r2://ctbk           # + nj-crashes, jc-taxes, path, hbt (HCCS acct)
+    endpoint_url: https://<hccs-acct>.r2.cloudflarestorage.com
+    profile: hccs            # Object Read-only key on the source buckets
+  - uri: r2://disk-tree-demo # personal/RAC acct
+    endpoint_url: https://<rac-acct>.r2.cloudflarestorage.com
+    profile: rac             # Object Read & Write key on the demo bucket
+```
+
+The runner materializes `~/.aws/credentials` with `[hccs]` and `[rac]` from
+separate secrets, and **must not** set `DISK_TREE_R2_ENDPOINT_URL` (it globally
+overrides the per-bucket endpoints). Least-privilege falls out naturally: RO on
+the sources, RW only on `disk-tree-demo`.
+
+**Note:** the *demo's serving path* (Pages Functions over R2) is unaffected —
+it reads only scan blobs from the `disk-tree-demo` binding, never the source
+objects. Drill-to-file shows a file's recorded stats, not its bytes; reading the
+actual source object would be a new capability + a Function, and a cross-account
+R2 *binding* isn't possible (bindings are same-account), so it'd fetch via the
+bucket's public/custom-domain URL — a deliberate future feature, not part of
+this pipeline.
+
+Migration order (user handling): the three current sources still live in RAC, so
+today's rescan is single-account (one RAC token, RO sources + RW demo). As
+buckets move to HCCS, give each its HCCS `profile` + endpoint and the RO HCCS
+credential; the RW RAC credential stays for `disk-tree-demo` alone.
 
 ### Phase 5 — demo UX ✅ (compare action on the Scans table)
 
@@ -158,7 +186,9 @@ filter over public data.
    bounded compute, edge-cached); add the **(A-consecutive) O(N) cache** later
    only if the default diff feels slow. Never O(N²). *(Resolved: on-the-fly
    default per user; the persisted set, if any, is O(N) consecutive.)*
-2. **Phase 4 source** — `s3://hudcostreets/{path,hbt}` (DVC/S3). Scan S3 directly
-   (extra AWS cred) or user migrates to R2 first (user handling separately).
+2. **Phase 4 source** — `path`/`hbt` land in the **HCCS** CF account (not RAC),
+   so publishing into `disk-tree-demo` is cross-account. *(Resolved: per-bucket
+   `profile:` credentials in `buckets.yml` — built; source reads with the HCCS
+   RO key, demo writes with the RAC RW key, in one `index --to` run.)*
 3. **Phase 1 cadence** — daily; time non-critical (nj-crashes' GHA drifts hours),
    so no tight alignment needed.
