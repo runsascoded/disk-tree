@@ -11,11 +11,14 @@ Design-only. Everything below **already exists**, provisioned by hand (`wrangler
 
 What does **not** transfer: mgu's `@pulumi/gcp` half (Cloud Scheduler / Batch / Secret Manager) — dt has no GCP. dt's re-scan cadence is GHA cron (`.github/workflows/rescan-demo.yml`, `reduce.yml`), which is repo-tracked YAML, not a cloud resource; leave it as-is. mgu's Zero Trust Access apps map onto dt's **private** stack only (the demo is `PUBLIC_OPEN`, no auth). And mgu is an OA-org project living in the shared `~/c/oa/ops` Pulumi repo; dt is self-contained (see Where).
 
-## Account reconciliation (resolve before writing code)
+## Accounts (resolved 2026-09-10, by the user)
 
-The specs disagree on which account holds what, and the task framing adds a third label. `CLOUDFLARE_ACCOUNT_ID` in `.envrc` is `0dcad…` (also the R2 endpoint host), and `cfn-demo-and-flask-localhost-peer.md` (2026-09-08) calls `0dcad…` **"Open Athena"** and states the demo Pages project, the `disk-tree-demo` bucket, the `rbw.sh` zone, **and the three source buckets (`ctbk`/`nj-crashes`/`jc-taxes`) all live in that one `0dcad…` account.** The task calls the demo account "RAC/personal" and says the source buckets are in a **separate HCCS** account. `public-diff-demo.md` Phase 4 says only the *future* `path`/`hbt` buckets are HCCS (cross-account), which matches the `CF_HCCS_R2_*` RO key already in `.envrc`.
+Three CF accounts, confirmed:
+- **RAC** (`Ryan@runsascoded.com`) — `0dcad5654e9744de6616f74b8df4af63` = `.envrc`'s `CLOUDFLARE_ACCOUNT_ID` and the R2 endpoint host. **Holds the demo:** `disk-tree-demo` bucket + Pages project + the `r2.rbw.sh`/`rbw.sh` zone (+ the private `disk-tree` project/bucket + `disk-tree-auth` D1). This is dt's one **managing** account.
+- **OA** (Open Athena) — `74981a43be0de7712369306c7b19133d`. mgu's home; nothing of dt's. (`cfn-demo-and-flask-localhost-peer.md`'s "Open Athena" label on `0dcad…` was wrong — that id is RAC.)
+- **HCCS** — `2363642879f18d37d52dca114059937e`. The source buckets are moving here (`ctbk`/`nj-crashes`/`path` read via the `CF_HCCS_R2_*` RO key; `jc-taxes` appears to still be RAC per the `disk-tree-wrangler` R2 policy). **Foreign-owned — dt reads, never manages.**
 
-Best current read: **one account (`0dcad…`) holds the demo project + bucket + `r2.rbw.sh` + the current source buckets today**; HCCS is a *future* home for `path`/`hbt` only. IaC is built against `0dcad…` regardless of its human name. **Open question for the user:** confirm the account's identity/label and whether the current source buckets are truly co-account — it changes only whether the source buckets are "same-account but foreign-owned" (reference-only) or genuinely another account (a second provider, still reference-only). Either way dt's IaC does **not** manage them.
+So one managing CF provider, pinned to RAC `0dcad…`; the source buckets (RAC or HCCS) are reference-only either way.
 
 ## 1. Resource inventory
 
@@ -89,7 +92,7 @@ Import ID shapes for `@pulumi/cloudflare` (verify against the pinned provider ma
 
 ## Open questions
 
-- **Account identity/label** — confirm `0dcad…` is one account holding demo project + bucket + `r2.rbw.sh` + current source buckets (per `cfn-demo-…md`), vs. the task's "RAC/personal demo + separate HCCS sources" split. Decides §3's one-vs-two-provider question (answer is still one *managing* provider either way).
+- ~~Account identity/label~~ — **resolved** (see Accounts): `0dcad…` = RAC, holds the demo; one managing provider.
 - **State backend** — Pulumi Cloud vs self-managed (R2/S3) for a personal, self-contained dt. (§3)
 - **Token scope** — does `disk-tree-wrangler` (Pages Write + R2 Read [+ D1 Write]) cover `pulumi import`/`refresh` of PagesProject/PagesDomain/R2/D1, or is a broader/dedicated Pulumi token needed?
 - **Private stack now or later** — demo-only first pass is recommended; confirm.
