@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import { contrastEdge, DEFAULT_PALETTE, slotColor } from './colors'
+import { CONTAINER_BG, contrastEdge, DEFAULT_PALETTE, slotColor } from './colors'
 import { DustHatch } from './DustHatch'
 import type { FoldedNode, LayoutConfig } from './layout'
 import { edgeEmphFactor, isFolded, layoutCells } from './layout'
@@ -9,6 +9,8 @@ import { TreemapCanvas, type CanvasHit } from './TreemapCanvas'
 import { OutlineOverlay } from './OutlineOverlay'
 import type { OutlineGroups } from './outlines'
 import { categoricalStyle, resolveRing, type StyleOpts } from './cellStyle'
+import { canvasToPngBlob, composeExport, copyPng, defaultExportFilename, downloadPng } from './exportImage'
+import type { ExportKind, ExportOptions } from './exportImage'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -191,6 +193,17 @@ export interface TreemapProps<T> {
   mergeSmall?: (small: T[]) => T
   /** Show the fullscreen toggle button. Default: true. */
   fullscreen?: boolean
+  /**
+   * Add copy-PNG / download-PNG buttons to the bar (and `⌘/Ctrl+Shift+C` to
+   * copy) that export the current view as an image. `true` ≡ `{}` (the bare
+   * map); `{ title: true }` composites the crumb text above it. Canvas
+   * renderer only — the export reads the map's `<canvas>` pixels directly (no
+   * DOM-to-image dependency); ignored under the DOM renderer.
+   */
+  exportable?: boolean | ExportOptions<T>
+  /** Fired after each export, with the PNG blob and how it left (for a
+   *  "copied ✓" toast / analytics; the copy/download itself is already done). */
+  onExport?: (blob: Blob, ctx: { kind: ExportKind }) => void
   /** Render the breadcrumbs/legend bar. Default: true. */
   chrome?: boolean
   /** Render in-cell labels. Default: true. (`false` + `chrome={false}` ≈ a redacted/og render.) */
@@ -508,6 +521,8 @@ export function Treemap<T>({
   minCellSide = 7,
   mergeSmall,
   fullscreen = true,
+  exportable,
+  onExport,
   chrome = true,
   showLabels = true,
   sizeAlign = 'left',
@@ -545,6 +560,9 @@ export function Treemap<T>({
   const mapRef = useRef<HTMLDivElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const tipRef = useRef<HTMLDivElement>(null)
+  // The live map `<canvas>` (canvas renderer only), so image export can read
+  // its pixels directly (`exportable`).
+  const canvasElRef = useRef<HTMLCanvasElement | null>(null)
   // Grace timer so the hover tip survives the cell→tip gap: leaving the map
   // schedules a clear, entering the tip cancels it. Lets you move into the tip
   // and use its controls/links without pinning (the tip is anchored, not
@@ -1235,6 +1253,38 @@ export function Treemap<T>({
     else void el.requestFullscreen()
   }
 
+  // Image export (`exportable`): read the live map canvas, optionally composite
+  // the crumb text as a title, then copy or download the PNG. Canvas renderer
+  // only (the buttons only render when a canvas is present).
+  const exportOpts: ExportOptions<T> | null =
+    exportable ? (exportable === true ? {} : exportable) : null
+  const doExport = useCallback(
+    async (kind: ExportKind) => {
+      const src = canvasElRef.current
+      if (!src || !exportOpts) return
+      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+      const cs = mapRef.current ? getComputedStyle(mapRef.current) : null
+      const ink = cs?.color || 'rgb(230, 230, 238)'
+      const transparent = (c: string | undefined) => !c || c === 'transparent' || c === 'rgba(0, 0, 0, 0)'
+      let bg = cs?.backgroundColor
+      if (transparent(bg) && typeof document !== 'undefined') bg = getComputedStyle(document.body).backgroundColor
+      if (transparent(bg)) bg = `rgb(${CONTAINER_BG[0]}, ${CONTAINER_BG[1]}, ${CONTAINER_BG[2]})`
+      const title = exportOpts.title ? `${path.map(getLabel).join('/')} — ${formatSize(getSize(node))}` : null
+      const out = composeExport(src, { title, bg: bg!, ink, dpr })
+      const blob = await canvasToPngBlob(out)
+      const filename = exportOpts.filename?.({ node, path }) ?? defaultExportFilename(getLabel(node))
+      if (kind === 'copy') {
+        const copied = await copyPng(blob)
+        if (!copied) downloadPng(blob, filename) // Firefox/insecure context → save instead.
+      } else {
+        downloadPng(blob, filename)
+      }
+      onExport?.(blob, { kind })
+    },
+    [exportOpts, path, node, getLabel, getSize, formatSize, onExport],
+  )
+  const showExport = !!exportOpts && renderer === 'canvas'
+
   const tipToShow = pinnedTip ?? tip
   // Clamp the tip to the viewport using its MEASURED size — consumers widen
   // it with CSS (max-width overrides), so a fixed guess overflows the edge.
@@ -1260,6 +1310,13 @@ export function Treemap<T>({
     <div
       className={'dt-treemap' + (className ? ` ${className}` : '')}
       ref={wrapRef}
+      onKeyDown={showExport ? (e => {
+        // ⌘/Ctrl+Shift+C copies the current view (when focus is inside the map).
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+          e.preventDefault()
+          void doExport('copy')
+        }
+      }) : undefined}
       style={{ display: 'flex', flexDirection: 'column', width: '100%', height: '100%' }}
     >
       {chrome && <div
@@ -1312,6 +1369,28 @@ export function Treemap<T>({
             />
           </label>
         )}
+        {showExport && (
+          <>
+            <button
+              className="dt-treemap-export-copy"
+              onClick={() => void doExport('copy')}
+              title="Copy PNG to clipboard (⌘/Ctrl+Shift+C)"
+              aria-label="Copy image to clipboard"
+              style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.05em' }}
+            >
+              ⧉
+            </button>
+            <button
+              className="dt-treemap-export-dl"
+              onClick={() => void doExport('download')}
+              title="Download PNG"
+              aria-label="Download image"
+              style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.05em' }}
+            >
+              ⇩
+            </button>
+          </>
+        )}
         {fullscreen && (
           <button
             className="dt-treemap-fs"
@@ -1360,6 +1439,7 @@ export function Treemap<T>({
                 a11yMaxCells={a11yMaxCells}
                 a11yMinSide={a11yMinSide}
                 pinnedKey={pinnedTip?.key ?? null}
+                canvasRef={exportable ? canvasElRef : undefined}
                 onHover={(hit: CanvasHit<T>, x, y) => activateHover(hit.node, hit.path, hit.key, x, y)}
                 onClick={(hit: CanvasHit<T>, e) =>
                   hit.foldChild

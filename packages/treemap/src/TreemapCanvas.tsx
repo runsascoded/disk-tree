@@ -61,6 +61,8 @@ export interface TreemapCanvasProps<T> {
   a11yMinSide: number
   /** Key of the currently pinned cell, ringed on the canvas so the pin reads. */
   pinnedKey: string | null
+  /** Mirror of the internal `<canvas>` element, for image export (`exportable`). */
+  canvasRef?: React.MutableRefObject<HTMLCanvasElement | null>
   onHover: (hit: CanvasHit<T>, clientX: number, clientY: number) => void
   onClick: (hit: CanvasHit<T>, e: React.MouseEvent) => void
   onLeave: () => void
@@ -130,11 +132,18 @@ export function TreemapCanvas<T>({
   a11yMaxCells,
   a11yMinSide,
   pinnedKey,
+  canvasRef,
   onHover,
   onClick,
   onLeave,
 }: TreemapCanvasProps<T>) {
   const ref = useRef<HTMLCanvasElement>(null)
+  // Callback ref that keeps both the internal ref (used by the paint effect)
+  // and the consumer's export mirror pointed at the live element.
+  const setCanvas = (el: HTMLCanvasElement | null) => {
+    ref.current = el
+    if (canvasRef) canvasRef.current = el
+  }
   // Biggest-first paint order. A container's rect always contains its
   // descendants', so its area strictly exceeds theirs — area-descending is
   // therefore a valid ancestor-before-descendant order (children paint over
@@ -264,7 +273,7 @@ export function TreemapCanvas<T>({
   return (
     <>
       <canvas
-        ref={ref}
+        ref={setCanvas}
         width={Math.max(1, Math.round(width))}
         height={Math.max(1, Math.round(height))}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'default' }}
