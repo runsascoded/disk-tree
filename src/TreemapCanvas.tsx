@@ -61,6 +61,8 @@ export interface TreemapCanvasProps<T> {
   a11yMinSide: number
   /** Key of the currently pinned cell, ringed on the canvas so the pin reads. */
   pinnedKey: string | null
+  /** Mirror of the internal `<canvas>` element, for image export (`exportable`). */
+  canvasRef?: React.MutableRefObject<HTMLCanvasElement | null>
   onHover: (hit: CanvasHit<T>, clientX: number, clientY: number) => void
   onClick: (hit: CanvasHit<T>, e: React.MouseEvent) => void
   onLeave: () => void
@@ -72,7 +74,7 @@ const SYNC_BUDGET_MS = 8
 /** Each subsequent animation frame's paint budget, leaving headroom in 16ms. */
 const FRAME_BUDGET_MS = 10
 
-interface PaintOpts<T> {
+export interface PaintOpts<T> {
   styleOpts: StyleOpts<T>
   getSize: (n: T) => number
   getLabel: (n: T) => string
@@ -130,11 +132,18 @@ export function TreemapCanvas<T>({
   a11yMaxCells,
   a11yMinSide,
   pinnedKey,
+  canvasRef,
   onHover,
   onClick,
   onLeave,
 }: TreemapCanvasProps<T>) {
   const ref = useRef<HTMLCanvasElement>(null)
+  // Callback ref that keeps both the internal ref (used by the paint effect)
+  // and the consumer's export mirror pointed at the live element.
+  const setCanvas = (el: HTMLCanvasElement | null) => {
+    ref.current = el
+    if (canvasRef) canvasRef.current = el
+  }
   // Biggest-first paint order. A container's rect always contains its
   // descendants', so its area strictly exceeds theirs — area-descending is
   // therefore a valid ancestor-before-descendant order (children paint over
@@ -264,7 +273,7 @@ export function TreemapCanvas<T>({
   return (
     <>
       <canvas
-        ref={ref}
+        ref={setCanvas}
         width={Math.max(1, Math.round(width))}
         height={Math.max(1, Math.round(height))}
         style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'default' }}
@@ -356,6 +365,38 @@ export function TreemapCanvas<T>({
       )}
     </>
   )
+}
+
+/**
+ * Paint the whole placed-cell tree to `canvas` in one synchronous pass (no
+ * progressive budget) — the export path, and any non-progressive render. Sizes
+ * the canvas to `width`×`height` at `devicePixelRatio`, and resolves theme CSS
+ * vars + label sizes against `resolveEl` (an in-DOM, themed element — an
+ * offscreen export canvas can't resolve a consumer's `var(--…)`). Lets the DOM
+ * renderer export an identical canvas rendering without mounting one.
+ */
+export function renderMapToCanvas<T>(
+  canvas: HTMLCanvasElement,
+  cells: PlacedCell<T>[],
+  width: number,
+  height: number,
+  opts: PaintOpts<T>,
+  resolveEl: Element,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+  canvas.width = Math.max(1, Math.round(width * dpr))
+  canvas.height = Math.max(1, Math.round(height * dpr))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, width, height)
+  ctx.fillStyle = CONTAINER_RGB
+  ctx.fillRect(0, 0, width, height)
+  resolveVar = colorResolver(resolveEl)
+  readLabelSizes(resolveEl)
+  const flat = flattenPlaced(cells)
+  flat.sort((a, b) => b.w * b.h - a.w * a.h)
+  for (const c of flat) paintCell(ctx, c, opts)
 }
 
 /**
