@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactElement } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch, FaRegCopy, FaCheck } from 'react-icons/fa'
@@ -786,6 +787,7 @@ function Treemap({
         tiling={tiling}
         renderer={renderer}
         exportable={{ title: true }}
+        renderTip={(label, btn) => <Tooltip title={label}>{btn as ReactElement}</Tooltip>}
         nestedHues
         renderLegend={() => (
           <span style={{ display: 'inline-flex', gap: 8, fontSize: '0.8rem' }}>

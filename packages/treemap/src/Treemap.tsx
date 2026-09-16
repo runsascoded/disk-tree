@@ -11,6 +11,7 @@ import type { OutlineGroups } from './outlines'
 import { categoricalStyle, resolveRing, type StyleOpts } from './cellStyle'
 import { canvasToPngBlob, composeExport, copyPng, defaultExportFilename, downloadPng } from './exportImage'
 import type { ExportKind, ExportOptions } from './exportImage'
+import { CopyIcon, DownloadIcon, FullscreenIcon } from './chromeIcons'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -204,6 +205,14 @@ export interface TreemapProps<T> {
   /** Fired after each export, with the PNG blob and how it left (for a
    *  "copied ✓" toast / analytics; the copy/download itself is already done). */
   onExport?: (blob: Blob, ctx: { kind: ExportKind }) => void
+  /**
+   * Wrap a control-bar button (export copy/download, fullscreen) with your own
+   * tooltip lib — MUI `<Tooltip>`, `@floating-ui/react`, Radix, … — instead of
+   * the browser-native `title`. Given the button's label and element, return
+   * the wrapped node. When set, the native `title` is suppressed so tips
+   * aren't doubled. Omitted → native `title` (the core stays dependency-free).
+   */
+  renderTip?: (label: string, button: ReactNode) => ReactNode
   /** Render the breadcrumbs/legend bar. Default: true. */
   chrome?: boolean
   /** Render in-cell labels. Default: true. (`false` + `chrome={false}` ≈ a redacted/og render.) */
@@ -523,6 +532,7 @@ export function Treemap<T>({
   fullscreen = true,
   exportable,
   onExport,
+  renderTip,
   chrome = true,
   showLabels = true,
   sizeAlign = 'left',
@@ -1284,6 +1294,14 @@ export function Treemap<T>({
     [exportOpts, path, node, getLabel, getSize, formatSize, onExport],
   )
   const showExport = !!exportOpts && renderer === 'canvas'
+  // Wrap a bar button with the consumer's tooltip (if any); else identity, and
+  // the button keeps its native `title`.
+  const withTip = (label: string, button: ReactNode): ReactNode => (renderTip ? renderTip(label, button) : button)
+  const iconBtn: CSSProperties = {
+    background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer',
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    padding: 2, lineHeight: 0, fontSize: '1.05em',
+  }
 
   const tipToShow = pinnedTip ?? tip
   // Clamp the tip to the viewport using its MEASURED size — consumers widen
@@ -1371,36 +1389,41 @@ export function Treemap<T>({
         )}
         {showExport && (
           <>
-            <button
-              className="dt-treemap-export-copy"
-              onClick={() => void doExport('copy')}
-              title="Copy PNG to clipboard (⌘/Ctrl+Shift+C)"
-              aria-label="Copy image to clipboard"
-              style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.05em' }}
-            >
-              ⧉
-            </button>
-            <button
-              className="dt-treemap-export-dl"
-              onClick={() => void doExport('download')}
-              title="Download PNG"
-              aria-label="Download image"
-              style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.05em' }}
-            >
-              ⇩
-            </button>
+            {withTip('Copy PNG to clipboard (⌘/Ctrl+Shift+C)', (
+              <button
+                className="dt-treemap-export-copy"
+                onClick={() => void doExport('copy')}
+                title={renderTip ? undefined : 'Copy PNG to clipboard (⌘/Ctrl+Shift+C)'}
+                aria-label="Copy image to clipboard"
+                style={iconBtn}
+              >
+                <CopyIcon />
+              </button>
+            ))}
+            {withTip('Download PNG', (
+              <button
+                className="dt-treemap-export-dl"
+                onClick={() => void doExport('download')}
+                title={renderTip ? undefined : 'Download PNG'}
+                aria-label="Download image"
+                style={iconBtn}
+              >
+                <DownloadIcon />
+              </button>
+            ))}
           </>
         )}
-        {fullscreen && (
+        {fullscreen && withTip('Toggle fullscreen', (
           <button
             className="dt-treemap-fs"
             onClick={goFullscreen}
-            title="Toggle fullscreen"
-            style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '1.1em' }}
+            title={renderTip ? undefined : 'Toggle fullscreen'}
+            aria-label="Toggle fullscreen"
+            style={iconBtn}
           >
-            ⛶
+            <FullscreenIcon />
           </button>
-        )}
+        ))}
       </div>}
       {(() => {
         const r = renderRollup?.(node, path)

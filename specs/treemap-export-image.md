@@ -10,7 +10,8 @@ The cells and labels are canvas-rendered (`packages/treemap/src/TreemapCanvas.ts
 
 ## Proposal (`@rdub/treemap`) — as built
 
-- `Treemap` prop `exportable?: boolean | ExportOptions<T>`, where `ExportOptions = { filename?: (ctx: { node; path }) => string; title?: boolean }`. `true` ≡ `{}` (bare map). When set, the crumb bar gets two small glyph buttons (copy `⧉`, download `⇩`) before the fullscreen toggle; keyboard `⌘/Ctrl+Shift+C` copies while focus is inside the treemap.
+- `Treemap` prop `exportable?: boolean | ExportOptions<T>`, where `ExportOptions = { filename?: (ctx: { node; path }) => string; title?: boolean }`. `true` ≡ `{}` (bare map). When set, the crumb bar gets two small inline-SVG icon buttons (copy, download) before the fullscreen toggle; keyboard `⌘/Ctrl+Shift+C` copies while focus is inside the treemap.
+- **Tooltips**: the buttons carry a native `title` by default (the core stays 0-dependency — it doesn't bundle a tooltip lib). A consumer passes `renderTip?: (label, button) => ReactNode` to wrap them in its own tooltip (MUI `<Tooltip>`, `@floating-ui/react`, Radix, …); when set, the native `title` is suppressed so tips aren't doubled. Applies to the copy/download/fullscreen buttons. (dt passes MUI `<Tooltip>`; the fullscreen/fold buttons ride the same slot.)
 - **Canvas renderer only.** The export reads the map's `<canvas>` pixels directly (`canvas.toBlob('image/png')`) — no DOM-to-image dependency, crisp on retina (the canvas is already drawn at `devicePixelRatio`). Under the DOM renderer there is no canvas to read, so the buttons don't render (a `renderer` toggle flips them on/off live). The base export is the map alone (what the teammate clipped).
 - **Title** (`title: true`): the crumb text — `path.map(getLabel).join('/') — <total>` — composited as a line above the map on an offscreen canvas, in the map's current theme colours (`getComputedStyle` on the map element for ink + ground; falls back to `document.body`, then the container constant), with a small margin.
 - `filename` default: `<view-basename>-<YYYYMMDD-HHMM>.png` (`defaultExportFilename`; basename = the current view's last path segment, filename-sanitised). Consumers can derive from their scan id via the `{ node, path }` ctx.
@@ -31,5 +32,5 @@ Recommendation: **(b)** if a legend is wanted (mgu passes its key; dt passes not
 
 ## Consumer side
 
-- **dt** (`ScanDetails`): `exportable={{ title: true }}` on the main treemap. Visible only in canvas mode (dt defaults to the DOM renderer with a toggle).
+- **dt** (`ScanDetails`): `exportable={{ title: true }}` + `renderTip={(l, b) => <Tooltip title={l}>{b}</Tooltip>}` (MUI) on the main treemap. Visible only in canvas mode (dt defaults to the DOM renderer with a toggle). dt has no colour-key legend (its bar's right slot is a controls panel), so title-only is the whole story here.
 - **cw-s3/gcs**: pass `exportable={{ title: true }}`; add `legend` once the fork above is resolved. Optional later: a "share" that uploads the PNG to the deployment's public icons Pages project and posts the URL to Slack — out of scope here.
