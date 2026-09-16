@@ -74,7 +74,7 @@ const SYNC_BUDGET_MS = 8
 /** Each subsequent animation frame's paint budget, leaving headroom in 16ms. */
 const FRAME_BUDGET_MS = 10
 
-interface PaintOpts<T> {
+export interface PaintOpts<T> {
   styleOpts: StyleOpts<T>
   getSize: (n: T) => number
   getLabel: (n: T) => string
@@ -365,6 +365,38 @@ export function TreemapCanvas<T>({
       )}
     </>
   )
+}
+
+/**
+ * Paint the whole placed-cell tree to `canvas` in one synchronous pass (no
+ * progressive budget) — the export path, and any non-progressive render. Sizes
+ * the canvas to `width`×`height` at `devicePixelRatio`, and resolves theme CSS
+ * vars + label sizes against `resolveEl` (an in-DOM, themed element — an
+ * offscreen export canvas can't resolve a consumer's `var(--…)`). Lets the DOM
+ * renderer export an identical canvas rendering without mounting one.
+ */
+export function renderMapToCanvas<T>(
+  canvas: HTMLCanvasElement,
+  cells: PlacedCell<T>[],
+  width: number,
+  height: number,
+  opts: PaintOpts<T>,
+  resolveEl: Element,
+): void {
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
+  canvas.width = Math.max(1, Math.round(width * dpr))
+  canvas.height = Math.max(1, Math.round(height * dpr))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, width, height)
+  ctx.fillStyle = CONTAINER_RGB
+  ctx.fillRect(0, 0, width, height)
+  resolveVar = colorResolver(resolveEl)
+  readLabelSizes(resolveEl)
+  const flat = flattenPlaced(cells)
+  flat.sort((a, b) => b.w * b.h - a.w * a.h)
+  for (const c of flat) paintCell(ctx, c, opts)
 }
 
 /**

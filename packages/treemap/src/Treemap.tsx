@@ -5,13 +5,13 @@ import { DustHatch } from './DustHatch'
 import type { FoldedNode, LayoutConfig } from './layout'
 import { edgeEmphFactor, isFolded, layoutCells } from './layout'
 import { foldSmall, foldThin, squarify, squarifyRemainder } from './squarify'
-import { TreemapCanvas, type CanvasHit } from './TreemapCanvas'
+import { TreemapCanvas, renderMapToCanvas, type CanvasHit } from './TreemapCanvas'
 import { OutlineOverlay } from './OutlineOverlay'
 import type { OutlineGroups } from './outlines'
 import { categoricalStyle, resolveRing, type StyleOpts } from './cellStyle'
 import { canvasToPngBlob, composeExport, copyPng, defaultExportFilename, downloadPng } from './exportImage'
 import type { ExportKind, ExportOptions } from './exportImage'
-import { CopyIcon, DownloadIcon, FullscreenIcon } from './chromeIcons'
+import { CheckIcon, CopyIcon, DownloadIcon, FullscreenIcon } from './chromeIcons'
 import { useHoverPin } from './useHoverPin'
 
 /**
@@ -573,6 +573,10 @@ export function Treemap<T>({
   // The live map `<canvas>` (canvas renderer only), so image export can read
   // its pixels directly (`exportable`).
   const canvasElRef = useRef<HTMLCanvasElement | null>(null)
+  // Transient "copied ✓ / saved ✓" confirmation on the export buttons.
+  const [flash, setFlash] = useState<ExportKind | null>(null)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current) }, [])
   // Grace timer so the hover tip survives the cell→tip gap: leaving the map
   // schedules a clear, entering the tip cancels it. Lets you move into the tip
   // and use its controls/links without pinning (the tip is anchored, not
@@ -1270,30 +1274,56 @@ export function Treemap<T>({
     exportable ? (exportable === true ? {} : exportable) : null
   const doExport = useCallback(
     async (kind: ExportKind) => {
-      const src = canvasElRef.current
-      if (!src || !exportOpts) return
+      if (!exportOpts || !mapRef.current) return
       const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
-      const cs = mapRef.current ? getComputedStyle(mapRef.current) : null
-      const ink = cs?.color || 'rgb(230, 230, 238)'
+      // Base image: the live canvas when the canvas renderer is up; otherwise
+      // (DOM renderer) render the same placed cells to an offscreen canvas with
+      // the identical paint machinery — so export is renderer-independent and
+      // costs nothing until a button is actually clicked.
+      let src = canvasElRef.current
+      if (!src) {
+        if (size.w <= 0 || size.h <= 0) return
+        const cfg: LayoutConfig<T> = {
+          getSize, getLabel, childrenOf, showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
+        }
+        const cells = layoutCells(rects, path, rootMode, cfg)
+        const off = document.createElement('canvas')
+        renderMapToCanvas(
+          off, cells, size.w, size.h,
+          { styleOpts, getSize, getLabel, formatSize, sizeAlign, inlineSizeMinWidth, dustTexture },
+          mapRef.current,
+        )
+        src = off
+      }
+      const cs = getComputedStyle(mapRef.current)
+      const ink = cs.color || 'rgb(230, 230, 238)'
       const transparent = (c: string | undefined) => !c || c === 'transparent' || c === 'rgba(0, 0, 0, 0)'
-      let bg = cs?.backgroundColor
+      let bg: string | undefined = cs.backgroundColor
       if (transparent(bg) && typeof document !== 'undefined') bg = getComputedStyle(document.body).backgroundColor
       if (transparent(bg)) bg = `rgb(${CONTAINER_BG[0]}, ${CONTAINER_BG[1]}, ${CONTAINER_BG[2]})`
       const title = exportOpts.title ? `${path.map(getLabel).join('/')} — ${formatSize(getSize(node))}` : null
       const out = composeExport(src, { title, bg: bg!, ink, dpr })
       const blob = await canvasToPngBlob(out)
       const filename = exportOpts.filename?.({ node, path }) ?? defaultExportFilename(getLabel(node))
+      let outcome: ExportKind = kind
       if (kind === 'copy') {
         const copied = await copyPng(blob)
-        if (!copied) downloadPng(blob, filename) // Firefox/insecure context → save instead.
+        if (!copied) { downloadPng(blob, filename); outcome = 'download' } // Firefox/insecure → save.
       } else {
         downloadPng(blob, filename)
       }
-      onExport?.(blob, { kind })
+      setFlash(outcome)
+      if (flashTimer.current) clearTimeout(flashTimer.current)
+      flashTimer.current = setTimeout(() => setFlash(null), 1600)
+      onExport?.(blob, { kind: outcome })
     },
-    [exportOpts, path, node, getLabel, getSize, formatSize, onExport],
+    [
+      exportOpts, path, node, getLabel, getSize, formatSize, onExport, size, rects, rootMode,
+      styleOpts, sizeAlign, inlineSizeMinWidth, dustTexture,
+      childrenOf, showLabels, collapseChains, borderWidth, edgeEmphasis, fold, layTiles, tilingFor,
+    ],
   )
-  const showExport = !!exportOpts && renderer === 'canvas'
+  const showExport = !!exportOpts
   // Wrap a bar button with the consumer's tooltip (if any); else identity, and
   // the button keeps its native `title`.
   const withTip = (label: string, button: ReactNode): ReactNode => (renderTip ? renderTip(label, button) : button)
@@ -1387,32 +1417,37 @@ export function Treemap<T>({
             />
           </label>
         )}
-        {showExport && (
-          <>
-            {withTip('Copy PNG to clipboard (⌘/Ctrl+Shift+C)', (
-              <button
-                className="dt-treemap-export-copy"
-                onClick={() => void doExport('copy')}
-                title={renderTip ? undefined : 'Copy PNG to clipboard (⌘/Ctrl+Shift+C)'}
-                aria-label="Copy image to clipboard"
-                style={iconBtn}
-              >
-                <CopyIcon />
-              </button>
-            ))}
-            {withTip('Download PNG', (
-              <button
-                className="dt-treemap-export-dl"
-                onClick={() => void doExport('download')}
-                title={renderTip ? undefined : 'Download PNG'}
-                aria-label="Download image"
-                style={iconBtn}
-              >
-                <DownloadIcon />
-              </button>
-            ))}
-          </>
-        )}
+        {showExport && (() => {
+          const okStyle = { ...iconBtn, color: 'var(--dt-treemap-ok, #3fb950)' }
+          const copyLabel = flash === 'copy' ? 'Copied ✓' : 'Copy PNG to clipboard (⌘/Ctrl+Shift+C)'
+          const dlLabel = flash === 'download' ? 'Saved ✓' : 'Download PNG'
+          return (
+            <>
+              {withTip(copyLabel, (
+                <button
+                  className="dt-treemap-export-copy"
+                  onClick={() => void doExport('copy')}
+                  title={renderTip ? undefined : copyLabel}
+                  aria-label="Copy image to clipboard"
+                  style={flash === 'copy' ? okStyle : iconBtn}
+                >
+                  {flash === 'copy' ? <CheckIcon /> : <CopyIcon />}
+                </button>
+              ))}
+              {withTip(dlLabel, (
+                <button
+                  className="dt-treemap-export-dl"
+                  onClick={() => void doExport('download')}
+                  title={renderTip ? undefined : dlLabel}
+                  aria-label="Download image"
+                  style={flash === 'download' ? okStyle : iconBtn}
+                >
+                  {flash === 'download' ? <CheckIcon /> : <DownloadIcon />}
+                </button>
+              ))}
+            </>
+          )
+        })()}
         {fullscreen && withTip('Toggle fullscreen', (
           <button
             className="dt-treemap-fs"

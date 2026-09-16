@@ -33,6 +33,13 @@ export const DownloadIcon = () => (
   </svg>
 )
 
+/** Check mark — transient "copied / saved ✓" confirmation. */
+export const CheckIcon = () => (
+  <svg {...base}>
+    <path d="M3.5 8.5 6.5 11.5 12.5 4.5" />
+  </svg>
+)
+
 /** Four corner brackets — toggle fullscreen. */
 export const FullscreenIcon = () => (
   <svg {...base}>
