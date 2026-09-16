@@ -206,6 +206,18 @@ export function TimeSeries<T>({
   const dragRef = useRef<{ x0: number; x1: number } | null>(null)
   const [drag, setDragState] = useState<{ x0: number; x1: number } | null>(null)
   const setDrag = (d: { x0: number; x1: number } | null) => { dragRef.current = d; setDragState(d) }
+  // A drag that starts inside the shown window SLIDES it (same width in points,
+  // clamped to the data) instead of brushing a new one; a drag that starts
+  // outside brushes as before. Held in point indices so the window keeps its
+  // point count while the x spacing varies. (Upstreamed from mgu `gcs`.)
+  const slideRef = useRef<{ i0: number; span: number; start: number } | null>(null)
+  const xsSorted = useMemo(() => [...allXs].sort((a, b) => a - b), [allXs])
+  const idxOf = (x: number): number => {
+    let best = 0
+    for (let i = 1; i < xsSorted.length; i++) if (Math.abs(xsSorted[i] - x) < Math.abs(xsSorted[best] - x)) best = i
+    return best
+  }
+  const inWindow = (x: number | null): boolean => x != null && !!xWindow && x >= xWindow[0] && x <= xWindow[1]
   const svgRef = useRef<SVGSVGElement>(null)
   const xAt = (clientX: number): number | null => {
     const el = svgRef.current
@@ -215,13 +227,39 @@ export function TimeSeries<T>({
     const x = xAt(e.clientX)
     setHoverX(x)
     const d = dragRef.current
-    if (d && x != null && x !== d.x1) setDrag({ x0: d.x0, x1: x })
+    if (!d || x == null) return
+    const s = slideRef.current
+    if (s) {
+      // Sliding: shift the fixed-span window by the pointer's index delta.
+      const i0 = Math.max(0, Math.min(xsSorted.length - 1 - s.span, s.i0 + (idxOf(x) - s.start)))
+      const x0 = xsSorted[i0]
+      if (x0 !== d.x0) setDrag({ x0, x1: xsSorted[i0 + s.span] })
+    } else if (x !== d.x1) setDrag({ x0: d.x0, x1: x })
   }
   const onDown = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!onBrush || e.button !== 0) return
     e.preventDefault() // no text selection while dragging
     const x = xAt(e.clientX)
     if (x == null) return
+    // A press inside the current window slides it (keeps its point span); a
+    // press outside brushes a fresh window.
+    if (inWindow(x) && xWindow && xsSorted.length > 1) {
+      const i0 = idxOf(xWindow[0])
+      const span = Math.max(1, idxOf(xWindow[1]) - i0)
+      slideRef.current = { i0, span, start: idxOf(x) }
+      setDrag({ x0: xsSorted[i0], x1: xsSorted[i0 + span] })
+      window.addEventListener('mouseup', (up: MouseEvent) => {
+        const s = slideRef.current
+        const d = dragRef.current
+        slideRef.current = null
+        setDrag(null)
+        if (!s || !d) return
+        const xi = idxOf(xAt(up.clientX) ?? x)
+        if (xi === s.start) onPickX?.(x) // a click inside the window is still a pick
+        else onBrush(d.x0, d.x1)
+      }, { once: true })
+      return
+    }
     setDrag({ x0: x, x1: x })
     // Commit on the release wherever it lands (a drag often ends past the
     // plot's edge), from the pointer's own x rather than the last move.
@@ -264,7 +302,7 @@ export function TimeSeries<T>({
           // With a brush, clicks resolve in mouseup (a zero-width drag) — a
           // separate click handler would fire the pick twice.
           onClick={onPickX && !onBrush ? () => { if (hoverX != null) onPickX(hoverX) } : undefined}
-          style={{ display: 'block', cursor: drag ? 'col-resize' : onBrush ? 'crosshair' : onPickX ? 'pointer' : undefined, userSelect: 'none' }}
+          style={{ display: 'block', cursor: drag ? (slideRef.current ? 'grabbing' : 'col-resize') : onBrush ? (inWindow(hoverX) ? 'grab' : 'crosshair') : onPickX ? 'pointer' : undefined, userSelect: 'none' }}
         >
           {/* Window band (the highlighted x-range, or the drag in progress) */}
           {band && band[1] > band[0] && (
