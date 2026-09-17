@@ -3,7 +3,8 @@ import type { ReactElement } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Alert, Box, Button, Checkbox, CircularProgress, Collapse, TextField, Tooltip } from '@mui/material'
 import { FaChevronDown, FaChevronRight, FaExclamationTriangle, FaExchangeAlt, FaFileAlt, FaFolder, FaFolderOpen, FaSync, FaSortUp, FaSortDown, FaTrash, FaSearch, FaRegCopy, FaCheck } from 'react-icons/fa'
-import { useAction } from 'use-kbd'
+import { useRowSelection, useRowSelectionKeys } from '../hooks/useRowSelection'
+import type { RowSelection } from '../hooks/useRowSelection'
 import { AgeHistograms, age01, ageDomain, ageFade, BytesOverTime, dimUnmatched, parseQuery, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
 import '@rdub/treemap/styles.css'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -267,7 +268,7 @@ function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanSt
   return <span style={{ opacity: 0.4 }}>-</span>
 }
 
-function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, selectedPaths, hoveredIndex, mouseHoverIndex, onRowClick, onRowHover, collapsedRows, tableRef }: {
+function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, sel, collapsedRows, tableRef }: {
   root: Row
   children: Row[]
   uri: string
@@ -282,11 +283,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   onSort: (key: SortKey) => void
   onDelete: (path: string) => void
   deletingPaths: Set<string>
-  selectedPaths: Set<string>
-  hoveredIndex: number | null
-  mouseHoverIndex: number | null
-  onRowClick: (uri: string, index: number, event: React.MouseEvent | React.KeyboardEvent) => void
-  onRowHover: (index: number | null) => void
+  sel: RowSelection<Row>
   collapsedRows?: CollapsedRow[] | null
   tableRef?: React.RefObject<HTMLTableElement | null>
 }) {
@@ -298,28 +295,8 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   // Build prefix for child links, avoiding double slashes
   // For root (/), prefix should be /file not /file/
   const prefix = childLinkPrefix(uri)
-  const allSelected = children.length > 0 && children.every(r => selectedPaths.has(r.uri))
-  const someSelected = children.some(r => selectedPaths.has(r.uri))
-
-  const handleSelectAll = () => {
-    // Toggle all - if all selected, deselect all; otherwise select all
-    const syntheticEvent = { shiftKey: false, metaKey: false, ctrlKey: false } as React.MouseEvent
-    if (allSelected) {
-      // Deselect all by clicking each selected one with meta key (toggle off)
-      children.forEach((r, idx) => {
-        if (selectedPaths.has(r.uri)) {
-          onRowClick(r.uri, idx, { ...syntheticEvent, metaKey: true } as React.MouseEvent)
-        }
-      })
-    } else {
-      // Select all not yet selected
-      children.forEach((r, idx) => {
-        if (!selectedPaths.has(r.uri)) {
-          onRowClick(r.uri, idx, { ...syntheticEvent, metaKey: true } as React.MouseEvent)
-        }
-      })
-    }
-  }
+  const allSelected = children.length > 0 && children.every(r => sel.isSelected(r))
+  const someSelected = children.some(r => sel.isSelected(r))
 
   return (
     <table className="scan-details-table" ref={tableRef}>
@@ -330,7 +307,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               size="small"
               checked={allSelected}
               indeterminate={someSelected && !allSelected}
-              onChange={handleSelectAll}
+              onChange={sel.togglePage}
               sx={{ padding: 0 }}
             />
           </th>
@@ -472,9 +449,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
         {(!collapsedRows || collapsedExpanded) && children.map((row, idx) => {
           const childUri = row.uri
           const isChildScanning = scanningPaths.has(childUri)
-          const isSelected = selectedPaths.has(childUri)
-          const isCursor = hoveredIndex === idx  // Keyboard cursor position
-          const isMouseHover = mouseHoverIndex === idx  // Mouse hover (for visual feedback)
+          const isSelected = sel.isSelected(row)
           // Indent children under collapsed rows when expanded
           const indentPx = collapsedRows && collapsedExpanded ? collapsedRows.length * 20 : 0
           // Build the collapsed path prefix from the last collapsed row's original_path
@@ -484,30 +459,15 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           return (
             <tr
               key={row.path}
-              style={{
-                opacity: row.scanned || scanStatus === 'full' ? 1 : 0.6,
-                background: isSelected
-                  ? 'var(--selected-bg, rgba(25, 118, 210, 0.12))'
-                  : isCursor
-                    ? 'var(--cursor-bg, rgba(25, 118, 210, 0.08))'
-                    : isMouseHover
-                      ? 'var(--hover-bg, #f5f5f5)'
-                      : undefined,
-                // Show cursor indicator with left border
-                boxShadow: isCursor ? 'inset 3px 0 0 var(--cursor-border, #1976d2)' : undefined,
-              }}
-              onClick={e => onRowClick(childUri, idx, e)}
-              onMouseEnter={() => onRowHover(idx)}
-              onMouseLeave={() => onRowHover(null)}
+              ref={sel.rowRef(idx)}
+              {...sel.rowProps(idx)}
+              style={{ opacity: row.scanned || scanStatus === 'full' ? 1 : 0.6 }}
             >
               <td className="col-checkbox" onClick={e => e.stopPropagation()}>
                 <Checkbox
                   size="small"
                   checked={isSelected}
-                  onChange={() => {
-                    // Checkbox always toggles (unlike row click which replaces selection)
-                    onRowClick(childUri, idx, { metaKey: true, ctrlKey: true, shiftKey: false } as React.MouseEvent)
-                  }}
+                  onChange={() => sel.toggle(idx)}
                   sx={{ padding: 0 }}
                 />
               </td>
@@ -1213,14 +1173,6 @@ export function ScanDetails() {
     placeholderData: prev => prev, // keep the last slice on screen while typing
     staleTime: 60 * 1000,
   })
-  // Selection model (Superhuman-style):
-  // - hoveredIndex: keyboard cursor position (moving end of range)
-  // - rangeAnchor: fixed end of range selection
-  // - pinnedUris: items selected via meta-click that persist across range changes
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
-  const [rangeAnchor, setRangeAnchor] = useState<number | null>(null)
-  const [pinnedUris, setPinnedUris] = useState<Set<string>>(new Set())
-  const [mouseHoverIndex, setMouseHoverIndex] = useState<number | null>(null)
   const wrapperRef = useRef<HTMLDivElement>(null)
   const tableRef = useRef<HTMLTableElement>(null)
 
@@ -1333,212 +1285,35 @@ export function ScanDetails() {
     return sortedChildren.slice(start, start + pageSize)
   }, [sortedChildren, page, pageSize])
 
-  // Compute selectedPaths from pinnedUris + range(rangeAnchor, hoveredIndex)
-  const selectedPaths = useMemo(() => {
-    const result = new Set(pinnedUris)
-    if (hoveredIndex !== null && rangeAnchor !== null) {
-      const start = Math.min(hoveredIndex, rangeAnchor)
-      const end = Math.max(hoveredIndex, rangeAnchor)
-      for (let i = start; i <= end; i++) {
-        if (paginatedChildren[i]) {
-          result.add(paginatedChildren[i].uri)
-        }
-      }
-    }
-    return result
-  }, [pinnedUris, hoveredIndex, rangeAnchor, paginatedChildren])
+  // Multi-row selection (shift-range, ⌘-click, j/k) — use-kbd's `useRowSelection`
+  // via the shared wrapper, keyed by `uri` so it survives paging and sort.
+  const sel = useRowSelection(paginatedChildren, r => r.uri)
+  useRowSelectionKeys(sel)
 
   // Reset page when sort/filter changes or data reloads
   useEffect(() => {
     setPage(0)
   }, [sorts, filter, details])
 
-  // Clear selection when data changes
-  useEffect(() => {
-    setHoveredIndex(null)
-    setRangeAnchor(null)
-    setPinnedUris(new Set())
-  }, [details])
+  // Clear selection on a new listing (scan reload); a page/sort/filter change
+  // keeps it — use-kbd freezes the active range into pins by key.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { sel.clear() }, [details])
 
-  // Handle row click with shift/meta modifiers
-  const handleRowClick = useCallback((uri: string, index: number, event: React.MouseEvent | React.KeyboardEvent) => {
-    const shiftKey = event.shiftKey
-    const metaKey = 'metaKey' in event ? event.metaKey || event.ctrlKey : false
-
-    if (metaKey) {
-      // Meta-click: pin current selection, then toggle this item and set new anchor
-      setPinnedUris(prev => {
-        const next = new Set(prev)
-        // Add current range to pinned
-        if (hoveredIndex !== null && rangeAnchor !== null) {
-          const start = Math.min(hoveredIndex, rangeAnchor)
-          const end = Math.max(hoveredIndex, rangeAnchor)
-          for (let i = start; i <= end; i++) {
-            if (paginatedChildren[i]) {
-              next.add(paginatedChildren[i].uri)
-            }
-          }
-        }
-        // Toggle clicked item
-        if (next.has(uri)) {
-          next.delete(uri)
-        } else {
-          next.add(uri)
-        }
-        return next
-      })
-      setHoveredIndex(index)
-      setRangeAnchor(index)
-    } else if (shiftKey && rangeAnchor !== null) {
-      // Shift-click: extend range from anchor to clicked (pinnedUris stay)
-      setHoveredIndex(index)
-    } else {
-      // Regular click: toggle if only this row selected, otherwise select just this row
-      const isOnlySelected = selectedPaths.size === 1 && selectedPaths.has(uri)
-      if (isOnlySelected) {
-        // Clicking the only selected row deselects it
-        setHoveredIndex(null)
-        setRangeAnchor(null)
-        setPinnedUris(new Set())
-      } else {
-        // Select just this row
-        setHoveredIndex(index)
-        setRangeAnchor(index)
-        setPinnedUris(new Set())
-      }
-    }
-  }, [hoveredIndex, rangeAnchor, paginatedChildren, selectedPaths])
-
-  // Click outside table to deselect
+  // Click outside the wrapper (table + toolbar) deselects.
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      // Clear selection when clicking outside the wrapper (table + toolbar)
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setHoveredIndex(null)
-        setRangeAnchor(null)
-        setPinnedUris(new Set())
-      }
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) sel.clear()
     }
-
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Get initial cursor position (from mouse hover or start/end)
-  const getInitialIndex = useCallback((direction: 'up' | 'down') => {
-    if (mouseHoverIndex !== null && mouseHoverIndex >= 0 && mouseHoverIndex < paginatedChildren.length) {
-      return mouseHoverIndex
-    }
-    return direction === 'up' ? paginatedChildren.length - 1 : 0
-  }, [mouseHoverIndex, paginatedChildren.length])
-
-  // Move cursor up (clears selection, sets single-row selection)
-  useAction('table:up', {
-    label: 'Row up',
-    group: 'Table: Navigation',
-    defaultBindings: ['k', 'arrowup'],
-    handler: useCallback(() => {
-      if (paginatedChildren.length === 0) return
-      const newIndex = hoveredIndex === null
-        ? getInitialIndex('up')
-        : Math.max(0, hoveredIndex - 1)
-      setHoveredIndex(newIndex)
-      setRangeAnchor(newIndex)
-      setPinnedUris(new Set())
-    }, [hoveredIndex, paginatedChildren.length, getInitialIndex]),
-  })
-
-  // Move cursor down
-  useAction('table:down', {
-    label: 'Row down',
-    group: 'Table: Navigation',
-    defaultBindings: ['j', 'arrowdown'],
-    handler: useCallback(() => {
-      if (paginatedChildren.length === 0) return
-      const newIndex = hoveredIndex === null
-        ? getInitialIndex('down')
-        : Math.min(paginatedChildren.length - 1, hoveredIndex + 1)
-      setHoveredIndex(newIndex)
-      setRangeAnchor(newIndex)
-      setPinnedUris(new Set())
-    }, [hoveredIndex, paginatedChildren.length, getInitialIndex]),
-  })
-
-  // Extend selection up (keeps anchor fixed, moves cursor)
-  useAction('table:extend-up', {
-    label: 'Extend selection up',
-    group: 'Table: Selection',
-    defaultBindings: ['shift+k', 'shift+arrowup'],
-    handler: useCallback(() => {
-      if (paginatedChildren.length === 0) return
-      if (rangeAnchor === null) {
-        // First shift+arrow: set anchor and move cursor
-        const startIndex = hoveredIndex ?? getInitialIndex('up')
-        setRangeAnchor(startIndex)
-        setHoveredIndex(Math.max(0, startIndex - 1))
-      } else {
-        // Move cursor up (anchor stays fixed)
-        setHoveredIndex(prev => Math.max(0, (prev ?? rangeAnchor) - 1))
-      }
-    }, [hoveredIndex, rangeAnchor, paginatedChildren.length, getInitialIndex]),
-  })
-
-  // Extend selection down
-  useAction('table:extend-down', {
-    label: 'Extend selection down',
-    group: 'Table: Selection',
-    defaultBindings: ['shift+j', 'shift+arrowdown'],
-    handler: useCallback(() => {
-      if (paginatedChildren.length === 0) return
-      if (rangeAnchor === null) {
-        // First shift+arrow: set anchor and move cursor
-        const startIndex = hoveredIndex ?? getInitialIndex('down')
-        setRangeAnchor(startIndex)
-        setHoveredIndex(Math.min(paginatedChildren.length - 1, startIndex + 1))
-      } else {
-        // Move cursor down (anchor stays fixed)
-        setHoveredIndex(prev => Math.min(paginatedChildren.length - 1, (prev ?? rangeAnchor) + 1))
-      }
-    }, [hoveredIndex, rangeAnchor, paginatedChildren.length, getInitialIndex]),
-  })
-
-  // Clear selection
-  useAction('table:clear', {
-    label: 'Clear selection',
-    group: 'Table: Selection',
-    defaultBindings: ['escape'],
-    handler: useCallback(() => {
-      setHoveredIndex(null)
-      setRangeAnchor(null)
-      setPinnedUris(new Set())
-    }, []),
-  })
-
-  // Select all
-  useAction('table:select-all', {
-    label: 'Select all',
-    group: 'Table: Selection',
-    defaultBindings: ['meta+a'],
-    handler: useCallback(() => {
-      if (paginatedChildren.length === 0) return
-      setPinnedUris(new Set(paginatedChildren.map(r => r.uri)))
-      setHoveredIndex(paginatedChildren.length - 1)
-      setRangeAnchor(0)
-    }, [paginatedChildren]),
-  })
-
-  // Compute selection summary
-  const selectedRows = useMemo(() => {
-    return paginatedChildren.filter(r => selectedPaths.has(r.uri))
-  }, [paginatedChildren, selectedPaths])
-
-  const selectedSize = useMemo(() => {
-    return selectedRows.reduce((sum, r) => sum + (r.size ?? 0), 0)
-  }, [selectedRows])
-
-  const selectedDirs = useMemo(() => {
-    return selectedRows.filter(r => r.kind === 'dir')
-  }, [selectedRows])
+  // Selection summary (over the current page's selected rows).
+  const selectedRows = sel.selectedRows()
+  const selectedSize = selectedRows.reduce((sum, r) => sum + (r.size ?? 0), 0)
+  const selectedDirs = selectedRows.filter(r => r.kind === 'dir')
 
   // Bulk actions
   const handleBulkScan = async () => {
@@ -1584,9 +1359,7 @@ export function ScanDetails() {
       return next
     })
 
-    setHoveredIndex(null)
-    setRangeAnchor(null)
-    setPinnedUris(new Set())
+    sel.clear()
     refetch()
   }
 
@@ -1920,11 +1693,7 @@ export function ScanDetails() {
             )}
             <Button
               size="small"
-              onClick={() => {
-                setHoveredIndex(null)
-                setRangeAnchor(null)
-                setPinnedUris(new Set())
-              }}
+              onClick={() => sel.clear()}
               sx={{ minWidth: 0, opacity: 0.7 }}
             >
               Clear
@@ -1951,11 +1720,7 @@ export function ScanDetails() {
         onSort={handleSort}
         onDelete={handleDelete}
         deletingPaths={deletingPaths}
-        selectedPaths={selectedPaths}
-        hoveredIndex={hoveredIndex}
-        mouseHoverIndex={mouseHoverIndex}
-        onRowClick={handleRowClick}
-        onRowHover={setMouseHoverIndex}
+        sel={sel}
         collapsedRows={collapsed_rows}
         tableRef={tableRef}
       />

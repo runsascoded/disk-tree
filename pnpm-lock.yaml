@@ -34,7 +34,7 @@ importers:
         version: 19.2.4(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0))
+        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
       jsdom:
         specifier: ^25.0.1
         version: 25.0.1
@@ -71,7 +71,7 @@ importers:
         version: 19.2.4(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0))
+        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
       d3-hierarchy:
         specifier: ^3.1.2
         version: 3.1.2
@@ -130,8 +130,8 @@ importers:
         specifier: ^7.10.1
         version: 7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       use-kbd:
-        specifier: https://github.com/runsascoded/use-kbd#34745efff8efdfd2c46e3e39d479a708aba704b2
-        version: https://codeload.github.com/runsascoded/use-kbd/tar.gz/34745efff8efdfd2c46e3e39d479a708aba704b2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        specifier: https://github.com/runsascoded/use-kbd#06ae0cfee696462fb35d761bb413b159eb66a1dd
+        version: https://codeload.github.com/runsascoded/use-kbd/tar.gz/06ae0cfee696462fb35d761bb413b159eb66a1dd(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^5.20260906.1
@@ -153,7 +153,7 @@ importers:
         version: 19.2.4(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0))
+        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
       eslint:
         specifier: ^9.39.1
         version: 9.39.5
@@ -3004,9 +3004,9 @@ packages:
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
 
-  use-kbd@https://codeload.github.com/runsascoded/use-kbd/tar.gz/34745efff8efdfd2c46e3e39d479a708aba704b2:
-    resolution: {tarball: https://codeload.github.com/runsascoded/use-kbd/tar.gz/34745efff8efdfd2c46e3e39d479a708aba704b2}
-    version: 0.10.0-dist.bf02e9e
+  use-kbd@https://codeload.github.com/runsascoded/use-kbd/tar.gz/06ae0cfee696462fb35d761bb413b159eb66a1dd:
+    resolution: {tarball: https://codeload.github.com/runsascoded/use-kbd/tar.gz/06ae0cfee696462fb35d761bb413b159eb66a1dd}
+    version: 0.13.0-dist.ef820a1
     peerDependencies:
       react: '>=18.0.0'
       react-dom: '>=18.0.0'
@@ -4352,7 +4352,7 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
-  '@vitejs/plugin-react@5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0))':
+  '@vitejs/plugin-react@5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
@@ -6263,7 +6263,7 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  use-kbd@https://codeload.github.com/runsascoded/use-kbd/tar.gz/34745efff8efdfd2c46e3e39d479a708aba704b2(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
+  use-kbd@https://codeload.github.com/runsascoded/use-kbd/tar.gz/06ae0cfee696462fb35d761bb413b159eb66a1dd(react-dom@19.2.8(react@19.2.8))(react@19.2.8):
     dependencies:
       debug: 4.4.3
       react: 19.2.8

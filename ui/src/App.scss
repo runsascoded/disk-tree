@@ -90,6 +90,11 @@ tr.root {
 // Table-specific styles
 .scan-details-table {
   user-select: none;
+
+  // Row selection (use-kbd's rowProps classes): selected fill + cursor left-border.
+  tbody tr.sel { background: rgba(25, 118, 210, 0.12); }
+  tbody tr.cur { box-shadow: inset 3px 0 0 #1976d2; }
+  tbody tr.cur:not(.sel) { background: rgba(25, 118, 210, 0.08); }
 }
 
 // Breadcrumbs
