@@ -175,6 +175,14 @@ disk-tree digest [BUCKET] # Post a bucket's usage digest to Slack/Discord: one t
                           # (default current month), `-n` dry-run (render + print OP, no post/secrets).
                           # Needs the `notify` extra (`thrds`); the plot uses core plotly+kaleido
 
+disk-tree stage URI…      # Stage URIs for deletion into a shared open plan (spec staged-delete.md,
+                          # CP1). The opt-in "delete" model: nothing dies by inaction
+disk-tree staged          # List open plans (staged sets) + recent runs (-j for JSON)
+disk-tree unstage URI…    # Remove URIs from every open plan
+disk-tree dispatch [PLAN] # Execute a plan (id/name; default the open `Staged` plan): delete its
+                          # staged URIs via the backend, or (default) dry-run + report bytes/objects.
+                          # `-f`/`--for-real` deletes + closes the plan; records a run + per-URI bands
+
 disk-tree migrate         # Backfill SQLite stats from parquet files
 disk-tree migrate-depth   # Add depth column to existing parquets
 
