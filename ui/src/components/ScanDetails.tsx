@@ -838,8 +838,11 @@ function Treemap({
         // staleness/voronoi views already do — rather than drilling the map
         // in place and diverging from the table above. `uri` is the absolute
         // URI, so this is correct through chunk/collapse boundaries; `true`
-        // suppresses the widget's built-in in-place drill.
-        onCellClick={n => {
+        // suppresses the widget's built-in in-place drill. ⌥-click falls
+        // through (returns nothing) so the widget pins the branch instead —
+        // inspect/act on a deep cell's tip without re-rooting the page.
+        onCellClick={(n, _path, e) => {
+          if (e.altKey) return
           if (!n.uri || n.isPlaceholder) return
           navigate(uriToPath(n.uri))
           return true
