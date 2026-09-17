@@ -49,13 +49,19 @@ A `digest:` block per bucket in `~/.config/disk-tree/buckets.yml` (or `defaults`
 
 ## Staging
 
-1. **`discord_api` port** — self-contained, stdlib-only, unit-testable in isolation. Lands first.
-2. **Engine + `DigestProfile` Protocol + reference profile + `plot`** — the mechanism, with mgu's content functions as the shape to preserve; port `test_digest.py`'s pure-function specs against the reference profile.
-3. **CLI `disk-tree digest` + `digest:` config** — wire to a bucket's scans.
+1. **`discord_api` port** — self-contained, stdlib-only, unit-testable in isolation. **Done** (`9833200`): `src/disk_tree/notify/discord_api.py` + 7 specs, `USER_AGENT` parameterized, `_request -> Any` (Discord collections return arrays), errors never leak the webhook token.
+2. **Engine + `DigestProfile` Protocol + reference profile + `plot`** — the mechanism, with mgu's content functions as the shape to preserve; port `test_digest.py`'s pure-function specs against the reference profile. **Done**:
+   - `notify/digest.py` — the engine: shared arrow/emoji math (`deg`, `THRESH`, `emoji_name`, `discordify`), the `Period` model (`month`/`week`/`day` keys) + `select_window` (lead-in windowing), converge-state IO (via `blobfs`, so `r2://`/local both work), and the two profile-driven lifecycles `converge_slack` / `converge_discord` + the real-client `post_digest_discord` shell (guarded `thrds` import).
+   - `notify/profile.py` — the `DigestProfile` `Protocol` (opaque `Row`) + the reference `BytesProfile` (bytes-over-time monthly digest, no cloud pricing; `icons_base=None` degrades to plain senders).
+   - `notify/plot.py` — `render_bytes`, the total-TiB-over-time panel, **plotly + kaleido** (already core deps — no matplotlib, unlike mgu's `digest_plot`).
+   - `tests/test_digest.py` — 24 specs: the arrow/emoji/period/window/state-path engine functions, the `BytesProfile` content (rows/reply/op_body, exact strings), and both converge lifecycles against fake Slack/Discord clients (fresh → incremental → idempotent, backfill edit-replies).
+   - `pyproject.toml` — `notify` extra = `thrds`.
+3. **CLI `disk-tree digest` + `digest:` config** — wire to a bucket's scans. *(Next.)*
 4. **mgu adopts** — mgu's gcs `digest.py` becomes a `DigestProfile` importing DT's engine; its `discord_api` deletes in favour of DT's. Handled by the mgu session once the engine lands here (spec round-trip).
 
-## Open questions
+## Open questions — resolved in stage 2
 
-- **Row model generality.** mgu's `Scan` dataclass is gcs-shaped (per-class TiB). The engine's `Row` should be opaque (the profile owns it; the engine only sees `op_body`/`reply` output) — confirm nothing in the OP/reply lifecycle needs to introspect row internals beyond the period key + sender/body/avatar.
-- **Avatar/emoji hosting.** gcs hosts `av_deg{N}.png` on a Pages project + Discord app-emoji. DT's default profile should degrade gracefully (no avatars → plain sender) so a deployment without an icons host still works.
-- **`thrds` API surface.** Pin the exact `SlackClient`/`DiscordClient` methods the engine leans on; if thin, consider whether a `Poster` Protocol lets a deployment swap in another backend (Slack-only, no Discord). Defer unless a deployment needs it.
+- **Row model generality.** ✅ `Row` is opaque: the engine reads only `row.date` (for per-scan reply keying) and the profile's `op_body`/`reply`/`render_plot` output. The `DigestProfile` Protocol owns the row type (`BytesRow` for the reference; gcs's `Scan` for its future profile).
+- **Avatar/emoji hosting.** ✅ `BytesProfile(icons_base=None)` degrades — `reply` returns an empty avatar, `op_avatar` is empty — so a deployment without an icons host posts plain senders.
+- **Plot stack.** ✅ plotly + kaleido (DT core), not mgu's matplotlib — no new dependency. The reference panel is a single total-line; a richer profile (gcs's stacked storage-class tiers) supplies its own `render_plot`.
+- **`thrds` API surface.** The engine leans on `SlackClient.{post,edit}` and `DiscordWebhookClient.{post,edit}` / `DiscordClient.create_thread` (mirrors mgu; fakes in the tests pin the exact call shapes). A `Poster` Protocol for a Slack-only deployment is deferred until one needs it.

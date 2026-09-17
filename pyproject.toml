@@ -39,6 +39,12 @@ dev = [
 mem = [
     "memray",
 ]
+# Post monthly digests to Slack/Discord (`disk-tree digest`). Core stays lean —
+# only a deployment that posts pulls `thrds`; `discord_api` needs only stdlib.
+# The OP plot uses plotly + kaleido, already core deps.
+notify = [
+    "thrds",
+]
 # Sharded bulk listers for cloud object stores. Split by scheme so users pay
 # only for the SDK they use; `bulk` pulls all three for convenience.
 gcs = [
