@@ -235,6 +235,80 @@ describe('<TimeSeries>', () => {
     expect(bandOf(container)!.edges).toEqual([[56, '2 3'], [220, '2 3']])
   })
 
+  // Mirror the component's own pixel math so expected path `d`s are exact
+  // (same float→string as production), not eyeballed.
+  function geom(w: number, h: number, xMin: number, xMax: number, yMin: number, yMax: number) {
+    const plotW = w - 56 - 16
+    const plotH = h - 12 - 24
+    return {
+      xToPx: (x: number) => 56 + ((x - xMin) / Math.max(1, xMax - xMin)) * plotW,
+      yToPx: (y: number) => 12 + plotH - ((y - yMin) / Math.max(0.001, yMax - yMin)) * plotH,
+    }
+  }
+
+  it('getY0 draws a band (baseline walked back at y0, not the axis) and the tooltip shows band height', () => {
+    const pts = [{ t: 0, top: 80, bot: 30 }, { t: 1, top: 80, bot: 30 }]
+    const { container } = withSize(() =>
+      render(
+        <TimeSeries
+          series={[{ key: 'a', color: '#abc', points: pts }]}
+          getX={p => p.t}
+          getY={p => p.top}
+          getY0={p => p.bot}
+        />,
+      ),
+    )
+    // yMax = 80 * 1.05 (zero-anchored); the band never touches the axis.
+    const { xToPx, yToPx } = geom(400, 200, 0, 1, 0, 80 * 1.05)
+    const area = container.querySelector('svg path:not([fill="none"])')!
+    expect(area.getAttribute('d')).toBe(
+      `M ${xToPx(0)} ${yToPx(80)} L ${xToPx(1)} ${yToPx(80)}`
+      + ` L ${xToPx(1)} ${yToPx(30)} L ${xToPx(0)} ${yToPx(30)} Z`,
+    )
+    expect(area.getAttribute('fill')).toBe('#abc')
+    expect(area.getAttribute('fill-opacity')).toBe('0.35')
+    // Hover at t=0 → tooltip value is the band height (80 − 30), not the top.
+    fireEvent.mouseMove(container.querySelector('svg')!, { clientX: 56 })
+    expect([...container.querySelectorAll('.dt-timeseries > div b')].map(b => b.textContent)).toEqual(['50'])
+  })
+
+  it('dashBeforeX splits the line into a dashed lead and a solid remainder sharing the cut point', () => {
+    const pts = [{ t: 0, y: 100 }, { t: 1, y: 100 }, { t: 2, y: 100 }]
+    const { container } = withSize(() =>
+      render(
+        <TimeSeries
+          series={[{ key: 'a', points: pts, dashBeforeX: 1, area: false }]}
+          getX={p => p.t}
+          getY={p => p.y}
+        />,
+      ),
+    )
+    const { xToPx, yToPx } = geom(400, 200, 0, 2, 0, 100 * 1.05)
+    const dashed = container.querySelector('svg path[stroke-dasharray="4 4"]')!
+    // Dashed leads up to and including the cut (t0→t1); solid takes over there.
+    expect(dashed.getAttribute('d')).toBe(`M ${xToPx(0)} ${yToPx(100)} L ${xToPx(1)} ${yToPx(100)}`)
+    const solid = [...container.querySelectorAll('svg path[fill="none"]')].find(p => !p.getAttribute('stroke-dasharray'))!
+    expect(solid.getAttribute('d')).toBe(`M ${xToPx(1)} ${yToPx(100)} L ${xToPx(2)} ${yToPx(100)}`)
+  })
+
+  it('per-series area overrides the chart-wide area flag both ways', () => {
+    const mk = (a: boolean, chart: boolean) =>
+      withSize(() =>
+        render(
+          <TimeSeries
+            series={[{ key: 'a', points: [{ t: 0, y: 10 }, { t: 1, y: 20 }], area: a }]}
+            getX={p => p.t}
+            getY={p => p.y}
+            area={chart}
+          />,
+        ),
+      )
+    // Fill paths (the area) are the only non-"none" fills; lines/dashes are "none".
+    const fills = (c: HTMLElement) => c.querySelectorAll('svg path:not([fill="none"])').length
+    expect(fills(mk(true, false).container)).toBe(1)  // series true beats chart false
+    expect(fills(mk(false, true).container)).toBe(0)  // series false beats chart true
+  })
+
   it('handles empty series without crashing', () => {
     interface P { t: number; y: number }
     const { container } = render(

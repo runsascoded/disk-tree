@@ -24,6 +24,11 @@ export interface Series<T> {
   label?: string
   color?: string
   points: T[]
+  /** Per-series area fill; overrides the chart-wide `area`. */
+  area?: boolean
+  /** The part of the line at x < this is dashed — e.g. a total drawn before
+   *  every component existed (specs/root-geneses.md). */
+  dashBeforeX?: number
 }
 
 export interface Annotation {
@@ -37,6 +42,10 @@ export interface TimeSeriesProps<T> {
   series: Series<T>[]
   getX: (p: T) => number
   getY: (p: T) => number
+  /** A point's baseline: with it, a series is a BAND from `getY0` up to
+   *  `getY` (stacked areas: each series' y0 = the running sum below it), the
+   *  tooltip shows the band's height, and the y-range still spans `getY`. */
+  getY0?: (p: T) => number
   /** Format an X tick (default: `new Date(x).toLocaleDateString()`). */
   formatX?: (x: number) => string
   /** Format a Y tick / tooltip value. */
@@ -107,6 +116,7 @@ export function TimeSeries<T>({
   series,
   getX,
   getY,
+  getY0,
   formatX = x => new Date(x).toLocaleDateString(),
   formatY = y => y.toLocaleString('en-US'),
   yScale = 'linear',
@@ -281,7 +291,7 @@ export function TimeSeries<T>({
       return {
         color: s.color ?? DEFAULT_COLORS[i % DEFAULT_COLORS.length],
         label: s.label ?? s.key,
-        y: pt ? getY(pt) : null,
+        y: pt ? getY(pt) - (getY0 ? getY0(pt) : 0) : null,
       }
     })
 
@@ -402,16 +412,24 @@ export function TimeSeries<T>({
             if (s.points.length === 0) return null
             const color = s.color ?? DEFAULT_COLORS[si % DEFAULT_COLORS.length]
             const sortedPts = [...s.points].sort((a, b) => getX(a) - getX(b))
-            const linePath = sortedPts
-              .map((p, i) => `${i === 0 ? 'M' : 'L'} ${xToPx(getX(p))} ${yToPx(getY(p))}`)
-              .join(' ')
-            const areaPath = area
-              ? `${linePath} L ${xToPx(getX(sortedPts[sortedPts.length - 1]))} ${PAD.top + plotH} L ${xToPx(getX(sortedPts[0]))} ${PAD.top + plotH} Z`
-              : null
+            const seg = (pts: T[]) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xToPx(getX(p))} ${yToPx(getY(p))}`).join(' ')
+            const linePath = seg(sortedPts)
+            // A band's lower edge is its baseline, walked back; a plain area
+            // drops to the axis.
+            const base = getY0
+              ? [...sortedPts].reverse().map(p => `L ${xToPx(getX(p))} ${yToPx(getY0(p))}`).join(' ')
+              : `L ${xToPx(getX(sortedPts[sortedPts.length - 1]))} ${PAD.top + plotH} L ${xToPx(getX(sortedPts[0]))} ${PAD.top + plotH}`
+            const areaPath = (s.area ?? area) ? `${linePath} ${base} Z` : null
+            // `dashBeforeX`: the line up to (and joining) the first point at or
+            // past it is dashed; the rest solid.
+            const cut = s.dashBeforeX != null ? sortedPts.findIndex(p => getX(p) >= s.dashBeforeX!) : -1
+            const dashed = cut > 0 ? seg(sortedPts.slice(0, cut + 1)) : null
+            const solid = cut > 0 ? seg(sortedPts.slice(cut)) : linePath
             return (
               <g key={s.key}>
-                {areaPath && <path d={areaPath} fill={color} fillOpacity={0.15} />}
-                <path d={linePath} fill="none" stroke={color} strokeWidth={1.75} />
+                {areaPath && <path d={areaPath} fill={color} fillOpacity={getY0 ? 0.35 : 0.15} />}
+                {dashed && <path d={dashed} fill="none" stroke={color} strokeWidth={1.75} strokeDasharray="4 4" />}
+                <path d={solid} fill="none" stroke={color} strokeWidth={1.75} />
                 {sortedPts.map((p, i) => (
                   <circle
                     key={i}
