@@ -1,0 +1,11 @@
+"""disk-tree notify/digest engine (``specs/comms-notify.md``).
+
+A generic Slack + Discord digest mechanism — converge state, one thread per
+period, an OP edited in place, day-keyed replies, hosted plot — driven by a
+per-deployment ``DigestProfile`` (body builder, plot panels, metric semantics).
+Generalized from ``marin-gcs-usage``'s ``dt_cloud`` comms.
+
+``discord_api`` is stdlib-only; the posting engine needs the ``notify`` extra
+(``thrds``).
+"""
+from __future__ import annotations
