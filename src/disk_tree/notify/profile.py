@@ -14,9 +14,9 @@ from __future__ import annotations
 import datetime as dt
 from collections import OrderedDict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, TypeVar, runtime_checkable
 
-from .digest import Period, deg, pct, pct_val, select_window, signed, yymmdd
+from .digest import Period, deg, pct, pct_val, signed, yymmdd
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,10 +32,14 @@ class Row(Protocol):
     date: str
 
 
-class DigestProfile(Protocol):
-    """The interface the engine drives. A profile is a *configured object* (it
-    holds its own site URL, icons host, metric prices/units), so its methods
-    close over that config rather than taking it per call."""
+RowT = TypeVar("RowT", bound=Row)
+
+
+class DigestProfile(Protocol[RowT]):
+    """The interface the engine drives, generic over its own row type. A profile
+    is a *configured object* (it holds its own site URL, icons host, metric
+    prices/units), so its methods close over that config rather than taking it
+    per call."""
 
     #: Slack OP ``icon_emoji`` (the thread starter's avatar).
     op_icon: str
@@ -46,25 +50,23 @@ class DigestProfile(Protocol):
         """The thread title / OP sender name (e.g. ``disk-tree usage — August 2026``)."""
         ...
 
-    def op_body(self, rows: list[Row], period: Period, plot_url: str | None) -> str:
+    def op_body(self, rows: list[RowT], period: Period, plot_url: str | None) -> str:
         """The OP markdown. ``plot_url=None`` omits the hosted-image line (Discord
         attaches the PNG as a file instead)."""
         ...
 
-    def reply(self, row: Row, platform: str = "slack") -> tuple[str, str, str]:
+    def reply(self, row: RowT, platform: str = "slack") -> tuple[str, str, str]:
         """One scan's reply -> ``(sender_username, body, avatar_url)``."""
         ...
 
-    def rows_from_meta(self, dated_meta: list[tuple[str, dict]]) -> list[Row]:
+    def rows_from_meta(self, dated_meta: list[tuple[str, dict]]) -> list[RowT]:
         """Build rows from ``(date, meta)`` pairs in date order. The first pair
-        seeds the second's delta; callers pass one lead-in scan then slice it."""
+        seeds the second's delta; callers pass one lead-in scan then slice it.
+        Where the ``(date, meta)`` pairs come from is a source's job
+        (:mod:`disk_tree.notify.sources`), not the profile's."""
         ...
 
-    def load_rows(self, root: str, period: Period) -> list[Row]:
-        """Read ``period``'s rows from the ``root`` scan source (side-effecting)."""
-        ...
-
-    def render_plot(self, rows: list[Row], period: Period, out: Path) -> None:
+    def render_plot(self, rows: list[RowT], period: Period, out: Path) -> None:
         """Render the OP plot PNG for ``rows`` to ``out`` (needs the ``plot`` extra)."""
         ...
 
@@ -104,10 +106,7 @@ class BytesProfile:
         self.site_url = site_url.rstrip("/")
         self.icons_base = icons_base.rstrip("/") if icons_base else None
         self.avatar_rev = avatar_rev
-
-    @property
-    def op_avatar(self) -> str:
-        return f"{self.icons_base}/calendar.png?v=2" if self.icons_base else ""
+        self.op_avatar = f"{self.icons_base}/calendar.png?v=2" if self.icons_base else ""
 
     def title(self, period: Period) -> str:
         return f"{self.name} — {period.start:%B %Y}"
@@ -166,28 +165,25 @@ class BytesProfile:
         avatar = f"{self.icons_base}/arrows/av_deg{deg(pct_val(dtb, row.tb), 7)}.png?v={self.avatar_rev}" if self.icons_base else ""
         return sender, link, avatar
 
-    def load_rows(self, root: str, period: Period) -> list[BytesRow]:
-        """Read ``{root}/<date>/meta.json`` snapshots for ``period`` (plus one
-        lead-in for the first delta) via ``blobfs``, in date order."""
-        import json
-        import re
-
-        from .. import blobfs
-
-        fs = blobfs.fs_for(root)[0]
-        dates = sorted(
-            m.group(1)
-            for p in fs.glob(blobfs.join(root, "*/meta.json"))
-            if (m := re.search(r"/(\d{4}-\d{2}-\d{2})/meta\.json$", p))
-        )
-        window, has_lead_in = select_window(dates, period)
-        if not window:
-            return []
-        dated_meta = [(d, json.loads(blobfs.read_text(blobfs.join(root, f"{d}/meta.json")))) for d in window]
-        rows = self.rows_from_meta(dated_meta)
-        return rows[1:] if has_lead_in else rows
-
     def render_plot(self, rows: list[BytesRow], period: Period, out: Path) -> None:
         from .plot import render_bytes
 
         render_bytes(rows, out, self.title(period))
+
+
+def build_profile(spec: dict) -> DigestProfile:
+    """Construct a :class:`DigestProfile` from a config block's ``profile:``
+    selector and its keys. Built-in ``bytes`` -> :class:`BytesProfile`; an
+    import path (``pkg.mod:Class`` or ``pkg.mod:factory``) lets a deployment
+    ship its own (called with the remaining keys as kwargs)."""
+    spec = dict(spec)
+    kind = spec.pop("profile", "bytes")
+    keys = {k: spec[k] for k in ("name", "site_url", "icons_base", "avatar_rev") if k in spec}
+    if kind == "bytes":
+        return BytesProfile(**keys)
+    if ":" in kind:
+        import importlib
+
+        mod, attr = kind.split(":", 1)
+        return getattr(importlib.import_module(mod), attr)(**keys)
+    raise ValueError(f"unknown digest profile {kind!r} — use 'bytes' or an import path 'pkg.mod:Class'")

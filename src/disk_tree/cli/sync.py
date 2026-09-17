@@ -65,6 +65,7 @@ class BucketCfg:
     engine: str = 'stream'
     pivot_sums: tuple[str, ...] = ()
     mean_mtime: bool = False
+    digest: dict | None = None  # passthrough for `disk-tree digest` (see cli/digest.py); sync ignores it
 
     def __post_init__(self):
         from disk_tree.backends.url import parse_url

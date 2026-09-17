@@ -166,6 +166,15 @@ disk-tree sync            # pull all configured buckets (cron entrypoint); build
                           # diff index vs its previous scan (`-D` skips)
                           # Config: ~/.config/disk-tree/buckets.yml (see specs/personal-sync.md)
 
+disk-tree digest [BUCKET] # Post a bucket's usage digest to Slack/Discord: one thread per period,
+                          # an OP edited in place + one reply per scan (spec comms-notify.md).
+                          # Config: a `digest:` block in buckets.yml (profile/period/site_url/
+                          # icons_base + slack/discord channel + secret ENV VAR NAMES). Generic
+                          # engine (`disk_tree.notify`) + per-deployment profile; ships a `bytes`
+                          # reference profile. `-p slack|discord` (default discord), `-m YYYY-MM`
+                          # (default current month), `-n` dry-run (render + print OP, no post/secrets).
+                          # Needs the `notify` extra (`thrds`); the plot uses core plotly+kaleido
+
 disk-tree migrate         # Backfill SQLite stats from parquet files
 disk-tree migrate-depth   # Add depth column to existing parquets
 

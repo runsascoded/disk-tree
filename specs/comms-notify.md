@@ -56,8 +56,18 @@ A `digest:` block per bucket in `~/.config/disk-tree/buckets.yml` (or `defaults`
    - `notify/plot.py` — `render_bytes`, the total-TiB-over-time panel, **plotly + kaleido** (already core deps — no matplotlib, unlike mgu's `digest_plot`).
    - `tests/test_digest.py` — 24 specs: the arrow/emoji/period/window/state-path engine functions, the `BytesProfile` content (rows/reply/op_body, exact strings), and both converge lifecycles against fake Slack/Discord clients (fresh → incremental → idempotent, backfill edit-replies).
    - `pyproject.toml` — `notify` extra = `thrds`.
-3. **CLI `disk-tree digest` + `digest:` config** — wire to a bucket's scans. *(Next.)*
-4. **mgu adopts** — mgu's gcs `digest.py` becomes a `DigestProfile` importing DT's engine; its `discord_api` deletes in favour of DT's. Handled by the mgu session once the engine lands here (spec round-trip).
+3. **CLI `disk-tree digest` + `digest:` config** — wire to a bucket's scans. **Done**:
+   - `notify/sources.py` — the row *source* (decoupled from the profile, which now only maps meta→rows): `scan_totals(uri)` reads disk-tree's own `Scan` DB (a bucket's scans over time, latest-per-day), `rows_from_totals` windows them to the period (pure, unit-tested), `scan_rows` ties them together.
+   - `notify/profile.py` `build_profile(spec)` — config-block → profile factory (built-in `bytes`, or an `pkg.mod:Class` import path for a deployment's own).
+   - `cli/digest.py` — `disk-tree digest [BUCKET] [-p slack|discord] [-m YYYY-MM] [-n]`: resolve the bucket's `digest:` block, build the profile, load the period's rows from the `Scan` DB, and converge via the engine shells. `--dry-run` builds rows + renders the plot + prints the OP body without posting or reading any secret. Secrets are named by env var (`*_env`) and read from `os.environ` at post time, never inlined.
+   - `digest:` block on `BucketCfg` (a passthrough field `load_config` accepts and `sync` ignores).
+   - `post_digest_slack` added beside `post_digest_discord`; both now take pre-loaded `rows` (source ≠ engine). `tests/test_cli_digest.py` — an end-to-end `--dry-run` (import a bucket at three dated TiB-scale totals → exact OP body) + config-error paths.
+4. **mgu adopts** — mgu's gcs `digest.py` becomes a `DigestProfile` importing DT's engine; its `discord_api` deletes in favour of DT's. Handled by the mgu session once the engine lands here (spec round-trip). *(Next — theirs.)*
+
+## Deferred (not blocking mgu adoption)
+
+- **Slack plot hosting.** Discord attaches the PNG; Slack needs a hosted image URL, which disk-tree has no default host for — `post_digest_slack` takes an optional `plot_url` (from the `slack.plot_url` config), else posts text-only. A deployment that wants the Slack plot hosts it (gcs uses its Pages project).
+- **Import-path profiles.** `build_profile` accepts `pkg.mod:Class` but only `bytes` ships; gcs's `$`+class-tier profile lands with its adoption (stage 4).
 
 ## Open questions — resolved in stage 2
 

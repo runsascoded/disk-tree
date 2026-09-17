@@ -11,7 +11,8 @@ from datetime import date
 import pytest
 
 from disk_tree.notify import digest as D
-from disk_tree.notify.profile import BytesProfile
+from disk_tree.notify import sources
+from disk_tree.notify.profile import BytesProfile, build_profile
 
 TIB = 1024**4
 
@@ -106,6 +107,49 @@ def test_state_path():
     assert D.state_path(root, AUG, "discord", "123") == "gs://b/digest/discord/123/2026-08.json"
     with pytest.raises(ValueError, match="keyed by webhook id"):
         D.state_path(root, AUG, "discord")
+
+
+# ---- row source (windowing over scan totals) -------------------------------
+
+
+def _b(tib: float) -> int:
+    return round(tib * TIB)
+
+
+def test_rows_from_totals_month_with_prior_month_lead_in():
+    # a July scan is the lead-in for August's first delta, then sliced off
+    totals = [("2026-07-31", _b(3000)), ("2026-08-03", _b(3030)), ("2026-08-04", _b(3010))]
+    rows = sources.rows_from_totals(P, totals, AUG)
+    assert [(r.date, r.tb, r.dtb) for r in rows] == [("2026-08-03", 3030.0, 30.0), ("2026-08-04", 3010.0, -20.0)]
+
+
+def test_rows_from_totals_no_prior_scan():
+    # the month's first scan is the first ever: no lead-in, so it carries dtb=None
+    totals = [("2026-08-01", _b(3000)), ("2026-08-03", _b(3030))]
+    rows = sources.rows_from_totals(P, totals, AUG)
+    assert [(r.date, r.tb, r.dtb) for r in rows] == [("2026-08-01", 3000.0, None), ("2026-08-03", 3030.0, 30.0)]
+
+
+def test_rows_from_totals_empty_when_no_scans_in_period():
+    assert sources.rows_from_totals(P, [("2026-06-01", _b(3000))], AUG) == []
+
+
+# ---- profile factory -------------------------------------------------------
+
+
+def test_build_profile_bytes_with_keys():
+    p = build_profile({"profile": "bytes", "name": "X", "site_url": "https://x/", "icons_base": None})
+    assert isinstance(p, BytesProfile)
+    assert (p.name, p.site_url, p.icons_base) == ("X", "https://x", None)
+
+
+def test_build_profile_defaults_to_bytes():
+    assert isinstance(build_profile({}), BytesProfile)
+
+
+def test_build_profile_unknown_raises():
+    with pytest.raises(ValueError, match="unknown digest profile"):
+        build_profile({"profile": "nope"})
 
 
 # ---- reference profile: rows + content -------------------------------------

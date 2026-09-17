@@ -300,10 +300,38 @@ def converge_discord(
 # ---- real-client shells (the `notify` extra: thrds) ------------------------
 
 
+def post_digest_slack(
+    profile: DigestProfile,
+    root: str,
+    period: Period,
+    rows: list[Row],
+    token: str,
+    channel: str,
+    *,
+    plot_url: str | None = None,
+    reply_delay: float = 0.0,
+) -> dict:
+    """``converge_slack`` against a real Slack workspace: load the period's
+    thread state, converge, persist. ``plot_url`` is a hosted image the OP
+    references (Slack has no attach-and-reference, so a deployment that wants
+    the plot must host it; ``None`` posts text-only)."""
+    from thrds.slack import SlackClient
+
+    state = load_state(root, period, "slack")
+    return converge_slack(
+        profile, rows, period, state,
+        client=SlackClient(token, channel),
+        plot_url=plot_url,
+        reply_delay=reply_delay,
+        save=lambda s: save_state(root, period, s, "slack"),
+    )
+
+
 def post_digest_discord(
     profile: DigestProfile,
     root: str,
     period: Period,
+    rows: list[Row],
     webhook: str,
     bot_token: str,
     *,
@@ -320,10 +348,6 @@ def post_digest_discord(
 
     from . import discord_api
 
-    rows = profile.load_rows(root, period)
-    if not rows:
-        _err(f"digest: no scans for {period.key}")
-        return {}
     info = discord_api.webhook_info(webhook)
     channel, key = info["channel_id"], info["id"]
     state = load_state(root, period, "discord", key)
