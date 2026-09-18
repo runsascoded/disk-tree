@@ -13,6 +13,7 @@ import type { FilterResult, HistogramChild, Row, ScanJob, ScanProgress, Collapse
 import { VoronoiTreemap } from '@rdub/treemap/voronoi'
 import { VizBoundary } from './VizBoundary'
 import { useCapabilities } from '../hooks/useCapabilities'
+import { useDeleteMethod } from '../hooks/useDeleteMethod'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
 import { formatSize, formatCount, timeAgo, elapsed } from '../utils/format'
@@ -24,7 +25,6 @@ import {
   isSchemeRoot,
   segmentsToUri,
   supportsDelete,
-  supportsStage,
   uriToPath,
   type RouteType,
 } from '../schemes'
@@ -289,11 +289,15 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
   tableRef?: React.RefObject<HTMLTableElement | null>
 }) {
   const caps = useCapabilities()
-  const canDelete = supportsDelete(routeType) && caps?.delete === true
-  // Cloud buckets stage instead of deleting immediately (spec `staged-delete.md`).
-  const canStage = supportsStage(routeType) && caps?.stageDelete === true
-  const canAct = canDelete || canStage
-  const actionVerb = canDelete ? 'Delete' : 'Stage'
+  // The trash gesture syncs or stages per the deployment's `deleteApproval`
+  // policy (spec `staged-delete.md` CP6), not the scheme.
+  const { method } = useDeleteMethod()
+  const deletable = supportsDelete(routeType)
+  const canSync = deletable && caps?.delete === true && method === 'sync'
+  const staging = deletable && caps?.stageDelete === true && method === 'staged'
+  const canAct = canSync || staging
+  const actionVerb = staging ? 'Stage' : 'Delete'
+  const actionColor = staging ? '#ed6c02' : '#d32f2f'
   // Track whether the collapsed (auto-expanded) rows are shown expanded
   const [collapsedExpanded, setCollapsedExpanded] = useState(true)
 
@@ -439,7 +443,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                         size="small"
                         onClick={() => onDelete(collapsedUri)}
                         disabled={isDeleting}
-                        sx={{ minWidth: 0, padding: '2px 4px', color: canDelete ? '#d32f2f' : '#ed6c02' }}
+                        sx={{ minWidth: 0, padding: '2px 4px', color: actionColor }}
                       >
                         {isDeleting ? <CircularProgress size={14} /> : <FaTrash size={12} />}
                       </Button>
@@ -536,7 +540,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                         size="small"
                         onClick={() => onDelete(childUri)}
                         disabled={deletingPaths.has(childUri)}
-                        sx={{ minWidth: 0, padding: '2px 4px', color: canDelete ? '#d32f2f' : '#ed6c02' }}
+                        sx={{ minWidth: 0, padding: '2px 4px', color: actionColor }}
                       >
                         {deletingPaths.has(childUri) ? <CircularProgress size={14} /> : <FaTrash size={12} />}
                       </Button>
@@ -1184,10 +1188,13 @@ export function ScanDetails() {
 
   // Live scan progress from SSE
   const scanProgress = useScanProgress()
-  const canDelete = supportsDelete(routeType) && caps?.delete === true
-  // Cloud buckets stage into a plan instead of deleting immediately (CP3).
-  const canStage = supportsStage(routeType) && caps?.stageDelete === true
-  const canAct = canDelete || canStage
+  // Sync vs stage is the deployment's `deleteApproval` policy (CP6), not the scheme.
+  const { method: deleteMethod } = useDeleteMethod()
+  const deletable = supportsDelete(routeType)
+  const canDelete = deletable && caps?.delete === true && deleteMethod === 'sync'
+  const staging = deletable && caps?.stageDelete === true && deleteMethod === 'staged'
+  const canAct = canDelete || staging
+  const actionColor = staging ? '#ed6c02' : '#d32f2f'
 
   // Auto-refetch when a scan relevant to this view finishes. A completed scan
   // is *deleted* from `scan_progress` (see ScanProgress.finish), so completion
@@ -1341,7 +1348,7 @@ export function ScanDetails() {
 
     // Cloud buckets stage into a plan (reversible, no deadline) rather than
     // deleting immediately; an admin dispatches from `/staged`.
-    if (canStage && !canDelete) {
+    if (staging) {
       const uris = selectedRows.map(r => r.uri)
       try {
         const { added } = await stageUris(uris)
@@ -1457,7 +1464,7 @@ export function ScanDetails() {
 
   const handleDelete = async (path: string) => {
     // Cloud buckets stage into a plan; an admin dispatches from `/staged`.
-    if (canStage && !canDelete) {
+    if (staging) {
       try {
         const { added } = await stageUris([path])
         setStageNotice(added.length ? 'Staged for deletion — review in Staged.' : 'Already staged.')
@@ -1722,14 +1729,14 @@ export function ScanDetails() {
               </Tooltip>
             )}
             {canAct && (
-              <Tooltip title={`${canDelete ? 'Delete' : 'Stage'} ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}${canDelete ? '' : ' for deletion'}`}>
+              <Tooltip title={`${staging ? 'Stage' : 'Delete'} ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}${staging ? ' for deletion' : ''}`}>
                 <Button
                   size="small"
                   onClick={handleBulkDelete}
                   startIcon={<FaTrash size={12} />}
-                  sx={{ minWidth: 0, color: canDelete ? '#d32f2f' : '#ed6c02' }}
+                  sx={{ minWidth: 0, color: actionColor }}
                 >
-                  {canDelete ? 'Delete' : 'Stage'}
+                  {staging ? 'Stage' : 'Delete'}
                 </Button>
               </Tooltip>
             )}

@@ -1221,5 +1221,5 @@ class TestCapabilities:
             'static': False,
             'scan': True, 'delete': True, 'reveal': True, 'histogram': True, 'filter': True,
             'preview': True, 'compare': True, 'progress': True, 'library': True, 'backend': True, 's3': True,
-            'stageDelete': True,
+            'stageDelete': True, 'deleteApproval': 'sync',
         }

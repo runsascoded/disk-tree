@@ -2387,12 +2387,35 @@ CAPABILITIES = {
     'backend': True,
     's3': True,
     'stageDelete': True,
+    'deleteApproval': 'sync',
 }
+
+
+def _delete_approval() -> str:
+    """The deployment's delete-approval policy (spec `staged-delete.md` CP6):
+    `DISK_TREE_DELETE_APPROVAL`, else buckets.yml `delete.approval`, else `sync`
+    (a credentialed local server just deletes)."""
+    v = os.environ.get('DISK_TREE_DELETE_APPROVAL')
+    if v in ('sync', 'staged', 'user-choice'):
+        return v
+    try:
+        import yaml
+        from disk_tree.config import ROOT_DIR
+        p = os.path.join(ROOT_DIR, 'buckets.yml')
+        if os.path.exists(p):
+            with open(p) as f:
+                raw = yaml.safe_load(f) or {}
+            a = (raw.get('delete') or {}).get('approval')
+            if a in ('sync', 'staged', 'user-choice'):
+                return a
+    except Exception:
+        pass
+    return 'sync'
 
 
 @app.route('/api/capabilities')
 def get_capabilities():
-    return jsonify(CAPABILITIES)
+    return jsonify({**CAPABILITIES, 'deleteApproval': _delete_approval()})
 
 
 @app.route('/api/backend', methods=['GET'])

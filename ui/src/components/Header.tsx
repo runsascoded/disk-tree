@@ -5,6 +5,7 @@ import { FaCloud, FaDatabase, FaFolder, FaHistory, FaCog, FaTrash } from 'react-
 import { useQuery } from '@tanstack/react-query'
 import { fetchAvailableBackends } from '../api'
 import { useCapabilities } from '../hooks/useCapabilities'
+import { useDeleteMethod } from '../hooks/useDeleteMethod'
 import { useUnits } from '../utils/units'
 import { LibrarySwitcher } from './LibrarySwitcher'
 import { WhoamiChip } from '../auth'
@@ -30,6 +31,7 @@ export function Header() {
   const backendOpen = Boolean(anchorEl)
 
   const caps = useCapabilities()
+  const { method: deleteMethod, offered: methodOffered, setMethod: setDeleteMethod } = useDeleteMethod()
   // Fetch backend info (not on a static deployment — nothing to switch)
   const { data: backendData } = useQuery({
     queryKey: ['available-backends'],
@@ -88,8 +90,9 @@ export function Header() {
           >
             Recent
           </Button>
-          {/* Staged-delete queue: shown wherever the deployment supports it. */}
-          {caps?.stageDelete && (
+          {/* Staged-delete queue: shown where staging is a possible method (an
+              always-sync deployment has no queue to show). */}
+          {caps?.stageDelete && caps?.deleteApproval !== 'sync' && (
             <Button
               component={Link}
               to="/staged"
@@ -103,6 +106,25 @@ export function Header() {
         </Box>
 
         {caps?.library && <LibrarySwitcher />}
+
+        {/* Delete method (spec `staged-delete.md` CP6): shown only where the
+            deployment leaves the choice to the user (`deleteApproval:
+            user-choice`); a locked deployment hides it entirely. */}
+        {methodOffered && (
+          <Tooltip title="Delete method — Sync: delete immediately · Staged: queue for an admin to dispatch">
+            <ToggleButtonGroup
+              size="small"
+              exclusive
+              value={deleteMethod}
+              onChange={(_e, v) => { if (v) setDeleteMethod(v) }}
+              sx={{ mr: 1, '& .MuiToggleButton-root': { py: 0, px: 1, fontSize: '0.7rem', textTransform: 'none' } }}
+            >
+              <ToggleButton value="sync">Sync</ToggleButton>
+              <ToggleButton value="staged">Staged</ToggleButton>
+            </ToggleButtonGroup>
+          </Tooltip>
+        )}
+
         <WhoamiChip />
 
         {/* Size units: SI (G = 10⁹) vs IEC (Gi = 2³⁰). Single tooltip on the

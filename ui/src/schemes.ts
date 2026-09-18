@@ -78,20 +78,12 @@ export function isSchemeRoot(uri: string): boolean {
 }
 
 /**
- * Whether the delete UI should render for a route type. Historical: the S3
- * button is hidden even though the S3 backend supports it — mirror that for
- * gcs/r2 which don't yet have DT backends.
+ * Whether a route's scheme has a delete-capable backend at all (`backend_for`
+ * can remove it): local `gfind`/`rm`, `ssh`, `S3Backend.delete` (`aws s3 rm`,
+ * R2 via endpoint). `gcs` has no DT delete backend yet. *How* a delete runs —
+ * inline (`sync`) or via the staged queue — is the deployment's `deleteApproval`
+ * policy (`useDeleteMethod`), not the scheme.
  */
 export function supportsDelete(routeType: RouteType): boolean {
-  return routeType === 'file' || routeType === 'ssh'
-}
-
-/**
- * Whether a route's scheme can be *staged* for deletion (spec
- * `specs/staged-delete.md`): the cloud buckets a server-side executor deletes
- * with `buckets.yml` creds (`S3Backend.delete` — `aws s3 rm`, R2 via endpoint).
- * The local/ssh routes delete immediately instead (`supportsDelete`).
- */
-export function supportsStage(routeType: RouteType): boolean {
-  return routeType === 's3' || routeType === 'r2'
+  return routeType === 'file' || routeType === 'ssh' || routeType === 's3' || routeType === 'r2'
 }

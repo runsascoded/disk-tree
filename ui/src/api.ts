@@ -568,6 +568,11 @@ export type Capabilities = {
    *  `specs/staged-delete.md`), rather than deleting immediately (`delete`).
    *  On where the deployment is gated (needs an identity to attribute to). */
   stageDelete: boolean
+  /** The deployment's delete-approval policy (spec `specs/staged-delete.md` CP6):
+   *  `sync` deletes inline, `staged` always queues, `user-choice` lets each user
+   *  pick (sticky) — the deployment default + lock. A credentialless deployment
+   *  (edge) is `staged`; a credentialed one (laptop) defaults `sync`. */
+  deleteApproval: 'sync' | 'staged' | 'user-choice'
   /** Browse the host's local filesystem (`/file/*`). Off on a static deployment,
    *  which has no live scanner — the Local nav item hides. */
   filesystem: boolean
@@ -578,7 +583,7 @@ export type Capabilities = {
 export const ALL_CAPABILITIES: Capabilities = {
   static: false, scan: true, delete: true, reveal: true, histogram: true, filter: true,
   preview: true, compare: true, progress: true, library: true, backend: true, s3: true,
-  stageDelete: true, filesystem: true, auth: false,
+  stageDelete: true, deleteApproval: 'sync', filesystem: true, auth: false,
 }
 
 /** A server without the endpoint (an older Flask) can do everything. */

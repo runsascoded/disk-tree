@@ -23,6 +23,29 @@ Per-deploy policy is **config, not forked code** (`Store.*` in mgu; a `delete:` 
 | `undo` | `soft-delete` \| `versioning` \| `none` | what makes one-click delete safe; set by the store adapter's *offer* |
 | `eligibility` | `owner-slice` \| `any` | an *optional* auto-approve shortcut, **not** a safety gate; default: approve every real delete |
 
+## Two orthogonal axes (target model)
+
+CP1–4 built **one cell**: approval = *staged*, executor = *laptop CLI drainer over direct D1*. The design generalizes along two independent axes — **approval** (the trust/UX gate) and **execution** (how a delete actually runs, by scope). They don't hardcode by path type; they're config, with an optional per-user layer.
+
+**Axis 1 — approval.** Per-deployment `delete.approval`:
+- `sync` — delete inline (confirm dialog), no queue. (`local-confirm` today.)
+- `staged` — always the admin queue. (`chat-approve` today — gcs / less-trusted Stanford users; the control is **not offered**.)
+- `user-choice` — offer a **sticky per-user setting in the logged-in chip** (sync ↔ staged), persisted per identity; the deployment sets the default and may cap/lock it. A locked deployment hides the control entirely, so trust is enforced server-side, not by a hideable client toggle.
+
+**Axis 2 — executor**, chosen by deletion scope (a per-user/-deploy **threshold**): small → **CFN**, large → **Batch**. Backend-specific, IaC-provisioned:
+
+| backend | small (CFN) | large (Batch) |
+|---|---|---|
+| R2 | **Worker + R2 binding** — same-account, *no external creds, no laptop drainer* | Worker queue / Durable-Object chain |
+| S3 | Lambda (IAM role) | AWS Batch |
+| GCS | Cloud Function | GCP Batch (what gcs runs today) |
+
+The R2 row is the key simplification: for Ryan's own R2 in his CF account, a bound Worker deletes directly, so **small R2 deletes run at the edge as a CFN** — the CP4 laptop drainer is then only the fallback for arbitrary/cross-account buckets and large (Batch) jobs. The executor is an interface (`plan → run`) the approval axis dispatches into; `sync` calls it inline, `staged` calls it from the queue.
+
+**IaC (roadmap item 2)** provisions the CFN + Batch resources per backend (S3/R2/GCS) so a deployment stands the executors up seamlessly — the forcing function for making the ported pieces genuinely generic.
+
+The four axes above stay; `approval` gains the `sync | staged | user-choice` framing and `delete.executor` (`cfn | batch | drainer`, `threshold`) is the new axis.
+
 ## What gcs built — generic vs specific
 
 Generic (upstream): the **plan object** (`plans`/`plan_items`, the shared cw+gcs schema — a staged set auto-populated by trash gestures), the run records (`deletion_runs`/`deletion_bands`), the `/api/plans` CRUD + `/stage` shape, the generic `/api/db` registry-CRUD, the `auth.ts` scope/gate, `edgeCache.ts`, and the **stage → approve → dispatch → runs** UX.
@@ -57,6 +80,9 @@ That shapes the split: **edge stages + approves (D1); a server-side dispatcher d
 3. **`/staged` React page + trash-can rewire. Done.** `ScanDetails`'s trash-can *stages* (`stageUris`) instead of deleting immediately where `canStage = supportsStage(routeType) && caps.stageDelete` — cloud buckets (`s3`/`r2`, `supportsStage`) that a server-side executor deletes; `file`/`ssh` keep the immediate `delete`. The per-row + bulk affordance turns amber and its tooltip/label read "Stage"; a success notice links to `/staged`. The `/staged` page (`StagedPage.tsx`, `AccessPage` patterns) lists open plans + items with the runs feed; dispatch is gated (`isAdmin`, or the ungated local server) — the two-step confirm calls `dispatchPlan`. A Header nav link shows wherever `caps.stageDelete`. **Both servers implement the HTTP surface:** the edge (CP2) enqueues; the Flask peer (`server.py` `/api/staged`, `/api/plans/stage`, `/api/plans/unstage`, `/api/dispatch`) deletes inline (local-confirm) over the CP1 engine via `staged_backend.py` (a standalone SQLAlchemy engine — *not* flask-sqlalchemy's `init()`, whose app-context push corrupts a request context). `stageDelete` added to `ALL_CAPABILITIES` + the Flask capabilities. CIC-verified: the `/staged` page renders plans/items/runs, stages/unstages/dry-dispatches live; the nav link resolves.
 4. **Server-side dispatcher + chat. Done.** `disk-tree dispatch --serve` (`cli/staged.py` `_serve`) drains the edge-enqueued runs. It reaches D1 **directly** via the `CLOUDFLARE_API_TOKEN` the laptop already holds (`disk_tree/d1.py` `D1Client`, the D1 REST API) — no bespoke authenticated Functions endpoint, no service token. `disk_tree/drain.py` (`pending_runs`/`execute_run`/`drain_once`, DB duck-typed + `size_fn`/`delete_fn` injected like CP1) sizes each staged URI from the local scan DB and deletes it through `backend_for`, writes a per-URI band + the run's totals/`finished_ts` back to D1; a single URI's failure is recorded, not fatal. Exp-backoff poll loop (`-i` base, ×5 idle; `-o` once; Ctrl-C clean). Chat: a deployment-wide `delete:` block in buckets.yml (`chat: slack|discord|none`, `undo`, `database_id`, per-platform secret env names) → `notify/announce.py` `make_announcer` posts a per-run message (`disk_tree.notify`, the `notify`/thrds extra). Tested (`tests/test_drain.py`, 8 specs) against an in-memory fake D1 + `D1Client` over a stubbed `urlopen`; the client verified live read-only against the real D1 (tables present, no pending runs). *The demo drainer is the laptop poller (open question resolved).*
 5. **Pluggable undo.** `undo`/`restore` per store adapter — S3/R2 version-restore, GCS soft-delete restore — behind `delete.undo`; an `undo` CLI/endpoint over `DeletionRun`.
+6. **Configurable approval + user-sticky method. Done.** `deleteApproval` capability (`sync | staged | user-choice`): Flask from `DISK_TREE_DELETE_APPROVAL` / buckets.yml `delete.approval` (default `sync` — a credentialed server just deletes); the edge is `staged` (no inline executor for arbitrary buckets). `ui/src/hooks/useDeleteMethod.ts` (`resolveDeleteMethod` pure + a `useSyncExternalStore` sticky `localStorage` preference) yields the effective method; the Header shows a Sync/Staged toggle **only** when `user-choice` (locked deployments hide it, so trust is server-side). `ScanDetails`'s trash gesture now branches on the *method*, not the scheme: `supportsDelete` extended to `s3`/`r2` (all delete-capable backends), `canSync`/`staging` = `deletable && caps.{delete,stageDelete} && method === {sync,staged}`. This folds in the "laptop sync-deletes cloud" fix (sync mode deletes cloud inline) and the `/staged` nav now hides on an always-`sync` deployment. `deleteApproval` added to `ALL_CAPABILITIES` + both capability endpoints. CIC-verified: the toggle renders under `user-choice`; sync ⇒ cloud rows "Delete" (inline), the sticky `staged` preference ⇒ "Stage".
+7. **Pluggable executor + scope threshold.** `delete.executor` interface (`plan → run`) the approval axis dispatches into (`sync` inline, `staged` from the queue). Scope threshold picks CFN vs Batch. First cell to add: the **R2-binding Worker CFN** — small same-account R2 deletes run at the edge, no drainer. Then S3 Lambda / GCS Cloud Function (small) and AWS/GCP Batch (large).
+8. **IaC for CFN + Batch (roadmap item 2).** Provision the per-backend executor resources (Worker/Lambda/Cloud Function + AWS/GCP Batch) so a deployment stands them up seamlessly on S3/R2/GCS.
 
 ## Open questions
 
