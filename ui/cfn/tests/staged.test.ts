@@ -14,6 +14,29 @@ const B = 'r2://bucket/b'
 const C = 'r2://bucket/c'
 const ADMIN = 'ryan@example.test'
 
+/** Minimal in-memory R2 for the CFN dispatch path (CP7). */
+class FakeR2 {
+  objects = new Map<string, number>()
+  deleted: string[] = []
+  seed(entries: Record<string, number>) {
+    for (const [k, v] of Object.entries(entries)) this.objects.set(k, v)
+    return this
+  }
+  async head(key: string) {
+    return this.objects.has(key) ? { key, size: this.objects.get(key)! } : null
+  }
+  async list({ prefix = '' }: { prefix?: string }) {
+    const objects = [...this.objects.entries()].filter(([k]) => k.startsWith(prefix)).map(([key, size]) => ({ key, size }))
+    return { objects, truncated: false, cursor: undefined, delimitedPrefixes: [] }
+  }
+  async delete(keys: string | string[]) {
+    for (const k of Array.isArray(keys) ? keys : [keys]) {
+      this.objects.delete(k)
+      this.deleted.push(k)
+    }
+  }
+}
+
 let db: D1Database
 beforeEach(() => {
   db = migratedD1()
@@ -162,6 +185,38 @@ describe('staged routes (real gate)', () => {
     const ab = after.body as { plans: unknown[]; runs: { run_id: string; mode: string; finished_ts: number | null; actor: string }[] }
     expect(ab.plans).toEqual([])
     expect(ab.runs.map(r => [r.run_id, r.mode, r.finished_ts, r.actor])).toEqual([[d.run_id, 'real', null, ADMIN]])
+  })
+
+  it('dispatch deletes small same-account R2 inline (CFN) instead of enqueueing', async () => {
+    const env = envOf()
+    const bucket = new FakeR2().seed({ 'logs/a': 10, 'logs/b': 20 })
+    ;(env as unknown as Record<string, unknown>).R2_ctbk = bucket
+    const admin = await adminCookie(env)
+    await postStage(env, request(admin, { uris: ['r2://ctbk/logs'] }))
+
+    const res = await read(await postDispatch(env, request(admin, {})))
+    expect(res.status).toBe(200)
+    const d = res.body as { state: string; deleted_objects: number; deleted_bytes: number; run_id: string }
+    expect([d.state, d.deleted_objects, d.deleted_bytes]).toEqual(['done', 2, 30])
+    expect(bucket.deleted.sort()).toEqual(['logs/a', 'logs/b'])
+
+    // the run is recorded *finished* (not pending), plan closed
+    const after = (await read(await getStaged(env))).body as { plans: unknown[]; runs: { run_id: string; finished_ts: number | null }[] }
+    expect(after.plans).toEqual([])
+    expect(after.runs.map(r => [r.run_id, r.finished_ts !== null])).toEqual([[d.run_id, true]])
+  })
+
+  it('dispatch enqueues (drainer) when the bucket is unbound or too big', async () => {
+    const env = envOf()
+    const bucket = new FakeR2().seed({ 'big/1': 1, 'big/2': 1, 'big/3': 1 })
+    ;(env as unknown as Record<string, unknown>).R2_ctbk = bucket
+    ;(env as unknown as Record<string, unknown>).DELETE_THRESHOLD = '2'
+    const admin = await adminCookie(env)
+    await postStage(env, request(admin, { uris: ['r2://ctbk/big'] }))
+
+    const res = await read(await postDispatch(env, request(admin, {})))
+    expect((res.body as { state: string }).state).toBe('enqueued') // over threshold → drainer
+    expect(bucket.deleted).toEqual([]) // nothing deleted at the edge
   })
 
   it('refuses a dispatch of an empty / missing plan', async () => {

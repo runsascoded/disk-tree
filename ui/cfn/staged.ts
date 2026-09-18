@@ -160,6 +160,45 @@ export async function listRuns(db: D1Database, limit = 10): Promise<DeletionRun[
   return results
 }
 
+export interface InlineBand {
+  uri: string
+  bytes: number
+  objects: number
+}
+
+/** Record an already-executed run (spec CP7): the edge CFN deleted the objects,
+ *  so write a *finished* real run + a band per URI and close the plan, atomically.
+ *  (Contrast `enqueueDispatch`, which leaves `finished_ts` NULL for the drainer.) */
+export async function recordInlineRun(
+  db: D1Database,
+  plan: Plan,
+  actor: string,
+  bands: InlineBand[],
+): Promise<DeletionRun> {
+  const ts = nowS()
+  const run_id = `${plan.id}-${stamp(ts)}-${hex4()}`
+  const bytes = bands.reduce((a, b) => a + b.bytes, 0)
+  const objects = bands.reduce((a, b) => a + b.objects, 0)
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO deletion_runs (run_id, plan_id, mode, actor, started_ts, finished_ts, deleted_bytes, deleted_objects) ` +
+          `VALUES (?1, ?2, 'real', ?3, ?4, ?4, ?5, ?6)`,
+      )
+      .bind(run_id, plan.id, actor, ts, bytes, objects),
+    ...bands.map(b =>
+      db
+        .prepare(`INSERT INTO deletion_bands (run_id, uri, bytes, objects, deleted, gone) VALUES (?1, ?2, ?3, ?4, 1, 0)`)
+        .bind(run_id, b.uri, b.bytes, b.objects),
+    ),
+    db.prepare(`UPDATE plans SET state = 'closed', closed_ts = ?2 WHERE id = ?1`).bind(plan.id, ts),
+  ])
+  return {
+    run_id, plan_id: plan.id, mode: 'real', actor, started_ts: ts, finished_ts: ts,
+    deleted_bytes: bytes, deleted_objects: objects, skipped_gone: 0, undo_state: 'none', undo_deadline: null,
+  }
+}
+
 /** Dispatch a plan from the edge: enqueue a real run (pending — the executor
  *  drains it) and close the plan so its staged set is frozen. No bands: the
  *  server-side executor produces them with real sizes. */

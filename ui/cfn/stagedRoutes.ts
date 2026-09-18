@@ -12,6 +12,7 @@ import { hasScope } from '@open-athena/auth'
 import { ADMIN_SCOPE, actorLabel, authFor } from './auth'
 import { type Env, isOpen } from './env'
 import { error, json } from './http'
+import { deleteKeys, planR2Deletion } from './r2exec'
 import {
   type Plan,
   enqueueDispatch,
@@ -19,6 +20,7 @@ import {
   listRuns,
   planByRef,
   planItems,
+  recordInlineRun,
   stage,
   unstage,
 } from './staged'
@@ -110,6 +112,27 @@ export async function postDispatch(env: Env, request: Request): Promise<Response
   if (plan.state !== 'open') return error(`plan ${plan.id} is already ${plan.state}`, 409)
   const its = await planItems(env.DB!, plan.id)
   if (its.length === 0) return error(`plan ${plan.id} has no staged items`, 400)
+
+  // CFN path (CP7): if every URI is a bound same-account R2 bucket and the total
+  // scope is under the threshold, delete inline and finish the run here — no
+  // drainer. Otherwise (unbound bucket, non-R2, or too big) enqueue the fallback.
+  const limit = Number(env.DELETE_THRESHOLD ?? 1000)
+  const uris = its.map(i => i.uri)
+  const cfn = await planR2Deletion(env, uris, limit)
+  if (cfn) {
+    const bands = []
+    for (const p of cfn) {
+      const bytes = await deleteKeys(p.bucket, p.keys)
+      bands.push({ uri: p.uri, bytes, objects: p.keys.length })
+    }
+    const run = await recordInlineRun(env.DB!, plan, who, bands)
+    return json(
+      { run_id: run.run_id, plan_id: plan.id, mode: run.mode, items: its.length,
+        deleted_bytes: run.deleted_bytes, deleted_objects: run.deleted_objects, state: 'done' },
+      { maxAge: 0 },
+    )
+  }
+
   const run = await enqueueDispatch(env.DB!, plan, who)
   return json(
     { run_id: run.run_id, plan_id: plan.id, mode: run.mode, items: its.length, state: 'enqueued' },
