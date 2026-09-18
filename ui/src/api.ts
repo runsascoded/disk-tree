@@ -508,6 +508,10 @@ export type Capabilities = {
   library: boolean
   backend: boolean
   s3: boolean
+  /** Stage paths for deletion into a plan an admin dispatches (spec
+   *  `specs/staged-delete.md`), rather than deleting immediately (`delete`).
+   *  On where the deployment is gated (needs an identity to attribute to). */
+  stageDelete: boolean
   /** Browse the host's local filesystem (`/file/*`). Off on a static deployment,
    *  which has no live scanner — the Local nav item hides. */
   filesystem: boolean
@@ -518,7 +522,7 @@ export type Capabilities = {
 export const ALL_CAPABILITIES: Capabilities = {
   static: false, scan: true, delete: true, reveal: true, histogram: true, filter: true,
   preview: true, compare: true, progress: true, library: true, backend: true, s3: true,
-  filesystem: true, auth: false,
+  stageDelete: true, filesystem: true, auth: false,
 }
 
 /** A server without the endpoint (an older Flask) can do everything. */

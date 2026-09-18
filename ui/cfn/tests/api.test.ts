@@ -98,7 +98,7 @@ describe('capabilities + fallback', () => {
   it('declares the static deployment and refuses everything else', async () => {
     const caps = await call(capabilities, '/api/capabilities')
     expect(caps.status).toBe(200)
-    expect(Object.entries(caps.body).filter(([, v]) => v)).toEqual([['static', true], ['compare', true], ['auth', true]])
+    expect(Object.entries(caps.body).filter(([, v]) => v)).toEqual([['static', true], ['compare', true], ['stageDelete', true], ['auth', true]])
     expect(await call(fallback, '/api/histogram?uri=/x')).toEqual({
       status: 501, body: { error: 'not available in the static (cloud) deployment', path: '/api/histogram' },
     })

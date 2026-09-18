@@ -2272,6 +2272,7 @@ CAPABILITIES = {
     'library': True,
     'backend': True,
     's3': True,
+    'stageDelete': True,
 }
 
 
