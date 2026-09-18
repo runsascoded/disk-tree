@@ -181,7 +181,13 @@ disk-tree staged          # List open plans (staged sets) + recent runs (-j for 
 disk-tree unstage URI…    # Remove URIs from every open plan
 disk-tree dispatch [PLAN] # Execute a plan (id/name; default the open `Staged` plan): delete its
                           # staged URIs via the backend, or (default) dry-run + report bytes/objects.
-                          # `-f`/`--for-real` deletes + closes the plan; records a run + per-URI bands
+                          # `-f`/`--for-real` deletes + closes the plan; records a run + per-URI bands.
+                          # `-s`/`--serve` instead runs the CP4 drainer: poll the edge's D1 (the
+                          # browser dispatched runs there; the edge can't reach user buckets) via the
+                          # `CLOUDFLARE_API_TOKEN` and execute each enqueued run here, deleting through
+                          # `backend_for` (`-i` base poll secs, `-o` once, Ctrl-C stops). Announces
+                          # per-run results to Slack/Discord per the `delete:` block in buckets.yml
+                          # (`chat`/`undo`/`database_id` + secret ENV VAR NAMES); needs `notify` for chat
 
 disk-tree migrate         # Backfill SQLite stats from parquet files
 disk-tree migrate-depth   # Add depth column to existing parquets

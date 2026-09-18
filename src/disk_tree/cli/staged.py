@@ -91,12 +91,24 @@ def staged_cmd(as_json: bool):
 
 
 @cli.command("dispatch")
+@option("-c", "--config", "config_path", default=None, help="--serve: buckets.yml path (for the `delete:` chat/undo/database_id block)")
 @option("-f", "--for-real", is_flag=True, help="Actually delete (default: dry-run, report only)")
+@option("-i", "--interval", default=30, type=int, help="--serve: base poll seconds (exp-backoff to 5x while idle)")
 @option("-j", "--json", "as_json", is_flag=True, help="Emit JSON")
+@option("-o", "--once", is_flag=True, help="--serve: drain the enqueued runs once and exit")
+@option("-s", "--serve", is_flag=True, help="Drain edge-enqueued runs from D1 and execute them (the CP4 drainer)")
 @argument("plan_ref", required=False)
-def dispatch_cmd(for_real: bool, as_json: bool, plan_ref: str | None):
+def dispatch_cmd(config_path: str | None, for_real: bool, interval: int, as_json: bool, once: bool, serve: bool, plan_ref: str | None):
     """Dispatch a plan (PLAN_REF = id or name; default the open `Staged` plan):
-    delete its staged URIs, or (default) report what would be deleted."""
+    delete its staged URIs, or (default) report what would be deleted.
+
+    With `--serve`, instead run the drainer: poll the edge's D1 for enqueued
+    runs (the browser dispatched them; the edge can't reach user buckets) and
+    execute each here, where `buckets.yml` creds live."""
+    if serve:
+        _serve(config_path, interval, once)
+        return
+
     from disk_tree.staged import dispatch, items, plan_by_ref
 
     session = _session()
@@ -128,3 +140,50 @@ def dispatch_cmd(for_real: bool, as_json: bool, plan_ref: str | None):
         return
     verb = "deleted" if for_real else "would delete"
     print(f"{run.run_id}: {verb} {naturalsize(tot_bytes)} across {tot_objs} object(s)")
+
+
+def _delete_cfg(config_path: str | None) -> dict:
+    """The deployment-wide `delete:` block from buckets.yml, or `{}` if none."""
+    from disk_tree.cli.sync import load_config
+
+    try:
+        return load_config(config_path).delete or {}
+    except FileNotFoundError:
+        return {}
+
+
+def _serve(config_path: str | None, interval: int, once: bool) -> None:
+    """The CP4 drainer: execute edge-enqueued runs from D1, here where the
+    backend creds live. Exp-backoff polling (base `interval`, up to 5x while
+    idle); Ctrl-C stops cleanly."""
+    import time
+
+    from disk_tree.d1 import D1Client, D1Error
+    from disk_tree.drain import drain_once
+    from disk_tree.notify.announce import make_announcer
+
+    delete_cfg = _delete_cfg(config_path)
+    try:
+        d1 = D1Client.from_env(delete_cfg.get("database_id"))
+    except D1Error as e:
+        raise SystemExit(f"dispatch --serve: {e}")
+    undo_state = delete_cfg.get("undo", "none")
+    announce = make_announcer(delete_cfg)
+    err(f"dispatch --serve: draining D1 {d1.database_id} (undo={undo_state}, chat={delete_cfg.get('chat', 'none')})")
+
+    idle = 0
+    try:
+        while True:
+            summaries = drain_once(d1, size_fn=_size_fn, delete_fn=_delete_fn, undo_state=undo_state, announce=announce)
+            for s in summaries:
+                err(f"  ran {s['run_id']}: deleted {naturalsize(s['deleted_bytes'])}"
+                    f" across {s['deleted_objects']}/{s['items']} object(s)"
+                    + (f", {len(s['errors'])} failed" if s['errors'] else ""))
+            if once:
+                if not summaries:
+                    err("dispatch --serve --once: no enqueued runs")
+                return
+            idle = 0 if summaries else min(idle + 1, 4)
+            time.sleep(interval * (1 + idle))
+    except KeyboardInterrupt:
+        err("dispatch --serve: stopped")

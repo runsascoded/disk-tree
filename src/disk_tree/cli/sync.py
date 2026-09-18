@@ -83,6 +83,7 @@ class BucketCfg:
 class SyncCfg:
     listings: str
     buckets: list[BucketCfg]
+    delete: dict | None = None  # deployment-wide staged-delete policy (CP4): chat/undo/database_id
 
 
 def load_config(path: str | None) -> SyncCfg:
@@ -95,7 +96,7 @@ def load_config(path: str | None) -> SyncCfg:
         )
     with open(cfg_path) as f:
         raw = yaml.safe_load(f) or {}
-    unknown = set(raw) - {'listings', 'defaults', 'buckets'}
+    unknown = set(raw) - {'listings', 'defaults', 'buckets', 'delete'}
     if unknown:
         raise ValueError(f"{cfg_path}: unknown top-level key(s) {sorted(unknown)}")
     defaults = raw.get('defaults') or {}
@@ -117,7 +118,7 @@ def load_config(path: str | None) -> SyncCfg:
             raise ValueError(f"{cfg_path}: bucket {e['uri']!r} has unknown key(s) {sorted(bad)}")
         buckets.append(BucketCfg(**{**defaults, **e}))
     listings = os.path.expanduser(raw.get('listings') or join(ROOT_DIR, 'listings'))
-    return SyncCfg(listings=listings, buckets=buckets)
+    return SyncCfg(listings=listings, buckets=buckets, delete=raw.get('delete'))
 
 
 def select_buckets(cfg: SyncCfg, names: tuple[str, ...]) -> list[BucketCfg]:
