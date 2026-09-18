@@ -197,9 +197,10 @@ disk-tree dispatch [PLAN] # Execute a plan (id/name; default the open `Staged` p
 disk-tree iac r2-bindings # Generate deployment config from buckets.yml (spec staged-delete.md CP8):
                           # `r2-bindings` emits the `[[r2_buckets]]` wrangler.toml blocks binding each
 disk-tree iac config      # configured R2 bucket for the edge CFN executor (CP7); `config` emits the
-                          # `CfnDashboard` Pulumi component config (JSON). One source of truth from
-                          # buckets.yml. The Pulumi component lives in `iac/` (applied where the
-                          # `@pulumi` SDK + CF creds live, not this repo)
+disk-tree iac aws-batch   # `CfnDashboard` Pulumi component config (JSON); `aws-batch` emits the Terraform
+                          # tfvars for the AWS Batch delete executor (`iac/aws/`, the large-scope cell
+                          # the drainer submits oversized S3 runs to). One source of truth from
+                          # buckets.yml. IaC lives in `iac/` (applied where the SDK + creds live)
 
 disk-tree migrate         # Backfill SQLite stats from parquet files
 disk-tree migrate-depth   # Add depth column to existing parquets

@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 SizeFn = Callable[[str], "tuple[int, int]"]
 DeleteFn = Callable[[str], None]
 Announce = Callable[[dict], None]
+SubmitFn = Callable[[str, list[str]], str]  # (run_id, uris) -> batch job id
 
 
 def _now() -> int:
@@ -25,10 +26,11 @@ def _now() -> int:
 
 
 def pending_runs(db: Any) -> list[dict]:
-    """Enqueued runs (awaiting execution), oldest first."""
+    """Runs awaiting execution, oldest first: not finished and not handed to Batch
+    (a `batch_job` run is running remotely — the Batch job finishes it)."""
     return db.query(
         "SELECT run_id, plan_id, mode, actor, started_ts FROM deletion_runs "
-        "WHERE finished_ts IS NULL ORDER BY started_ts"
+        "WHERE finished_ts IS NULL AND batch_job IS NULL ORDER BY started_ts"
     )
 
 
@@ -44,15 +46,29 @@ def execute_run(
     delete_fn: DeleteFn,
     undo_state: str = "none",
     now: Callable[[], int] = _now,
+    submit_fn: Optional[SubmitFn] = None,
+    batch_threshold: Optional[int] = None,
 ) -> dict:
-    """Execute one enqueued run: delete each staged URI, record a band per URI,
-    finish the run in D1. A single URI's failure is recorded (not deleted) and
-    doesn't abort the run. Returns a summary."""
+    """Execute one enqueued run. Small (or no `submit_fn`): delete each staged URI
+    inline, record a band per URI, finish the run — a single URI's failure is
+    recorded, not fatal. Large (scope over `batch_threshold`): hand the run to
+    Batch (`submit_fn`) and record its `batch_job` instead, leaving it unfinished
+    for the Batch job to complete. Returns a summary."""
     uris = run_items(db, run["plan_id"])
+    sized = [(uri, *size_fn(uri)) for uri in uris]  # (uri, bytes, objects)
+
+    if submit_fn is not None and batch_threshold is not None and sum(o for _, _, o in sized) > batch_threshold:
+        job = submit_fn(run["run_id"], uris)
+        db.query("UPDATE deletion_runs SET batch_job = ? WHERE run_id = ?", [job, run["run_id"]])
+        return {
+            "run_id": run["run_id"], "plan_id": run["plan_id"], "actor": run.get("actor"),
+            "items": len(uris), "deleted_bytes": 0, "deleted_objects": 0, "errors": [],
+            "submitted": True, "batch_job": job,
+        }
+
     deleted_bytes = deleted_objects = 0
     errors: list[tuple[str, str]] = []
-    for uri in uris:
-        nbytes, nobjs = size_fn(uri)
+    for uri, nbytes, nobjs in sized:
         deleted = 0
         try:
             delete_fn(uri)
@@ -76,7 +92,7 @@ def execute_run(
     return {
         "run_id": run["run_id"], "plan_id": run["plan_id"], "actor": run.get("actor"),
         "items": len(uris), "deleted_bytes": deleted_bytes, "deleted_objects": deleted_objects,
-        "errors": errors, "finished_ts": finished,
+        "errors": errors, "submitted": False, "finished_ts": finished,
     }
 
 
@@ -88,11 +104,17 @@ def drain_once(
     undo_state: str = "none",
     announce: Optional[Announce] = None,
     now: Callable[[], int] = _now,
+    submit_fn: Optional[SubmitFn] = None,
+    batch_threshold: Optional[int] = None,
 ) -> list[dict]:
-    """Execute every enqueued run once. Returns a summary per run."""
+    """Execute every pending run once (inline, or submit oversized ones to Batch).
+    Returns a summary per run."""
     out = []
     for run in pending_runs(db):
-        summary = execute_run(db, run, size_fn=size_fn, delete_fn=delete_fn, undo_state=undo_state, now=now)
+        summary = execute_run(
+            db, run, size_fn=size_fn, delete_fn=delete_fn, undo_state=undo_state, now=now,
+            submit_fn=submit_fn, batch_threshold=batch_threshold,
+        )
         out.append(summary)
         if announce:
             announce(summary)

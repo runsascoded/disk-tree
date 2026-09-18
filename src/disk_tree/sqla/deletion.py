@@ -62,6 +62,9 @@ class DeletionRun(Base):
     skipped_gone: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     undo_state: Mapped[str] = mapped_column(String, nullable=False, default="none")  # none|partial|full|expired
     undo_deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    # CP8: the AWS/GCP Batch job a large run was handed to; NULL = inline/CFN. A
+    # run with this set stays unfinished but the drainer skips it (Batch finishes it).
+    batch_job: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
 
 
 class DeletionBand(Base):

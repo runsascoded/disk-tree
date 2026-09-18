@@ -11,10 +11,27 @@ Deletion has two orthogonal axes; IaC provisions the **executor** axis:
 | executor | small scope | large scope |
 |---|---|---|
 | **R2** | `CfnDashboard` binds `R2_<bucket>` → the edge Worker deletes inline (**CP7, done**) | Worker queue / Durable-Object chain |
-| **S3** | drainer inline `aws s3 rm` (**CP4, done**) | AWS Batch (`batch: {provider: 'aws'}`) |
+| **S3** | drainer inline `aws s3 rm` (**CP4, done**) | **AWS Batch (`iac/aws/`, done)** — the drainer submits oversized runs |
 | **GCS** | Cloud Function | GCP Batch (what gcs runs today) |
 
-The R2 small cell is live (CP7); the `batch` arg is the extension point for the large-scope cells.
+The R2 small + S3 large cells are live. The drainer (`disk-tree dispatch --serve`) deletes small runs inline and, past `delete.batch.threshold`, submits the run to AWS Batch (`disk_tree/batch.py`) — the run keeps `batch_job` set (unfinished, but not re-submitted) until the job's container (`iac/aws/delete-job/`) deletes the objects and writes the result back to D1.
+
+## AWS Batch (`iac/aws/`)
+
+Terraform for the Fargate compute environment + job queue + job definition, with an IAM role scoped to your S3 buckets, and the delete-job container. Fill `terraform.tfvars` from `buckets.yml`:
+
+```bash
+disk-tree iac aws-batch > iac/aws/terraform.tfvars   # project/region/s3_buckets
+# add image (the pushed delete-job container), d1_database_id, subnets, security_group_ids
+cd iac/aws && terraform init && terraform apply
+```
+
+Then point the drainer at it — a `delete.batch` block in `buckets.yml`:
+
+```yaml
+delete:
+  batch: { provider: aws, job_queue: disk-tree-delete, job_definition: disk-tree-delete, threshold: 10000 }
+```
 
 ## `CfnDashboard` (`index.ts`)
 

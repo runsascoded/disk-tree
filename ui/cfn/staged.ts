@@ -41,6 +41,8 @@ export interface DeletionRun {
   skipped_gone: number
   undo_state: string
   undo_deadline: number | null
+  /** CP8: the AWS/GCP Batch job a large run was handed off to; null = inline/CFN. */
+  batch_job: string | null
 }
 
 const nowS = (): number => Math.floor(Date.now() / 1000)
@@ -195,7 +197,7 @@ export async function recordInlineRun(
   ])
   return {
     run_id, plan_id: plan.id, mode: 'real', actor, started_ts: ts, finished_ts: ts,
-    deleted_bytes: bytes, deleted_objects: objects, skipped_gone: 0, undo_state: 'none', undo_deadline: null,
+    deleted_bytes: bytes, deleted_objects: objects, skipped_gone: 0, undo_state: 'none', undo_deadline: null, batch_job: null,
   }
 }
 
@@ -215,6 +217,6 @@ export async function enqueueDispatch(db: D1Database, plan: Plan, actor: string)
   ])
   return {
     run_id, plan_id: plan.id, mode: 'real', actor, started_ts: ts, finished_ts: null,
-    deleted_bytes: 0, deleted_objects: 0, skipped_gone: 0, undo_state: 'none', undo_deadline: null,
+    deleted_bytes: 0, deleted_objects: 0, skipped_gone: 0, undo_state: 'none', undo_deadline: null, batch_job: null,
   }
 }

@@ -194,6 +194,25 @@ def _delete_cfg(config_path: str | None) -> dict:
         return {}
 
 
+def _batch_submitter(batch_cfg: dict | None):
+    """Build a `(submit_fn, threshold)` for the drainer from a `delete.batch`
+    block (`provider: aws`, `job_queue`, `job_definition`, `region?`,
+    `threshold?`), or `(None, None)` when Batch isn't configured."""
+    if not batch_cfg:
+        return None, None
+    import boto3
+
+    from disk_tree.batch import submit_delete_job
+
+    client = boto3.client("batch", region_name=batch_cfg.get("region"))
+    jq, jd = batch_cfg["job_queue"], batch_cfg["job_definition"]
+
+    def submit(run_id: str, uris: list[str]) -> str:
+        return submit_delete_job(client, run_id=run_id, uris=uris, job_queue=jq, job_definition=jd)
+
+    return submit, int(batch_cfg.get("threshold", 10000))
+
+
 def _serve(config_path: str | None, interval: int, once: bool) -> None:
     """The CP4 drainer: execute edge-enqueued runs from D1, here where the
     backend creds live. Exp-backoff polling (base `interval`, up to 5x while
@@ -211,13 +230,21 @@ def _serve(config_path: str | None, interval: int, once: bool) -> None:
         raise SystemExit(f"dispatch --serve: {e}")
     undo_state = delete_cfg.get("undo", "none")
     announce = make_announcer(delete_cfg)
-    err(f"dispatch --serve: draining D1 {d1.database_id} (undo={undo_state}, chat={delete_cfg.get('chat', 'none')})")
+    submit_fn, batch_threshold = _batch_submitter(delete_cfg.get("batch"))
+    err(f"dispatch --serve: draining D1 {d1.database_id} (undo={undo_state}, "
+        f"chat={delete_cfg.get('chat', 'none')}, batch={'on' if submit_fn else 'off'})")
 
     idle = 0
     try:
         while True:
-            summaries = drain_once(d1, size_fn=_size_fn, delete_fn=_delete_fn, undo_state=undo_state, announce=announce)
+            summaries = drain_once(
+                d1, size_fn=_size_fn, delete_fn=_delete_fn, undo_state=undo_state, announce=announce,
+                submit_fn=submit_fn, batch_threshold=batch_threshold,
+            )
             for s in summaries:
+                if s.get("submitted"):
+                    err(f"  submitted {s['run_id']} to Batch job {s['batch_job']} ({s['items']} path(s), over threshold)")
+                    continue
                 err(f"  ran {s['run_id']}: deleted {naturalsize(s['deleted_bytes'])}"
                     f" across {s['deleted_objects']}/{s['items']} object(s)"
                     + (f", {len(s['errors'])} failed" if s['errors'] else ""))

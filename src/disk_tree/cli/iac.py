@@ -39,3 +39,15 @@ def config_cmd(config_path: str | None, project: str):
     from disk_tree.iac import dashboard_config
 
     echo(json.dumps(dashboard_config(load_config(config_path), project=project), indent=2))
+
+
+@iac.command("aws-batch")
+@option("-c", "--config", "config_path", default=None, help="buckets.yml path (default: <DISK_TREE_ROOT>/buckets.yml)")
+@option("-p", "--project", default="disk-tree", help="Batch resource name prefix")
+@option("-r", "--region", default="us-east-1", help="AWS region")
+def aws_batch(config_path: str | None, project: str, region: str):
+    """Emit the Terraform tfvars for the AWS Batch delete executor (`iac/aws/`)."""
+    from disk_tree.cli.sync import load_config
+    from disk_tree.iac import aws_batch_tfvars
+
+    echo(aws_batch_tfvars(load_config(config_path), region=region, project=project), nl=False)
