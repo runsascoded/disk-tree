@@ -179,6 +179,11 @@ disk-tree stage URI…      # Stage URIs for deletion into a shared open plan (s
                           # CP1). The opt-in "delete" model: nothing dies by inaction
 disk-tree staged          # List open plans (staged sets) + recent runs (-j for JSON)
 disk-tree unstage URI…    # Remove URIs from every open plan
+disk-tree undo RUN_ID     # Undo a deletion run: restore the objects it deleted where the store allows
+                          # it (S3/R2 versioning — remove the delete-markers; local/ssh have no undo).
+                          # Dry by default (report restorable scope); `-f`/`--for-real` restores. Records
+                          # the run's `undo_state` (spec staged-delete.md CP5)
+
 disk-tree dispatch [PLAN] # Execute a plan (id/name; default the open `Staged` plan): delete its
                           # staged URIs via the backend, or (default) dry-run + report bytes/objects.
                           # `-f`/`--for-real` deletes + closes the plan; records a run + per-URI bands.

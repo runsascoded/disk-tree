@@ -79,6 +79,35 @@ def test_dispatch_real_deletes_records_and_closes_plan(session):
     assert all(b.deleted == 1 for b in bands)
 
 
+def test_undo_run_restores_deleted_bands_and_sets_full(session):
+    plan, _ = staged.stage(session, [A, B], "ryan")
+    run = staged.dispatch(session, plan, "ryan", for_real=True, delete_fn=lambda u: None, size_fn=lambda u: (100, 3))
+    restored: list[str] = []
+
+    def restore(u):
+        restored.append(u)
+        return 3
+
+    _, results = staged.undo_run(session, run, restore)
+    assert restored == [A, B]                    # every deleted band, in URI order
+    assert results == [(A, 3), (B, 3)]
+    assert run.undo_state == "full"
+
+
+def test_undo_run_partial_when_some_restore_nothing(session):
+    plan, _ = staged.stage(session, [A, B], "ryan")
+    run = staged.dispatch(session, plan, "ryan", for_real=True, delete_fn=lambda u: None, size_fn=lambda u: (1, 1))
+    _, results = staged.undo_run(session, run, lambda u: 2 if u == A else 0)
+    assert results == [(A, 2), (B, 0)]
+    assert run.undo_state == "partial"           # A came back, B didn't
+
+
+def test_restorable_bands_excludes_a_dry_run(session):
+    plan, _ = staged.stage(session, [A], "ryan")
+    dry = staged.dispatch(session, plan, "ryan", for_real=False, delete_fn=lambda u: None, size_fn=lambda u: (1, 1))
+    assert staged.restorable_bands(session, dry) == []   # dry deleted nothing
+
+
 def test_plan_by_ref_resolves_id_name_and_default(session):
     plan, _ = staged.stage(session, [A], "ryan")
     assert staged.plan_by_ref(session, None).id == plan.id     # open Staged
@@ -126,3 +155,11 @@ def test_cli_stage_dry_then_real_delete(tmp_path: Path):
     listed = json.loads(_run_dt(root, "staged", "-j").stdout)
     assert listed["plans"] == []
     assert sorted(r["mode"] for r in listed["runs"]) == ["dry", "real"]
+
+    # `undo` (dry) reports the real run's restorable scope without touching the store
+    real_run = next(r["run_id"] for r in listed["runs"] if r["mode"] == "real")
+    undo = _run_dt(root, "undo", real_run, "-j")
+    assert undo.returncode == 0
+    uj = json.loads(undo.stdout)
+    assert (uj["run_id"], uj["for_real"], uj["paths"]) == (real_run, False, 1)
+    assert uj["objects"] > 0

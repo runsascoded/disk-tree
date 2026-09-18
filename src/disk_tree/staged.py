@@ -24,6 +24,7 @@ STAGED = "Staged"
 
 SizeFn = Callable[[str], "tuple[int, int]"]
 DeleteFn = Callable[[str], None]
+RestoreFn = Callable[[str], int]
 
 
 def _now() -> datetime:
@@ -91,6 +92,34 @@ def plan_by_ref(session: Session, ref: str | None) -> Plan | None:
 
 def items(session: Session, plan: Plan) -> list[PlanItem]:
     return list(session.scalars(select(PlanItem).where(PlanItem.plan_id == plan.id).order_by(PlanItem.uri)))
+
+
+def restorable_bands(session: Session, run: DeletionRun) -> list[DeletionBand]:
+    """The bands a run actually deleted (the undo candidates)."""
+    return list(
+        session.scalars(
+            select(DeletionBand)
+            .where(DeletionBand.run_id == run.run_id, DeletionBand.deleted == 1)
+            .order_by(DeletionBand.uri)
+        )
+    )
+
+
+def undo_run(session: Session, run: DeletionRun, restore_fn: RestoreFn) -> tuple[DeletionRun, list[tuple[str, int]]]:
+    """Restore a run's deleted URIs via ``restore_fn(uri) -> objects restored``
+    (the store's undo — e.g. removing a versioned bucket's delete-markers).
+    Records ``undo_state`` (``full`` every band restored something, ``partial``
+    some did, else unchanged) and returns the per-URI counts."""
+    bands = restorable_bands(session, run)
+    results = [(b.uri, restore_fn(b.uri)) for b in bands]
+    restored_any = any(n for _, n in results)
+    restored_all = bool(results) and all(n for _, n in results)
+    if restored_all:
+        run.undo_state = "full"
+    elif restored_any:
+        run.undo_state = "partial"
+    session.flush()
+    return run, results
 
 
 def dispatch(

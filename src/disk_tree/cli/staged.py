@@ -17,6 +17,7 @@ from utz import err
 
 from disk_tree.cli.base import cli
 from disk_tree.staged_backend import delete_fn as _delete_fn
+from disk_tree.staged_backend import restore_fn as _restore_fn
 from disk_tree.staged_backend import session as _session
 from disk_tree.staged_backend import size_fn as _size_fn
 
@@ -140,6 +141,47 @@ def dispatch_cmd(config_path: str | None, for_real: bool, interval: int, as_json
         return
     verb = "deleted" if for_real else "would delete"
     print(f"{run.run_id}: {verb} {naturalsize(tot_bytes)} across {tot_objs} object(s)")
+
+
+@cli.command("undo")
+@option("-f", "--for-real", is_flag=True, help="Actually restore (default: report what would be restored)")
+@option("-j", "--json", "as_json", is_flag=True, help="Emit JSON")
+@argument("run_id")
+def undo_cmd(for_real: bool, as_json: bool, run_id: str):
+    """Undo a deletion RUN_ID: restore the objects it deleted, where the store
+    allows it (S3/R2 versioning — remove the delete-markers). Dry by default."""
+    from disk_tree.sqla import DeletionRun
+    from disk_tree.staged import restorable_bands, undo_run
+
+    session = _session()
+    run = session.get(DeletionRun, run_id)
+    if run is None:
+        raise SystemExit(f"undo: no run {run_id!r}")
+    bands = restorable_bands(session, run)
+    if not bands:
+        raise SystemExit(f"undo: run {run_id} deleted nothing to restore")
+
+    if not for_real:
+        would = sum(b.objects for b in bands)
+        if as_json:
+            json.dump({"run_id": run_id, "paths": len(bands), "objects": would, "for_real": False}, stdout, indent=2)
+            print()
+            return
+        print(f"{run_id}: would restore {would} object(s) across {len(bands)} path(s) (--for-real to do it)")
+        return
+
+    _, results = undo_run(session, run, _restore_fn)
+    session.commit()
+    total = sum(n for _, n in results)
+    if as_json:
+        json.dump(
+            {"run_id": run_id, "restored": total, "undo_state": run.undo_state,
+             "paths": [{"uri": u, "restored": n} for u, n in results]},
+            stdout, indent=2,
+        )
+        print()
+        return
+    print(f"{run_id}: restored {total} object(s) across {len(results)} path(s); undo_state={run.undo_state}")
 
 
 def _delete_cfg(config_path: str | None) -> dict:

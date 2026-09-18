@@ -67,3 +67,10 @@ def delete_fn(uri: str) -> None:
     from disk_tree.backends import backend_for
 
     backend_for(uri).delete(uri)
+
+
+def restore_fn(uri: str) -> int:
+    """Undo a delete of ``uri`` through its backend (spec CP5); objects restored."""
+    from disk_tree.backends import backend_for
+
+    return backend_for(uri).restore(uri)
