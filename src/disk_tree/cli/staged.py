@@ -10,51 +10,19 @@ from __future__ import annotations
 import json
 import os
 from sys import stdout
-from typing import TYPE_CHECKING, cast
 
 from click import argument, option
 from humanize import naturalsize
 from utz import err
 
 from disk_tree.cli.base import cli
-
-if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+from disk_tree.staged_backend import delete_fn as _delete_fn
+from disk_tree.staged_backend import session as _session
+from disk_tree.staged_backend import size_fn as _size_fn
 
 
 def _who() -> str:
     return os.environ.get("USER") or "local"
-
-
-def _session() -> "Session":
-    """The app DB session, typed as a plain SQLAlchemy `Session` (flask-sqlalchemy's
-    `scoped_session` proxy is API-compatible)."""
-    from disk_tree.sqla import init
-
-    return cast("Session", init().session)
-
-
-def _size_fn(uri: str) -> tuple[int, int]:
-    """(bytes, objects) for ``uri`` from its freshest covering scan; (0, 0) if
-    none is known (the executor still deletes — sizing is for the report)."""
-    from sqlalchemy import select
-
-    from disk_tree.backends import canonical
-    from disk_tree.sqla import Scan, init
-
-    db = init()
-    scan = db.session.scalars(
-        select(Scan).where(Scan.path == canonical(uri)).order_by(Scan.time.desc())
-    ).first()
-    if scan is None or scan.size is None:
-        return 0, 0
-    return scan.size, (scan.n_desc or 0) + 1
-
-
-def _delete_fn(uri: str) -> None:
-    from disk_tree.backends import backend_for
-
-    backend_for(uri).delete(uri)
 
 
 @cli.command("stage")

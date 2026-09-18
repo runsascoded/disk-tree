@@ -153,6 +153,62 @@ export async function deletePath(path: string): Promise<DeleteResult> {
   return res.json()
 }
 
+// ---- staged delete (spec `specs/staged-delete.md`) ------------------------
+
+/** A staged set (open plan) with its URIs, as `GET /api/staged` returns it. */
+export type StagedPlan = {
+  id: number
+  name: string
+  state: 'open' | 'closed'
+  created_by: string
+  created_ts: number
+  items: string[]
+}
+
+/** A recorded run. `finished_ts == null` = enqueued, awaiting the executor. */
+export type StagedRun = {
+  run_id: string
+  plan_id: number
+  mode: string
+  actor: string
+  started_ts: number
+  finished_ts: number | null
+  deleted_bytes: number
+  deleted_objects: number
+}
+
+export type StagedState = { plans: StagedPlan[]; runs: StagedRun[] }
+
+async function postJson<T>(path: string, body: unknown, fallback: string): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    throw new Error(err.error || fallback)
+  }
+  return res.json()
+}
+
+export async function fetchStaged(): Promise<StagedState> {
+  const res = await fetch('/api/staged')
+  if (!res.ok) throw new Error('Failed to fetch staged set')
+  return res.json()
+}
+
+/** Stage URIs into the shared open plan (spec `specs/staged-delete.md`). */
+export const stageUris = (uris: string[], note?: string): Promise<{ plan_id: number; added: string[] }> =>
+  postJson('/api/plans/stage', note ? { uris, note } : { uris }, 'Failed to stage')
+
+export const unstageUris = (uris: string[]): Promise<{ removed: number }> =>
+  postJson('/api/plans/unstage', { uris }, 'Failed to unstage')
+
+/** Dispatch a plan (default the open `Staged`): admin only; enqueues + closes it. */
+export const dispatchPlan = (plan?: string): Promise<{ run_id: string; plan_id: number; items: number; state: string }> =>
+  postJson('/api/dispatch', plan ? { plan } : {}, 'Failed to dispatch')
+
 export async function revealPath(path: string): Promise<void> {
   const res = await fetch('/api/reveal', {
     method: 'POST',

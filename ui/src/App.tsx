@@ -11,6 +11,7 @@ import { RecentList } from './components/RecentList'
 import { CompareView } from './components/CompareView'
 import { BrowsePage } from './components/BrowsePage'
 import { AccessPage } from './components/AccessPage'
+import { StagedPage } from './components/StagedPage'
 import { Gate } from './auth'
 import './App.scss'
 import type { ReactNode } from 'react'
@@ -44,6 +45,7 @@ function App() {
             <Routes>
               <Route path="/" element={<ScanList />} />
               <Route path="/access" element={<AccessPage />} />
+              <Route path="/staged" element={<StagedPage />} />
               <Route path="/file/*" element={<ScanDetails />} />
               <Route path="/s3" element={<S3BucketList />} />
               <Route path="/s3/*" element={<ScanDetails />} />

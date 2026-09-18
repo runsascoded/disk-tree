@@ -85,3 +85,13 @@ export function isSchemeRoot(uri: string): boolean {
 export function supportsDelete(routeType: RouteType): boolean {
   return routeType === 'file' || routeType === 'ssh'
 }
+
+/**
+ * Whether a route's scheme can be *staged* for deletion (spec
+ * `specs/staged-delete.md`): the cloud buckets a server-side executor deletes
+ * with `buckets.yml` creds (`S3Backend.delete` — `aws s3 rm`, R2 via endpoint).
+ * The local/ssh routes delete immediately instead (`supportsDelete`).
+ */
+export function supportsStage(routeType: RouteType): boolean {
+  return routeType === 's3' || routeType === 'r2'
+}

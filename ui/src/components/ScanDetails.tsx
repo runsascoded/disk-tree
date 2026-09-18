@@ -8,7 +8,7 @@ import type { RowSelection } from '../hooks/useRowSelection'
 import { AgeHistograms, age01, ageDomain, ageFade, BytesOverTime, dimUnmatched, parseQuery, StalenessScatter, Treemap as DTTreemap } from '@disk-tree/react'
 import '@rdub/treemap/styles.css'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchScanDetails, fetchScanHistory, fetchHistogram, fetchFilter, startScan, fetchScanStatus, deletePath, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
+import { fetchScanDetails, fetchScanHistory, fetchHistogram, fetchFilter, startScan, fetchScanStatus, deletePath, stageUris, revealPath, fetchFilePreview, DEFAULT_MAX_ROWS } from '../api'
 import type { FilterResult, HistogramChild, Row, ScanJob, ScanProgress, CollapsedRow } from '../api'
 import { VoronoiTreemap } from '@rdub/treemap/voronoi'
 import { VizBoundary } from './VizBoundary'
@@ -24,6 +24,7 @@ import {
   isSchemeRoot,
   segmentsToUri,
   supportsDelete,
+  supportsStage,
   uriToPath,
   type RouteType,
 } from '../schemes'
@@ -289,6 +290,10 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
 }) {
   const caps = useCapabilities()
   const canDelete = supportsDelete(routeType) && caps?.delete === true
+  // Cloud buckets stage instead of deleting immediately (spec `staged-delete.md`).
+  const canStage = supportsStage(routeType) && caps?.stageDelete === true
+  const canAct = canDelete || canStage
+  const actionVerb = canDelete ? 'Delete' : 'Stage'
   // Track whether the collapsed (auto-expanded) rows are shown expanded
   const [collapsedExpanded, setCollapsedExpanded] = useState(true)
 
@@ -319,7 +324,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
           <SortableHeader className="col-numeric" label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
           <SortableHeader className="col-numeric" label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
           <th className="col-action"></th>
-          {canDelete && <th className="col-action"></th>}
+          {canAct && <th className="col-action"></th>}
         </tr>
       </thead>
       <tbody>
@@ -369,7 +374,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
               </Tooltip>
             )}
           </td>
-          {canDelete && <td className="col-action"></td>}
+          {canAct && <td className="col-action"></td>}
         </tr>
         {/* Render collapsed/expanded parent rows (auto-expanded single-child dirs) */}
         {collapsedRows && collapsedRows.map((collapsedRow, depth) => {
@@ -426,15 +431,15 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   </Tooltip>
                 )}
               </td>
-              {canDelete && (
+              {canAct && (
                 <td className="col-action">
-                  <Tooltip title="Delete directory">
+                  <Tooltip title={`${actionVerb} directory`}>
                     <span>
                       <Button
                         size="small"
                         onClick={() => onDelete(collapsedUri)}
                         disabled={isDeleting}
-                        sx={{ minWidth: 0, padding: '2px 4px', color: '#d32f2f' }}
+                        sx={{ minWidth: 0, padding: '2px 4px', color: canDelete ? '#d32f2f' : '#ed6c02' }}
                       >
                         {isDeleting ? <CircularProgress size={14} /> : <FaTrash size={12} />}
                       </Button>
@@ -523,15 +528,15 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
                   </Tooltip>
                 )}
               </td>
-              {canDelete && (
+              {canAct && (
                 <td className="col-action" onClick={e => e.stopPropagation()}>
-                  <Tooltip title={`Delete ${row.kind === 'dir' ? 'directory' : 'file'}`}>
+                  <Tooltip title={`${actionVerb} ${row.kind === 'dir' ? 'directory' : 'file'}`}>
                     <span>
                       <Button
                         size="small"
                         onClick={() => onDelete(childUri)}
                         disabled={deletingPaths.has(childUri)}
-                        sx={{ minWidth: 0, padding: '2px 4px', color: '#d32f2f' }}
+                        sx={{ minWidth: 0, padding: '2px 4px', color: canDelete ? '#d32f2f' : '#ed6c02' }}
                       >
                         {deletingPaths.has(childUri) ? <CircularProgress size={14} /> : <FaTrash size={12} />}
                       </Button>
@@ -1152,6 +1157,7 @@ export function ScanDetails() {
     enabled: !localBrowseUnavailable,
   })
   const [mutationError, setMutationError] = useState<string | null>(null)
+  const [stageNotice, setStageNotice] = useState<string | null>(null)
   const error = queryError?.message || mutationError
   const [scanning, setScanning] = useState(false)
   const [scanJob, setScanJob] = useState<ScanJob | null>(null)
@@ -1179,6 +1185,9 @@ export function ScanDetails() {
   // Live scan progress from SSE
   const scanProgress = useScanProgress()
   const canDelete = supportsDelete(routeType) && caps?.delete === true
+  // Cloud buckets stage into a plan instead of deleting immediately (CP3).
+  const canStage = supportsStage(routeType) && caps?.stageDelete === true
+  const canAct = canDelete || canStage
 
   // Auto-refetch when a scan relevant to this view finishes. A completed scan
   // is *deleted* from `scan_progress` (see ScanProgress.finish), so completion
@@ -1298,7 +1307,7 @@ export function ScanDetails() {
   // Clear selection on a new listing (scan reload); a page/sort/filter change
   // keeps it — use-kbd freezes the active range into pins by key.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { sel.clear() }, [details])
+  useEffect(() => { sel.clear(); setStageNotice(null) }, [details])
 
   // Click outside the wrapper (table + toolbar) deselects.
   useEffect(() => {
@@ -1329,6 +1338,22 @@ export function ScanDetails() {
 
   const handleBulkDelete = async () => {
     if (selectedRows.length === 0) return
+
+    // Cloud buckets stage into a plan (reversible, no deadline) rather than
+    // deleting immediately; an admin dispatches from `/staged`.
+    if (canStage && !canDelete) {
+      const uris = selectedRows.map(r => r.uri)
+      try {
+        const { added } = await stageUris(uris)
+        const dup = uris.length - added.length
+        setStageNotice(`Staged ${added.length} for deletion${dup ? ` (${dup} already staged)` : ''} — review in Staged.`)
+        setMutationError(null)
+      } catch (e) {
+        setMutationError(e instanceof Error ? e.message : 'Failed to stage')
+      }
+      sel.clear()
+      return
+    }
 
     const msg = selectedRows.length === 1
       ? `Delete "${selectedRows[0].path}"?`
@@ -1431,6 +1456,18 @@ export function ScanDetails() {
   }
 
   const handleDelete = async (path: string) => {
+    // Cloud buckets stage into a plan; an admin dispatches from `/staged`.
+    if (canStage && !canDelete) {
+      try {
+        const { added } = await stageUris([path])
+        setStageNotice(added.length ? 'Staged for deletion — review in Staged.' : 'Already staged.')
+        setMutationError(null)
+      } catch (e) {
+        setMutationError(e instanceof Error ? e.message : 'Failed to stage')
+      }
+      return
+    }
+
     const name = path.split('/').pop() || path
     if (!confirm(`Delete "${name}"? This cannot be undone.`)) {
       return
@@ -1646,6 +1683,11 @@ export function ScanDetails() {
       </Box>
       <ScanProgressBanner progress={scanProgress} currentUri={uri} />
       {error && <p style={{ color: 'red' }}>{error}</p>}
+      {stageNotice && (
+        <Alert severity="success" onClose={() => setStageNotice(null)} sx={{ mb: 1 }}>
+          {stageNotice} <Link to="/staged">Staged →</Link>
+        </Alert>
+      )}
       {error_count && error_count > 0 && (
         <PermissionErrorWarning
           errorCount={error_count}
@@ -1679,15 +1721,15 @@ export function ScanDetails() {
                 </Button>
               </Tooltip>
             )}
-            {canDelete && (
-              <Tooltip title={`Delete ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}`}>
+            {canAct && (
+              <Tooltip title={`${canDelete ? 'Delete' : 'Stage'} ${selectedRows.length} item${selectedRows.length === 1 ? '' : 's'}${canDelete ? '' : ' for deletion'}`}>
                 <Button
                   size="small"
                   onClick={handleBulkDelete}
                   startIcon={<FaTrash size={12} />}
-                  sx={{ minWidth: 0, color: '#d32f2f' }}
+                  sx={{ minWidth: 0, color: canDelete ? '#d32f2f' : '#ed6c02' }}
                 >
-                  Delete
+                  {canDelete ? 'Delete' : 'Stage'}
                 </Button>
               </Tooltip>
             )}

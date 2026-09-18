@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { AppBar, Toolbar, Typography, Button, Box, Tooltip, Popover, List, ListItem, ListItemText, Chip, Alert, ToggleButton, ToggleButtonGroup } from '@mui/material'
-import { FaCloud, FaDatabase, FaFolder, FaHistory, FaCog } from 'react-icons/fa'
+import { FaCloud, FaDatabase, FaFolder, FaHistory, FaCog, FaTrash } from 'react-icons/fa'
 import { useQuery } from '@tanstack/react-query'
 import { fetchAvailableBackends } from '../api'
 import { useCapabilities } from '../hooks/useCapabilities'
@@ -16,6 +16,7 @@ export function Header() {
   const isLocalPage = path.startsWith('/file')
   const isS3Page = path.startsWith('/s3')
   const isRecentPage = path === '/recent'
+  const isStagedPage = path === '/staged'
   const [units, setUnits] = useUnits()
 
   // Backend popover state
@@ -87,6 +88,18 @@ export function Header() {
           >
             Recent
           </Button>
+          {/* Staged-delete queue: shown wherever the deployment supports it. */}
+          {caps?.stageDelete && (
+            <Button
+              component={Link}
+              to="/staged"
+              startIcon={<FaTrash />}
+              variant={isStagedPage ? 'contained' : 'text'}
+              size="small"
+            >
+              Staged
+            </Button>
+          )}
         </Box>
 
         {caps?.library && <LibrarySwitcher />}

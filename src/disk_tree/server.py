@@ -2255,6 +2255,120 @@ def delete_path():
     })
 
 
+# ---- staged delete (spec `specs/staged-delete.md`) ------------------------
+# The HTTP surface behind the `/staged` UI, over the CP1 engine. The Cloudflare
+# edge (`ui/cfn/stagedRoutes.ts`) implements the same shapes but *enqueues* a run
+# (it can't reach arbitrary buckets); the Flask peer deletes inline (local-confirm).
+
+def _staged_who() -> str:
+    """Actor for a staged action on the local (ungated) server."""
+    return os.environ.get('USER') or 'local'
+
+
+def _staged_epoch(dt) -> int | None:
+    """A model `datetime` as epoch seconds, matching the edge's D1 shape."""
+    return int(dt.timestamp()) if dt is not None else None
+
+
+def _staged_uris(data):
+    uris = data.get('uris')
+    if not isinstance(uris, list) or not uris or not all(isinstance(u, str) for u in uris):
+        return None
+    return uris
+
+
+@app.route('/api/staged')
+def api_staged():
+    """Open plans (staged sets) with their URIs, plus the recent runs feed."""
+    from sqlalchemy import select
+    from disk_tree.sqla import DeletionRun, Plan
+    from disk_tree.staged import items
+    from disk_tree.staged_backend import session
+
+    s = session()
+    plans = list(s.scalars(select(Plan).where(Plan.state == 'open').order_by(Plan.id)))
+    runs = list(s.scalars(select(DeletionRun).order_by(DeletionRun.started_ts.desc()).limit(20)))
+    return jsonify({
+        'plans': [
+            {
+                'id': p.id, 'name': p.name, 'state': p.state, 'created_by': p.created_by,
+                'created_ts': _staged_epoch(p.created_ts), 'items': [it.uri for it in items(s, p)],
+            }
+            for p in plans
+        ],
+        'runs': [
+            {
+                'run_id': r.run_id, 'plan_id': r.plan_id, 'mode': r.mode, 'actor': r.actor,
+                'started_ts': _staged_epoch(r.started_ts), 'finished_ts': _staged_epoch(r.finished_ts),
+                'deleted_bytes': r.deleted_bytes, 'deleted_objects': r.deleted_objects,
+            }
+            for r in runs
+        ],
+    })
+
+
+@app.route('/api/plans/stage', methods=['POST'])
+def api_stage():
+    """Stage URIs into the shared open plan."""
+    from disk_tree.staged import stage
+    from disk_tree.staged_backend import session
+
+    uris = _staged_uris(request.get_json() or {})
+    if uris is None:
+        return jsonify({'error': '`uris` must be a non-empty array of strings'}), 400
+    note = (request.get_json() or {}).get('note')
+    s = session()
+    plan, added = stage(s, uris, _staged_who(), note)
+    s.commit()
+    return jsonify({'plan_id': plan.id, 'added': added})
+
+
+@app.route('/api/plans/unstage', methods=['POST'])
+def api_unstage():
+    """Remove URIs from every open plan."""
+    from disk_tree.staged import unstage
+    from disk_tree.staged_backend import session
+
+    uris = _staged_uris(request.get_json() or {})
+    if uris is None:
+        return jsonify({'error': '`uris` must be a non-empty array of strings'}), 400
+    s = session()
+    removed = unstage(s, uris)
+    s.commit()
+    return jsonify({'removed': removed})
+
+
+@app.route('/api/dispatch', methods=['POST'])
+def api_dispatch():
+    """Dispatch a plan. The local server deletes inline (`for_real`, default
+    true); pass `for_real=false` for a dry report."""
+    from disk_tree.staged import dispatch, items, plan_by_ref
+    from disk_tree.staged_backend import delete_fn, session, size_fn
+
+    data = request.get_json(silent=True) or {}
+    ref = data.get('plan')
+    for_real = bool(data.get('for_real', True))
+    s = session()
+    plan = plan_by_ref(s, ref)
+    if plan is None:
+        return jsonify({'error': f'no plan {ref or "(open Staged)"}'}), 404
+    if plan.state != 'open':
+        return jsonify({'error': f'plan {plan.id} is already {plan.state}'}), 409
+    its = items(s, plan)
+    if not its:
+        return jsonify({'error': f'plan {plan.id} has no staged items'}), 400
+    run = dispatch(s, plan, _staged_who(), for_real=for_real, delete_fn=delete_fn, size_fn=size_fn)
+    s.commit()
+    if for_real:
+        # Deleted objects — drop cached scan slices so the next read is fresh.
+        _cache.clear()
+    return jsonify({
+        'run_id': run.run_id, 'plan_id': plan.id, 'mode': run.mode, 'items': len(its),
+        'deleted_bytes': run.deleted_bytes, 'deleted_objects': run.deleted_objects,
+        'state': 'done' if for_real else 'dry',
+    })
+
+
 #: What this server can do — the live Flask peer can do everything. The static
 #: Cloudflare Pages deployment (`ui/functions/api/capabilities.ts`) answers the
 #: same shape with most of these off, and the UI hides those affordances. Keep
