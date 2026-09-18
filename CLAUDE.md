@@ -189,6 +189,13 @@ disk-tree dispatch [PLAN] # Execute a plan (id/name; default the open `Staged` p
                           # per-run results to Slack/Discord per the `delete:` block in buckets.yml
                           # (`chat`/`undo`/`database_id` + secret ENV VAR NAMES); needs `notify` for chat
 
+disk-tree iac r2-bindings # Generate deployment config from buckets.yml (spec staged-delete.md CP8):
+                          # `r2-bindings` emits the `[[r2_buckets]]` wrangler.toml blocks binding each
+disk-tree iac config      # configured R2 bucket for the edge CFN executor (CP7); `config` emits the
+                          # `CfnDashboard` Pulumi component config (JSON). One source of truth from
+                          # buckets.yml. The Pulumi component lives in `iac/` (applied where the
+                          # `@pulumi` SDK + CF creds live, not this repo)
+
 disk-tree migrate         # Backfill SQLite stats from parquet files
 disk-tree migrate-depth   # Add depth column to existing parquets
 

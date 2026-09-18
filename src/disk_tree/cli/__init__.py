@@ -1,2 +1,2 @@
 from .base import cli
-from . import access, bulk_list, capture, diff, diff_index, digest, du, filter, histogram, import_listing, index, migrate, overcount, reclaim, repos, scans, series, snapshots, staged, sync, vocab
+from . import access, bulk_list, capture, diff, diff_index, digest, du, filter, histogram, iac, import_listing, index, migrate, overcount, reclaim, repos, scans, series, snapshots, staged, sync, vocab
