@@ -37,6 +37,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
@@ -59,4 +64,22 @@ jobs:
             echo "::group::index r2://$b"
             uv run disk-tree index -C -q -D "r2://$b" --to r2://disk-tree-demo/scans/
             echo "::endgroup::"
+          done
+
+      - name: Refresh OG cards (tier A)
+        # Capture each bucket's live treemap → R2 `og/r2/<bucket>.jpg`, which the
+        # `/og/<key>` Function serves ahead of the bundled seed cards. Best-effort:
+        # a capture flake must never fail the scan run (the seeds stay valid).
+        continue-on-error: true
+        working-directory: ui
+        run: |
+          set -euo pipefail
+          # Let the Pages Functions' 60s scan-list cache expire so the capture
+          # reflects the scan just uploaded.
+          sleep 70
+          npm i --no-save puppeteer@23
+          node scripts/og-capture.mjs
+          for b in nj-crashes jc-taxes ctbk; do
+            aws s3 cp "og-out/$b.jpg" "s3://disk-tree-demo/og/r2/$b.jpg" \
+              --endpoint-url "$DISK_TREE_R2_ENDPOINT_URL" --content-type image/jpeg
           done
