@@ -15,7 +15,8 @@
     "cfn:migrate:local": "wrangler d1 migrations apply disk-tree-auth --local",
     "scrns": "scrns -c scrns.config.json -h 5001 -o ../screenshots",
     "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "test:e2e:ui": "playwright test --ui",
+    "scrns:live": "scrns -c scrns.config.json -h r2.rbw.sh --https -o ../screenshots -i treemap"
   },
   "dependencies": {
     "@disk-tree/react": "workspace:*",
