@@ -39,6 +39,16 @@ export function LifecycleFold({ store, asof, prevScan, note }: {
   const prevQ = useLifecycle(store, prevScan)
   const rules = curQ.data
   const rows = rules ? lifecycleDiffByBucket(prevQ.data ?? null, rules) : []
+  // Natural order within each bucket (the raw list is lexical — `ttl-14d` before
+  // `ttl-1d`, `ttl-30d` before `ttl-3d`): whole-bucket rules (no `ttl=Nd`) first,
+  // then TTL rules by ascending days. Buckets stay in first-seen order (stable
+  // sort keeps cross-bucket pairs put), so blanking repeats groups them.
+  const ttlDays = (r: (typeof rows)[number]['rule']): number => {
+    const m = /ttl=?-?(\d+)\s*d/.exec(rulePrefix(r) || r.ID)
+    return m ? Number(m[1]) : -1
+  }
+  const sortedRows = [...rows].sort((a, b) =>
+    a.bucket !== b.bucket ? 0 : (ttlDays(a.rule) - ttlDays(b.rule)) || a.rule.ID.localeCompare(b.rule.ID))
   const loading = !!asof && curQ.isPending
   const nRules = rules ? Object.values(rules).reduce((n, rs) => n + rs.length, 0) : 0
   const nBuckets = rules ? Object.keys(rules).length : 0
@@ -57,9 +67,12 @@ export function LifecycleFold({ store, asof, prevScan, note }: {
             <tr>{nBuckets > 1 && <th>bucket</th>}<th>rule</th><th>prefix</th><th>action</th><th>status</th></tr>
           </thead>
           <tbody>
-            {rows.map(({ bucket, rule, change, prev }) => (
-              <tr key={`${bucket}/${rule.ID}:${change ?? ''}`} className={change === 'removed' ? 'removed' : undefined}>
-                {nBuckets > 1 && <td className="id">{bucket}</td>}
+            {sortedRows.map(({ bucket, rule, change, prev }, i) => {
+              const firstOfBucket = i === 0 || sortedRows[i - 1].bucket !== bucket
+              const cls = [change === 'removed' ? 'removed' : '', firstOfBucket && i > 0 ? 'bucket-start' : ''].filter(Boolean).join(' ') || undefined
+              return (
+              <tr key={`${bucket}/${rule.ID}:${change ?? ''}`} className={cls}>
+                {nBuckets > 1 && <td className="id bucket">{firstOfBucket ? bucket : ''}</td>}
                 <td className="id">
                   {rule.ID}
                   {change === 'new' && <span className="chip new">new</span>}
@@ -78,7 +91,8 @@ export function LifecycleFold({ store, asof, prevScan, note }: {
                 <td>{describeRule(rule)}</td>
                 <td>{rule.Status}</td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
         </div>

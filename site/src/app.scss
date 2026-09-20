@@ -1638,6 +1638,13 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
 .children-tbl { margin-top: 10px; }
 // Row selection (rowSelection.ts) on the children table: the checkbox
 // column, the cursor / selected row tints, and the bulk bar docked below.
+// Lifecycle table: group rows by bucket — the bucket cell shows once per group,
+// with a divider above each new bucket so the (many) per-TTL rules read as a set.
+.lifecycle-tbl {
+  td.bucket { color: var(--ink-2); white-space: nowrap; }
+  tr.bucket-start > td { border-top: 1px solid var(--rule, rgba(128, 128, 128, 0.28)); }
+}
+
 .worklist.selectable {
   tbody tr { cursor: default; }
   tr.sel td { background: color-mix(in oklab, var(--s1) 14%, transparent); }
