@@ -296,37 +296,49 @@ export function DiffHeader({ model, controls }: { model: DiffModel | null; contr
   )
 }
 
-/** The root movement table: bytes and objects, each decomposed as
- *  start − removed + added (⊕ first scanned) = end (±Δ), columns shared so the
- *  two rows line up. */
+/** One movement row: `start − removed + added (⊕ first) = end (±Δ)`, in the
+ *  shared `.diff-move` columns so rows line up. */
+interface MoveRow {
+  label: string
+  old: number; removed: number; added: number; neu: number; delta: number; first?: number
+  fmt: (n: number) => string; fmtD: (n: number) => string
+  eq?: string; suffix?: string
+}
+
+/** The movement table (bytes + objects), used for both the whole-diff totals
+ *  (resting drawer) and a hovered cell — one format + font everywhere. Columns
+ *  are always shown (even a `− 0`), so a cell reads the same as the root. */
+function MoveTable({ rows, showFirst }: { rows: MoveRow[]; showFirst?: boolean }) {
+  return (
+    <table className="diff-move">
+      <tbody>
+        {rows.map(r => (
+          <tr key={r.label}>
+            <th>{r.label}</th>
+            <td>{r.fmt(r.old)}</td>
+            <td className="shrank">− {r.fmt(r.removed)}</td>
+            <td className="grew">+ {r.fmt(r.added)}</td>
+            {showFirst && <td className="first">{r.first ? `⊕ ${r.fmt(r.first)}` : ''}</td>}
+            <td className="eq">{r.eq ?? '='} {r.fmt(r.neu)}{r.suffix ?? ''}</td>
+            <td className={r.delta >= 0 ? 'grew' : 'shrank'}>({r.fmtD(r.delta)})</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
+/** The root movement table: bytes and objects (compact sig-figs). */
 function DiffStats({ model }: { model: DiffModel }) {
   const { data, root, added, removed, n_added, n_removed, grew, grewN, firstScanned, firstScannedN,
     fmtBytes, fmtDelta, fmtC, fmtCDelta } = model
   const bEq = data.truncated || added - removed !== root.delta ? '≈' : '='
   const nEq = data.truncated || n_added - n_removed !== root.n_desc_delta ? '≈' : '='
   return (
-    <table className="diff-move">
-      <tbody>
-        <tr>
-          <th>bytes</th>
-          <td>{fmtBytes(root.size_old)}</td>
-          <td className="shrank">− {fmtBytes(removed)}</td>
-          <td className="grew">+ {fmtBytes(grew)}</td>
-          {firstScanned > 0 && <td className="first">⊕ {fmtBytes(firstScanned)}</td>}
-          <td className="eq">{bEq} {fmtBytes(root.size_new)}</td>
-          <td className={root.delta >= 0 ? 'grew' : 'shrank'}>({fmtDelta(root.delta)})</td>
-        </tr>
-        <tr>
-          <th>objects</th>
-          <td>{fmtC(root.n_old)}</td>
-          <td className="shrank">− {fmtC(n_removed)}</td>
-          <td className="grew">+ {fmtC(grewN)}</td>
-          {firstScanned > 0 && <td className="first">⊕ {fmtC(firstScannedN)}</td>}
-          <td className="eq">{nEq} {fmtC(root.n_new)}</td>
-          <td className={root.n_desc_delta >= 0 ? 'grew' : 'shrank'}>({fmtCDelta(root.n_desc_delta)})</td>
-        </tr>
-      </tbody>
-    </table>
+    <MoveTable showFirst={firstScanned > 0} rows={[
+      { label: 'bytes', old: root.size_old, removed, added: grew, neu: root.size_new, delta: root.delta, first: firstScanned, fmt: fmtBytes, fmtD: fmtDelta, eq: bEq },
+      { label: 'objects', old: root.n_old, removed: n_removed, added: grewN, neu: root.n_new, delta: root.n_desc_delta, first: firstScannedN, fmt: fmtC, fmtD: fmtCDelta, eq: nEq },
+    ]} />
   )
 }
 
@@ -459,22 +471,12 @@ export function DiffTreemap({ model, onDrill }: {
         renderTooltip={n => (
           <>
             <div style={{ fontWeight: 500 }}>{n.key}{n.first ? ' (first scanned)' : ''}</div>
-            <div style={{ opacity: 0.85, fontSize: '0.85em', fontVariantNumeric: 'tabular-nums' }}>
-              {fmtBytes(n.size_old)}
-              {n.removed > 0 && <> <span className="shrank">− {fmtBytes(n.removed)}</span></>}
-              {n.added > 0 && <> <span className="grew">+ {fmtBytes(n.added)}</span></>}
-              {' '}= {fmtBytes(n.size_new)}{' '}
-              <span className={n.delta >= 0 ? 'grew' : 'shrank'}>({fmtDelta(n.delta)})</span>
-            </div>
-            {n.status !== 'filler' && (
-              <div style={{ opacity: 0.75, fontSize: '0.85em', fontVariantNumeric: 'tabular-nums' }}>
-                {fmtN(n.n_old)}
-                {n.n_removed > 0 && <> <span className="shrank">− {fmtN(n.n_removed)}</span></>}
-                {n.n_added > 0 && <> <span className="grew">+ {fmtN(n.n_added)}</span></>}
-                {' '}= {fmtN(n.n_new)} obj{' '}
-                <span className={n.n_desc_delta >= 0 ? 'grew' : 'shrank'}>({fmtNDelta(n.n_desc_delta)})</span>
-              </div>
-            )}
+            <MoveTable rows={[
+              { label: 'bytes', old: n.size_old, removed: n.removed, added: n.added, neu: n.size_new, delta: n.delta, fmt: fmtBytes, fmtD: fmtDelta },
+              ...(n.status !== 'filler'
+                ? [{ label: 'objects', old: n.n_old, removed: n.n_removed, added: n.n_added, neu: n.n_new, delta: n.n_desc_delta, fmt: fmtN, fmtD: fmtNDelta, suffix: ' obj' }]
+                : []),
+            ]} />
             <div style={{ opacity: 0.5, fontSize: '0.75em', marginTop: 2 }}>
               {n.status === 'filler' ? 'unchanged bytes the diff never needed to enumerate'
                 : n.fs ? 'first scanned — entered the scan this interval, not written in it'
