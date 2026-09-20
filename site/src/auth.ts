@@ -9,8 +9,14 @@ import { displayName, useForgetWhoami, useWhoami, type Whoami, type WhoamiSource
 // flag. `edge` = the whole host sits behind a CF Access gate (cw-s3.oa.dev:
 // `/cdn-cgi/access/get-identity`, sign-in bounces through `/login`); `app`
 // (default) = the app session (`/api/auth/whoami`, minted at `/auth/sso`).
-export const AUTH_MODE: 'app' | 'edge' = import.meta.env.VITE_AUTH_MODE === 'edge' ? 'edge' : 'app'
-export const WHOAMI_SOURCE: WhoamiSource = { kind: AUTH_MODE }
+// `public` = no gate (r2.rbw.sh, per-project embeds): the app renders for an
+// anonymous viewer, no whoami fetch or login wall (specs/federated-scans.md).
+export const AUTH_MODE: 'app' | 'edge' | 'public' =
+  import.meta.env.VITE_AUTH_MODE === 'edge' ? 'edge'
+    : import.meta.env.VITE_AUTH_MODE === 'public' ? 'public'
+      : 'app'
+// The whoami source only applies to the gated modes; public bypasses the Gate.
+export const WHOAMI_SOURCE: WhoamiSource = { kind: AUTH_MODE === 'edge' ? 'edge' : 'app' }
 
 // `?wall` forces the wall in dev (which otherwise short-circuits to authed,
 // since neither identity source exists locally). A real `oa_auth` cookie

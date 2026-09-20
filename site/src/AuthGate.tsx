@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { AuthGate as Gate } from '@open-athena/auth/react'
-import { DEV_IDENTITY, signInUrl, WHOAMI_SOURCE } from './auth'
+import { AUTH_MODE, DEV_IDENTITY, signInUrl, WHOAMI_SOURCE } from './auth'
 import { DEFAULT_STORE } from './stores'
 
 // Gate the human-facing routes on an identity: the app session on gcs.oa.dev
@@ -9,6 +9,9 @@ import { DEFAULT_STORE } from './stores'
 // + og:image stay publicly crawlable for link unfurls either way — crawlers
 // read the og: meta from <head> regardless of which body we render.
 export function AuthGate({ children }: { children: ReactNode }) {
+  // Public deploys (r2.rbw.sh, per-project embeds): no gate — render for an
+  // anonymous viewer (server grants the base scope via PUBLIC_READ).
+  if (AUTH_MODE === 'public') return <>{children}</>
   return (
     <Gate source={WHOAMI_SOURCE} devIdentity={DEV_IDENTITY} signIn={<LoginWall />}>
       {children}

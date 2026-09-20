@@ -62,6 +62,11 @@ export interface Env {
   EDGE_TRUSTED?: string
   /** The scope every viewer of this deployment needs (`gcs` | `cw`). */
   BASE_SCOPE?: string
+  /** Public/no-gate deploys (r2.rbw.sh, per-project embeds): grant the base
+   *  viewer scope anonymously so read endpoints serve without auth. Admin and
+   *  any non-base scope still require a real identity, so mutations stay closed
+   *  (specs/federated-scans.md). */
+  PUBLIC_READ?: string
   /** The store root's crumb label (`marin GCS`, `marin CoreWeave`). */
   ROOT_LABEL?: string
   /** Snapshot dir of this store inside the data bucket (`snapshots/<sub>/`); unset = the bare `snapshots/`. */
@@ -122,7 +127,7 @@ export interface Identity {
   scopes: string[]
   /** `admin` scope, as a flag — what the plan-first sweep console keys on. */
   admin: boolean
-  via: 'edge' | 'session' | 'grant'
+  via: 'edge' | 'session' | 'grant' | 'public'
 }
 const withAdmin = (id: Omit<Identity, 'admin'>): Identity => ({ ...id, admin: id.scopes.includes(ADMIN_SCOPE) || id.scopes.includes('*') })
 
@@ -185,6 +190,14 @@ export async function identify(ctx: Ctx): Promise<Identity | null> {
 
 /** Gate a handler on a scope; 401/403 as JSON. */
 export async function requireScope(ctx: Ctx, scope: string): Promise<Identity | Response> {
+  // Public deploy: the base viewer scope is granted anonymously so read
+  // endpoints serve without auth. A real identity (if the deploy also has a
+  // gate) still wins; any non-base scope (admin, other stores) falls through
+  // to the normal gate, so mutations stay closed (specs/federated-scans.md).
+  if (ctx.env.PUBLIC_READ && scope === baseScope(ctx.env)) {
+    const id = await identify(ctx)
+    return id ?? { email: null, name: null, scopes: [baseScope(ctx.env)], admin: false, via: 'public' }
+  }
   const id = await identify(ctx)
   if (!id) return json({ error: 'unauthenticated' }, 401)
   if (!id.scopes.includes(scope) && !id.scopes.includes('*')) return json({ error: 'forbidden' }, 403)
