@@ -1,77 +1,94 @@
 # disk-tree as the shared base for the cloud-usage viewers
 
-Status: **in progress** (2026-09-20). Union view + single-cloud collapse landed (`786b5bb`). **Direction (2026-09-20): disk-tree `main` is the shared base; the public Map shell (`site/`) + ingestion (`cloud/`) get hoisted *into* this repo from mgu, and all public deploys build from it.** mgu is a fork of disk-tree (merge-base `109ab11`, 2026-08-19), so this is a **code move (CP/`mv`), not a from-scratch build.**
+Status: **in progress** (2026-09-20). Union view + single-cloud collapse landed (`786b5bb`). Phase-1 hoist of raw `m/gcs` (`76a07ad`) was the **wrong source** — superseded below.
+
+**Direction (decided 2026-09-20):** disk-tree `cloud` is the canonical base for every cloud-storage-usage viewer. mgu already has a mature convergence in flight (`m/cw-s3:specs/convergence.md` — "one codebase, deployments as configuration"), whose own endgame is to upstream the union to disk-tree. So: **mgu finishes its convergence; disk-tree adopts the union tip (`m/cw-s3`) as the base and builds the r2/public layer convergence.md doesn't cover; then adopts mgu's converged `main`.** One convergence, not two.
 
 ## Goal
 
-disk-tree `main` is the **canonical base** for every cloud-storage-usage viewer:
-- **r2.rbw.sh** — public R2 bucket viewer (ctbk, crashes, jc-taxes).
-- **gcs.oa.dev / cw-s3.oa.dev** (mgu `site/`) — cloud-usage maps (auth-gated, owner/marks on gcs).
-- a future **multi-cloud/local superset** (disky/blobby.rbw.sh, rename TBD) — the full scan-manager.
+disk-tree `cloud` is the base for:
+- **r2.rbw.sh** — public R2 bucket viewer (ctbk, crashes, jc-taxes). **anonymous / no auth.**
+- **gcs.oa.dev / cw-s3.oa.dev** (mgu) — cloud-usage maps, auth-gated (owner/marks on gcs).
+- future **rac/oa clouds** — other personal/OA blob stores, public or gated.
+- (later) a **multi-cloud/local superset** — disk-tree's `ui/` scan-manager (own domain, TBD).
 
-Each deploy differs only in **config** (schemes/buckets, capabilities, auth on/off, store), never in forked view code. Where disk-tree and mgu each have a *better* implementation of a feature, the base takes it and the other deploy **adopts** it — merge, not replace. Instance that surfaced this: **mgu's static OG → disk-tree's dynamic edge-rendered OG.**
+Each deploy differs only in **config** (a `Store` row + wrangler vars/secrets + D1), never in forked view code.
 
-## The key fact — mgu is a fork; its Map is two additive subtrees
+## The key facts (established 2026-09-20 by two branch investigations + `convergence.md`)
 
-`git merge-base main m/gcs` = `109ab11` (2026-08-19). Divergence: 199 disk-tree-only vs 642 mgu-only commits. The entire mgu Map app lives in **two directories disk-tree does not have** (purely additive — zero conflict on checkout):
-- **`site/`** (207 files) — the public Map SPA + all CF Functions (`subtree`/`diff`/`series`/`estate`/…), the **D1-tiers** reader/index (`site/functions/_lib/index.ts`, `view.ts`), `SiteNav.tsx`, `stores.ts`. Imports `@rdub/treemap` + `@disk-tree/react` as **`workspace:*`** — already built to resolve the shared libs from a monorepo `packages/*` (which disk-tree is).
-- **`cloud/`** (57 files) — the `dt_cloud` ingestion CLI (listing → build-index → `index-tiers` → `index-sync` → D1), built on `src/disk_tree`.
+**mgu is a fork of disk-tree** (merge-base `109ab11`, 2026-08-19). It has two live deploy branches and an in-flight unification:
 
-So bringing the Map into disk-tree is `git checkout m/gcs -- site/ cloud/` + `pnpm-workspace` add `"site"` + reconcile against disk-tree's (ahead) `packages/*`/`src/disk_tree`. **Not** designing `/api/subtree`, D1-tiers, or Map chrome — they exist.
+- **`m/denovo-land`** (2026-09-16) = the **union** of gcs+cw: every feature of both deploys present, gated so each store behaves as today. It is an **ancestor of `m/cw-s3`** (cw-s3 = union + 57 purely-additive commits).
+- **`m/cw-s3`** (the union tip, actively advancing) — the base to adopt. = denovo-land + age-index pyramid, treemap-first-class diff-mode, root-geneses, scan-picker, filter-views. Purely additive over the union; zero deletions.
+- **`m/gcs`** is **not** a descendant of the union — a divergent deploy that *stripped* the cw stack (net −2369 lines: `sweep.py`, `cw_digest.py`, `cwBatch.ts`, `plan-sweep/*`) and added its own features (below). Its *additions* are the fold-in signal, but that fold-in is **mgu's job** (convergence.md).
 
-## Already shared (the floor)
+### The variant contract (two axes — already built)
 
-Both apps build on the same libraries — `@rdub/treemap` (core `Treemap`/`squarify`/layout/colors/diff) and `@disk-tree/react` (re-export + `StalenessScatter`/`AgeHistograms`/`BytesOverTime`). mgu `site/` and disk-tree `ui/` are two *shells* over this floor. The hoist brings the `site/` shell + `cloud/` ingestion home too, so the whole viewer base — not just the libs — lives in this repo.
+1. **`Store` descriptor** (`site/src/stores.ts`) — compile-time rows, resolved per-URL by `storeForPath()`:
+   ```ts
+   interface Store { key; label; title; desc; path; scheme; base; ogImage;
+     prices: boolean; marks: boolean; sweep: 'owner'|'plan'; lifecycle?; peer? }
+   ```
+   gcs vs cw = which rows ship + these flags (`marks`/`sweep`/`prices`/`lifecycle`/`scheme`).
+2. **Env config** (denovo 11/12's real win — per-deploy constants → env): `INDEX_VARIANTS` (which parquet tiers: gcs `path,user`, cw `path`), `BASE_SCOPE`, `EDGE_TRUSTED`, `D1_DB_ID/NAME`, `WARM_PATHS`, `ROOT_LABEL`. Python writer (`cloud/src/dt_cloud/index_footer.py`) + TS reader (`site/functions/_lib/index.ts:indexKey`) mirror the variant set.
+3. **Auth as config**: server `BASE_SCOPE` + `EDGE_TRUSTED` (whole-host CF-Access edge gate vs app-gated D1 session); client `VITE_AUTH_MODE` (`edge`|`app`).
 
-## The two shells (both end up here)
+## Division of labor
 
-| | disk-tree `ui/` → **superset** (disky) | mgu `site/` → **public Map** (r2/gcs/cw) |
-|---|---|---|
-| Chrome | scan-manager: Scans/Recent/Local/S3, live scan, delete | Map-first: ☰ menu, "all buckets" root, scope controls |
-| Landing treemap | `UnionTreemap` — flat bucket leaves | "the Map" — deeply nested pixel-budget subtree |
-| Read backend | per-`<uuid>` parquet, direct hyparquet footer reads | tiered parquets + **D1** footer index (`d1-tiers`) |
-| OG | **dynamic** edge-rendered | static pre-gen → **adopts disk-tree's dynamic** |
-| owners/marks/sweep, storage-class/write-time | — | ledger (gcs; off for cw) + per-node columns |
+### mgu's lane (convergence.md — do NOT duplicate here)
 
-`ui/` is the superset shell; `site/` is the public shell. Both live in disk-tree; a deploy picks one.
+Finish the 4 "seams" + fold gcs's config-delta, landing one converged `main`:
+1. Two sweep executors → plan-first model + per-cloud adapters (`GcsStore`/`CaiosStore`), one `/sweep`.
+2. Two mark ledgers → gcs's `actions` WAL; cw's marks become action kinds.
+3. Two D1 lineages → one renumbered `IF NOT EXISTS` lineage applied to both databases (the `site/migrations/{cw,gcs}/` split is the interim guard). **Unbuilt; hardest.**
+4. Two digests → engine + per-store content profile.
+Plus fold gcs's A-delta (`m/gcs:specs/cp-from-cw-s3-2026-09-16.md`, 50 files) so `cw-s3..gcs` is deployment-only.
 
-## Backend — standardize on `d1-tiers` (decided)
+gcs's fold-in BASE features (all mgu-owned): guest-chip/grant-subject auth + read-only scope + rotate, help/edu-drawer (also on cw → converge), plans-absorbs-marks refactor, page-scope-bar, lifecycle engine, over-time x-range picker, treemap reflow-on-resize.
 
-Not a real fork. `direct` (disk-tree's no-D1 footer reads) buys only ops simplicity, which is moot: the gated deploy already runs a D1 (`disk-tree-auth`), so the footer index is new *tables*, not a new binding — and `d1-tiers` is required for gcs/marin scale (34M dirs) regardless. Two backends would violate "one base." Every deploy uses `site/`'s `d1-tiers` reader; r2.rbw.sh gains a D1 + the tier/index-sync ingestion (trivial at ctbk/crashes scale).
+### disk-tree's lane (what convergence.md does NOT cover — OA's two deploys never needed it)
 
-## Naming
+1. **Public/no-gate auth mode.** Every mgu deploy requires a `baseScope`; `requireViewer` always gates; there is no anonymous mode (only read-only guest share links). r2.rbw.sh + future public clouds need a real `BASE_SCOPE=public` / gate-bypass. **Build it in `site/functions/_lib/auth.ts` + client `AUTH_MODE`.**
+2. **Env-generalize `makeStore`.** `site/functions/_lib/index.ts` hardcodes `endpoint: 'storage.googleapis.com'` + `BUCKET = 'oa-gcs-usage-dvx'` (only HMAC creds are env-driven). Lift `endpoint`/`bucket`/`region`/`prefixes` into `Env` or the `Store` descriptor so r2/s3/gcs each point at their own store. `S3Store` is already S3-compatible; just thread the config.
+3. **r2 variant + D1 + ingestion.** Add an `r2` `Store` row (ctbk/crashes/jc-taxes) + wrangler vars; stand up a D1 + the `dt_cloud` tier/index-sync ingestion (trivial at ctbk/crashes scale) over R2. Deploy `site/` at r2.rbw.sh.
+4. **Shared packages as the superset.** `@rdub/treemap` + `@disk-tree/react` live here. cw-s3's `site/` uses `pendingCell` + `tipMode:'dock'` (cw additions) — keep DT's packages a superset (port the deltas; `tipMode` already ported in `76a07ad`).
+5. **Dynamic edge-OG** into `site/` (DT owns it; mgu has only static per-user avatars) — later.
 
-`dt_cloud`'s `webdata` (listing → `path-index.parquet` + layer-3 JSONs) is a bad name — rename during the hoist. Candidates: `web-index` (pairs with `index-tiers`/`index-sync`) or `publish`. Final pick TBD (user's call).
+### Adoption / merge protocol
+
+- disk-tree `cloud` re-seeds `site/`+`cloud/` from `m/cw-s3` (union tip), on top of DT's `main` (`ui/` superset, packages with DT's 199 commits, `src/disk_tree`).
+- DT builds its lane on that base. When mgu lands its converged `main`, DT adopts it (shared cw-s3 ancestry → tractable merge).
+- Endgame (convergence.md step 4 + this doc): DT `cloud` = converged app + DT's generalization layer = the base gcs/cw/r2/future all fork off. gcs/cw history retired.
+
+## No conflict with disk-tree's own work
+
+- **Dynamic edge-OG**: unique to DT (mgu's `og-user/*.jpg` are static avatars; no functions-side OG endpoint). No reconcile.
+- **diff-index**: DT owns the persisted `<a>-<b>.parquet` *backend* (`/api/compare`); cw-s3's treemap-first-class `DiffTreemap` is the *frontend* that consumes compare output. Complementary — fold-in picks DT backend + cw FE.
+- **viz-widgets / aggregation-extensions**: gcs specs cede these to DT (`@disk-tree/react`, `import --pivot-sum`/`--mean-mtime`). Already here.
 
 ## Per-deploy config (thin deltas)
 
-| deploy | shell | schemes/buckets | auth | owners/marks | OG |
+| deploy | store row | schemes/buckets | auth | owners/marks | OG |
 |---|---|---|---|---|---|
-| r2.rbw.sh | `site/` (Map) | r2: ctbk, crashes, jc-taxes | public | off | dynamic |
-| gcs.oa.dev | `site/` (Map) | gs://… | CF Access | on | dynamic (adopt) |
-| cw-s3.oa.dev | `site/` (Map) | cw s3://… | CF Access | off | dynamic (adopt) |
-| disky.rbw.sh | `ui/` (superset) | file+r2+gcs+s3+ssh | none/local | off | dynamic |
+| r2.rbw.sh | r2 | ctbk, crashes, jc-taxes | **public (new)** | off | dynamic (DT) |
+| gcs.oa.dev | gcs | gs://… | app-gated (`BASE_SCOPE=gcs`) | on | dynamic (adopt) |
+| cw-s3.oa.dev | cw | s3://… | edge (`EDGE_TRUSTED`) | off | dynamic (adopt) |
+| disky.rbw.sh | `ui/` superset | file+r2+gcs+s3+ssh | none/local | off | dynamic |
 
-All `site/` code shared; only this row + wrangler vars/store config differ.
+## Phased plan
 
-## Phased plan (mv-shaped)
+1. ✅ Union view + single-cloud collapse in `ui/` (`dab2d2e`, `786b5bb`).
+2. ✅ Establish the discovery + division (this spec). Superseded the raw-gcs hoist.
+3. **Re-seed `cloud` from `m/cw-s3`** (union tip) over DT `main`; reconcile the `packages/*` delta (`pendingCell`, tipMode) so `site/` builds against DT's base. Confirm `ui/` unregressed.
+4. **DT lane — go public for r2**: public/no-gate auth mode; env-generalize `makeStore`; r2 `Store` row + wrangler vars; `dt_cloud` ingestion over ctbk/crashes → tiers + D1. Deploy `site/` at r2.rbw.sh.
+5. **Adopt mgu's converged `main`** when it lands (merge; DT's lane rides on top).
+6. **Dynamic edge-OG** into `site/`.
+7. **Superset** (`ui/` → disky/blobby domain), unchanged multi-cloud/local scan-manager.
 
-1. **Hoist** `site/` + `cloud/` from `m/gcs` into disk-tree; add `"site"` to `pnpm-workspace`, `cloud/` to the python project; `pnpm i`, build, reconcile any `packages/*`/`src/disk_tree` API drift (par-construct only where the fork diverged). Goal: `site/` builds + serves against disk-tree's base libs.
-2. **Generalize + go public for r2**: env-drive the hardcoded GCS bucket seam (`makeStore` endpoint/bucket, `index.ts:34,113`); add a public/anonymous mode to `requireViewer`/`scopesFor`; add an `r2` `stores.ts` row + wrangler vars; stand up `dt_cloud` ingestion (renamed) over ctbk/crashes → tiers + D1. Deploy `site/` at r2.rbw.sh.
-3. **CP disk-tree's edge-OG into `site/`** (replace static OG); pull in diff-index if it beats mgu's `/api/diff`. In-place now that code is co-located.
-4. **gcs/cw-s3 track this repo's `site/`** — deltas only (owner/marks config, their D1). Handoff spec into the mgu repo (`/Users/ryan/c/oa/marin-gcs-usage/specs/`) for an mgu-session.
-5. **Superset** (`ui/` → disky/blobby): unchanged multi-cloud/local scan-manager. Rename TBD.
+## Coordination
 
-## Landed so far
+mgu convergence lives in `m/cw-s3:specs/convergence.md` (+ `denovo-factor.md`, `branch-parity-discipline.md`; gcs side `gcs-toward-union.md`, `sweep-plan-union.md`). Two live mgu sessions: main clone (`7b789415`, the convergence) + cw-s3 worktree (`41e25a3f`). Write a handoff spec into `/Users/ryan/c/oa/marin-gcs-usage/specs/` once DT's `cloud` base is adoptable, so the mgu session knows DT owns the r2/public/makeStore layer + will adopt their converged `main`.
 
-- **Breadcrumb registry + per-scheme landings + single-cloud collapse** (`dab2d2e`, `786b5bb`): `SCHEMES` descriptor drives the breadcrumb/landing; on r2.rbw.sh `/` is the R2 union (`r2 → /`), `/scans` the scheme-agnostic list, `/r2` redirects; scheme-scoped `ScanList` strips its `<scheme>://` prefix; `ScanDetails` root cell/row shows the basename. These live in `ui/` (the superset shell) — the Map shell (`site/`) supersedes them for the public deploys once hoisted.
+## Naming
 
-## Reconciliation risks (Phase 1)
-
-- **Package API drift** — `site/` was built against mgu's `packages/*` (base + mgu commits); disk-tree's are base + 199 commits (dynamic-OG/diff work). `site/` consumes public API, so mostly fine, but expect a few adapt/par-construct spots. If mgu *added* to `packages/*` and disk-tree lacks it, CP that package delta too (it's a shared-core improvement).
-- **`cloud/` ↔ `src/disk_tree`** — `dt_cloud` uses the engine; reconcile against disk-tree's version.
-- **`@rdub/file-tree` github-pin** in `site/package.json` — carry it as-is.
-
-## Deferred — multi-account tier
-
-A true `all ▸ scheme ▸ account ▸ bucket ▸ path` hierarchy earns its keep only when a deployment serves >1 account/scheme; build it on the shared shell + a store grouping when needed. Scan-time skew stays a non-goal (roots scanned by separate jobs, never byte-synchronous; the map aggregates child sizes, no per-super-root scan time).
+`dt_cloud` (renamed from `gcs_usage` on mgu, CLI `dt-cloud`). Its `webdata` verb — user flagged as a bad name; rename during the r2 ingestion work. Candidates: `web-index` / `publish`. Final pick TBD (user).
