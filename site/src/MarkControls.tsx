@@ -1,5 +1,6 @@
 import { Explain } from './Help'
 import { type ReactNode, useState } from 'react'
+import { DEFAULT_STORE } from './stores'
 import { Avatar } from './Avatar'
 import { UserChip, ghHandle, shortName } from './UserChip'
 import { AssignSelect } from './AssignSelect'
@@ -187,8 +188,9 @@ export function MarkControls({ uri, idx, node, lensed, userIdx, onPickUser }: {
         )}
       </span>
       {/* Ownership — assigned owner, or the attribution bar — and the assign
-          control folded behind one button until it's wanted. */}
-      <span className="owner">
+          control folded behind one button until it's wanted. Only where the
+          store has attribution + claims (`Store.owners`). */}
+      {DEFAULT_STORE.owners && <span className="owner">
         <span className="lbl">{mixed ? 'owners' : 'owner'}</span>
         {cl
           ? <><OwnerFactChip who={cl.who} assigned={{ by: cl.by, ts: cl.ts, memo: cl.memo }} /><span className="prov">assigned {fmtMarkDate(cl.ts)}</span></>
@@ -211,7 +213,7 @@ export function MarkControls({ uri, idx, node, lensed, userIdx, onPickUser }: {
             viewing as guest — <a href={signInUrl()}>sign in</a> with your email to mark
           </span>
         )}
-      </span>
+      </span>}
       {pending && (
         <span className="override-confirm">
           overrides <b>{ov.n}</b> more-specific mark{ov.n === 1 ? '' : 's'} inside

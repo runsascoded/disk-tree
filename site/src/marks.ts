@@ -7,6 +7,7 @@
 // repaints older deeper ones). `sweep` is the default state (absence of a
 // mark) — explicit rows record affirmative decisions, incl. clears.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { DEFAULT_STORE } from './stores'
 import { useMemo } from 'react'
 
 export type MarkAction = 'keep' | 'keep_last_ckpt' | 'sweep'
@@ -59,12 +60,53 @@ export const ACTION_LABELS: Record<MarkAction, string> = {
 
 // 30s poll: several people mark concurrently during the sprint, and the
 // overlay should reflect their marks without a reload.
+
+// ---- plan-first stores (cw-s3): the same hooks over `/api/plan-marks` ----
+//
+// cw's marks are one row per prefix (`{ prefix, keep, who, ts, note }`, keep
+// null = cleared) rather than an actions WAL. Presented through the same
+// `KeepRow` shape, the hub's dots / outlines / `MarkControls` work unchanged;
+// mutations post cw's body. No owners: `owners` is always empty and a claim is
+// refused. `Store.sweep === 'plan'` selects this path.
+export const PLAN_LEDGER = DEFAULT_STORE.sweep === 'plan'
+
+export interface PlanMark {
+  prefix: string
+  keep: MarkAction | null
+  who: string
+  ts: number
+  note?: string | null
+}
+
+/** cw's rows → the actions-ledger shape (`action_id` = row order; rows are
+ * unique per prefix, so any stable order works for `foldLatest`). */
+export function planMarksToLedger(marks: PlanMark[]): { keeps: KeepRow[]; owners: OwnerRow[] } {
+  return {
+    keeps: marks.map((m, i) => ({ prefix: m.prefix.endsWith('/') ? m.prefix : m.prefix + '/', keep: m.keep, ts: m.ts, who: m.who, memo: m.note ?? null, action_id: i + 1 })),
+    owners: [],
+  }
+}
+
+/** One actions-ledger post → cw's `/api/plan-marks` body. Owner posts have no
+ * plan-first equivalent. */
+export function planMarkBody(a: ActionPost, scan?: string): { prefixes: string[]; keep: MarkAction | null; scan?: string; note?: string } {
+  if ('owner' in a) throw new Error('assignments are not available on this store')
+  return { prefixes: [a.pattern], keep: a.keep ?? null, ...(scan ? { scan } : {}), ...(a.memo ? { note: a.memo } : {}) }
+}
+
+async function fetchPlanMarks(): Promise<{ keeps: KeepRow[]; owners: OwnerRow[] }> {
+  const r = await fetch('/api/plan-marks', { credentials: 'include' })
+  if (!r.ok) throw new Error(`plan-marks: ${r.status}`)
+  const { marks } = (await r.json()) as { marks: PlanMark[] }
+  return planMarksToLedger(marks)
+}
+
 export function useMarks(enabled: boolean) {
   return useQuery<{ keeps: KeepRow[]; owners: OwnerRow[] }, Error>({
     queryKey: ['actions'],
     enabled,
     refetchInterval: 30_000,
-    queryFn: async () => {
+    queryFn: PLAN_LEDGER ? fetchPlanMarks : async () => {
       const r = await fetch('/api/actions', { credentials: 'include' })
       if (!r.ok) throw new Error(`actions: ${r.status}`)
       return r.json()
@@ -96,6 +138,18 @@ export function useMarkMutations() {
   }
   const post = useMutation({
     mutationFn: async (v: ActionPost | ActionPost[]) => {
+      if (PLAN_LEDGER) {
+        for (const a of Array.isArray(v) ? v : [v]) {
+          const r = await fetch('/api/plan-marks', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(planMarkBody(a, currentScan)),
+          })
+          if (!r.ok) throw new Error(((await r.json()) as { error?: string }).error ?? `${r.status}`)
+        }
+        return
+      }
       const items = (Array.isArray(v) ? v : [v]).map(a => ({ scan: currentScan, ...a }))
       const r = await fetch('/api/actions', {
         method: 'POST',

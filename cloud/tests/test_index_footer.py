@@ -212,7 +212,7 @@ def test_gc_d1_deletes_only_generations_no_pointer_names(monkeypatch):
     from dt_cloud.index_footer import gc_d1
 
     con = sqlite3.connect(":memory:")
-    ddl = (Path(__file__).parents[2] / "site/migrations/0020_index_generations.sql").read_text()
+    ddl = (Path(__file__).parents[2] / "site/migrations/gcs/0020_index_generations.sql").read_text()
     con.executescript("CREATE TABLE index_schema (date TEXT, variant TEXT, version INTEGER, schema_json TEXT, floor_bytes INTEGER, PRIMARY KEY (date, variant));")
     con.executescript(ddl)
     row = "(?, ?, ?, ?, 1, 1, 'a', 'b', 1, NULL, NULL, 0, 1, '[]')"

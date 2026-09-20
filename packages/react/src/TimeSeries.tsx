@@ -29,6 +29,10 @@ export interface Series<T> {
   /** The part of the line at x < this is dashed — e.g. a total drawn before
    *  every component existed (specs/root-geneses.md). */
   dashBeforeX?: number
+  /** Draw per-point dots (default true). */
+  dots?: boolean
+  /** Line stroke width (default 1.75). */
+  strokeWidth?: number
 }
 
 export interface Annotation {
@@ -428,9 +432,9 @@ export function TimeSeries<T>({
             return (
               <g key={s.key}>
                 {areaPath && <path d={areaPath} fill={color} fillOpacity={getY0 ? 0.35 : 0.15} />}
-                {dashed && <path d={dashed} fill="none" stroke={color} strokeWidth={1.75} strokeDasharray="4 4" />}
-                <path d={solid} fill="none" stroke={color} strokeWidth={1.75} />
-                {sortedPts.map((p, i) => (
+                {dashed && <path d={dashed} fill="none" stroke={color} strokeWidth={s.strokeWidth ?? 1.75} strokeDasharray="4 4" />}
+                <path d={solid} fill="none" stroke={color} strokeWidth={s.strokeWidth ?? 1.75} />
+                {(s.dots ?? true) && sortedPts.map((p, i) => (
                   <circle
                     key={i}
                     cx={xToPx(getX(p))}

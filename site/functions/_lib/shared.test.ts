@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { shared } from './shared'
+import { shared, snapshotsPrefix } from './shared'
 
 describe('shared', () => {
   beforeEach(() => vi.useFakeTimers())
@@ -46,5 +46,14 @@ describe('shared', () => {
     await vi.advanceTimersByTimeAsync(200)
     expect(await settled).toBe('shared k: no result after 100 ms')
     expect(map.has('k')).toBe(false)
+  })
+})
+
+describe('snapshotsPrefix', () => {
+  it('is the bare snapshots dir for the default store and a named subdir otherwise', () => {
+    expect(snapshotsPrefix({})).toBe('snapshots/')
+    expect(snapshotsPrefix({ SNAPSHOTS_SUBDIR: '' })).toBe('snapshots/')
+    expect(snapshotsPrefix({ SNAPSHOTS_SUBDIR: 'cw' })).toBe('snapshots/cw/')
+    expect(snapshotsPrefix({ SNAPSHOTS_SUBDIR: '/cw/' })).toBe('snapshots/cw/')
   })
 })

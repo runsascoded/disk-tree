@@ -126,6 +126,12 @@ export function makeStore(env: Env) {
  * (default) or `user`. Mirrors `INDEX_VARIANTS` in the dt-cloud CLI
  * (specs/view-serving.md §1). */
 export function indexKey(dir: string, variant: string): string {
+  // The age index is a standalone index (per-path created-day strata), not a
+  // path-index tier, so it keeps its own base name (specs/age-index.md).
+  if (variant === 'age') return `${dir}/age-index.parquet`
+  // Phase B: one path-major pyramid tier per bin (`age-pyramid-<bin>`).
+  const pm = /^age-pyramid-(\d+(?:min|h|d|mo|y))$/.exec(variant)
+  if (pm) return `${dir}/age-pyramid-${pm[1]}.parquet`
   const m = /^(?:(coarse\d+)(?:-(user))?|(path|user))$/.exec(variant)
   if (!m) throw new Error(`bad index variant '${variant}'`)
   const tier = m[1] ? `-${m[1]}` : ''
@@ -274,8 +280,10 @@ export function reviveRowGroup(json: string, schema: SchemaElement[]): Record<st
   }
 }
 
-/** Read one row group (given its stored metadata JSON) via a subset FileMetaData. */
-async function readGroup(h: IndexHandle, rgJson: string, columns?: string[]): Promise<Row[]> {
+/** Read one row group (given its stored metadata JSON) via a subset
+ * FileMetaData, as raw column records (pre-`toRow`). The age index (variant
+ * `age`) carries its own columns (`day,b,o`), not the shared `Row` shape. */
+async function readGroupRaw(h: IndexHandle, rgJson: string, columns?: string[]): Promise<Record<string, unknown>[]> {
   const rg = reviveRowGroup(rgJson, h.schema)
   const metadata = { version: h.version, schema: h.schema, num_rows: rg.num_rows, row_groups: [rg], metadata_length: 0 } as unknown as Awaited<ReturnType<typeof parquetMetadataAsync>>
   const trace = h.trace
@@ -285,7 +293,12 @@ async function readGroup(h: IndexHandle, rgJson: string, columns?: string[]): Pr
   const t0 = now()
   const rows = (await parquetReadObjects({ file, metadata, columns })) as Record<string, unknown>[]
   trace?.('group', now() - t0)
-  return rows.map(toRow)
+  return rows
+}
+
+/** Read one row group as shaped `Row`s. */
+async function readGroup(h: IndexHandle, rgJson: string, columns?: string[]): Promise<Row[]> {
+  return (await readGroupRaw(h, rgJson, columns)).map(toRow)
 }
 
 interface Span extends GroupSpan { rg: number }
@@ -532,4 +545,22 @@ export async function readAsks(
   })
   h.trace?.('groups', now() - t0)
   return { rows: perGroup.flat(), groups: spans.length }
+}
+
+/** Raw rows (pre-`toRow` records) for a single `(depth, path)` point lookup —
+ * the age index (variant `age`), whose columns (`day,b,o`) aren't the shared
+ * `Row` shape but which sorts `(depth, path, day)` so a path's day rows are one
+ * contiguous run. Same span-select + row-group-prune path as the readers above. */
+export async function readPoint(h: IndexHandle, depth: number, path: string, columns?: string[]): Promise<Record<string, unknown>[]> {
+  const ask: Ask = { depth, path }
+  const cand = await selectSpans(h, [askRect(ask)])
+  const spans = cand.filter(s => groupMayHold(s, ask))
+  if (spans.length > 60) throw new Error(`age lookup too wide: ${spans.length} row groups`)
+  const jsons = await fetchGroupJson(h, spans.map(s => s.rg))
+  const perGroup = await mapLimit(spans, GROUP_READS, async s => {
+    const j = jsons.get(s.rg)
+    if (!j) return []
+    return (await readGroupRaw(h, j, columns)).filter(r => str(r.path) === path)
+  })
+  return perGroup.flat()
 }

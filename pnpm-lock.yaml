@@ -34,7 +34,7 @@ importers:
         version: 19.2.4(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
+        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))
       jsdom:
         specifier: ^25.0.1
         version: 25.0.1
@@ -71,7 +71,7 @@ importers:
         version: 19.2.4(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
+        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))
       d3-hierarchy:
         specifier: ^3.1.2
         version: 3.1.2
@@ -97,11 +97,11 @@ importers:
         specifier: ^0.27.20
         version: 0.27.20(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@open-athena/auth':
-        specifier: github:Open-Athena/auth#e254545e10177bf59d089e034bcb8a78f527638f
-        version: https://codeload.github.com/Open-Athena/auth/tar.gz/e254545e10177bf59d089e034bcb8a78f527638f(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)
+        specifier: github:Open-Athena/auth#a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30
+        version: https://codeload.github.com/Open-Athena/auth/tar.gz/a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)
       '@rdub/file-tree':
         specifier: https://github.com/runsascoded/file-tree#b64278c27d45479fe09507dabc0e16dd0a4b8b87
-        version: https://codeload.github.com/runsascoded/file-tree/tar.gz/b64278c27d45479fe09507dabc0e16dd0a4b8b87(@disk-tree/react@packages+react)(@rdub/treemap@packages+treemap)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@6.30.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.5.0(react@19.2.8))(wa-sqlite@1.0.0)(yaml@1.10.3)
+        version: https://codeload.github.com/runsascoded/file-tree/tar.gz/b64278c27d45479fe09507dabc0e16dd0a4b8b87(@disk-tree/react@packages+react)(@rdub/treemap@packages+treemap)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@6.30.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.4.1(react@19.2.8))(wa-sqlite@1.0.0)(yaml@2.9.1)
       '@rdub/treemap':
         specifier: workspace:*
         version: link:../packages/treemap
@@ -114,6 +114,12 @@ importers:
       hyparquet:
         specifier: ^1.27.1
         version: 1.30.0
+      pyrmts:
+        specifier: github:runsascoded/pyrmts#320dca972aadecd4a6091e64e9bac084787e74ec&path:/js/packages/pyrmts
+        version: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts(react@19.2.8)
+      pyrmts-cfw:
+        specifier: github:runsascoded/pyrmts#320dca972aadecd4a6091e64e9bac084787e74ec&path:/js/packages/pyrmts-cfw
+        version: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts-cfw(react@19.2.8)
       react:
         specifier: ^19.1.0
         version: 19.2.8
@@ -130,8 +136,8 @@ importers:
         specifier: https://github.com/runsascoded/use-kbd#06ae0cfee696462fb35d761bb413b159eb66a1dd
         version: https://codeload.github.com/runsascoded/use-kbd/tar.gz/06ae0cfee696462fb35d761bb413b159eb66a1dd(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       use-prms:
-        specifier: ^0.5.0
-        version: 0.5.0(react@19.2.8)
+        specifier: ^0.4.1
+        version: 0.4.1(react@19.2.8)
     devDependencies:
       '@cloudflare/workers-types':
         specifier: ^5.20260820.1
@@ -147,7 +153,7 @@ importers:
         version: 19.2.4(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^4.5.0
-        version: 4.7.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
+        version: 4.7.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))
       puppeteer:
         specifier: ^25.4.0
         version: 25.11.0(yauzl@2.10.0)
@@ -162,10 +168,10 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^7.0.0
-        version: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3)
+        version: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1)
       vitest:
         specifier: ^4.1.11
-        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
+        version: 4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))
 
   ui:
     dependencies:
@@ -186,7 +192,7 @@ importers:
         version: https://codeload.github.com/Open-Athena/auth/tar.gz/43bf9598898d820475b539c985f141e46067b54f(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)
       '@rdub/file-tree':
         specifier: github:runsascoded/file-tree#49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1
-        version: https://codeload.github.com/runsascoded/file-tree/tar.gz/49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1(@disk-tree/react@packages+react)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.5.0(react@19.2.8))(wa-sqlite@1.0.0)(yaml@1.10.3)
+        version: https://codeload.github.com/runsascoded/file-tree/tar.gz/49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1(@disk-tree/react@packages+react)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.5.0(react@19.2.8))(wa-sqlite@1.0.0)(yaml@2.9.1)
       '@rdub/treemap':
         specifier: workspace:*
         version: link:../packages/treemap
@@ -235,7 +241,7 @@ importers:
         version: 19.2.4(@types/react@19.2.18)
       '@vitejs/plugin-react':
         specifier: ^5.1.1
-        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
+        version: 5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))
       eslint:
         specifier: ^9.39.1
         version: 9.39.5
@@ -262,7 +268,7 @@ importers:
         version: 8.66.0(eslint@9.39.5)(typescript@5.9.3)
       vite:
         specifier: ^7.2.4
-        version: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3)
+        version: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1)
       vitest:
         specifier: ^2.1.9
         version: 2.1.9(@types/node@24.13.3)(jsdom@25.0.1)(sass@1.102.0)
@@ -1139,9 +1145,9 @@ packages:
       react:
         optional: true
 
-  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/e254545e10177bf59d089e034bcb8a78f527638f':
-    resolution: {tarball: https://codeload.github.com/Open-Athena/auth/tar.gz/e254545e10177bf59d089e034bcb8a78f527638f}
-    version: 0.1.0-dist.a142c96
+  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30':
+    resolution: {tarball: https://codeload.github.com/Open-Athena/auth/tar.gz/a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30}
+    version: 0.1.0-dist.0ac175c
     peerDependencies:
       '@cloudflare/workers-types': '*'
       '@tanstack/react-query': ^5.0.0
@@ -2931,6 +2937,19 @@ packages:
     engines: {node: '>=22.12.0'}
     hasBin: true
 
+  pyrmts-cfw@https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts-cfw:
+    resolution: {path: /js/packages/pyrmts-cfw, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec}
+    version: 0.0.0
+
+  pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts:
+    resolution: {path: /js/packages/pyrmts, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec}
+    version: 0.0.0
+    peerDependencies:
+      react: '>=18'
+    peerDependenciesMeta:
+      react:
+        optional: true
+
   react-dom@19.2.8:
     resolution: {integrity: sha512-rVprimfGBG3DR+Tq0IQG2DT5PxKth1WIGDmj5yPmlzr4YBe7uyE+Du4oVqTDXZSHGGGXRtTJEGSSePyQCMBglQ==}
     peerDependencies:
@@ -3342,6 +3361,14 @@ packages:
       react: '>=18.0.0'
       react-dom: '>=18.0.0'
 
+  use-prms@0.4.1:
+    resolution: {integrity: sha512-137eYoyglpP3bnQqU+BDnr4kJnPqkibcSBpjHAIZJugtRjtInRCi+Af+hsk5lElXcIqz+ReEA4me6YrOehg6XA==}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
+    peerDependenciesMeta:
+      react:
+        optional: true
+
   use-prms@0.5.0:
     resolution: {integrity: sha512-oWgETG/6KxEzJToR0MltHgIkJBLVBcibjjvx7qdMg63SqUVgNAy6iYBjODjcXwC7OYtw9UyyrnFfqC6JumQdKQ==}
     peerDependencies:
@@ -3618,6 +3645,11 @@ packages:
   yaml@1.10.3:
     resolution: {integrity: sha512-vIYeF1u3CjlhAFekPPAk2h/Kv4T3mAkMox5OymRiJQB0spDP10LHvt+K7G9Ny6NuuMAb25/6n1qyUjAcGNf/AA==}
     engines: {node: '>= 6'}
+
+  yaml@2.9.1:
+    resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
 
   yargs-parser@21.1.1:
     resolution: {integrity: sha512-tVpsJW7DdjecAiFpbIB1e3qxIQsE6NoPc5/eTdrbbIC4h0LVsWhnoa3g+m2HclBIujHzsxZ4VJVA+GUuc2/LBw==}
@@ -4381,7 +4413,7 @@ snapshots:
       '@tanstack/react-query': 5.101.4(react@19.2.8)
       react: 19.2.8
 
-  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/e254545e10177bf59d089e034bcb8a78f527638f(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)':
+  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)':
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260906.1
       '@tanstack/react-query': 5.101.4(react@19.2.8)
@@ -4485,7 +4517,7 @@ snapshots:
     optionalDependencies:
       yauzl: 2.10.0
 
-  '@rdub/file-tree@https://codeload.github.com/runsascoded/file-tree/tar.gz/49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1(@disk-tree/react@packages+react)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.5.0(react@19.2.8))(wa-sqlite@1.0.0)(yaml@1.10.3)':
+  '@rdub/file-tree@https://codeload.github.com/runsascoded/file-tree/tar.gz/49c02fab96dd4d7b98e695c1bc0c9ac4bb2764a1(@disk-tree/react@packages+react)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.5.0(react@19.2.8))(wa-sqlite@1.0.0)(yaml@2.9.1)':
     dependencies:
       '@disk-tree/react': link:packages/react
       aws4fetch: 1.0.20
@@ -4496,13 +4528,13 @@ snapshots:
       remark-gfm: 4.0.1
       use-prms: 0.5.0(react@19.2.8)
       wa-sqlite: 1.0.0
-      yaml: 1.10.3
+      yaml: 2.9.1
     optionalDependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
       react-router-dom: 7.18.2(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
 
-  '@rdub/file-tree@https://codeload.github.com/runsascoded/file-tree/tar.gz/b64278c27d45479fe09507dabc0e16dd0a4b8b87(@disk-tree/react@packages+react)(@rdub/treemap@packages+treemap)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@6.30.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.5.0(react@19.2.8))(wa-sqlite@1.0.0)(yaml@1.10.3)':
+  '@rdub/file-tree@https://codeload.github.com/runsascoded/file-tree/tar.gz/b64278c27d45479fe09507dabc0e16dd0a4b8b87(@disk-tree/react@packages+react)(@rdub/treemap@packages+treemap)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@6.30.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.4.1(react@19.2.8))(wa-sqlite@1.0.0)(yaml@2.9.1)':
     dependencies:
       '@disk-tree/react': link:packages/react
       '@rdub/treemap': link:packages/treemap
@@ -4512,9 +4544,9 @@ snapshots:
       jq-web: 0.6.2
       react-markdown: 10.1.0(@types/react@19.2.18)(react@19.2.8)
       remark-gfm: 4.0.1
-      use-prms: 0.5.0(react@19.2.8)
+      use-prms: 0.4.1(react@19.2.8)
       wa-sqlite: 1.0.0
-      yaml: 1.10.3
+      yaml: 2.9.1
     optionalDependencies:
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -4833,7 +4865,7 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
-  '@vitejs/plugin-react@4.7.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))':
+  '@vitejs/plugin-react@4.7.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
@@ -4841,11 +4873,11 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-beta.27
       '@types/babel__core': 7.20.5
       react-refresh: 0.17.0
-      vite: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3)
+      vite: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1)
     transitivePeerDependencies:
       - supports-color
 
-  '@vitejs/plugin-react@5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))':
+  '@vitejs/plugin-react@5.2.0(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
@@ -4853,7 +4885,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-rc.3
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3)
+      vite: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -4881,13 +4913,13 @@ snapshots:
     optionalDependencies:
       vite: 5.4.21(@types/node@24.13.3)(sass@1.102.0)
 
-  '@vitest/mocker@4.1.11(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))':
+  '@vitest/mocker@4.1.11(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))':
     dependencies:
       '@vitest/spy': 4.1.11
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3)
+      vite: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1)
 
   '@vitest/pretty-format@2.1.9':
     dependencies:
@@ -6402,6 +6434,19 @@ snapshots:
       - utf-8-validate
       - yauzl
 
+  pyrmts-cfw@https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts-cfw(react@19.2.8):
+    dependencies:
+      pyrmts: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts(react@19.2.8)
+    transitivePeerDependencies:
+      - react
+
+  pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts(react@19.2.8):
+    dependencies:
+      hyparquet: 1.30.0
+      yaml: 2.9.1
+    optionalDependencies:
+      react: 19.2.8
+
   react-dom@19.2.8(react@19.2.8):
     dependencies:
       react: 19.2.8
@@ -6911,6 +6956,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  use-prms@0.4.1(react@19.2.8):
+    optionalDependencies:
+      react: 19.2.8
+
   use-prms@0.5.0(react@19.2.8):
     optionalDependencies:
       react: 19.2.8
@@ -6953,7 +7002,7 @@ snapshots:
       fsevents: 2.3.3
       sass: 1.102.0
 
-  vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3):
+  vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1):
     dependencies:
       esbuild: 0.28.1
       fdir: 6.5.0(picomatch@4.0.5)
@@ -6965,7 +7014,7 @@ snapshots:
       '@types/node': 24.13.3
       fsevents: 2.3.3
       sass: 1.102.0
-      yaml: 1.10.3
+      yaml: 2.9.1
 
   vitest@2.1.9(@types/node@24.13.3)(jsdom@25.0.1)(sass@1.102.0):
     dependencies:
@@ -7003,10 +7052,10 @@ snapshots:
       - supports-color
       - terser
 
-  vitest@4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3)):
+  vitest@4.1.11(@types/node@24.13.3)(jsdom@25.0.1)(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.11
-      '@vitest/mocker': 4.1.11(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3))
+      '@vitest/mocker': 4.1.11(vite@7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1))
       '@vitest/pretty-format': 4.1.11
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -7023,7 +7072,7 @@ snapshots:
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@1.10.3)
+      vite: 7.3.6(@types/node@24.13.3)(sass@1.102.0)(yaml@2.9.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 24.13.3
@@ -7117,6 +7166,8 @@ snapshots:
   yallist@3.1.1: {}
 
   yaml@1.10.3: {}
+
+  yaml@2.9.1: {}
 
   yargs-parser@21.1.1: {}
 

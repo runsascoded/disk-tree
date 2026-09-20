@@ -133,6 +133,9 @@ export interface TreemapProps<T> {
    * empty panel keeps a small footprint so the layout doesn't jump.
    */
   tipMode?: 'float' | 'dock'
+  /** Dock mode only: a resting card shown in the docked tip panel when no cell
+   *  is hovered (e.g. the current root's summary), instead of the empty hint. */
+  renderTipDefault?: (n: T, path: T[]) => ReactNode
   /** Extra row above the map (e.g. rollup / totals). */
   renderRollup?: (n: T, path: T[]) => ReactNode
   /** Right side of the breadcrumbs bar. */
@@ -526,6 +529,7 @@ export function Treemap<T>({
   renderCellExtra,
   renderTooltip,
   tipMode = 'float',
+  renderTipDefault,
   renderRollup,
   renderLegend,
   renderCrumbSuffix,
@@ -1554,10 +1558,16 @@ export function Treemap<T>({
           covering the cells and controls under it. Always rendered (a faint
           hint while empty) so the layout doesn't jump. A phone, with no hover,
           taps to pin into this same panel. */}
-      {tipMode === 'dock' ? (
+      {tipMode === 'dock' ? (() => {
+        const defaultContent = renderTipDefault ? renderTipDefault(node, path) : null
+        const body = tipContent ?? defaultContent
+          ?? <span className="dt-treemap-tipdock-hint">Hover a cell for its details.</span>
+        // `resting` = a real default card (root summary); `empty` = nothing at all.
+        const cls = tipContent ? '' : defaultContent ? ' resting' : ' empty'
+        return (
         <div
           ref={tipRef}
-          className={'dt-treemap-tip dock' + (pinnedTip ? ' pinned' : '') + (tipContent ? '' : ' empty')}
+          className={'dt-treemap-tip dock' + (pinnedTip ? ' pinned' : '') + cls}
           onMouseEnter={cancelTipClear}
           onMouseLeave={() => { if (!pinnedTip) { pin.hover(null); clearHover(); setTip(null) } }}
           style={{ position: 'relative', width: '100%', pointerEvents: 'auto' }}
@@ -1576,9 +1586,10 @@ export function Treemap<T>({
               ×
             </button>
           )}
-          {tipContent ?? <span className="dt-treemap-tipdock-hint">Hover a cell for its details.</span>}
+          {body}
         </div>
-      ) : tipContent && tipToShow ? (
+        )
+      })() : tipContent && tipToShow ? (
         <div
           ref={tipRef}
           className={'dt-treemap-tip' + (pinnedTip ? ' pinned' : '')}

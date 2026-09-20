@@ -65,6 +65,7 @@ export function useHashSpy({ ids, hash, deps = [], legacy = {}, offset = () => 0
     const id = legacy[raw] ?? raw
     deepLinkPending = true
     let last = NaN
+    let lastH = NaN
     let tries = 0
     const stop = () => {
       clearInterval(iv)
@@ -76,8 +77,14 @@ export function useHashSpy({ ids, hash, deps = [], legacy = {}, offset = () => 0
       const el = document.getElementById(id)
       if (!el) return
       const top = el.getBoundingClientRect().top
-      if (Math.abs(top - offset()) < 4 && top === last) { stop(); return } // parked
+      const h = document.documentElement.scrollHeight
+      // Park only once the section sits at the offset AND the page height has
+      // settled — otherwise late-loading content above (treemap, series, diff,
+      // age chart) pushes the section down after we stop, stranding the reader
+      // above it. While height still changes, keep re-nudging to follow it.
+      if (Math.abs(top - offset()) < 4 && top === last && h === lastH) { stop(); return }
       last = top
+      lastH = h
       // Instant, not smooth: this is page-load positioning, not a navigation
       // the reader watches — and a smooth animation restarted every nudge
       // (or paused in a background tab) never gets there.

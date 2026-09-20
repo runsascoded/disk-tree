@@ -16,7 +16,7 @@
  * Anyone with the `gcs` scope can read; the sweep's review gate is where
  * authority gets applied — the ledger keeps the full who-did-what trail.
  */
-import { type Ctx, json, requireAdmin, requireScope, requireViewer } from '../_lib/auth.js'
+import { type Ctx, json, requireScope, requireViewer } from '../_lib/auth.js'
 
 /** gs://marin-<suffix>/<path>/ — the six marin buckets only, dir prefixes only. */
 const PREFIX_RE = /^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/
@@ -68,10 +68,10 @@ function validate(b: ActionBody): { error: string } | {
 export const onRequest = async (ctx: Ctx): Promise<Response> => {
   const { request, env } = ctx
   if (!env.DB) return json({ error: 'actions backend not configured (DB)' }, 503)
+  const id = await requireViewer(ctx)
+  if (id instanceof Response) return id
 
   if (request.method === 'GET') {
-    const gated = await requireViewer(ctx)
-    if (gated instanceof Response) return gated
     const [keeps, owners] = await Promise.all([
       env.DB.prepare(
         'SELECT k.prefix, k.keep, k.ts, a.actor AS who, a.memo, a.id AS action_id ' +
@@ -88,11 +88,9 @@ export const onRequest = async (ctx: Ctx): Promise<Response> => {
   }
 
   if (request.method === 'POST') {
-    // Marking is admin-only: non-admins propose deletions by staging, not by
-    // writing the keep/owner ledger directly (specs/share-link-hardening.md).
-    const id = await requireAdmin(ctx)
-    if (id instanceof Response) return id
-    if (!id.email) return json({ error: 'admin identity has no email' }, 403)
+    if (!id.email) {
+      return json({ error: 'writing requires a signed-in email — guest links are read-only; sign in via Google or ask for a personal link' }, 403)
+    }
     const raw = (await request.json()) as ActionBody | ActionBody[]
     const items = Array.isArray(raw) ? raw : [raw]
     if (!items.length || items.length > 500) return json({ error: 'expected 1–500 actions' }, 400)

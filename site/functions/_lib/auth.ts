@@ -51,6 +51,8 @@ export interface Env {
   BASE_SCOPE?: string
   /** The store root's crumb label (`marin GCS`, `marin CoreWeave`). */
   ROOT_LABEL?: string
+  /** Snapshot dir of this store inside the data bucket (`snapshots/<sub>/`); unset = the bare `snapshots/`. */
+  SNAPSHOTS_SUBDIR?: string
   /** Dedicated SA key (Batch submit + actAs the job SA) for the sweep dispatch bridge. */
   GCP_SA_KEY?: string
 }
@@ -64,15 +66,11 @@ export const GCS_SCOPE = 'gcs'
 export const CW_SCOPE = 'cw'
 export const ADMIN_SCOPE = 'admin'
 export const REQUESTS_SCOPE = 'requests'
-/** Read-only viewer: reads only (no stage, no mark). Guest share links get this. */
-export const GCS_READ_SCOPE = 'gcs:read'
 
 export const TEAM_DOMAIN = 'https://openathena-ai-pages.cloudflareaccess.com'
 
 /** The deployment's base scope: what `requireViewer` asks for. */
 export const baseScope = (env: Env): string => env.BASE_SCOPE ?? GCS_SCOPE
-/** The read-only twin of the deployment's base scope (`gcs` -> `gcs:read`). */
-export const baseReadScope = (env: Env): string => `${baseScope(env)}:read`
 
 const staffDomain = (env: Env) => env.STAFF_DOMAIN ?? 'openathena.ai'
 
@@ -116,7 +114,7 @@ export interface Identity {
 const withAdmin = (id: Omit<Identity, 'admin'>): Identity => ({ ...id, admin: id.scopes.includes(ADMIN_SCOPE) || id.scopes.includes('*') })
 
 /** Staff (by domain) or an `admin_emails` row (the edge-trusted deployment's
- *  own admin list, `site/migrations/0004_admin.sql`). */
+ *  own admin list, `site/migrations/cw/0004_admin.sql`). */
 export async function isAdmin(env: Env, email: string): Promise<boolean> {
   if (email.toLowerCase().endsWith(`@${staffDomain(env)}`)) return true
   if (!env.DB || !env.EDGE_TRUSTED) return false
@@ -183,20 +181,8 @@ export async function requireScope(ctx: Ctx, scope: string): Promise<Identity | 
 export { hasScope }
 
 /** Any authenticated viewer of this deployment (reads). */
-/** Gate on ANY of several scopes; 401/403 as JSON. */
-export async function requireAnyScope(ctx: Ctx, scopes: string[]): Promise<Identity | Response> {
-  const id = await identify(ctx)
-  if (!id) return json({ error: 'unauthenticated' }, 401)
-  if (!scopes.some(sc => id.scopes.includes(sc)) && !id.scopes.includes('*')) return json({ error: 'forbidden' }, 403)
-  return id
-}
-
-/** Any viewer of this deployment (reads) — the base scope OR its read-only twin. */
-export const requireViewer = (ctx: Ctx): Promise<Identity | Response> =>
-  requireAnyScope(ctx, [baseScope(ctx.env), baseReadScope(ctx.env)])
-/** A full (non-read-only) viewer — may stage deletions; excludes guest read-only links. */
-export const requireStager = (ctx: Ctx): Promise<Identity | Response> => requireScope(ctx, baseScope(ctx.env))
-/** An admin (mark, plan writes, sweep dispatch). */
+export const requireViewer = (ctx: Ctx): Promise<Identity | Response> => requireScope(ctx, baseScope(ctx.env))
+/** An admin (plan writes + sweep dispatch). */
 export const requireAdmin = (ctx: Ctx): Promise<Identity | Response> => requireScope(ctx, ADMIN_SCOPE)
 
 export const json = (data: unknown, status = 200, headers: Record<string, string> = {}): Response =>

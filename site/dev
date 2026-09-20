@@ -8,12 +8,6 @@
 #   ./dev --refresh  # first refresh the local D1 from prod (see ./refresh-db)
 #
 # (`pnpm dev` alone runs only vite → blank treemap, since /data isn't served.)
-#
-# .dev.vars keys: DEV_EMAIL (the localhost identity — use a staff address to get
-# the admin console), GCS_HMAC_KEY_ID/GCS_HMAC_SECRET (bucket reads), and
-# SESSION_SECRET (any value — the auth gate needs it, and the /admin console's
-# package routes authenticate by a session cookie the localhost stub can't fake,
-# so functions/api/auth/[[path]].ts auto-signs-in DEV_EMAIL on localhost).
 set -euo pipefail
 # Ports: `devPort` in package.json (vite) and the next one (wrangler).
 PORT=$(node -p "require('./package.json').devPort")

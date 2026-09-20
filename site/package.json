@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.1",
   "type": "module",
-  "devPort": 3253,
+  "devPort": 3263,
   "scripts": {
     "dev": "vite",
     "dev:full": "./dev",
@@ -18,18 +18,20 @@
   "dependencies": {
     "@disk-tree/react": "workspace:*",
     "@floating-ui/react": "^0.27.20",
-    "@open-athena/auth": "github:Open-Athena/auth#e254545e10177bf59d089e034bcb8a78f527638f",
+    "@open-athena/auth": "github:Open-Athena/auth#a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30",
     "@rdub/file-tree": "https://github.com/runsascoded/file-tree#b64278c27d45479fe09507dabc0e16dd0a4b8b87",
     "@rdub/treemap": "workspace:*",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-table": "^8.21.3",
     "hyparquet": "^1.27.1",
+    "pyrmts": "github:runsascoded/pyrmts#320dca972aadecd4a6091e64e9bac084787e74ec&path:/js/packages/pyrmts",
+    "pyrmts-cfw": "github:runsascoded/pyrmts#320dca972aadecd4a6091e64e9bac084787e74ec&path:/js/packages/pyrmts-cfw",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-icons": "^5.7.0",
     "react-router-dom": "^6.30.6",
     "use-kbd": "https://github.com/runsascoded/use-kbd#06ae0cfee696462fb35d761bb413b159eb66a1dd",
-    "use-prms": "^0.5.0"
+    "use-prms": "^0.4.1"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260820.1",

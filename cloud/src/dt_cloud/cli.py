@@ -22,20 +22,14 @@ import duckdb
 import pandas as pd
 from click import Choice, argument, group, option
 
+from .cw_digest import REPLY_HOUR_UTC
 from .identity import DEFAULT_IDENTITIES, load_identities
 from .mark import DEFAULT_URL as MARK_DEFAULT_URL
 from .mark import KEEP_ACTIONS as MARK_KEEPS
 from .secrets import env_secret, secret
 from .index_footer import INDEX_VARIANTS
 from .viz import COARSE_EXPS
-
-
-def prepare_listing(con, listings):
-    """The `disk_tree` engine is a runtime dependency of the listing-aggregating
-    commands only — imported here, not at module load, so `dt-cloud healthcheck`
-    (and the CLI's `--help`) run from a bare `dt-cloud` venv (Healthcheck GHA)."""
-    from disk_tree.listing import prepare_listing as _prepare_listing
-    return _prepare_listing(con, listings)
+from .listing import prepare_listing
 from .prefixes import load_prefix_map
 from .records import mine_record_rows
 from .signals import RECORD_BASENAME, manual_rows, record_file_paths, user_prefix_rows
@@ -760,6 +754,38 @@ def healthcheck(date: str | None, max_age_days: int, as_json: bool, max_ms: int,
         raise SystemExit(1)
 
 
+def bucket_sources(specs: tuple[str, ...], default_bucket: str) -> list[tuple[str, str]]:
+    """`<bucket>=<layer-2 parquet>` pairs → [(bucket, path)]; a bare path is
+    ``default_bucket``'s (the single-bucket form)."""
+    out: list[tuple[str, str]] = []
+    for s in specs:
+        bucket, eq, path = s.partition("=")
+        out.append((bucket, path) if eq else (default_bucket, s))
+    return out
+
+
+@main.command("index-write")
+@option("-b", "--bucket", default=None, help="Bucket a bare (no `<bucket>=`) layer-2 argument describes (default $CW_BUCKET)")
+@option("-m", "--mem", default="8GB", help="DuckDB memory limit")
+@option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-coarse<E>.parquet")
+@option("-t", "--threads", default=8, type=int, help="DuckDB threads")
+@option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
+@argument("sources", nargs=-1, required=True)
+def index_write(bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
+    """Write the scan's index tiers from its layer-2 parquet(s) — SOURCES are
+    `<bucket>=<l2.parquet>` pairs, one per bucket of the scan (a bare path is
+    `-b`'s bucket): the floor-free `path-index.parquet` (dir rows,
+    bucket-prefixed, sorted (depth, path), 8k-row groups, the site's column
+    contract) and the coarse tiers, floors in their parquet metadata.
+    `index-sync` then publishes their footers to D1."""
+    from .index import write_index
+    from .sweep import CW_BUCKET
+
+    s = write_index(bucket_sources(sources, bucket or CW_BUCKET), out_dir, mem=mem, threads=threads, tmp_dir=tmp_dir)
+    err(f"index-write: {s['rows']:,} rows over {s['buckets']}; floors {s['floors']}; kept {s['paths']}")
+    print(json.dumps(s))
+
+
 @main.command("index-sync")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
 @option("-C", "--coarse-only", is_flag=True, help="Only the coarse tiers (a backfill; the floor-free variants keep their pointer)")
@@ -971,7 +997,7 @@ def warm_cache(date: str | None, jobs: int, dry_run: bool, root: str | None, tok
     # Deployment config: SITE_URL / SNAPSHOTS_SUBDIR (the CoreWeave job exports
     # cw-s3.oa.dev + snapshots/cw); defaults are the GCS deployment's.
     site_url = site_url or os.environ.get("SITE_URL") or wk.DEFAULT_URL
-    root = root or f"gs://{os.environ.get('DATA_BUCKET', 'oa-gcs-usage-dvx')}/{os.environ.get('SNAPSHOTS_SUBDIR', 'snapshots')}"
+    root = root or f"gs://{os.environ.get('DATA_BUCKET', 'oa-gcs-usage-dvx')}/snapshots" + (f"/{os.environ['SNAPSHOTS_SUBDIR'].strip('/')}" if os.environ.get('SNAPSHOTS_SUBDIR') else '')
     dates = wk.scan_dates(root)
     if not dates:
         raise SystemExit("warm-cache: no scans under root")
@@ -1002,57 +1028,22 @@ def warm_cache(date: str | None, jobs: int, dry_run: bool, root: str | None, tok
 @main.group()
 def lifecycle() -> None:
     """Bucket lifecycle rules as a tracked file: `pull` (live → JSON), `diff`
-    (file vs live), `push` (file → bucket, whole-config write + read-back
-    verification), `gc-rule` (print the S3 bucket-wide noncurrent-version GC
-    rule to add to a file). `gs://<bucket>` reads GCS (ADC: the job SA, or
-    your gcloud application-default login); a bare name is S3 / CAIOS with the
-    keys from the env (see `sweep`). Several `-b` → one JSON map keyed by
-    bucket, the per-scan snapshot shape."""
-
-
-def _lifecycle_clients(buckets: tuple[str, ...]):
-    from .lifecycle import is_gcs
-
-    gcs = s3 = None
-    if any(is_gcs(b) for b in buckets):
-        from google.cloud import storage
-
-        gcs = storage.Client(project=os.environ.get("GCP_PROJECT", "oa-internal-450019"))
-    if any(not is_gcs(b) for b in buckets):
-        try:
-            from .sweep import s3_client  # the CoreWeave deployment's CAIOS client
-        except ImportError as e:
-            raise SystemExit("lifecycle: bare (S3) bucket names need the CoreWeave deployment's `sweep` module; GCS buckets are `gs://<name>`") from e
-        s3 = s3_client()
-    return s3, gcs
-
-
-_LC_BUCKET = option("-b", "--bucket", "buckets", multiple=True, help="`gs://<bucket>` (GCS) or a bare S3 bucket name; repeatable (default $CW_BUCKET)")
-
-
-def _lc_buckets(buckets: tuple[str, ...]) -> tuple[str, ...]:
-    if buckets:
-        return buckets
-    b = os.environ.get("CW_BUCKET")
-    if not b:
-        raise SystemExit("lifecycle: need -b <bucket> (or $CW_BUCKET)")
-    return (b,)
+    (file vs live), `push` (file → bucket, whole-config PUT + read-back
+    verification), `gc-rule` (print the bucket-wide noncurrent-version GC rule
+    to add to the file). Creds: the CAIOS keys from the env (see `sweep`)."""
 
 
 @lifecycle.command("pull")
-@_LC_BUCKET
+@option("-b", "--bucket", "buckets", multiple=True, help="Bucket (repeatable; default $CW_BUCKET). One → the bare `Rules[]`; several → `{<bucket>: Rules[]}` in this order")
 @option("-o", "--out", type=Path, help="Write here instead of stdout")
 def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
-    """One bucket → its rule list; several → `{bucket: rules}`."""
-    from .lifecycle import GCS_SCHEME, dump, is_gcs, pull_any, pull_many
+    from .lifecycle import dump, dump_map, pull
+    from .sweep import CW_BUCKET, s3_client
 
-    buckets = _lc_buckets(buckets)
-    s3, gcs = _lifecycle_clients(buckets)
-    if len(buckets) == 1:
-        text = dump(pull_any(buckets[0], s3=s3, gcs=gcs), bucket=buckets[0])
-    else:
-        # one cloud per snapshot map (the keys are bare names, so the map's cloud is the flag)
-        text = dump(pull_many(list(buckets), s3=s3, gcs=gcs), bucket=GCS_SCHEME if all(is_gcs(b) for b in buckets) else "")
+    buckets = buckets or (CW_BUCKET,)
+    client = s3_client()
+    by_bucket = {b: pull(client, b) for b in buckets}
+    text = dump(by_bucket[buckets[0]]) if len(buckets) == 1 else dump_map(by_bucket)
     if out is None:
         sys.stdout.write(text)
     else:
@@ -1061,41 +1052,39 @@ def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
 
 
 @lifecycle.command("diff")
-@_LC_BUCKET
+@option("-b", "--bucket", default=lambda: os.environ.get("CW_BUCKET", "marin-us-east-02a"), help="Bucket (default $CW_BUCKET)")
 @argument("path", type=Path)
-def lifecycle_diff(buckets: tuple[str, ...], path: Path) -> None:
-    """Exit 1 when PATH (intended) differs from the live rules of the one -b bucket."""
-    from .lifecycle import diff_any, load, pull_any
+def lifecycle_diff(bucket: str, path: Path) -> None:
+    """Exit 1 when PATH (intended) differs from the live rules."""
+    from .lifecycle import diff, load, pull
+    from .sweep import s3_client
 
-    (bucket,) = _lc_buckets(buckets)
-    s3, gcs = _lifecycle_clients((bucket,))
-    d = diff_any(bucket, load(str(path)), pull_any(bucket, s3=s3, gcs=gcs))
+    d = diff(load(str(path)), pull(s3_client(), bucket))
     print(json.dumps(d))
     if any(d.values()):
         sys.exit(1)
 
 
 @lifecycle.command("push")
-@_LC_BUCKET
+@option("-b", "--bucket", default=lambda: os.environ.get("CW_BUCKET", "marin-us-east-02a"), help="Bucket (default $CW_BUCKET)")
 @option("-n", "--dry-run", is_flag=True, help="Print the diff that would be applied; touch nothing")
 @argument("path", type=Path)
-def lifecycle_push(buckets: tuple[str, ...], dry_run: bool, path: Path) -> None:
-    """Replace the one -b bucket's lifecycle configuration with PATH (read back + verified)."""
-    from .lifecycle import bucket_name, diff_any, is_gcs, load, pull_any, push, push_gcs
+def lifecycle_push(bucket: str, dry_run: bool, path: Path) -> None:
+    """Replace the bucket's lifecycle configuration with PATH (read back + verified)."""
+    from .lifecycle import diff, load, pull, push
+    from .sweep import s3_client
 
-    (bucket,) = _lc_buckets(buckets)
-    s3, gcs = _lifecycle_clients((bucket,))
+    client = s3_client()
     intended = load(str(path))
-    base = pull_any(bucket, s3=s3, gcs=gcs)
-    d = diff_any(bucket, intended, base)
+    base = pull(client, bucket)
+    d = diff(intended, base)
     if not any(d.values()):
         err(f"lifecycle: {bucket} already matches {path}")
         return
     err(f"lifecycle: {'would apply' if dry_run else 'applying'} to {bucket}: {json.dumps(d)}")
     if dry_run:
         return
-    # refuses if live moved since the diff
-    live = push_gcs(gcs, bucket_name(bucket), intended, base=base) if is_gcs(bucket) else push(s3, bucket, intended, base=base)
+    live = push(client, bucket, intended, base=base)  # refuses if live moved since the diff
     err(f"lifecycle: {bucket} now has {len(live)} rule(s), verified")
 
 
@@ -1106,6 +1095,110 @@ def lifecycle_gc_rule(days: int, prefix: str) -> None:
     from .lifecycle import gc_rule
 
     print(json.dumps(gc_rule(days, prefix), indent=2))
+
+
+@main.group("plan-sweep")
+def plan_sweep() -> None:
+    """Mark & sweep: build deletion manifests and execute them (boto3/CAIOS)."""
+
+
+@plan_sweep.command("manifest")
+@option("-d", "--date", required=True, help="Scan id (SNAP_ID) whose layer-2 parquet to pin")
+@option("-l", "--l2", "l2_path", help="Layer-2 parquet path (default: /gcs/<data>/cw-l2/<date>/<bucket>.parquet)")
+@option("-o", "--out", required=True, help="Output dir for manifest/ + plan-summary.json")
+@argument("plan_path")
+def plan_sweep_manifest(date: str, l2_path: str | None, out: str, plan_path: str) -> None:
+    """Expand a curated PLAN (json) into an object-level deletion manifest.
+
+    Deletes nothing; reads the pinned layer-2 parquet and writes
+    manifest/<bucket>.parquet + plan-summary.json under --out."""
+    import json
+
+    from .sweep import DATA_BUCKET, build_manifest, load_plan
+
+    plan = load_plan(plan_path)
+    if l2_path is None:
+        l2_path = f"/gcs/{DATA_BUCKET}/cw-l2/{date}/{plan.bucket}.parquet"
+    summary = build_manifest(l2_path, plan, out)
+    err(f"manifest: {summary['objects']} objects, {summary['bytes']} bytes -> {summary['manifest']}")
+    print(json.dumps(summary))
+
+
+@plan_sweep.command("expire-manifest")
+@option("-b", "--bucket", default=None, help="Bucket (default $CW_BUCKET)")
+@option("-e", "--early-days", type=float, default=0.0, help="Also take objects within this many days of their TTL (age >= N - EARLY_DAYS)")
+@option("-o", "--out", required=True, help="Output run dir for manifest/ + plan-summary.json (what `sweep execute` consumes)")
+@option("-t", "--now-ts", type=int, default=None, help="Epoch seconds to age against (default: now)")
+@argument("l2_parquet")
+def plan_sweep_expire_manifest(bucket: str | None, early_days: float, out: str, now_ts: int | None, l2_parquet: str) -> None:
+    """Manifest of the `tmp/ttl=<N>d/` objects past (or within EARLY_DAYS of)
+    their TTL, from the layer-2 parquet L2_PARQUET, in the run-dir layout
+    `sweep execute` consumes. Objects younger than their TTL under the same
+    roots are not in the manifest, so the executor counts them as drift and
+    leaves them alone."""
+    import json
+    import time
+
+    from .sweep import CW_BUCKET, build_expiry_manifest
+
+    s = build_expiry_manifest(l2_parquet, out, bucket=bucket or CW_BUCKET, now_ts=now_ts or int(time.time()), early_days=early_days)
+    err(f"expire-manifest: {s['objects']} objects / {s['bytes']} bytes across {s['sweep']} -> {s['manifest']}")
+    print(json.dumps(s))
+
+
+@plan_sweep.command("execute")
+@option("-G", "--no-versioning-guard", is_flag=True, help="Skip the versioning preflight: a real delete is then PERMANENT (no delete marker to undo)")
+@option("-r", "--for-real", is_flag=True, help="Actually delete (writes recoverable delete markers); default is a dry run")
+@argument("run_dir")
+def plan_sweep_execute(no_versioning_guard: bool, for_real: bool, run_dir: str) -> None:
+    """Execute the manifest under RUN_DIR against CoreWeave S3 (boto3).
+
+    Default is a dry run (touches nothing). `--for-real` deletes reviewed keys
+    whose (size, mtime) still match; refused unless the bucket has versioning
+    Status=Enabled — `-G` disables that guard (deletes become permanent; the
+    summary records `versioning_guard: false`)."""
+    import json
+
+    from .sweep import execute_plan
+
+    s = execute_plan(run_dir, for_real=for_real, require_versioning=not no_versioning_guard)
+    err(
+        f"{'REAL' if for_real else 'DRY'}: {s['deleted_objects']} objs / {s['deleted_bytes']} bytes; "
+        f"gone {s['skipped_gone']} overwritten {s['skipped_overwritten']} "
+        f"drift {s['drift_new']} failed {s['delete_failed']}"
+    )
+    print(json.dumps(s))
+
+
+@plan_sweep.command("undo")
+@option("-n", "--dry-run", is_flag=True, help="Report what would be restored without touching anything")
+@option("-p", "--prefix", "prefixes", multiple=True, help="Restrict undo to keys under this prefix (repeatable)")
+@argument("run_dir")
+def plan_sweep_undo(dry_run: bool, prefixes: tuple[str, ...], run_dir: str) -> None:
+    """Undo a real run under RUN_DIR: remove its delete markers (recoverable
+    delete). Must run before `purge`."""
+    import json
+
+    from .sweep import undo_run
+
+    s = undo_run(run_dir, prefixes=list(prefixes) or None, dry_run=dry_run)
+    err(f"{'DRY ' if dry_run else ''}undo: restored {s['restored']} (failed {s['restore_failed']}, skipped {s['skipped']})")
+    print(json.dumps(s))
+
+
+@plan_sweep.command("purge")
+@option("-n", "--dry-run", is_flag=True, help="Report what would be purged without touching anything")
+@argument("run_dir")
+def plan_sweep_purge(dry_run: bool, run_dir: str) -> None:
+    """Permanently drop every version of a real run's deleted keys under RUN_DIR
+    — the irreversible space-reclaim stage, after the undo hold."""
+    import json
+
+    from .sweep import purge_run
+
+    s = purge_run(run_dir, dry_run=dry_run)
+    err(f"{'DRY ' if dry_run else ''}purge: {s['purged_versions']} versions / {s['purged_bytes']} bytes (failed {s['purge_failed']})")
+    print(json.dumps(s))
 
 
 @main.group()
@@ -2328,6 +2421,166 @@ def cascade_a2a(bucket: str, index_path: str, as_json: bool, top: int, dirs_tier
     print(json.dumps(report, indent=1, default=str) if as_json else render(report))
     if not report["ok"]:
         raise SystemExit(1)
+
+
+@main.command()
+@option("-d", "--depth", default=1, help="Path depth to compare at (1 = bucket level)")
+@option("-n", "--top", default=30, help="Show top-N rows by absolute byte delta (depth >= 2)")
+@argument("a")
+@argument("b")
+def compare(depth: int, top: int, a: str, b: str) -> None:
+    """Compare two snapshot tree.jsons: objects/bytes per bucket (or deeper path).
+
+    A/B are snapshot dates (resolved under site/public/data/) or dirs
+    containing tree.json.
+    """
+    import json
+
+    def load(spec: str) -> dict:
+        p = Path(spec)
+        if not p.exists():
+            p = Path("site/public/data") / spec
+        f = p / "tree.json" if p.is_dir() else p
+        return json.loads(f.read_text())
+
+    def walk(node: dict, prefix: str, d: int, out: dict) -> None:
+        key = f"{prefix}/{node['n']}" if prefix else node["n"]
+        if d == depth or not node.get("c"):
+            o, byts = out.get(key, (0, 0))
+            out[key] = (o + node["o"], byts + node["b"])
+            return
+        for c in node["c"]:
+            walk(c, key, d + 1, out)
+
+    ta, tb = load(a), load(b)
+    ra: dict[str, tuple[int, int]] = {}
+    rb: dict[str, tuple[int, int]] = {}
+    for c in ta.get("c", []):
+        walk(c, "", 1, ra)
+    for c in tb.get("c", []):
+        walk(c, "", 1, rb)
+    all_keys = sorted(set(ra) | set(rb), key=lambda k: -abs(rb.get(k, (0, 0))[1] - ra.get(k, (0, 0))[1]))
+    keys = all_keys[:top] if depth >= 2 else all_keys
+    w = max(5, *(len(k) for k in keys)) if keys else 5
+    print(f"{'path':{w}} {'a objs':>14} {'b objs':>14} {'Δobjs':>12} {'a TB':>9} {'b TB':>9} {'ΔTB':>8}")
+    for k in keys:
+        ao, ab_ = ra.get(k, (0, 0))
+        bo, bb = rb.get(k, (0, 0))
+        print(f"{k:{w}} {ao:>14,} {bo:>14,} {bo - ao:>+12,} {ab_ / 1e12:>9.1f} {bb / 1e12:>9.1f} {(bb - ab_) / 1e12:>+8.1f}")
+    if len(keys) < len(all_keys):
+        print(f"(… {len(all_keys) - len(keys)} more paths)")
+    tao, tab_ = (sum(x) for x in zip(*ra.values())) if ra else (0, 0)
+    tbo, tbb = (sum(x) for x in zip(*rb.values())) if rb else (0, 0)
+    print(f"{'TOTAL':{w}} {tao:>14,} {tbo:>14,} {tbo - tao:>+12,} {tab_ / 1e12:>9.1f} {tbb / 1e12:>9.1f} {(tbb - tab_) / 1e12:>+8.1f}")
+
+
+def _load_meta(root: str, date: str) -> dict:
+    import json
+
+    import fsspec
+
+    with fsspec.open(f"{root.rstrip('/')}/{date}/meta.json", "rt") as f:
+        return json.load(f)
+
+
+def _cw_icons_dir() -> Path:
+    """`job/icons-cw` in both layouts: pip-installed in the job image (cwd=/app →
+    /app/job/icons-cw) or the repo checkout (…/parents[3]/job/icons-cw)."""
+    cands = (Path.cwd() / "job" / "icons-cw", Path(__file__).resolve().parents[3] / "job" / "icons-cw")
+    return next((c for c in cands if c.exists()), cands[-1])
+
+
+@main.command("cw-digest")
+@option("-c", "--channel", help="Slack channel id (default $SLACK_CHANNEL)")
+@option("-D", "--reply-delay", "reply_delay", default=0.0, type=float, help="Seconds to sleep between replies (e.g. 305 for a spaced backfill so per-reply sender chrome survives)")
+@option("-F", "--for-real", is_flag=True, help="With --redo-replies: actually post the new replies and delete the old ones (default: print the plan)")
+@option("-H", "--reply-hour", type=int, default=REPLY_HOUR_UTC, help="UTC hour the sender variant's daily reply is taken from: the day's first scan at/after it (default 12 → the 12:01Z morning scan, 8:01 am ET; 00:01Z scans still feed the OP + plot)")
+@option("-i", "--icons-dir", type=Path, default=None, help="Where the plot PNG is written + deployed from (default job/icons-cw)")
+@option("-m", "--month", help="Month YYYY-MM (default: current UTC month)")
+@option("-n", "--dry-run", is_flag=True, help="Render the plot + print OP/replies; post & host nothing")
+@option("-r", "--root", help="Snapshots root (default gs://$DATA_BUCKET/snapshots/cw)")
+@option("-t", "--token", help="Slack bot token (default $SLACK_BOT_TOKEN)")
+@option("-u", "--url", "site_url", default=None, help="Site base for links (default cw-s3.oa.dev)")
+@option("-R", "--redo-replies", is_flag=True, help="Re-post the month's replies under the current day rule, then delete the old ones (dry-run unless --for-real)")
+@option("-V", "--variant", type=Choice(["sender", "body"]), default="sender", help="Reply style: headline as the sender name, posted once from the day's morning scan (sender) or bold in the body, edited as the day's scans land (body)")
+def cw_digest(channel: str | None, reply_delay: float, for_real: bool, reply_hour: int, icons_dir: Path | None, month: str | None, dry_run: bool, redo_replies: bool, root: str | None, token: str | None, site_url: str | None, variant: str) -> None:
+    """Converge the monthly digest thread in #cw-s3-usage: an OP edited in place
+    (month-to-date + weekly bullets + quota sparkline) + one reply per UTC day,
+    via thrds. State in gs://<bucket>/digest/cw/<channel>/<variant>/<YYYY-MM>.json.
+    See specs/cw-slack-digest.md."""
+    from . import cw_digest as dg
+
+    site_url = site_url or dg.DEFAULT_URL
+    m = (
+        dt.datetime.strptime(month, "%Y-%m").date()
+        if month
+        else dt.datetime.now(dt.timezone.utc).date().replace(day=1)
+    )
+    root = root or f"gs://{os.environ.get('DATA_BUCKET', 'oa-gcs-usage-dvx')}/snapshots/cw"
+
+    if dry_run:
+        month = dg.load_month(root, m)
+        if month is None:
+            raise SystemExit(f"digest: no scans for {m:%Y-%m}")
+        import tempfile
+
+        out = Path(tempfile.gettempdir()) / f"cw-digest-{m:%Y%m}.png"
+        dg.render_plot(month, m, out, root)
+        err(f"rendered plot → {out}")
+        print(dg.op_body(month, m, "<plot-url>", site_url))
+        print(f"\n--- replies ({variant}: username | body | icon) ---")
+        for day in dg.day_rows(month, variant, reply_hour):
+            r = dg.reply(day, variant, site_url)
+            print(f"{r.username} | {r.body} | {(r.icon_url or r.icon_emoji or '').split('/')[-1]}")
+        return
+
+    channel = channel or os.environ.get("SLACK_CHANNEL")
+    token = secret(token, "SLACK_BOT_TOKEN")
+    if not (channel and token):
+        raise SystemExit("digest: need SLACK_BOT_TOKEN + SLACK_CHANNEL (or -t/-c)")
+    icons = icons_dir or _cw_icons_dir()
+
+    def deploy(local: Path, name: str) -> str | None:
+        # publish the cw icons dir (the CORS _headers + the fresh plot) to the
+        # icons Pages project's `cw` preview branch — never its production
+        # branch, whose root alias serves the arrow avatars both digests use.
+        # Return the deployment-specific URL (served instantly), which the OP
+        # image uses to avoid racing alias propagation (→ Slack invalid_blocks).
+        import re
+        import shutil
+        import subprocess
+
+        # The job image installs wrangler globally (`npm install -g`) but has
+        # no `npx` shim, so prefer the binary; `npx` only serves a laptop run.
+        wrangler = [shutil.which("wrangler")] if shutil.which("wrangler") else ["npx", "wrangler"] if shutil.which("npx") else None
+        if wrangler is None:
+            raise SystemExit("digest: neither `wrangler` nor `npx` on PATH — can't publish the plot")
+        r = subprocess.run(
+            [*wrangler, "pages", "deploy", str(icons), "--project-name", dg.ICONS_PROJECT, "--branch", dg.ICONS_BRANCH, "--commit-dirty=true"],
+            check=True, capture_output=True, text=True,
+        )
+        err(r.stdout)
+        found = re.search(r"https://[a-z0-9]+\.gcs-usage-icons\.pages\.dev", r.stdout + r.stderr)
+        return found.group(0) if found else None
+
+    if redo_replies:
+        # rule change: re-post every reply under the current day rule, then retire the old ones
+        plan = dg.redo_replies(root, m, token, channel, variant, site_url=site_url, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay, reply_hour=reply_hour, for_real=for_real)
+        if for_real:
+            err(f"digest: re-threaded {m:%Y-%m} ({variant}): {len(plan.get('posted', {}))} replies" + (f", {len(plan['stale'])} old left undeleted" if plan.get("stale") else ""))
+            return
+        old = {day: e for day, e in plan["old"]}
+        print(f"digest --redo-replies {m:%Y-%m} in {channel} ({variant}; dry-run — -F/--for-real applies):")
+        print(f"  old replies to delete: {len(plan['old'])}")
+        for day, e in plan["old"]:
+            print(f"    {day}  {e['scan']}  ts={e['ts']}")
+        print(f"  new replies to post: {len(plan['new'])}")
+        for day, scan, head in plan["new"]:
+            same = "  (same scan as the old reply)" if day in old and old[day]["scan"] == scan else ""
+            print(f"    {day}  {scan}  {head!r}{same}")
+        return
+    dg.post_digest(root, m, token, channel, variant, site_url=site_url, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay, reply_hour=reply_hour)
+    err(f"digest: converged {m:%Y-%m} ({variant})")
 
 
 

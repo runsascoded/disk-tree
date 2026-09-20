@@ -65,7 +65,7 @@ export function AgeChart({ rows, catOrder, mode, onMode, modes = AGE_MODES, user
     const keyOf = (r: AgeRow) =>
       mode === 'read' ? String(r.a ?? NEVER)
       : userMode ? (r.u ?? 'unattributed')
-      : slotMap.has(r.d1) ? r.d1 : '(other)'
+      : r.d1 && slotMap.has(r.d1) ? r.d1 : '(other)'
     const byBucket = new Map<number, Map<string, number>>()
     for (const r of rows) {
       if (!Number.isFinite(r.d)) continue // pre-day-granularity snapshot rows

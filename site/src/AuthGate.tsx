@@ -22,9 +22,8 @@ function LoginWall() {
       <div className="card">
         <h1>{DEFAULT_STORE.title}</h1>
         <p>{DEFAULT_STORE.desc}</p>
-        <p className="restrict">{DEFAULT_STORE.wall.restrict}</p>
-        <a className="signin" href={signInUrl()}>{DEFAULT_STORE.wall.signIn}</a>
-        {DEFAULT_STORE.wall.how && <p className="signin-how">{DEFAULT_STORE.wall.how}</p>}
+        <p className="restrict">This dashboard is restricted to Open Athena members.</p>
+        <a className="signin" href={signInUrl()}>Sign in with Open Athena</a>
       </div>
     </div>
   )

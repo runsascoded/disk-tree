@@ -1,6 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { HotkeysProvider } from 'use-kbd'
-import { HelpLine, HelpProvider } from './Help'
+import { HelpCard, HelpProvider } from './Help'
 import { AdminDbPage } from './AdminDbPage'
 import { AdminPage } from './AdminPage'
 import App from './App'
@@ -9,6 +9,7 @@ import { FilesPage } from './FilesPage'
 import { MarksPage } from './MarksPage'
 import { AssignmentsPage } from './AssignmentsPage'
 import { SweepPage } from './SweepPage'
+import { PlanSweepPage } from './PlanSweepPage'
 import { OgPage } from './OgPage'
 import { UserOgPage, UserPage, UsersOgPage, UsersPage } from './UserPage'
 import { DEFAULT_STORE, STORES } from './stores'
@@ -33,7 +34,7 @@ export default function Root() {
       <Route path="/admin/db/:table" element={<AuthGate><AdminDbPage /></AuthGate>} />
       <Route path="/files/*" element={<AuthGate><FilesPage /></AuthGate>} />
       {/* The ledger pages exist only on a marks store; elsewhere they go home. */}
-      {DEFAULT_STORE.marks ? (<>
+      {DEFAULT_STORE.owners ? (<>
       <Route path="/marks" element={<AuthGate><MarksPage /></AuthGate>} />
       <Route path="/assignments" element={<AuthGate><AssignmentsPage /></AuthGate>} />
       <Route path="/users/og" element={<UsersOgPage />} />
@@ -43,12 +44,12 @@ export default function Root() {
       </>) : (
       <Route path="/users/*" element={<Navigate to="/" replace />} />
       )}
-      <Route path="/sweep" element={<AuthGate><SweepPage /></AuthGate>} />
+      <Route path="/sweep" element={<AuthGate>{DEFAULT_STORE.sweep === 'plan' ? <PlanSweepPage /> : <SweepPage />}</AuthGate>} />
       {/* The review lenses became the home page's mark/owner axes — /mark is just the map. */}
       <Route path="/mark" element={<Navigate to="/" replace />} />
       <Route path="*" element={<AuthGate><App /></AuthGate>} />
     </Routes>
-    <HelpLine />
+    <HelpCard />
     </HelpProvider>
     </HotkeysProvider>
   )

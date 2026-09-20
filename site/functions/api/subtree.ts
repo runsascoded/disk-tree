@@ -55,6 +55,7 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   const states = parseMarkAxes(url.searchParams.get('k'))
   const classes = parseClasses(url.searchParams.get('cl'))
   const qRaw = url.searchParams.get('q') ?? ''
+  const full = url.searchParams.get('full') === '1'
   const query = parseQuery(qRaw) ?? undefined
 
   // Data is gated (store-specific scope), like /data/*.
@@ -66,13 +67,13 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   const [head, xtra] = await st.time('pre', Promise.all([(states || lens) && ctx.env.DB ? ledgerHead(ctx.env) : Promise.resolve(0), hasExtras(ctx.env, date)]))
   const cacheKey = cacheKeyFor('subtree',
     `${date}/${encodeURIComponent(path)}?w=${w}&h=${h}&a=${minArea}&t=${atten}&l=${lensRaw ?? ''}` +
-      `&o=${rawOwner ?? ''}&b=${by ?? ''}&D=${depth ?? ''}&cl=${classKey(classes)}&x=${xtra ? 1 : 0}&k=${states ? [...states].sort().join(',') : ''}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}`,
+      `&o=${rawOwner ?? ''}&b=${by ?? ''}&D=${depth ?? ''}&cl=${classKey(classes)}&x=${xtra ? 1 : 0}&k=${states ? [...states].sort().join(',') : ''}&F=${query && !full ? 0 : 1}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}`,
   )
   const hit = await st.time('match', cacheMatch(ctx.env, cacheKey))
   if (hit) return hit
 
   try {
-    const view = await buildView(ctx.env, { date, path, w, h, minArea, atten, lens, owner, by, maxDepth: depth, states, query, classes, trace: st.trace })
+    const view = await buildView(ctx.env, { date, path, w, h, minArea, atten, lens, owner, by, maxDepth: depth, states, query, classes, partial: !!query && !full, trace: st.trace })
     const body = JSON.stringify({
       date,
       path,
@@ -88,7 +89,7 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
       truncated: view.truncated,
       ...(owner ? { owner } : {}),
       ...(states ? { states: [...states].sort() } : {}),
-      ...(query ? { q: qRaw, matches: view.matches } : {}),
+      ...(query ? { q: qRaw, matches: view.matches, matched: view.matched ?? [], ...(view.partial ? { partial: true } : {}) } : {}),
       tree: view.tree,
     })
     return await cacheStore(ctx.env, cacheKey, body, { 'server-timing': st.header() }, ctx.waitUntil?.bind(ctx))

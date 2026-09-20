@@ -72,10 +72,13 @@ def _group_rows(md: "pq.FileMetaData") -> list[dict]:
     """One row per row group: pruning stats + the stripped RowGroup JSON."""
     rows = []
     row_start = 0
-    di = md.schema.names.index("depth")
-    pi = md.schema.names.index("path")
-    bi = md.schema.names.index("b")
-    ui = md.schema.names.index("usr")
+    names = md.schema.names
+    di = names.index("depth")
+    pi = names.index("path")
+    bi = names.index("b")
+    # The age index (variant `age`) has no ownership column; its `u_min/u_max`
+    # stay NULL, and the (depth, path) rectangle prunes it like any other tier.
+    ui = names.index("usr") if "usr" in names else None
 
     def _srange(stats) -> tuple:
         # (min, max) of a string column's stats, or (None, None) when absent
@@ -97,7 +100,7 @@ def _group_rows(md: "pq.FileMetaData") -> list[dict]:
             for cc in (rg.column(c) for c in range(rg.num_columns))
         ]
         ds, ps, bs = rg.column(di).statistics, rg.column(pi).statistics, rg.column(bi).statistics
-        u_min, u_max = _srange(rg.column(ui).statistics)
+        u_min, u_max = _srange(rg.column(ui).statistics) if ui is not None else (None, None)
         rows.append({
             "rg": g,
             "d_min": int(ds.min), "d_max": int(ds.max),
@@ -366,6 +369,13 @@ for _e in COARSE_EXPS:
     INDEX_VARIANTS[f"coarse{_e}"] = f"path-index-coarse{_e}.parquet"
     if "user" in FLOOR_FREE_VARIANTS:
         INDEX_VARIANTS[f"coarse{_e}-user"] = f"path-index-coarse{_e}-by-user.parquet"
+# The age chart's backend: multi-scale path-major pyramid tiers, one per bin
+# (specs/age-index.md, Phase B — supersedes the single-bin `age-index.parquet`).
+# Standalone indexes, own base names; the footer's (depth, path, b) stats prune
+# them as usual, `usr` absent (u_min/u_max NULL). Keep in sync with
+# `AGE_PYRAMID_VARIANTS` in dt_cloud.index.
+for _b in ("1d", "1mo", "1y"):
+    INDEX_VARIANTS[f"age-pyramid-{_b}"] = f"age-pyramid-{_b}.parquet"
 
 
 def retire_d1(retain: int, db_id: str = D1_DB_ID) -> list[tuple[str, str, int]]:

@@ -9,6 +9,7 @@
  * `prefix` is the gs:// dir form, ready to hand straight to `dt-cloud mark`.
  */
 import { S3Store } from '@rdub/file-tree/stores/s3'
+import { snapshotsPrefix } from '../_lib/shared.js'
 import { type Ctx, type Env, json, requireViewer } from '../_lib/auth.js'
 import { keepSets, todoItems } from '../_lib/todo.js'
 import { buildView } from '../_lib/view.js'
@@ -18,13 +19,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{4})?$/
 const DEFAULT_LIMIT = 100
 const DEFAULT_MIN_FRAC = 0.0005 // ignore dust; overridable via ?min_frac=
 
-async function latestScan(store: ReturnType<typeof S3Store>): Promise<string | null> {
+async function latestScan(store: ReturnType<typeof S3Store>, prefix: string): Promise<string | null> {
   const dates: string[] = []
   let cursor: string | undefined
   do {
-    const page = await store.list('snapshots/', { cursor })
+    const page = await store.list(prefix, { cursor })
     for (const e of page.entries) {
-      const d = e.key.slice('snapshots/'.length).replace(/\/$/, '')
+      const d = e.key.slice(prefix.length).replace(/\/$/, '')
       if (e.isDir && DATE_RE.test(d)) dates.push(d)
     }
     cursor = page.cursor
@@ -54,7 +55,7 @@ export const onRequest = async (ctx: Ctx): Promise<Response> => {
     secretAccessKey: GCS_HMAC_SECRET,
   })
 
-  const scan = await latestScan(store)
+  const scan = await latestScan(store, snapshotsPrefix(ctx.env))
   if (!scan) return json({ error: 'no published scan' }, 404)
 
   // The fleet folded at min_bytes, straight from the index tiers (no

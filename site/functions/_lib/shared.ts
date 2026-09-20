@@ -42,3 +42,13 @@ class Stall extends Error {
     super(`shared ${key}: no result after ${ms} ms`)
   }
 }
+
+/** Where this deployment's snapshots live in the data bucket: `snapshots/`
+ * for the default (GCS) store, `snapshots/<SNAPSHOTS_SUBDIR>/` for a store
+ * published under a named subdir (cw-s3: `cw`). Every Function that lists or
+ * reads snapshot dirs goes through this, so a deployment can't list another
+ * store's scans (the 2026-09-16 preview charted the GCS fleet on cw). */
+export const snapshotsPrefix = (env: { SNAPSHOTS_SUBDIR?: string }): string => {
+  const sub = (env.SNAPSHOTS_SUBDIR ?? '').replace(/^\/+|\/+$/g, '')
+  return sub ? `snapshots/${sub}/` : 'snapshots/'
+}

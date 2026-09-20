@@ -374,15 +374,25 @@ const CKPT_SEG_RE = /^(step|checkpoint|ckpt|iter|epoch|global_?step)[-_]?\d+/i
 // loaded, so a dir whose shape is unknown is not offered (the CLI still
 // accepts KLC anywhere). Better still would be an ahead-of-time flag on each
 // index row (specs/children-table-selection.md § later).
-const CKPT_NAME_RE = /(^|[-_.])(ckpts?|checkpoints?)([-_.]|$)/i
-// The child must BE a checkpoints dir, not merely mention one: eval-output
-// dirs are named after checkpoint paths (`gs__…__checkpoints__…__step-600`).
-const CKPT_DIR_RE = /^(ckpts?|checkpoints?)$/i
+/** A run directory: ≥ 2 step-numbered children (`step-100`, `step-200`, …).
+ * `keep_last_ckpt` at such a dir keeps the highest step and sweeps the rest. */
+const isRunDir = (n: TreeNode): boolean =>
+  (n.c ?? []).filter(c => CKPT_SEG_RE.test(c.n)).length >= 2
+
+/** Offer keep-last-ckpt only when checkpoints sit within ~2 levels below the
+ * node: the run dir itself, or its parent (a `checkpoints/` dir or a group of
+ * runs). Higher up (`marin/`, whose runs are 4–5 levels down) it is far too
+ * broad — one step would be kept across every run — so it is not offered
+ * there; the CLI/API still accepts KLC at any depth for a curated run list.
+ * A node's own name is intentionally not enough: naming a dir `checkpoints`
+ * doesn't put the steps within reach if they are deep below.
+ * Folding can hide children, so an unknown shape is simply not offered.
+ * (A per-row "checkpoints within N" flag from the index would be exact —
+ * specs/children-table-selection.md § later.) */
 export const looksCkpt = (n: TreeNode, _uri?: string): boolean =>
   n.k === 1 ||
-  CKPT_NAME_RE.test(n.n) ||
-  (n.c ?? []).some(c => CKPT_DIR_RE.test(c.n)) ||
-  (n.c ?? []).filter(c => CKPT_SEG_RE.test(c.n)).length >= 2
+  isRunDir(n) ||
+  (n.c ?? []).some(isRunDir)
 
 /** Reviewed = covered by any mark (deepest-wins ancestor or own). */
 export const reviewedBytes = (rows: SweepRow[], idx: MarkIndex): number =>

@@ -89,7 +89,7 @@ export function parseQuery(q: string | null): NamePred | null {
  * Bytes are matched bytes only, never double-counted: a match root's
  * ancestors get its aggregate once, its descendants are not visited. Depth
  * is bounded by what was read — matches below the read's threshold are not
- * found (a fleet-wide deep search is a separate index; view-serving.md §2). */
+ * found (a store-wide deep search is a separate index; view-serving.md §2). */
 export function nameFilter<A>(
   root: { path: string; agg: A },
   aggs: Map<string, { depth: number; agg: A }>,

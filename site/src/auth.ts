@@ -30,11 +30,6 @@ export const signInUrl = (): string =>
 export interface Ident {
   email: string
   name?: string
-  /** A share-link (grant) session, not SSO — the chip shows the grant's own
-   *  subject (name + avatar) rather than the owner-registry lookup. */
-  guest?: boolean
-  /** The grant subject's explicit avatar URL (Slack/GitHub/…), when set. */
-  avatar?: string
 }
 
 /** Sign out of the app session (POST /api/auth/logout clears the cookie). */
@@ -54,34 +49,14 @@ export function useIdent(): Ident | null {
   if (!whoami) return null
   const name = displayName(whoami) ?? undefined
   const email = (whoami as { email?: string | null }).email ?? name ?? 'guest'
-  const w = whoami as { kind?: string; subject?: { avatar?: string | null } | null }
-  return { email, name, guest: w.kind === 'grant', avatar: w.subject?.avatar ?? undefined }
-}
-
-/** Scopes on the current identity, or null when unknown (the dev stub carries
- *  none — the server has full scopes there, so callers treat null as dev-full). */
-function useScopes(): string[] | null {
-  const { whoami } = useWhoami(WHOAMI_SOURCE, { devIdentity: DEV_IDENTITY })
-  const sc = (whoami as { scopes?: string[] } | null)?.scopes
-  return Array.isArray(sc) ? sc : null
+  return { email, name }
 }
 
 /**
- * Marking (keep/sweep/owner) is admin-only — non-admins propose deletions by
- * staging instead (specs/share-link-hardening.md); the server enforces the same.
+ * Mark/claim writes require an email-bearing identity — anonymous guest
+ * links are read-only (the server enforces the same rule).
  */
 export function useCanMark(): boolean {
-  const scopes = useScopes()
-  if (scopes === null) return import.meta.env.DEV
-  return scopes.includes('admin') || scopes.includes('*')
-}
-
-/**
- * Staging (the opt-in trash proposal) needs the full base scope; a read-only
- * guest link (`gcs:read`) cannot. The server enforces the same via `requireStager`.
- */
-export function useCanStage(): boolean {
-  const scopes = useScopes()
-  if (scopes === null) return import.meta.env.DEV
-  return scopes.includes('gcs') || scopes.includes('*')
+  const { whoami } = useWhoami(WHOAMI_SOURCE, { devIdentity: DEV_IDENTITY })
+  return !!(whoami as { email?: string | null } | null)?.email
 }

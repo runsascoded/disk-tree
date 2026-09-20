@@ -70,9 +70,8 @@ def plan(date: str, dates: list[str], widths: tuple[int, ...] = WIDTHS, spans: t
 
 
 def warm(url: str, headers: dict[str, str], paths: list[str], jobs: int = 4, timeout: float = 120) -> list[tuple[str, int, float, str]]:
-    """GET each path with ``headers`` (a bearer token here; the CoreWeave
-    deployment passes a Cloudflare Access service-token pair), ``jobs`` at a
-    time; returns
+    """GET each path with ``headers`` (the Access service token pair), ``jobs``
+    at a time; returns
     ``(path, status, seconds, x-cache)`` per request (status 0 = transport
     error). Logs one line per request to stderr."""
     def one(path: str) -> tuple[str, int, float, str]:

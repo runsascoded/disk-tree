@@ -3,6 +3,7 @@
 // applies one keep/owner action to all of them — client-side expansion into
 // exact-prefix ledger actions (server-side pattern rows are the v2 follow-up).
 import { useState } from 'react'
+import { DEFAULT_STORE } from './stores'
 import { type ActionPost, type MarkAction, useMarkMutations } from './marks'
 import { allUsers } from './UserChip'
 import { useUnits } from './units'
@@ -54,6 +55,8 @@ export function BulkBar({ matches, scheme, query }: {
           {label}
         </button>
       ))}
+      {/* Claims are an owners feature: absent on a store without attribution. */}
+      {DEFAULT_STORE.owners && (<>
       <button type="button" className="act claim" disabled={over || progress != null}
         onClick={() => {
           const v = assign.trim()
@@ -65,6 +68,7 @@ export function BulkBar({ matches, scheme, query }: {
       <input list="bb-assign-users" value={assign} onChange={e => setAssign(e.target.value)}
         placeholder="you" size={7} aria-label="Assign matches to user" />
       <datalist id="bb-assign-users">{allUsers().map(u => <option key={u.id} value={u.name} />)}</datalist>
+      </>)}
       <input value={memo} onChange={e => setMemo(e.target.value)} placeholder="memo" size={10} aria-label="Bulk memo" />
       {over && <span className="bb-warn">&gt;{HARD_CAP.toLocaleString()} matches — that's a rule, not a gesture (use a `prefix_owners` glob)</span>}
       {progress && <span className="bb-progress">{progress}</span>}

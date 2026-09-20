@@ -5,8 +5,7 @@ import { stringParam, useUrlState } from 'use-prms'
 import { DustHatch, Treemap as DtTreemap } from '@disk-tree/react'
 import type { CellCtx, CellStyle, OutlineGroups } from '@disk-tree/react'
 import { Avatar } from './Avatar'
-import { CopyName, copyText } from './CopyName'
-import { FaRegCopy } from 'react-icons/fa6'
+import { CopyName } from './CopyName'
 import { canonId, UserChip, ghHandle, shortName } from './UserChip'
 import { dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonth, inkFor, slotColor, userColor } from './colors'
 import type { UserIndexEntry } from './colors'
@@ -34,36 +33,24 @@ const LI_METRIC_CHIPS: [LiMetric, string, string][] = [
   ['c', '$', 'Show each legend row’s estimated storage cost ($/mo, list price)'],
 ]
 
-/** The path atop a docked/pinned tooltip, as drillable per-segment crumbs: each
- * ancestor segment drills the map to that level (the deepest — the cell itself,
- * or a folded `(other)` — is inert, bold). A copy icon ejects the whole prefix
- * to the CLI (via `copyText`, which also works off the tailnet dev server's
- * insecure origin). Its own component so the copy state has somewhere to live. */
-function PathBar({ path, scheme, onDrill }: { path: TreeNode[]; scheme: string; onDrill?: (p: TreeNode[]) => void }) {
+/** The `gs://…` path shown at the top of a pinned tooltip, with a copy-to-
+ * clipboard button (eject the prefix to the CLI) and an "open ↗" that drills the
+ * map to / focuses this prefix (also a shareable `?path=` URL). Its own component
+ * so the copy state has somewhere to live (renderTooltip is a plain function). */
+function PathBar({ uri, onOpen }: { uri: string; onOpen?: () => void }) {
   const [copied, setCopied] = useState(false)
-  const segs = path.slice(1)
-  const uri = scheme + segs.map(n => n.n).join('/')
+  const slash = uri.lastIndexOf('/') + 1
   return (
-    <div className="path" onClick={e => e.stopPropagation()}>
-      <span className="crumbs">
-        <span className="dirname">{scheme}</span>
-        {segs.map((n, i) => {
-          const last = i === segs.length - 1
-          const drillable = onDrill && !last && !n.n.startsWith('(')
-          return (
-            <span key={i}>
-              {i > 0 && <span className="sep">/</span>}
-              {drillable
-                ? <button type="button" className="seg" onClick={() => onDrill!(path.slice(0, i + 2))}>{n.n}</button>
-                : <span className={'seg' + (last ? ' basename' : '')}>{n.n}</span>}
-            </span>
-          )
-        })}
+    <div className="path">
+      <span className="dirname">{uri.slice(0, slash)}</span>
+      <span className="basename">{uri.slice(slash)}</span>
+      <span className="path-acts" onClick={e => e.stopPropagation()}>
+        <button
+          type="button" className="path-copy" title="Copy path to clipboard"
+          onClick={() => navigator.clipboard?.writeText(uri).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) })}
+        >{copied ? 'copied ✓' : 'copy'}</button>
+        {onOpen && <button type="button" className="path-open" title="Focus this prefix (drill in / shareable ?path= link)" onClick={onOpen}>open ↗</button>}
       </span>
-      <button
-        type="button" className="path-copy" title={copied ? 'copied ✓' : 'Copy path to clipboard'} aria-label="Copy path to clipboard"
-        onClick={() => copyText(uri).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) })}
-      >{copied ? <span className="copied">✓</span> : <FaRegCopy aria-hidden />}</button>
     </div>
   )
 }
@@ -582,6 +569,12 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
           ['undecided', state.unmarked, 'var(--other)'],
         ] as [string, number, string][]).filter(([, b]) => b > 0)
       : []
+    // Nothing to key here (tree/date/read at a level with no mark panel, no
+    // state row, no owner rows) — render no rollup at all, so an empty
+    // `.dt-treemap-rollup` div doesn't sit as a gap between the crumb bar and
+    // the map.
+    const rollupRows = rollup.filter(r => r.b >= 0.001 * node.b)
+    if (!hasPanel && stateRows.length === 0 && rollupRows.length === 0) return null
     return (
       <>
         {/* A bucket itself isn't markable (MarkControls renders nothing there) —
@@ -609,7 +602,7 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
             ))}
           </span>
         )}
-        {rollup.filter(r => r.b >= 0.001 * node.b).map(r => {
+        {rollupRows.map(r => {
           // Real per-user rows (not "(other users)"/"unowned") get a GitHub
           // avatar next to the color swatch.
           const isUser = mode === 'user' && !r.k.startsWith('(') && r.k !== 'unowned'
@@ -745,12 +738,10 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
       </Explain>
     </span>
   )
-  const legend = () => (
-    <div className="legend">
-      {modeLegend?.()}
-      {!hasPanel && keys}
-    </div>
-  )
+  // The legend row exists only for a gradient key (written/read); the keys
+  // (⚙, ⛶, outline key) live on the footer row with the totals, so nothing
+  // reserves a line above the map for two icons.
+  const legend = () => (modeLegend ? <div className="legend">{modeLegend()}</div> : null)
 
   const renderTooltip = (n: TreeNode, path: TreeNode[]) => {
     const uri = uriOf(path)
@@ -782,7 +773,7 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
     )
     return (
       <>
-        <PathBar path={path} scheme={scheme} onDrill={onPathChange} />
+        <PathBar uri={uri} onOpen={n.n.startsWith('(') ? undefined : () => onPathChange?.(path)} />
         <div className="nums">
           {fmtBytes(n.b)} · {fmtN(n.o)} objects · {((100 * n.b) / root.b).toFixed(2)}% of total
           {n.d != null && <> · mean created {epochDaysToMonth(n.d)}</>}
@@ -855,6 +846,18 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
       // instead of a tip that chases the pointer up and down a lineage and
       // covers the cells/controls under it.
       tipMode="dock"
+      // Resting state (nothing hovered / on a phone): a card about the whole
+      // current view, so the panel never collapses to an empty stub.
+      renderTipDefault={(n, p) => (
+        <div className="tip-viewcard">
+          <div className="vc-scope">{p.length > 1 ? uriOf(p) : n.n}</div>
+          <div className="nums">
+            {fmtBytes(n.b)} · {fmtN(n.o)} objects · {root.b ? ((100 * n.b) / root.b).toFixed(2) : 0}% of total
+            {n.d != null && <> · mean created {epochDaysToMonth(n.d)}</>}
+          </div>
+          <div className="vc-hint">Hover a cell for its details · click one to pin it.</div>
+        </div>
+      )}
       renderCellExtra={renderCellExtra}
       outlineGroups={markOutlines}
       renderRollup={renderRollup}
@@ -870,9 +873,10 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
         : node => (
           <div className="hint">
             <span className="stats">{fmtBytes(node.b)} · {fmtN(node.o)} objects{pricing && <> · est. {fmtUsd(estUsd(node))}/mo</>}</span>
-            <Explain text={<>Click a directory to drill in · click an object to pin its details · click the path above (or Backspace) to go up · small children fold into “(other)” · j/k select rows in the table below</>}>
+            <Tooltip content={<>Click a directory to drill in · click an object to pin its details · click the path above (or Backspace) to go up · small children fold into “(other)” · j/k select rows in the table below</>}>
               <span className="info" aria-label="how to use the map" tabIndex={0}>ⓘ</span>
-            </Explain>
+            </Tooltip>
+            {!hasPanel && keys}
           </div>
         )}
       chrome={!redact}
@@ -887,7 +891,12 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
       // headline), so the map area gets ONE frame in that state's color — every
       // tile inherits it, and per-tile borders are suppressed (state boundaries
       // only), so without this the view read as unmarked.
-      className={`treemap store-${scheme === 's3://' ? 'cw' : 'gcs'} tiling-${tiling}${rootMark ? ` root-marked root-marked-${rootMark.action}` : ''}`}
+      // At the un-drilled root the crumb bar is just the root label + totals —
+      // a redundant near-empty row (the topbar already names the view, the
+      // footer + resting card carry the totals) that read as a gap under the
+      // controls. Hide it there; a drill (breadcrumbs) or a gradient legend
+      // brings it back. `bar-hidden` → app.scss.
+      className={`treemap store-${scheme === 's3://' ? 'cw' : 'gcs'} tiling-${tiling}${rootMark ? ` root-marked root-marked-${rootMark.action}` : ''}${drillLen <= 1 && !modeLegend ? ' bar-hidden' : ''}`}
     />
   )
 }

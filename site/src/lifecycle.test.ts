@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { describeRule, displayId, fromGcs, groupRows, lifecycleDiff, normalizeSnapshot, rulePrefix } from './lifecycle'
-import type { GcsRule, GroupedRow, LifecycleRule, LifecycleRow } from './lifecycle'
+import { describeRule, lifecycleDiff, lifecycleDiffByBucket, parseLifecycle, rulePrefix } from './lifecycle'
+import type { BucketLifecycleRow, LifecycleRule, LifecycleRow, LifecycleSnapshot } from './lifecycle'
 
 const ttl = (days: number): LifecycleRule => ({ ID: `marin-ttl-${days}d`, Filter: { Prefix: `tmp/ttl=${days}d/` }, Status: 'Enabled', Expiration: { Days: days } })
 const gc: LifecycleRule = { ID: 'cw-noncurrent-gc', Filter: { Prefix: '' }, Status: 'Enabled', NoncurrentVersionExpiration: { NoncurrentDays: 1 }, Expiration: { ExpiredObjectDeleteMarker: true } }
@@ -26,12 +26,11 @@ describe('describeRule', () => {
 })
 
 describe('lifecycleDiff', () => {
-  it('no previous snapshot: rows sorted by ID (numeric-aware), no changes', () => {
-    expect(lifecycleDiff(null, [ttl(7), gc, ttl(14), ttl(1)])).toEqual<LifecycleRow[]>([
+  it('no previous snapshot: rows sorted by ID, no changes', () => {
+    expect(lifecycleDiff(null, [ttl(7), gc, ttl(1)])).toEqual<LifecycleRow[]>([
       { rule: gc, change: null },
       { rule: ttl(1), change: null },
       { rule: ttl(7), change: null },
-      { rule: ttl(14), change: null },
     ])
   })
   it('added, removed, changed against the previous snapshot', () => {
@@ -55,87 +54,46 @@ describe('lifecycleDiff', () => {
   })
 })
 
-// GCS rules: anonymous `{action, condition}` → S3-shaped rows with a content ID.
-const gTtl = (days: number): GcsRule => ({ action: { type: 'Delete' }, condition: { age: days, matchesPrefix: [`tmp/ttl=${days}d/`] } })
-const gCustom: GcsRule = { action: { type: 'Delete' }, condition: { daysSinceCustomTime: 0, matchesPrefix: ['scratch/compilation_cache/'] } }
-const gCold: GcsRule = { action: { type: 'SetStorageClass', storageClass: 'COLDLINE' }, condition: { age: 90, matchesStorageClass: ['STANDARD'] } }
-const gNoncurrent: GcsRule = { action: { type: 'Delete' }, condition: { isLive: false, numNewerVersions: 3 } }
-const gMpu: GcsRule = { action: { type: 'AbortIncompleteMultipartUpload' }, condition: { age: 7 } }
-
-describe('fromGcs', () => {
-  it('maps a TTL rule onto Expiration + Filter, with a content ID', () => {
-    expect(fromGcs(gTtl(14))).toEqual<LifecycleRule>({
-      ID: 'delete age=14 matchesPrefix=tmp/ttl=14d/',
-      Status: 'Enabled',
-      Filter: { Prefix: 'tmp/ttl=14d/' },
-      Expiration: { Days: 14 },
-    })
-    expect(describeRule(fromGcs(gTtl(14)))).toBe('expire objects after 14 d')
-    expect(displayId(fromGcs(gTtl(14)))).toBe('delete age=14')
-    expect(displayId(fromGcs(gNoncurrent))).toBe('delete isLive=false numNewerVersions=3')
-    expect(displayId(ttl(14))).toBe('marin-ttl-14d')
+describe('parseLifecycle', () => {
+  it('a bare Rules[] (scans before the multi-bucket job) is the primary bucket’s', () => {
+    expect(parseLifecycle([ttl(1), mpu], 'marin-us-east-02a')).toEqual<LifecycleSnapshot>({ 'marin-us-east-02a': [ttl(1), mpu] })
   })
-  it('words what S3 has no field for', () => {
-    expect(fromGcs(gCustom)).toEqual<LifecycleRule>({
-      ID: 'delete daysSinceCustomTime=0 matchesPrefix=scratch/compilation_cache/',
-      Status: 'Enabled',
-      Filter: { Prefix: 'scratch/compilation_cache/' },
-      Extra: "0 d after the object's custom time",
-    })
-    expect(fromGcs(gCold)).toEqual<LifecycleRule>({
-      ID: 'setstorageclass age=90 matchesStorageClass=STANDARD',
-      Status: 'Enabled',
-      Extra: 'move to COLDLINE after 90 d, in STANDARD',
-    })
-    expect(fromGcs(gNoncurrent)).toEqual<LifecycleRule>({
-      ID: 'delete isLive=false numNewerVersions=3',
-      Status: 'Enabled',
-      Extra: 'when 3 newer versions exist',
-    })
-    expect(fromGcs(gMpu)).toEqual<LifecycleRule>({
-      ID: 'abortincompletemultipartupload age=7',
-      Status: 'Enabled',
-      AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 },
-    })
-    expect(describeRule(fromGcs(gCustom))).toBe("0 d after the object's custom time")
+  it('a {bucket: Rules[]} map is taken as is', () => {
+    const snap: LifecycleSnapshot = { 'marin-us-east-02a': [gc, mpu], 'hero-checkpoints': [mpu] }
+    expect(parseLifecycle(snap, 'marin-us-east-02a')).toEqual(snap)
+  })
+  it('anything else throws', () => {
+    expect(() => parseLifecycle('x', 'b')).toThrow('lifecycle.json: expected Rules[] or {bucket: Rules[]}')
+    expect(() => parseLifecycle(null, 'b')).toThrow('lifecycle.json: expected Rules[] or {bucket: Rules[]}')
   })
 })
 
-describe('normalizeSnapshot', () => {
-  it('a bare list is one unnamed bucket; either cloud', () => {
-    expect(normalizeSnapshot([ttl(1)])).toEqual([{ bucket: null, rules: [ttl(1)] }])
-    expect(normalizeSnapshot([gTtl(1)])).toEqual([{ bucket: null, rules: [fromGcs(gTtl(1))] }])
-  })
-  it('a map is keyed by bucket, buckets sorted', () => {
-    expect(normalizeSnapshot({ 'marin-us-west4': [gTtl(1), gCustom], 'marin-eu-west4': [gTtl(1)] })).toEqual([
-      { bucket: 'marin-eu-west4', rules: [fromGcs(gTtl(1))] },
-      { bucket: 'marin-us-west4', rules: [fromGcs(gTtl(1)), fromGcs(gCustom)] },
+describe('lifecycleDiffByBucket', () => {
+  const P = 'marin-us-east-02a'
+  const H = 'hero-checkpoints'
+  it('diffs each bucket by rule ID within the bucket, in the current snapshot’s order', () => {
+    const prev: LifecycleSnapshot = { [P]: [mpu, ttl(1)], [H]: [ttl(1)] }
+    const cur: LifecycleSnapshot = { [P]: [mpu, ttl(1), gc], [H]: [{ ...ttl(1), Expiration: { Days: 2 } }] }
+    expect(lifecycleDiffByBucket(prev, cur)).toEqual<BucketLifecycleRow[]>([
+      { bucket: P, rule: gc, change: 'new' },
+      { bucket: P, rule: mpu, change: null },
+      { bucket: P, rule: ttl(1), change: null },
+      { bucket: H, rule: { ...ttl(1), Expiration: { Days: 2 } }, change: 'changed', prev: ttl(1) },
     ])
   })
-})
-
-describe('groupRows', () => {
-  const t1 = fromGcs(gTtl(1)); const t14 = fromGcs(gTtl(14)); const custom = fromGcs(gCustom)
-  it('a fleet-wide rule shows once with every bucket; a one-bucket rule with its bucket', () => {
-    const perBucket = [
-      { bucket: 'marin-us-west4', rows: lifecycleDiff(null, [t1, t14, custom]) },
-      { bucket: 'marin-eu-west4', rows: lifecycleDiff(null, [t14, t1]) },
-    ]
-    expect(groupRows(perBucket)).toEqual<GroupedRow[]>([
-      { rule: t1, change: null, buckets: ['marin-eu-west4', 'marin-us-west4'] },
-      { rule: t14, change: null, buckets: ['marin-eu-west4', 'marin-us-west4'] },
-      { rule: custom, change: null, buckets: ['marin-us-west4'] },
+  it('a bucket new to the snapshot is all `new`; one only the previous scan had is all `removed`', () => {
+    expect(lifecycleDiffByBucket({ [P]: [mpu] }, { [P]: [mpu], [H]: [ttl(7), ttl(1)] })).toEqual<BucketLifecycleRow[]>([
+      { bucket: P, rule: mpu, change: null },
+      { bucket: H, rule: ttl(1), change: 'new' },
+      { bucket: H, rule: ttl(7), change: 'new' },
+    ])
+    expect(lifecycleDiffByBucket({ [P]: [mpu], [H]: [ttl(7), ttl(1)] }, { [P]: [mpu] })).toEqual<BucketLifecycleRow[]>([
+      { bucket: P, rule: mpu, change: null },
+      { bucket: H, rule: ttl(1), change: 'removed' },
+      { bucket: H, rule: ttl(7), change: 'removed' },
     ])
   })
-  it('the same rule with different changes stays two rows; removed rows sort last', () => {
-    const perBucket = [
-      { bucket: 'a', rows: lifecycleDiff([t14, t1], [t1]) },   // t14 removed on a
-      { bucket: 'b', rows: lifecycleDiff([t1], [t1, t14]) },   // t14 new on b
-    ]
-    expect(groupRows(perBucket)).toEqual<GroupedRow[]>([
-      { rule: t1, change: null, buckets: ['a', 'b'] },
-      { rule: t14, change: 'new', buckets: ['b'] },
-      { rule: t14, change: 'removed', buckets: ['a'] },
-    ])
+  it('no previous snapshot: every row unchanged', () => {
+    expect(lifecycleDiffByBucket(null, { [H]: [ttl(1)] })).toEqual<BucketLifecycleRow[]>([{ bucket: H, rule: ttl(1), change: null }])
   })
 })

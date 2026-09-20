@@ -76,16 +76,21 @@ export const decodeScan = (e: string | undefined, now = new Date()): string | un
 
 // ---- span (the Changes section's look-back) ----
 //
-// `?d=[scan][-span]` — same shape as awair's `?t=`: the scan is the "after"
-// endpoint (absent = latest, a sticky state that follows new scans), the span
-// is how far back the "before" endpoint sits (absent = the baked previous
-// scan). Spans are `Nd`, `Nh`, or both (`6d12h`); a span alone (`-7d`) keeps
-// the page on latest.
-//   ?d=-7d            latest, 7 days back
-//   ?d=260904-0002    pinned to the 9/4 00:02Z scan, default look-back
-//   ?d=260904-0002-7d pinned, 7 days back
-// The span resolves to the *nearest* scan (scan times drift minutes past
-// exact multiples), so an explicit dropdown pick round-trips as its own span.
+// `?d=[end][-before]` — same shape as awair's `?t=`: `end` is the "after"
+// endpoint (absent = latest, a sticky state that follows new scans); `before`
+// is the "before" endpoint, expressed *either* as a look-back span *or* as a
+// second pinned scan — the two forms are orthogonal to the end pin:
+//   ?d=-7d                     latest end, 7 days back (a floating window)
+//   ?d=260904-0002             end pinned to the 9/4 00:02Z scan, default look-back
+//   ?d=260904-0002-7d          end pinned, 7 days back
+//   ?d=-260901-0002            latest end, START pinned to 9/1 (end floats, start fixed)
+//   ?d=260904-0002-260901-0002 both endpoints pinned (a frozen window)
+// Spans are `Nd`, `Nh`, or both (`6d12h`); a span resolves to the *nearest*
+// scan (times drift minutes past exact multiples), so a duration pick
+// round-trips as its own span. A pinned start (`from`) is a scan-id suffix —
+// `YYMMDD[-HHMM]`, distinguishable from a span (ends in d/h) and from the end
+// scan's own `-HHMM` time (4 digits, never a 6-digit date). Span and `from`
+// are mutually exclusive: setting one clears the other.
 
 export const encodeSpan = (ms: number): string => {
   const days = Math.floor(ms / DAY)
@@ -101,28 +106,41 @@ export const decodeSpan = (s: string): number | undefined => {
 }
 
 export interface ScanSel {
-  /** Scan-id prefix (decoded form, e.g. `2026-09-04T0002`); absent = latest. */
+  /** "After" scan-id prefix (decoded form, e.g. `2026-09-04T0002`); absent = latest. */
   d?: string
-  /** Look-back in ms; absent = the baked previous scan. */
+  /** "Before" as a look-back in ms; absent = the baked previous scan. Excludes `from`. */
   span?: number
+  /** "Before" as a pinned scan-id prefix (decoded form). Excludes `span`. */
+  from?: string
 }
 
 const SPAN_SUFFIX = /-(\d+d(?:\d+h)?|\d+h)$/
+// A trailing pinned-start scan: `-YYMMDD` optionally `-HHMM`. The 6-digit date
+// can't collide with a span (ends in d/h) or with the end scan's own 4-digit
+// `-HHMM` time, so the suffix is unambiguous.
+const FROM_SUFFIX = /-(\d{6}(?:-\d{4})?)$/
 
 export const encodeSel = (v: ScanSel | undefined): string | undefined => {
   if (!v) return undefined
   const d = encodeScan(v.d) ?? ''
-  const span = v.span ? `-${encodeSpan(v.span)}` : ''
-  return d + span || undefined
+  const before = v.from ? `-${encodeScan(v.from)}` : v.span ? `-${encodeSpan(v.span)}` : ''
+  return d + before || undefined
 }
 
 export const decodeSel = (e: string | undefined, now = new Date()): ScanSel | undefined => {
   if (!e) return undefined
-  const m = SPAN_SUFFIX.exec(e)
-  const span = m ? decodeSpan(m[1]) : undefined
-  const head = m ? e.slice(0, m.index) : e
+  const sm = SPAN_SUFFIX.exec(e)
+  const span = sm ? decodeSpan(sm[1]) : undefined
+  let head = sm ? e.slice(0, sm.index) : e
+  let from: string | undefined
+  if (!span) {
+    const fm = FROM_SUFFIX.exec(head)
+    if (fm) { from = decodeScan(fm[1], now); head = head.slice(0, fm.index) }
+  }
   const d = head ? decodeScan(head, now) : undefined
-  return d || span ? { ...(d ? { d } : {}), ...(span ? { span } : {}) } : undefined
+  return d || span || from
+    ? { ...(d ? { d } : {}), ...(span ? { span } : {}), ...(from ? { from } : {}) }
+    : undefined
 }
 
 /** The scan nearest to `t` among `scans` (any order); null when empty. */
@@ -139,9 +157,17 @@ export interface Scan {
   dP: string | undefined
   /** Pin the "after" scan; the latest scan (or undefined) clears the pin. */
   setDP: (v: string | undefined) => void
-  /** Diff look-back in ms; undefined = the previous scan. */
+  /** Diff look-back in ms; undefined = the previous scan (or a pinned `from`). */
   span: number | undefined
   setSpan: (ms: number | undefined) => void
+  /** "Before" pinned to a scan (decoded id); undefined = use `span`. Setting it
+   *  clears `span` (the two "before" forms are mutually exclusive). */
+  from: string | undefined
+  setFrom: (v: string | undefined) => void
+  /** Pin the "after" endpoint at the current scan, or release it to follow the
+   *  latest scan. (Only meaningful while the page is on the latest scan; an
+   *  older `asof` is already pinned.) */
+  setEndPin: (pin: boolean) => void
   /** Pin + look-back in one URL write (a chart brush sets both). */
   setRange: (d: string | undefined, ms: number | undefined) => void
   scansQ: UseQueryResult<string[]>
@@ -180,13 +206,40 @@ export function useScan(store: Store): Scan {
   const scans = useMemo(() => scansQ.data ?? [], [scansQ.data])
   const dP = sel?.d
   const span = sel?.span
+  const from = sel?.from
   const dMatches = useMemo(() => (dP ? scans.filter(s => s.startsWith(dP)) : []), [dP, scans])
   const asof = dMatches[0] ?? scans[0] ?? null
-  const setRange = (v: string | undefined, ms: number | undefined) => {
-    const d = v && v !== scans[0] ? v : undefined
-    setSel(d || ms ? { ...(d ? { d } : {}), ...(ms ? { span: ms } : {}) } : undefined)
+  // Write the {end, before} pair verbatim — `before` is a span OR a pinned
+  // `from`, never both. Callers that pass a `d` equal to the latest scan mean
+  // "float" and drop it; `setEndPin` is the one path that pins at latest.
+  const write = (d: string | undefined, span0: number | undefined, from0: string | undefined) =>
+    setSel(d || span0 || from0
+      ? { ...(d ? { d } : {}), ...(span0 ? { span: span0 } : {}), ...(from0 ? { from: from0 } : {}) }
+      : undefined)
+  const setRange = (v: string | undefined, ms: number | undefined) =>
+    write(v && v !== scans[0] ? v : undefined, ms, undefined)
+  const setDP = (v: string | undefined) => write(v && v !== scans[0] ? v : undefined, span, from)
+  const setSpan = (ms: number | undefined) => write(dP, ms, undefined)
+  const setFrom = (v: string | undefined) => write(dP, undefined, v)
+  const setEndPin = (pin: boolean) => write(pin ? asof ?? undefined : undefined, span, from)
+  return { asof, scans, dMatches, dP, setDP, span, setSpan, from, setFrom, setEndPin, setRange, scansQ }
+}
+
+/** `<optgroup>` rows for a scan picker: scans grouped by their displayed
+ * day (`fmtScan`'s date part, viewer-local for sub-daily ids), newest day
+ * first, each option labelled by its time alone (`8:01a`) — a date-only scan
+ * is its day's single, unlabelled-time entry. A list of sixty `9/16 8:01p`
+ * rows read as noise; grouped, the day is said once. */
+export function scanGroups(scans: string[], now = new Date()): { day: string; scans: { id: string; label: string }[] }[] {
+  const out: { day: string; scans: { id: string; label: string }[] }[] = []
+  for (const id of scans) {
+    const f = fmtScan(id, now)
+    const sp = f.indexOf(' ')
+    const day = sp < 0 ? f : f.slice(0, sp)
+    const label = sp < 0 ? f : f.slice(sp + 1)
+    const last = out[out.length - 1]
+    if (last && last.day === day) last.scans.push({ id, label })
+    else out.push({ day, scans: [{ id, label }] })
   }
-  const setDP = (v: string | undefined) => setRange(v, span)
-  const setSpan = (ms: number | undefined) => setRange(dP, ms)
-  return { asof, scans, dMatches, dP, setDP, span, setSpan, setRange, scansQ }
+  return out
 }

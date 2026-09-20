@@ -9,15 +9,15 @@ import { AGE_MODES, AgeChart } from './AgeChart'
 import { canonId, shortName, shortUserKey } from './UserChip'
 import { signInUrl, useCanMark, useIdent as useIdentity } from './auth'
 import { AttributionRules } from './AttributionRules'
-import { DiffTreemap } from './DiffTreemap'
+import { DiffTreemap, DiffHeader, useDiffModel } from './DiffTreemap'
 import type { DiffData } from './DiffTreemap'
+import { ScanCombobox } from './ScanCombobox'
 import { buildUserIndex, epochDaysToDate } from './colors'
 import { ChildrenTable } from './ChildrenTable'
-import { FitSelect } from './FitSelect'
-import { PathPopover } from './PathPopover'
 import { Busy, Skeleton } from './Busy'
 import { useRules } from './rules'
 import { useHashSpy } from './hashSpy'
+import { barControls } from './pageBar'
 import { LifecycleFold } from './LifecycleFold'
 import { ClassMixTip, Tooltip } from './Tooltip'
 import { Treemap } from './Treemap'
@@ -110,6 +110,11 @@ type OwnerMode = 'all' | 'owned' | 'unowned' | 'user' | 'others'
 
 // Home-page section anchors, top to bottom — the scroll-spy keeps `#hash`
 // tracking the one in view, and deep links scroll to it. Old ids keep working.
+// Client cache version: appended to the read endpoints' URLs so a browser's
+// HTTP copy of a pre-deploy answer (they were kept a day until 2026-09-17,
+// five minutes since) is never replayed after a reader rule changes. Bump
+// with `CACHE_V` in functions/_lib/edgeCache.ts.
+const API_CV = '2'
 const SECTION_IDS = ['tree-map', 'tbl', 'marks', 'over-time', 'diff', 'mtime']
 const LEGACY_ANCHORS: Record<string, string> = {
   'size-over-time': 'over-time', 'mark-history': 'marks', 'created-date': 'mtime', changes: 'diff',
@@ -121,27 +126,29 @@ function AppContent() {
   const { pathname, search, hash } = useLocation()
   const navigate = useNavigate()
   const store = storeForPath(pathname)
+  // Legacy `?path=<prefix>` links (cw-s3 drilled by query param until the
+  // union): forward to the URL-path form, keeping the other params.
+  useEffect(() => {
+    const q = new URLSearchParams(search)
+    const legacy = q.get('path')
+    if (legacy == null) return
+    q.delete('path')
+    const base = store.path === '/' ? '' : store.path
+    const rest = q.toString()
+    navigate({ pathname: legacy ? `${base}/${legacy.replace(/^\/+|\/+$/g, '')}` : store.path, search: rest ? `?${rest}` : '', hash }, { replace: true })
+  }, [search, hash, navigate, store])
   const canMark = useCanMark()
   // Mark & sweep (specs/mark-sweep-ui.md): the same treemap plus keep/sweep
   // controls, shown to any signed-in marker on the GCS store — anon and guest
   // (no-email) sessions get the read-only view. Folded onto `/` (was a separate
   // `/mark` route); GCS only, since CoreWeave is out of the sweep.
   const markMode = store.marks && canMark
-  // gcs's actions ledger is server-side (mark-state scopes, totals, history);
-  // a plan-first store's marks would be client-side only. The owner axis is a
-  // separate publish (attribution). Both derive from markMode ∧ a store flag —
-  // on gcs (`sweep: 'owner'`, `owners: true`) both equal markMode.
+  // gcs's actions ledger lives server-side (mark-state scopes, totals, history);
+  // a plan-first store's marks are client-side only (marks.ts adapter).
   const serverLedger = markMode && store.sweep === 'owner'
   const ownersMode = markMode && store.owners
   const marksQ = useMarks(markMode)
   const markIdx = useMarkIndex(marksQ.data)
-  // Marks (keep/sweep) are de-emphasized: owner assignment is the primary axis
-  // now, so the mark-state color option, the marks column, the mark-axis and
-  // owner-by-mark controls, and the Mark history feed are hidden from the
-  // default UI — reachable via `?marks=1` for triaging the mark backlog. The
-  // `?c=marks` colouring itself stays URL-accessible regardless.
-  const [marksFlagP] = useUrlState('marks', stringParam())
-  const marksUi = markMode && marksFlagP === '1'
   const [typedOpen, setTypedOpen] = useState(false)
   // Keep the tab title in sync with the store on client-side navigation.
   useDocTitle() // the bare site name (= the store's title) is the home page
@@ -158,7 +165,7 @@ function AppContent() {
   // Scan selection (`?d=YYMMDD`) + the polling scan list, shared with /users
   // and /user/:id via useScan (specs/scan-param-all-pages.md). Absent `?d` is
   // a first-class "latest", so a parked tab follows new scans.
-  const { asof, scans, dMatches, dP, setDP, span, setSpan, setRange, scansQ } = useScan(store)
+  const { asof, scans, dMatches, dP, setDP, span, setSpan, from, setFrom, setEndPin, setRange, scansQ } = useScan(store)
   const rulesQ = useRules()
   const rules: Rules | null = rulesQ.data ?? null
   // Ledger actions record which scan the actor was viewing.
@@ -176,6 +183,14 @@ function AppContent() {
   // instead of a tab row, so "unmarked ∧ unclaimed" or "sweep ∧ one user"
   // are plain combinations. Old links normalize below.
   const [fq, setFq] = useUrlState('f', stringParam())
+  // The box edits a local draft; the URL (and every query keyed on it) follows
+  // after a 250 ms pause — one request pair per phrase, not per keystroke.
+  const [fqDraft, setFqDraft] = useState<string | null>(null)
+  useEffect(() => {
+    if (fqDraft == null) return
+    const t = setTimeout(() => { setFq(fqDraft || undefined); setFqDraft(null) }, 250)
+    return () => clearTimeout(t)
+  }, [fqDraft, setFq])
   // Lens changes push history (they change WHAT you're looking at, like a
   // drill); cosmetics (`?c=`, `?s=`, `?n=`) replace.
   const [kP, setKP] = useUrlState('k', stringParam(), true)
@@ -270,7 +285,6 @@ function AppContent() {
     navigate({ pathname, search: `?${sp.toString()}`, hash }, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search])
-  const ageQ = useQuery(scanQuery<AgeRow[]>('age'))
   const metaQ = useQuery(scanQuery<Meta>('meta'))
   // The Diff section's "before" endpoint comes from the `?d=` span (see
   // scan.ts): absent = the previous scan; a span resolves to the scan
@@ -283,7 +297,10 @@ function AppContent() {
   const prevScan = asof ? scans[scans.indexOf(asof) + 1] ?? null : null
   const earlier = useMemo(() => (asof ? scans.filter(s => s < asof) : []), [asof, scans])
   const spanScan = span && asof ? nearestScan(earlier, scanTime(asof) - span) : null
-  const diffPrev = spanScan ?? prevScan
+  // A pinned start (`from`) wins over a look-back span; both fall back to the
+  // immediately-previous scan.
+  const fromScan = from && asof ? nearestScan(earlier, scanTime(from)) : null
+  const diffPrev = fromScan ?? spanScan ?? prevScan
   // Hour-rounded span back from `to` — the previous scan clears it, anything
   // else round-trips as its own span (nearest-scan resolution recovers it,
   // and the link keeps following `latest`).
@@ -301,6 +318,14 @@ function AppContent() {
     setRange(toScan, spanTo(toScan, fromScan))
   }
   const diffWindow: [string, string] | undefined = diffPrev && asof ? [diffPrev, asof] : undefined
+  // Two orthogonal, low-key toggles for the diff window (see scan.ts grammar):
+  // the start is either a pinned scan (`from`) or a look-back span; the end
+  // either follows the latest scan (floating) or is pinned. The end toggle only
+  // means anything while the page IS on the latest scan (an older `asof` is
+  // already pinned), so it hides otherwise.
+  const startPinned = from !== undefined
+  const endIsLatest = !!asof && asof === scans[0]
+  const endPinned = dP !== undefined
   // Presets past the history's reach — nearest scan more than a quarter of
   // the span off, or already claimed by a shorter preset — are dropped
   // rather than mislabeled.
@@ -336,13 +361,15 @@ function AppContent() {
       // user index for this scan; 413: view too wide) — those surface as-is.
       retry: (n: number, e: Error) => !/^4\d\d/.test(e.message) && n < 3,
       retryDelay: (n: number) => 400 * 2 ** n,
-      queryFn: async () => {
+      // With a filter the full read plans each match root's tier (`full=1`);
+      // the companion below paints the coarsest-tier forest first.
+      queryFn: async ({ signal }: { signal?: AbortSignal }) => {
         const r = await fetch(
-          `/api/subtree?date=${asof}&path=${encodeURIComponent(p)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}`,
-          { credentials: 'include' },
+          `/api/subtree?cv=${API_CV}&date=${asof}&path=${encodeURIComponent(p)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}${fq ? '&full=1' : ''}`,
+          { credentials: 'include', signal },
         )
         if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`)
-        return r.json() as Promise<{ tree: TreeNode; matches?: string[]; threshold?: number }>
+        return r.json() as Promise<{ tree: TreeNode; matches?: string[]; matched?: { path: string; b: number; o: number }[]; threshold?: number }>
       },
     })),
   })
@@ -360,10 +387,13 @@ function AppContent() {
       enabled: !!asof && i === subtreePaths.length - 1,
       staleTime: markAxes ? 30_000 : Infinity,
       retry: false,
-      queryFn: async () => {
+      // Plain view: one depth band. Filtered view: the whole forest from the
+      // coarsest tier (`partial`, milliseconds) — the fast first paint of
+      // specs/filter-views.md, replaced by the planned-tier read above.
+      queryFn: async ({ signal }: { signal?: AbortSignal }) => {
         const r = await fetch(
-          `/api/subtree?date=${asof}&path=${encodeURIComponent(p)}&w=${canW}&h=${Math.round(canW * 0.6)}&depth=1${scopeQs}`,
-          { credentials: 'include' },
+          `/api/subtree?cv=${API_CV}&date=${asof}&path=${encodeURIComponent(p)}&w=${canW}&h=${Math.round(canW * 0.6)}${fq ? '' : '&depth=1'}${scopeQs}`,
+          { credentials: 'include', signal },
         )
         if (!r.ok) throw new Error(`${r.status}`)
         return r.json() as Promise<{ tree: TreeNode }>
@@ -454,7 +484,14 @@ function AppContent() {
   // flagged `m` (a match root's whole subtree comes along, so its descendants
   // aren't flagged).
   const fMatches = useMemo(() => (tree && fq ? collectFlagged(tree) : []), [tree, fq])
-  const age: AgeRow[] = ageQ.data ?? []
+  // The filter's match roots (the deepest subtree response carries them);
+  // the series sums them per scan (the age chart follows the drill instead —
+  // its own per-path index, below).
+  const matchedRoots = useMemo((): string[] | undefined => {
+    if (!fq) return undefined
+    const m = subtreeQs[subtreeQs.length - 1]?.data?.matched ?? subtreeQs[0]?.data?.matched
+    return m?.map(x => x.path)
+  }, [fq, subStamp]) // eslint-disable-line react-hooks/exhaustive-deps
   const meta: Meta | null = metaQ.data ?? null
   // Section `#hash` both ways (deep link in, scroll-spy out) — shared with
   // /sweep. Re-armed as the map, meta and scans land (sections mount off
@@ -473,6 +510,25 @@ function AppContent() {
   // every depth, not just the root (specs/path-agnostic-serving.md §2.3).
   const drillPfx = drillPath ? `${store.scheme}${drillPath}/` : undefined
   const totalsQ = useMarkTotals(asof, serverLedger ? drillPfx : undefined, serverLedger)
+  // Per-path created-time strata for `AgeChart`, keyed on the drilled prefix so
+  // it follows the drill exactly instead of showing the whole fleet at every
+  // depth (specs/age-index.md). Root (`drillPath === ''`, depth 0) is the fleet
+  // total; a prefix below the index floor returns no rows. Served by the pyrmts
+  // pyramid (`/api/age-pyramid`, Phase B): the server picks the bin for the
+  // budget and returns `{dt (epoch-ms), b, o}`; the chart still buckets to
+  // day/week/month client-side, so we map `dt` back to an epoch-day `AgeRow`.
+  const ageQ = useQuery({
+    queryKey: ['age', store.key, asof, drillPath],
+    queryFn: () =>
+      fetch(`/api/age-pyramid?date=${asof}&path=${encodeURIComponent(drillPath)}&bin_budget=512`, { credentials: 'include' })
+        .then(r => { if (!r.ok) throw new Error(`age ${r.status}`); return r.json() as Promise<{ records: { dt: number; b: number; o: number }[] }> }),
+    enabled: !!asof,
+    staleTime: Infinity,
+  })
+  const age: AgeRow[] = useMemo(
+    () => (ageQ.data?.records ?? []).map(r => ({ d: Math.floor(r.dt / 86400_000), b: r.b, o: r.o })),
+    [ageQ.data],
+  )
   const drillTo = (segs: string[]) =>
     navigate({ pathname: segs.length ? `${storeBase}/${segs.join('/')}` : store.path, search, hash })
   // Read-recency lens domain: the access-log observation window (meta), not
@@ -487,23 +543,31 @@ function AppContent() {
   // all-undecided view; on a one-owner view the interesting axis is who else
   // is in there).
   const lensDefaultMode: ColorMode =
-    markAxes?.size === 1 || ownerMode === 'user' || ownerMode === 'others' ? 'user' : marksUi ? 'marks' : 'user'
+    !store.owners ? 'tree'
+    : markAxes?.size === 1 || ownerMode === 'user' || ownerMode === 'others' ? 'user' : markMode ? 'marks' : 'user'
   const mode: ColorMode = (MODES as string[]).includes(modeP ?? '') ? (modeP as ColorMode) : lensDefaultMode
   const setMode = (m: ColorMode) => setModeP(m === lensDefaultMode ? undefined : m)
   // The scan carries attribution (the owner axis and user coloring apply) —
   // from the scan's meta, not the current view, which may hold no user bytes
   // at all (e.g. `?o=unclaimed`).
   const hasAttr = !!meta?.users?.length
-  const effMode: ColorMode =
-    (mode === 'read' && !readRange) || (mode === 'marks' && !markMode) ? 'user' : hasAttr ? mode : 'tree'
+  // The page bar's controls, each on what backs it (`pageBar.ts`).
+  const bar = barControls({ marks: markMode, owners: store.owners, hasAttr, classes: store.prices, readRange: !!readRange })
+  const effMode: ColorMode = bar.color.includes(mode) ? mode : bar.color.includes('user') ? 'user' : 'tree'
   // The age chart's color axis: an explicit `?ac=` wins; otherwise it follows
   // the map, except marks (no per-stratum value in age.json) → written. The
   // read axis needs strata that carry `a` (scans published from 8/29 on) —
   // without them it's offered disabled and the chart falls back to written.
   const ageReadRange = age.some(r => r.a != null) ? readRange : null
-  // Only axes this scan can actually color by are offered (no dead buttons):
-  // `read` needs `a` strata, the user axis needs `us`.
-  const ageModes = AGE_MODES.filter(m => (m !== 'read' || ageReadRange) && (hasAttr || m === 'date' || m === 'tree'))
+  // Only axes the rows actually carry a per-stratum value for are offered (no
+  // dead buttons): `read` needs `a`, `user` needs `u`, `tree` needs `d1`. The
+  // Phase-A per-path index carries only `(d, b, o)`, so `date` is the axis;
+  // richer strata return with Phase B (specs/age-index.md).
+  const ageModes = AGE_MODES.filter(m =>
+    m === 'date'
+    || (m === 'read' && !!ageReadRange)
+    || (m === 'user' && hasAttr && age.some(r => r.u != null))
+    || (m === 'tree' && age.some(r => r.d1 != null)))
   const ageMode: ColorMode = (() => {
     const want: ColorMode = ageModeP && (AGE_MODES as string[]).includes(ageModeP) ? (ageModeP as ColorMode) : effMode === 'marks' ? 'date' : effMode
     return ageModes.includes(want) ? want : 'date'
@@ -527,10 +591,10 @@ function AppContent() {
     enabled: !!asof && !!diffPrev,
     staleTime: markAxes ? 30_000 : Infinity,
     retry: false,
-    queryFn: async () => {
+    queryFn: async ({ signal }: { signal?: AbortSignal }) => {
       const r = await fetch(
-        `/api/diff?from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}&depth=1`,
-        { credentials: 'include' },
+        `/api/diff?cv=${API_CV}&from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}&depth=1`,
+        { credentials: 'include', signal },
       )
       if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`)
       return r.json() as Promise<DiffData>
@@ -551,10 +615,10 @@ function AppContent() {
     staleTime: markAxes ? 30_000 : Infinity,
     retry: (n: number, e: Error) => !/^4\d\d/.test(e.message) && n < 3,
     retryDelay: (n: number) => 400 * 2 ** n,
-    queryFn: async () => {
+    queryFn: async ({ signal }: { signal?: AbortSignal }) => {
       const r = await fetch(
-        `/api/diff?from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}`,
-        { credentials: 'include' },
+        `/api/diff?cv=${API_CV}&from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}`,
+        { credentials: 'include', signal },
       )
       if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`)
       return r.json() as Promise<DiffData>
@@ -567,10 +631,10 @@ function AppContent() {
     enabled: !!asof && !!diffPrev,
     staleTime: markAxes ? 30_000 : Infinity,
     retry: false,
-    queryFn: async () => {
+    queryFn: async ({ signal }: { signal?: AbortSignal }) => {
       const r = await fetch(
-        `/api/diff?from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}&summary=1`,
-        { credentials: 'include' },
+        `/api/diff?cv=${API_CV}&from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}&summary=1`,
+        { credentials: 'include', signal },
       )
       if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`)
       return r.json() as Promise<DiffData>
@@ -582,6 +646,15 @@ function AppContent() {
   // aligning: its numbers describe another pair, so the subtitle says
   // "aligning" instead, and the drawn treemap dims under a marker.
   const diffStale = diffQ.isPlaceholderData || (!diff && diffQ.isFetching)
+  // Two flavours of "still aligning": (1) refining — the map already shows
+  // THIS pair's depth-1 diff (`diffL1`) while the full walk lands, so it's
+  // correct as far as it goes; keep it bright and mark it with a small corner
+  // pill (specs/treemap-first-class-everywhere.md §2 — no map-wide veil once
+  // depth 1 has rendered). (2) genuinely stale — the map is still showing a
+  // DIFFERENT pair's diff (the placeholder fell back to `prev`); that one is
+  // misleading, so it dims under the centered marker until this pair lands.
+  const diffRefining = diffQ.isPlaceholderData && !!diffL1 && diff === diffL1
+  const diffStaleOther = diffStale && !diffRefining
   // Record the settled map's height after every commit that shows one; a
   // reload then holds that height under the marker instead of collapsing.
   useLayoutEffect(() => {
@@ -592,8 +665,11 @@ function AppContent() {
   const diffHead: DiffData | null = diff && !diffStale ? diff : diffSumQ.data ?? null
   // One-line description of the page scope, for the section subtitles:
   // where, then whose, then which mark states, then which names.
+  // At the store root the scope is its buckets, counted (`2 buckets`) — the
+  // path bar already says where the page is.
+  const rootScope = mapTree?.c?.length ? `${mapTree.c.length} bucket${mapTree.c.length === 1 ? '' : 's'}` : store.rootLabel
   const scopeParts: string[] = [
-    drillPath || 'all buckets',
+    drillPath || rootScope,
     ...(ownerUser ? [`${shortName(ownerUser)}’s files${assigner ? `, assigned by ${shortName(assigner)}` : ''}`]
       : ownerMode === 'others' && notUsers[0] ? [`not ${shortName(notUsers[0])}`]
       : ownerMode !== 'all' ? [ownerMode] : []),
@@ -601,6 +677,10 @@ function AppContent() {
     ...(fq ? [`“${fq}”`] : []),
   ]
   const scopeDesc = scopeParts.join(' · ')
+  // Diff model (built tree + movement totals + formatters), shared by the diff
+  // header band and the diff map. Built here so the header stays mounted while a
+  // diff is loading/errored (the map isn't rendered then).
+  const diffModel = useDiffModel(diff, !drillPath, scopeDesc)
   // Controlled treemap drill path, resolved against the (possibly filtered/
   // scoped) tree each render: `?p=` survives scope toggles, filters, and scan
   // switches by re-walking the new tree; a vanished path truncates to its
@@ -668,6 +748,14 @@ function AppContent() {
       // owner axis has its own × button beside the picker.
       defaultBindings: ['alt+x'],
       handler: clearHl,
+    },
+    'nav:up': {
+      label: 'Go up a directory level',
+      group: 'Navigate',
+      // Not Escape (that reads as "dismiss"; it stays for unpinning tips);
+      // Backspace still pops the map too.
+      defaultBindings: ['g u'],
+      handler: () => { const s = drillPath.split('/').filter(Boolean); if (s.length) drillTo(s.slice(0, -1)) },
     },
     'owner:me': { label: 'Owner: my files', group: 'Scope', handler: () => setOP('me') },
     'owner:claimed': { label: 'Owner: owned only', group: 'Scope', handler: () => setOP('owned') },
@@ -784,7 +872,7 @@ function AppContent() {
       {asof && !/[T ]\d{2}/.test(asof) && meta.published && (
         <div>published {new Date(meta.published).toISOString().replace('T', ' ').slice(0, 16)} UTC</div>
       )}
-      <div><b>{fmtBytes(meta.total_bytes)}</b> · <b>{fmtN(meta.total_objects)}</b> objects across all buckets</div>
+      <div><b>{fmtBytes(meta.total_bytes)}</b> · <b>{fmtN(meta.total_objects)}</b> objects across {store.rootLabel}</div>
       {estCost && (
         <div>
           est. <b>${Math.round(estCost.list).toLocaleString()}/mo</b> at list price
@@ -810,16 +898,16 @@ function AppContent() {
     : setOP(negated ? `!${shortUserKey(canonId(v))}` : shortUserKey(canonId(v)))
   const ownerSelect = (
     <>
-      <FitSelect className="tb-select" value={ownerSelVal} ariaLabel="Owner"
+      <select className="tb-select" value={ownerSelVal} aria-label="Owner"
         onChange={e => pickOwner(e.target.value)}>
-        <option value="">all</option>
+        <option value="">anyone</option>
         <option value="owned">owned</option>
         <option value="unowned">unowned</option>
         {myUser && <option value="me">me ({shortName(myUser)})</option>}
         {mkUsers.filter(u => u !== myUser).map(u => <option key={u} value={u}>{shortName(u)}</option>)}
         {ownerUser && !mkUsers.includes(ownerUser) && ownerUser !== myUser && <option value={ownerUser}>{shortName(ownerUser)}</option>}
         {negated && notUsers[0] && notUsers[0] !== myUser && !mkUsers.includes(notUsers[0]) && <option value={notUsers[0]}>{shortName(notUsers[0])}</option>}
-      </FitSelect>
+      </select>
       {selPerson && (
         <Explain text={negated
           ? <>Showing everyone <b>except</b> this person. Click for just theirs.</>
@@ -834,26 +922,20 @@ function AppContent() {
       )}
     </>
   )
-  const menu: MenuEntry[] = marksUi ? [{ key: 'typed', label: 'Mark a typed prefix…', onClick: () => setTypedOpen(true) }] : []
+  const menu: MenuEntry[] = markMode ? [{ key: 'typed', label: 'Mark a typed prefix…', onClick: () => setTypedOpen(true) }] : []
   // The bar's first row: where the page is. The map's own crumb strip is
   // hidden (app.scss) — this IS it, kept on screen mid-scroll; the deepest
   // node's totals ride along as the suffix.
   const here = mapPath?.[mapPath.length - 1]
-  const crumbFullPath = store.scheme + segs.join('/') + (segs.length ? '/' : '')
   const crumbs = (
     <span className="tb-path" aria-label="Drilled path">
-      <Tooltip content="all buckets"><button type="button" className={segs.length ? '' : 'here'} onClick={() => drillTo([])}>{mapTree?.n ?? 'all buckets'}</button></Tooltip>
-      {segs.map((sg, i) => {
-        const last = i === segs.length - 1
-        return (
-          <span key={i}>
-            <span className="sep">/</span>
-            {last
-              ? <PathPopover label={sg} fullPath={crumbFullPath} />
-              : <Tooltip content={<code>{segs.slice(0, i + 1).join('/')}</code>}><button type="button" onClick={() => drillTo(segs.slice(0, i + 1))}>{sg}</button></Tooltip>}
-          </span>
-        )
-      })}
+      <Tooltip content={store.rootLabel}><button type="button" className={segs.length ? '' : 'here'} onClick={() => drillTo([])}>{mapTree?.n ?? store.rootLabel}</button></Tooltip>
+      {segs.map((sg, i) => (
+        <span key={i}>
+          <span className="sep">/</span>
+          <Tooltip content={<code>{segs.slice(0, i + 1).join('/')}</code>}><button type="button" className={i === segs.length - 1 ? 'here' : ''} onClick={() => drillTo(segs.slice(0, i + 1))}>{sg}</button></Tooltip>
+        </span>
+      ))}
     </span>
   )
 
@@ -868,43 +950,39 @@ function AppContent() {
       <SiteNav menu={menu} crumbs={crumbs}>
         {asof && scans.length > 1 && (
           <span className="tb-scan">
-            <Tooltip content={scanTip ?? 'scan'}>
-              <FitSelect className="tb-select scan" value={asof} onChange={e => setDP(e.target.value)} ariaLabel="Scan date">
-                {scans.map(s => <option key={s} value={s}>{fmtScan(s)}</option>)}
-              </FitSelect>
-            </Tooltip>
+            <ScanCombobox value={asof} scans={scans} onChange={setDP} label="Scan date" />
           </span>
         )}
-        {hasAttr && (<>
+        {bar.color.length > 1 && (
           <label className="tb-ctl">
             <span className="lbl">color</span>
             <Explain text={
-              effMode === 'date' ? <>Object <b>creation time</b>, from the bucket listings (each cell = the byte-weighted mean of its objects). GCS objects are immutable, so created ≈ last-modified.</>
+              effMode === 'date' ? <>Object <b>creation time</b>, from the bucket listings (each cell = the byte-weighted mean of its objects). {store.objectsNote}</>
               : effMode === 'read' ? <><b>Last read</b> — the most recent GET/HEAD/LIST anywhere under each cell, from the GCS usage logs (logging began {readRange ? epochDaysToDate(readRange.min) : '—'}). Brick-red = <b>never read</b> since then: prime sweep candidates.</>
               : effMode === 'marks' ? <>Effective <b>keep / sweep / undecided</b> state of every cell (the most recent covering mark wins).</>
               : effMode === 'user' ? <>Dominant <b>owner</b> of each cell; the legend lists the top users of the current view.</>
               : <>Top-level directory each cell belongs to.</>
             }>
-              <FitSelect className="tb-select" value={effMode} ariaLabel="Color plots by" onChange={e => setMode(e.target.value as ColorMode)}>
-                {MODES
-                  .filter(m => (m !== 'read' || readRange) && (m !== 'marks' || marksUi))
-                  .map(m => <option key={m} value={m}>{MODE_LABELS[m]}</option>)}
-              </FitSelect>
+              <select className="tb-select" value={effMode} aria-label="Color plots by" onChange={e => setMode(e.target.value as ColorMode)}>
+                {bar.color.map(m => <option key={m} value={m}>{MODE_LABELS[m]}</option>)}
+              </select>
             </Explain>
           </label>
-          {/* Secondary color axis: a shade *within* each cell's primary color.
-              Opt-in (default none), so the primary axis reads as it always has. */}
+        )}
+        {bar.shade && (
+          /* Secondary color axis: a shade *within* each cell's primary color.
+             Opt-in (default none), so the primary axis reads as it always has. */
           <label className="tb-ctl">
             <span className="lbl">shade</span>
             <Explain text={<>A perturbation <i>within</i> each cell's color, on top of the primary axis. <b>storage class</b>: darker = a larger share of cold classes (Nearline / Coldline / Archive), so within one owner's band you can see what's already cold. Off by default.</>}>
-              <FitSelect className="tb-select" value={shade ?? 'none'} ariaLabel="Shade cells by" onChange={e => setSP(e.target.value === 'none' ? undefined : e.target.value)}>
+              <select className="tb-select" value={shade} aria-label="Shade cells by" onChange={e => setSP(e.target.value === 'none' ? undefined : e.target.value)}>
                 <option value="none">none</option>
                 <option value="class">storage class</option>
-              </FitSelect>
+              </select>
             </Explain>
           </label>
-        </>)}
-        {hasAttr && (
+        )}
+        {bar.classes && (
           <span className="tb-axis">
             <span className="lbl">class</span>
             <MultiSelect<ClassAxis>
@@ -915,7 +993,7 @@ function AppContent() {
             />
           </span>
         )}
-        {marksUi && (
+        {bar.marksFilter && (
           <span className="tb-axis">
             <span className="lbl">marks</span>
             <MultiSelect<MarkAxis>
@@ -926,25 +1004,25 @@ function AppContent() {
             />
           </span>
         )}
-        {markMode && hasAttr && (
+        {bar.ownerFilter && (
           <span className="tb-axis">
             <span className="lbl">owner</span>
             {ownerSelect}
           </span>
         )}
-        {hasAttr && (
+        {bar.pathFilter && (
           <span className="filterbox">
             <input
-              value={fq ?? ''}
-              onChange={e => setFq(e.target.value || undefined)}
+              value={fqDraft ?? fq ?? ''}
+              onChange={e => setFqDraft(e.target.value)}
               placeholder="filter paths — text, a|b, or /regex/"
               aria-label="Filter tree by segment name"
-              size={22}
+              size={32}
             />
             {fq && tree && (
               <span className="fnote">
                 {tree.b > 0 ? <>{fmtBytes(tree.b)} matched</> : 'no matches'}
-                <Explain text="Clear the path filter"><button type="button" onClick={() => setFq(undefined)}>✕</button></Explain>
+                <Explain text="Clear the path filter"><button type="button" onClick={() => { setFqDraft(null); setFq(undefined) }}>✕</button></Explain>
               </span>
             )}
           </span>
@@ -1060,11 +1138,9 @@ function AppContent() {
               segs={tblSegs}
               scheme={store.scheme}
               markIdx={markMode ? markIdx : undefined}
-              marksCol={marksUi}
-              readAxis={!!readRange}
-              ownerAxis={hasAttr}
-              klcIdx={marksUi ? klcIdx : undefined}
-              states={marksUi ? markAxes : null}
+              klcIdx={markMode ? klcIdx : undefined}
+              states={markMode ? markAxes : null}
+              clientStates={!serverLedger}
               userIdx={userIdx}
               onPickUser={u => pickUser(u, false)}
               onOpen={openPath}
@@ -1084,8 +1160,8 @@ function AppContent() {
         <div id="tree-map" className="tm-skel" aria-busy="true" aria-label="loading tree" />
       )}
 
-      {marksUi && (
-        <MarkHistory prefix={store.scheme + drillPath} scope={drillPath || 'all buckets'} pred={pred} filterQ={fq} window={diffWindow} />
+      {serverLedger && (
+        <MarkHistory prefix={store.scheme + drillPath} scope={drillPath || store.rootLabel} pred={pred} filterQ={fq} window={diffWindow} />
       )}
 
       {/* Bytes per scan under the drilled prefix, scoped like the map (a user
@@ -1093,6 +1169,9 @@ function AppContent() {
           axis has no series yet (a per-scan ledger replay; view-serving.md).
           The age chart still hides under any scope until /api/age lands. */}
       <SizeOverTime
+        scopeLabel={store.rootLabel}
+        paths={matchedRoots}
+        filterLabel={fq ?? undefined}
         scans={scans} prefix={drillPath}
         user={ownerUser}
         pool={ownerMode === 'unowned' ? 'unowned' : ownerMode === 'owned' ? 'owned' : null}
@@ -1103,20 +1182,50 @@ function AppContent() {
 
       {asof && diffPrev && (
         <section id="diff">
-          <h2>Diff</h2>
-          <p className="sub">
+          <h2>Diff{diff && (
+            <Tooltip content={<>
+              <b>{scopeDesc}</b> at each scan — the same scope as the map above (drill, lens, mark states, name filter), so in a lens
+              a subtree that left the slice (e.g. got assigned to someone else) shows as shrunk even if its bytes didn’t move.
+              Both scans are read at one byte floor ({fmtBytes(diff.threshold)}): a directory is named on both sides or folded into
+              “(other)” on both, and one that crossed the floor is read exactly from the other scan — so every named cell’s Δ is real.
+              {diff.lookups_capped && <> Some small one-sided names went unread (lookup budget); they may sit in “(other)”.</>}
+              {diff.truncated && <> Largest changes shown — the diff walk was budget-capped, so the smallest movements aren’t enumerated (the totals are exact).</>}
+            </>}><span className="info" tabIndex={0} aria-label="how this diff is read"> ⓘ</span></Tooltip>
+          )}</h2>
+          {/* 2-row header band above the map: scan pickers + presets (with the
+              status/error line) sit as `controls`, the colour legend beneath
+              them; DiffHeader adds the movement table + area-mode toggle when the
+              model is ready. Rendered here (not inside the map) so the pickers
+              stay put while a diff is loading or errored. */}
+          <DiffHeader model={diffModel} controls={<span className="sub">
             {/* Both endpoints: the window's start, and the page's scan again
                 (the bar's picker — one scan, stated where the diff reads). */}
             <Explain text={<>The diff window's start — the size chart's shaded band reads from here to the scan. Drag on the size chart to set both ends.</>}>
-              <select className="tb-select scan" value={diffPrev} aria-label="Diff from scan" onChange={e => pickBefore(e.target.value)}>
-                {earlier.map(s => <option key={s} value={s}>{fmtScan(s)}</option>)}
-              </select>
+              <ScanCombobox value={diffPrev} scans={earlier} onChange={startPinned ? setFrom : pickBefore} label="Diff from scan" />
+            </Explain>
+            <Explain text={startPinned
+              ? <>Start is <b>pinned</b> to this scan — the window's near end stays put as new scans arrive. Click to track a duration back from the end instead.</>
+              : <>Start tracks a <b>duration</b> back from the end (the buttons). Click to pin it to this scan.</>}>
+              <button type="button" role="switch" aria-checked={startPinned} className={'d-mode' + (startPinned ? ' on' : '')}
+                onClick={() => startPinned
+                  ? setSpan(asof && diffPrev ? spanTo(asof, diffPrev) : undefined)
+                  : setFrom(diffPrev ?? undefined)}>
+                {startPinned ? 'pinned' : 'duration'}
+              </button>
             </Explain>
             <span className="arrow"> → </span>
-            <select className="tb-select scan" value={asof} aria-label="Diff to scan (the page's scan)" onChange={e => setDP(e.target.value)}>
-              {scans.map(s => <option key={s} value={s}>{fmtScan(s)}</option>)}
-            </select>
-            {spanPicks.length > 0 && (
+            <ScanCombobox value={asof} scans={scans} onChange={setDP} label="Diff to scan (the page's scan)" />
+            {endIsLatest && (
+              <Explain text={endPinned
+                ? <>End is <b>pinned</b> to this scan. Click to follow the latest scan as new ones arrive.</>
+                : <>End follows the <b>latest</b> scan. Click to pin it to this one.</>}>
+                <button type="button" role="switch" aria-checked={endPinned} className={'d-mode' + (endPinned ? ' on' : '')}
+                  onClick={() => setEndPin(!endPinned)}>
+                  {endPinned ? 'pinned' : 'latest'}
+                </button>
+              </Explain>
+            )}
+            {!startPinned && spanPicks.length > 0 && (
               <span className="gran spans" role="radiogroup" aria-label="Diff span (back from the after scan)">
                 {spanPicks.map(({ label, ms, scan }) => (
                   <Explain key={label} text={<>Diff over the last {label}: {fmtScan(scan)} → {fmtScan(asof)}</>}>
@@ -1130,27 +1239,7 @@ function AppContent() {
             )}
             {diffHead ? (
               <>
-                {' '}· <b className={diffHead.total_b >= diffHead.total_a ? 'grew' : 'shrank'}>
-                  {(diffHead.total_b >= diffHead.total_a ? '+' : '−') + fmtBytes(Math.abs(diffHead.total_b - diffHead.total_a))}
-                </b>
-                {' '}· Δobjects {(diffHead.objects_b - diffHead.objects_a).toLocaleString('en-US')}
                 {diffStale && <span className="loading"> · aligning the rows…</span>}
-                {' '}· <Explain text={<>
-                  <b>{scopeDesc}</b> at each scan — the same scope as the map above (drill, lens, mark states, name filter), so in a lens
-                  a subtree that left the slice (e.g. got assigned to someone else) shows as shrunk even if its bytes didn’t move.
-                  Both scans are read at one byte floor ({fmtBytes(diffHead.threshold)}): a directory is named on both sides or folded into
-                  “(other)” on both, and one that crossed the floor is read exactly from the other scan — so every named cell’s Δ is real.
-                  {diffHead.lookups_capped && <> Some small one-sided names went unread (lookup budget); they may sit in “(other)”.</>}
-                </>}>
-                  <span className="dotted">≈ {scopeDesc}</span>
-                </Explain>
-                {diffHead.truncated && (
-                  <>
-                    {' '}· <Explain text="Largest changes shown — the diff walk was budget-capped, so the smallest movements aren’t enumerated (the totals are exact).">
-                      <span className="dotted">largest changes</span>
-                    </Explain>
-                  </>
-                )}
               </>
             ) : diffErr && !diffStale ? (
               <span className="tab-note">
@@ -1164,16 +1253,23 @@ function AppContent() {
             ) : (
               <span className="loading"> · aligning {fmtScan(diffPrev)} → {fmtScan(asof)}…</span>
             )}
-          </p>
+          </span>} />
           {/* The slot keeps the treemap's height through a reload: the last
               diff dims under the marker, or (first load) a skeleton stands in.
               The height held is the one the last settled map actually drew
               (measured), not the request's canvas budget — the map is
               shorter than that, and a fixed floor left a blank band under it. */}
-          {diff && diff.rows.length > 0 && (
-            <div ref={diffSlotRef} className={diffStale ? 'diff-slot busy-host stale' : 'diff-slot busy-host'} style={diffStale && diffSlotH.current ? { minHeight: diffSlotH.current } : undefined}>
-              <DiffTreemap data={diff} label={scopeDesc} />
-              {diffStale && <Busy label={`aligning ${fmtScan(diffPrev)} → ${fmtScan(asof)}…`} />}
+          {diff && diff.rows.length > 0 && diffModel && (
+            <div ref={diffSlotRef} className={diffStaleOther ? 'diff-slot busy-host stale' : 'diff-slot busy-host'} style={diffStale && diffSlotH.current ? { minHeight: diffSlotH.current } : undefined}>
+              {/* A drill in the diff drills the page: the map, the table and
+                  the chart follow, and the diff itself re-reads at the new
+                  prefix (its rows are relative to the drilled path). */}
+              <DiffTreemap model={diffModel} onDrill={rel => drillTo([...segs, ...rel])} />
+              {diffStaleOther
+                ? <Busy label={`aligning ${fmtScan(diffPrev)} → ${fmtScan(asof)}…`} />
+                : diffRefining
+                  ? <Busy label="aligning rows…" corner />
+                  : null}
             </div>
           )}
           {diff && diff.rows.length === 0 && !diffStale && <p className="hint">No changes in this scope between the two scans.</p>}
@@ -1183,23 +1279,33 @@ function AppContent() {
         </section>
       )}
 
+
       {!lensScoped && (
       <section id="mtime">
         {/* Granularity is auto-picked (and user-switchable) inside AgeChart, so
             the heading stays unit-free rather than lying about "month". */}
-        <h2>Bytes by creation date</h2>
-        <p className="sub">
-          When each stored byte was <b>written</b> — the object’s creation time from the listing.
-          GCS objects are immutable, so there’s no separate “modified” time; the other time axis is{' '}
-          <b>last read</b> (from the usage logs, since {readRange ? epochDaysToDate(readRange.min) : '8/13'}) —
-          color by it to see which vintages nobody has touched. The chart’s color axis is its own (right):
-          it follows the map’s until you pick one; marks have no per-stratum value here.
-        </p>
+        <h2>Bytes by creation date{' '}
+          <Tooltip content={<>
+            When each stored byte was <b>written</b> — the object’s creation time from the listing.
+            {store.objectsNote}{readRange ? <>{' '}The other time axis is <b>last read</b> (from the usage logs, since {epochDaysToDate(readRange.min)}) —
+            color by it to see which vintages nobody has touched.</> : null}{' '}The chart’s color axis is its own (right):
+            it follows the map’s until you pick one; marks have no per-stratum value here.
+          </>}><span className="info" tabIndex={0} aria-label="about this chart">ⓘ</span></Tooltip>
+        </h2>
         {ageQ.isPending && !!asof && <Skeleton height={220} label="loading ages…" />}
         {age.length > 0 && (
           <AgeChart rows={age} catOrder={catOrder} mode={ageMode} onMode={m => setAgeModeP(m)} modes={ageModes} userIdx={userIdx} readRange={ageReadRange} />
         )}
       </section>
+      )}
+
+      {/* Stores whose scan job snapshots the buckets' lifecycle rules get the
+          fold here, last among the data sections; the rows diff against the previous scan. */}
+      {store.lifecycle && (
+        <LifecycleFold
+          store={store} asof={asof} prevScan={prevScan}
+          note={<>Intended state is tracked in <code>{store.lifecycle}</code> (<code>dt-cloud lifecycle diff|push</code>).</>}
+        />
       )}
 
       {meta && store.prices && (() => {
@@ -1209,7 +1315,7 @@ function AppContent() {
         if (!node) return null
         const mix = classMix(node)
         const total = node.b || 1
-        const scope = mapPath && mapPath.length > 1 ? mapPath.slice(1).map(n => n.n).join('/') : 'all buckets'
+        const scope = mapPath && mapPath.length > 1 ? mapPath.slice(1).map(n => n.n).join('/') : store.rootLabel
         return (
           <section id="storage-classes">
             <h2>Storage classes</h2>
@@ -1243,16 +1349,6 @@ function AppContent() {
       {/* Static attribution reference — how ownership is inferred + the rule tables.
           Reference material, so it sits last rather than sandwiched mid-page. */}
       {hasAttr && mapTree && <AttributionRules tree={mapTree} />}
-
-      {/* The fleet's lifecycle rules as the scan job snapshotted them
-          (`<base>/<scan>/lifecycle.json`, keyed by bucket) — last on the page,
-          below the analytics; the rows diff against the previous scan. */}
-      {store.lifecycle && (
-        <LifecycleFold
-          store={store} asof={asof} prevScan={prevScan}
-          note={<>Marin sets these on its buckets; the job records them each scan (<code>dt-cloud lifecycle pull</code>) and a copy is tracked in <code>{store.lifecycle}</code> (<code>dt-cloud lifecycle diff</code> shows drift).</>}
-        />
-      )}
 
       <SiteKbd
         placeholder="Users, color modes, scans, pages…"

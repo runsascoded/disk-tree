@@ -11,7 +11,7 @@
  * review gate is where authority gets applied, and `mark_log` keeps the full
  * who-did-what trail either way.
  */
-import { type Ctx, json, requireAdmin, requireViewer } from '../_lib/auth.js'
+import { type Ctx, json, requireViewer } from '../_lib/auth.js'
 
 /** gs://marin-<suffix>/<path>/ — the six marin buckets only, dir prefixes only. */
 const PREFIX_RE = /^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/
@@ -21,10 +21,11 @@ const ACTIONS = new Set(['keep', 'keep_last_ckpt', 'delete'])
 export const onRequest = async (ctx: Ctx): Promise<Response> => {
   const { request, env } = ctx
   if (!env.DB) return json({ error: 'marks backend not configured (DB)' }, 503)
+  const id = await requireViewer(ctx)
+  if (id instanceof Response) return id
+  const who = id.email ?? id.name ?? 'unknown'
 
   if (request.method === 'GET') {
-    const gated = await requireViewer(ctx)
-    if (gated instanceof Response) return gated
     const [marks, claims] = await Promise.all([
       env.DB.prepare('SELECT prefix, action, who, ts, note FROM marks ORDER BY prefix').all(),
       env.DB.prepare('SELECT prefix, who, ts FROM claims ORDER BY prefix').all(),
@@ -33,10 +34,9 @@ export const onRequest = async (ctx: Ctx): Promise<Response> => {
   }
 
   if (request.method === 'PUT') {
-    // Marking is admin-only (specs/share-link-hardening.md).
-    const id = await requireAdmin(ctx)
-    if (id instanceof Response) return id
-    const who = id.email ?? id.name ?? 'unknown'
+    if (!id.email) {
+      return json({ error: 'marking requires a signed-in email — guest links are read-only; sign in via Google or ask for a personal link' }, 403)
+    }
     const b = (await request.json()) as { prefix?: string; action?: string | null; note?: string }
     const prefix = b.prefix ?? ''
     if (!PREFIX_RE.test(prefix) || prefix.length > 1024) {

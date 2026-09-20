@@ -20,13 +20,24 @@
 
 const TTL = 86400
 const KV_TTL = 30 * 86400
-const PRIVATE = `private, max-age=${TTL}`
+// The browser's copy is short-lived: the answer for a (scan pair, path) is
+// immutable per scan, but a deploy that changes a reader rule is not, and a
+// day-long `max-age` had the page (and every probe from it) replaying the
+// pre-deploy diff while every other window was fresh (2026-09-17). The edge
+// tiers keep the long TTL behind the versioned key.
+const PRIVATE = 'private, max-age=300'
 const JSON_HDR = { 'content-type': 'application/json; charset=utf-8' }
 
 export interface CacheEnv { CACHE_KV?: KVNamespace }
 
+// Bumped whenever a cached endpoint's answer for the same inputs changes
+// (a reader rule, a diff walk rule): a stale entry lives a day in the colo
+// cache and a month in KV, and neither knows a deploy happened. 2026-09-17:
+// one-sided diff nodes expand.
+export const CACHE_V = '2'
+
 export function cacheKeyFor(ns: string, parts: string): Request {
-  return new Request(`https://${ns}.cache/${parts}`)
+  return new Request(`https://${ns}.cache/v${CACHE_V}/${parts}`)
 }
 
 const colo = () => (caches as unknown as { default: Cache }).default
