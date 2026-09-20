@@ -15,7 +15,7 @@
  */
 import { type Ctx, json, requireScope, requireViewer } from '../_lib/auth.js'
 import { snapshotsPrefix } from '../_lib/shared.js'
-import { type Lens, makeStore } from '../_lib/index.js'
+import { type Lens, makeStore, storeReady } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { classKey, parseClasses, parseOwner } from '../_lib/scope.js'
 import { readRootAgg, readRootRows } from '../_lib/view.js'
@@ -63,7 +63,7 @@ async function metaPoint(env: Ctx['env'], date: string): Promise<{ date: string;
 export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
   const { env, request } = ctx
   if (!env.DB) return json({ error: 'index backend not configured (DB)' }, 503)
-  if (!env.GCS_HMAC_KEY_ID || !env.GCS_HMAC_SECRET) return json({ error: 'index reader not configured' }, 503)
+  if (!storeReady(env)) return json({ error: 'index reader not configured' }, 503)
   const gated = await requireViewer(ctx)
   if (gated instanceof Response) return gated
   const url = new URL(request.url)

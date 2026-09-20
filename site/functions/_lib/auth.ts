@@ -36,8 +36,21 @@ export interface Env {
   /** Local dev only (`.dev.vars`): email the localhost dev identity acts as.
    *  Matters when the D1 binding is remote (writes land in the real ledger). */
   DEV_EMAIL?: string
-  GCS_HMAC_KEY_ID: string
-  GCS_HMAC_SECRET: string
+  /** GCS deploys: HMAC creds for the index/data store. Optional now that the
+   *  store seam is env-generalized — an r2/s3 deploy sets `STORE_*` instead
+   *  (`_lib/index.ts:storeCreds`). */
+  GCS_HMAC_KEY_ID?: string
+  GCS_HMAC_SECRET?: string
+  /** Generalized index-store seam (specs/union-of-roots.md — the r2/public
+   *  layer). Point the index reader at any S3-compatible store; unset falls
+   *  back to the GCS defaults + `GCS_HMAC_*` so gcs/cw are unchanged. */
+  STORE_ENDPOINT?: string
+  STORE_BUCKET?: string
+  STORE_REGION?: string
+  /** Comma-separated allowed key prefixes; unset = the GCS default set. */
+  STORE_PREFIXES?: string
+  STORE_ACCESS_KEY_ID?: string
+  STORE_SECRET_ACCESS_KEY?: string
   /** Global second cache tier behind the colo cache (`_lib/edgeCache.ts`). */
   CACHE_KV?: KVNamespace
   /** Deployment seam (specs/denovo-factor.md): set when the WHOLE host sits

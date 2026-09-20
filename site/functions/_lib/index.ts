@@ -109,14 +109,32 @@ export const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : 
 export const str = (v: unknown): string =>
   typeof v === 'string' ? v : v instanceof Uint8Array ? new TextDecoder().decode(v) : String(v ?? '')
 
+/** The index-store creds: an r2/s3 deploy sets `STORE_*`; unset falls back to
+ *  the GCS HMAC pair so gcs/cw are unchanged (specs/union-of-roots.md). */
+export const storeCreds = (env: Env) => ({
+  accessKeyId: env.STORE_ACCESS_KEY_ID ?? env.GCS_HMAC_KEY_ID,
+  secretAccessKey: env.STORE_SECRET_ACCESS_KEY ?? env.GCS_HMAC_SECRET,
+})
+
+/** Whether the index store is configured — the readiness gate every
+ *  index-serving endpoint checks before reading (replaces the direct
+ *  `GCS_HMAC_*` check, so an r2 deploy passes on `STORE_*`). */
+export const storeReady = (env: Env): boolean => {
+  const { accessKeyId, secretAccessKey } = storeCreds(env)
+  return !!(accessKeyId && secretAccessKey)
+}
+
 export function makeStore(env: Env) {
+  const { accessKeyId, secretAccessKey } = storeCreds(env)
   return S3Store({
-    endpoint: 'https://storage.googleapis.com',
-    bucket: BUCKET,
-    region: 'us-east1',
-    prefixes: ['listing/', 'snapshots/', 'cw-l2/'],
-    accessKeyId: env.GCS_HMAC_KEY_ID,
-    secretAccessKey: env.GCS_HMAC_SECRET,
+    endpoint: env.STORE_ENDPOINT ?? 'https://storage.googleapis.com',
+    bucket: env.STORE_BUCKET ?? BUCKET,
+    region: env.STORE_REGION ?? 'us-east1',
+    prefixes: env.STORE_PREFIXES
+      ? env.STORE_PREFIXES.split(',').map(s => s.trim()).filter(Boolean)
+      : ['listing/', 'snapshots/', 'cw-l2/'],
+    accessKeyId,
+    secretAccessKey,
   })
 }
 

@@ -13,7 +13,7 @@
  */
 import { type Env, requireViewer } from '../_lib/auth.js'
 import { parseMarkAxes } from '../_lib/markAxes.js'
-import type { Lens } from '../_lib/index.js'
+import { storeReady, type Lens } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { parseOwner, parseQuery, classKey, parseClasses } from '../_lib/scope.js'
 import { hasExtras } from '../_lib/extras.js'
@@ -23,9 +23,8 @@ import { cacheKeyFor, cacheMatch, cacheStore, serverTiming } from '../_lib/edgeC
 
 export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> => {
   const st = serverTiming()
-  const { GCS_HMAC_KEY_ID, GCS_HMAC_SECRET } = ctx.env
-  if (!GCS_HMAC_KEY_ID || !GCS_HMAC_SECRET) {
-    return new Response('subtree API not configured (missing GCS HMAC creds)', { status: 503 })
+  if (!storeReady(ctx.env)) {
+    return new Response('subtree API not configured (missing index store creds)', { status: 503 })
   }
   const url = new URL(ctx.request.url)
   const date = url.searchParams.get('date') ?? ''

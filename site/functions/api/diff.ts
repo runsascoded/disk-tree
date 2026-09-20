@@ -14,7 +14,7 @@
  */
 import { type Env, requireViewer } from '../_lib/auth.js'
 import { parseMarkAxes } from '../_lib/markAxes.js'
-import type { Lens } from '../_lib/index.js'
+import { storeReady, type Lens } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { classKey, parseClasses, parseOwner, parseQuery } from '../_lib/scope.js'
 import { ATTEN_DEFAULT, buildDiff, LensUnavailable, MIN_AREA_DEFAULT, NotFound, QUANT } from '../_lib/view.js'
@@ -23,9 +23,8 @@ const SCAN_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{4})?$/
 
 export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> => {
   const st = serverTiming()
-  const { GCS_HMAC_KEY_ID, GCS_HMAC_SECRET } = ctx.env
-  if (!GCS_HMAC_KEY_ID || !GCS_HMAC_SECRET) {
-    return new Response('diff API not configured (missing GCS HMAC creds)', { status: 503 })
+  if (!storeReady(ctx.env)) {
+    return new Response('diff API not configured (missing index store creds)', { status: 503 })
   }
   const url = new URL(ctx.request.url)
   const from = url.searchParams.get('from') ?? ''

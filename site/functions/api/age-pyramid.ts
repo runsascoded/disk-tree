@@ -12,14 +12,14 @@
  * FE should pass the chart's actual time domain to get useful granularity.
  */
 import { type Env, requireViewer } from '../_lib/auth.js'
-import { num, openIndex, readPoint } from '../_lib/index.js'
+import { num, openIndex, readPoint, storeReady } from '../_lib/index.js'
 import { AGE_TIERS, planAge } from '../_lib/agePyramid.js'
 
 const COLS = ['path', 'depth', 'binstart', 'b', 'o']
 
 export const onRequestGet = async (ctx: { request: Request; env: Env }): Promise<Response> => {
-  if (!ctx.env.GCS_HMAC_KEY_ID || !ctx.env.GCS_HMAC_SECRET) {
-    return new Response('age-pyramid API not configured (missing GCS HMAC creds)', { status: 503 })
+  if (!storeReady(ctx.env)) {
+    return new Response('age-pyramid API not configured (missing index store creds)', { status: 503 })
   }
   const url = new URL(ctx.request.url)
   const date = url.searchParams.get('date') ?? ''
