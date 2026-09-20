@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Full local app = vite (UI, :$PORT) + `wrangler pages dev` (the /data +
+# /v1/files Pages Functions, :$WPORT, reading GCS HMAC creds from .dev.vars).
+# vite proxies the API paths to wrangler (see vite.config.ts), so the treemap
+# and the scan browser both work locally against the live bucket.
+#
+#   ./dev            # then open http://localhost:$PORT
+#   ./dev --refresh  # first refresh the local D1 from prod (see ./refresh-db)
+#
+# (`pnpm dev` alone runs only vite → blank treemap, since /data isn't served.)
+#
+# .dev.vars keys: DEV_EMAIL (the localhost identity — use a staff address to get
+# the admin console), GCS_HMAC_KEY_ID/GCS_HMAC_SECRET (bucket reads), and
+# SESSION_SECRET (any value — the auth gate needs it, and the /admin console's
+# package routes authenticate by a session cookie the localhost stub can't fake,
+# so functions/api/auth/[[path]].ts auto-signs-in DEV_EMAIL on localhost).
+set -euo pipefail
+# Ports: `devPort` in package.json (vite) and the next one (wrangler).
+PORT=$(node -p "require('./package.json').devPort")
+WPORT=$((PORT + 1))
+cd "$(dirname "$0")"
+
+if [ "${1:-}" = "--refresh" ] || [ "${1:-}" = "--staging" ]; then
+  ./refresh-db
+fi
+
+# The D1 binding is `remote = true` (wrangler.toml): dev reads/writes the REAL
+# prod ledger, as `DEV_EMAIL` (.dev.vars). The remote session needs Workers
+# scopes the direnv CLOUDFLARE_API_TOKEN lacks — mask it so wrangler falls back
+# to the OAuth login (Ryan's OA user), and pin the OA account.
+#
+# The remote-binding session rides a long-lived tunnel: a network blip
+# ("Network connection lost") turns every D1 call into "internal error" and
+# wrangler eventually exits — so relaunch it until this script is stopped.
+(
+  while :; do
+    env -u CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID=74981a43be0de7712369306c7b19133d \
+      npx wrangler pages dev public --port $WPORT --compatibility-date 2026-01-01 || true
+    echo "wrangler exited; restarting in 3s (ctrl-c to stop)" >&2
+    sleep 3
+  done
+) &
+wpid=$!
+trap 'kill "$wpid" 2>/dev/null || true; pkill -P "$wpid" 2>/dev/null || true' EXIT INT TERM
+pnpm dev

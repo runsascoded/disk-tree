@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Build and deploy to Cloudflare Pages — the project named in wrangler.toml
+# (`oa-gcs-usage` → gcs.oa.dev, `oa-cw-s3-usage` → cw-s3.oa.dev; Open Athena
+# account). CF Access (Zero Trust) gates every hostname, production and preview.
+set -euo pipefail
+# The Pages project this checkout deploys: `name = "…"` in wrangler.toml.
+PROJECT=$(sed -n 's/^name = "\(.*\)"$/\1/p' wrangler.toml)
+[ -n "$PROJECT" ] || { echo "deploy: no name = ... in wrangler.toml" >&2; exit 1; }
+cd "$(dirname "$0")"
+
+# `--status`: report whether HEAD is deployed (no build/deploy). Delegates to the
+# standalone `cf-status` (queries the CF Pages deployments API, compares to HEAD).
+if [ "${1:-}" = "--status" ]; then exec ./cf-status; fi
+
+# Push is the DEFAULT: everything deployed to gcs.oa.dev is public-facing, so
+# the deployed commit (and the branch that contains it) belong on GitHub too —
+# otherwise agents reading the repo infer from stale source (bit us 8/27+8/28).
+# `-P`/`--no-push` keeps a deploy local (rare: experiments off the main branch).
+push=true
+for a in "$@"; do case "$a" in -P|--no-push) push=false ;; esac; done
+
+# Auth via the repo's direnv CLOUDFLARE_API_TOKEN, which has Pages write on the
+# OA account (as well as Access + oa.dev DNS edit). We deliberately do NOT fall
+# back to `wrangler login` OAuth: that session tends to drift to a personal
+# account and then fails with auth error 10000 against the OA account.
+pnpm build
+CLOUDFLARE_ACCOUNT_ID=74981a43be0de7712369306c7b19133d \
+  npx wrangler pages deploy dist --project-name "$PROJECT" --branch main
+
+# On a successful production deploy, advance the local `prod` pointer to exactly
+# what we shipped (HEAD). Kept in sync by deploy itself, so it can't drift the
+# way a hand-updated branch would; `cf-status` stays the authority (it reads
+# CF's own deployment metadata) and this is the git-native convenience for
+# `git log prod..HEAD` / offline diffing. (A preview/staging deploy would move a
+# `dev` pointer the same way, once we add that path.)
+sha=$(git rev-parse HEAD)
+git branch -f prod "$sha"
+echo "moved local prod → ${sha:0:9}"
+if $push; then
+  branch=$(git rev-parse --abbrev-ref HEAD)
+  git push o "$branch" || echo "WARN: push of $branch to o failed (deploy itself succeeded)" >&2
+  git push -f o prod
+  echo "pushed $branch + prod → o (GitHub)"
+fi

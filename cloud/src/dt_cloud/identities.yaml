@@ -1,0 +1,163 @@
+# Canonical identity map for storage/cost attribution.
+#
+# Canonical user ids use the `rigging.provenance.sanitize_username` spelling
+# (email-like logins drop their domain; lowercase; anything outside [a-z0-9_-]
+# collapses to '-'). A raw spelling that sanitizes directly to a canonical id
+# needs no alias entry; `aliases` cover everything else (short handles,
+# initials) as observed in Iris job owners, provenance `built_by`, and
+# `users/<seg>/` path segments. The attribution job reports unmapped users
+# — curate them into this file rather than letting them accumulate.
+#
+# Optional display fields (consumed by the web UI via `scripts/gen-identities-ts`
+# -> site/src/identities.gen.ts; see specs/avatar-sources.md):
+#   name:    short display name (the UI shows this, not the raw email). Defaults
+#            to the capitalized first segment of the id, so only spell it out for
+#            multi-word / non-obvious first names.
+#   github:  GitHub login for the real avatar (github.com/<login>.png). WITHOUT
+#            this we'd guess the login from the id and silently show the wrong
+#            face; leave it unset rather than guess. Fill one per person as
+#            confirmed — Will = Helw150, not the guessed `will-held`.
+# Ownership has ONE axis: a person. There is no group/team facet — it let most
+# of the fleet sit under a "communal" label with nobody to sign off on keeping
+# or deleting it (excised 2026-09-06; specs/view-serving.md). Bytes no person
+# owns are simply unclaimed.
+users:
+  ryan-williams:
+    aliases: [ryan, rw]
+    github: ryan-williams
+  russell-power:
+    github: rjpower
+    aliases: [rpower, russell, power]  # `power` observed as `built_by` in 2026-07-13 scan records
+  # display names come from the W&B user profile.
+  david-hall:
+    aliases: [dlwh]  # David Leo Wright Hall
+    github: dlwh
+  will-held:
+    aliases: [held]
+    github: Helw150
+  rafal-wojdyla:
+    aliases: [ravwojdyla, rav]
+    github: ravwojdyla
+  yael-elmatad:
+    github: yaelelmatad
+  matt-wittmann:
+    aliases: [mcwitt]
+    github: mcwitt
+  eric-czech:
+    aliases: [eczech]
+    github: eczech
+  romain-yon:
+    github: yonromai
+  moojin-kim:
+    aliases: [moojink]  # Moo Jin Kim
+    github: moojink
+  calvin-xu:
+    github: Calvin-Xu
+    aliases: [pinlinxu, calvinxu, calvinxu806]  # two W&B accounts + gmail login (display: Calvin Xu)
+  rohith-kuditipudi:
+    github: RohithKuditipudi
+    aliases: [rohithk]
+  michael-ryan:
+    aliases: [michaeljryan, michaelryan, mryan0]  # `mryan0` = ledger sign-in
+    github: XenonMolecule
+  kaiyue-wen:
+    github: WhenWen
+    aliases: [when, kaiyuew, kaiyue, kaiyuewen3]  # kaiyuewen3: gmail login on gcs.oa.dev marks
+  pranshu-chaturvedi:
+    github: pc0618
+    aliases: [pranshu-01-c]
+  ziqing-huang:
+    github: ziqing-huang
+    aliases: [ziqingh]
+  christopher-chou:
+    github: BabyChouSr
+    aliases: [babychousr]
+  percy-liang:
+    aliases: [percyliang]
+    github: percyliang
+  ahmed-ahmed:
+    github: ahmeda14960
+    aliases: [ahmedah, ahmed, ahmedsqred]  # Ahmed Mohamed Ahmed; `ahmedsqred` = ledger sign-in
+  kevin-li:
+    github: AlienKevin
+    aliases: [kevinxli]
+  chi-heem-wong:
+    github: chiheem
+    aliases: [chiheem]  # display "CHW"
+    name: Chi-Heem
+  nikil-ravi:
+    github: nikil-ravi
+  suhas-kotha:
+    aliases: [kothasuhas]
+    github: kothasuhas
+  elyas-obbad:
+    github: eobbad
+    aliases: [eobbad]
+  herumb-shandilya:
+    github: krypticmouse
+    aliases: [herumb-stanford]
+  jason-wang:
+    github: blahBlahhhJ
+    aliases: [blahblahhhj]
+  julian:
+    aliases: [julian-q, julianq]
+    github: julian-q  # Julian Quevedo (Discord jujujulian) — earlier misread as Julian Humml (hummlj)
+  tony-lee:
+    aliases: [tony, teetone]
+    github: teetone  # Tony Lee (Stanford; Discord tonyatstanford); owns the selfinstill SFT sweeps (path rule below)
+  alex-merose:
+    aliases: [alxmrs]
+    github: alxmrs
+  benjamin-feuer:
+    name: Ben
+    aliases: [benjaminfeuer]
+  gonzalo-benegas:
+    aliases: [gonzalo, gonzalobenegas]  # Iris owner; GitHub/W&B username
+    github: gonzalobenegas
+  larry-dial:
+    github: ClassicLarry
+    aliases: [larrydial, larry]
+  exedev:
+  runner:
+
+
+# Manual owners for prefixes no per-user signal covers. Deepest-prefix-wins
+# still applies, so per-user signals inside these trees override a row here.
+# A `*` in the bucket position fans out over the listing's buckets at report
+# time. `user: ~` (no user) is an explicit "nobody" for a subtree of a user
+# prefix. Shared corpora / infra trees (raw, tokenized, datakit, tmp, ...) are
+# deliberately NOT listed: with no person they are unclaimed, which is the
+# state that asks someone to claim or sweep them.
+prefix_owners:
+  # scratch/<user>/ segments (not definitionally per-user like users/, so
+  # only known-user segments are mapped)
+  - prefix: gs://marin-*/scratch/ahmed/
+    user: ahmed-ahmed
+  - prefix: gs://marin-*/scratch/kaiyue/
+    user: kaiyue-wen
+  - prefix: gs://marin-*/scratch/michaelryan/
+    user: michael-ryan
+  - prefix: gs://marin-*/scratch/rav/
+    user: rafal-wojdyla
+  - prefix: gs://marin-us-east5/pinlin_calvin_xu/
+    user: calvin-xu
+  - prefix: gs://marin-*/julian/
+    user: julian
+  # Calvin's data-mixture swarms (Percy, 8/18 call). Only ~350 of the ~1,060
+  # swarm dirs ever logged a W&B run (all his), so run-matching can't cover the
+  # rest — the name pattern can. Path-glob: `*` matches within one segment.
+  - prefix: gs://marin-*/grug/swarm_*/
+    user: calvin-xu
+  # Tony Lee") — 123 `checkpoints/exp_sft_qwen3_*_selfinstill_*` dirs across
+  # east5/central1/central2, ~92 TiB, none logged W&B runs. Segment glob catches
+  # the one `exp_fzzhang_sft_…_selfinstill_…` variant too.
+  - prefix: gs://marin-*/checkpoints/*selfinstill*/
+    user: tony-lee
+  - prefix: gs://marin-*/checkpoints/olmix-swarm/
+    user: calvin-xu
+  - prefix: gs://marin-*/user/rav/
+    user: rafal-wojdyla
+  - prefix: gs://marin-us-central1/ttl=30d/dlwh/
+    user: david-hall
+  - prefix: gs://marin-eu-west4/tomat/
+    user: ryan-williams

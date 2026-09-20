@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Refresh the LOCAL (miniflare) D1 from a fresh export of the prod auth DB, so
+# `./dev` renders against real marks / owners / claims / access-log instead of
+# whatever the local copy last held. The export is read-only — prod is never
+# written — and any marks you make while testing stay in the local DB, so this
+# doubles as a throwaway staging mirror.
+#
+#   ./refresh-db     # export prod → reset & reload local D1
+#   ./dev --refresh  # refresh first, then boot the dev servers
+#
+# The dump lands in tmp/prod-auth.sql (gitignored) and holds real emails +
+# hashed IPs + agent-token hashes — keep it local, never commit it, and never
+# push the local DB back to prod.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+DB=oa-gcs-usage-auth
+dump=tmp/prod-auth.sql
+mkdir -p tmp
+
+echo "→ exporting prod $DB (read-only)…" >&2
+npx wrangler d1 export "$DB" --remote --output "$dump"
+
+echo "→ resetting local D1 state…" >&2
+rm -rf .wrangler/state/v3/d1
+
+echo "→ importing $(wc -l <"$dump" | tr -d ' ') lines into local D1…" >&2
+npx wrangler d1 execute "$DB" --local --file "$dump" >/dev/null
+
+echo "✓ local D1 refreshed from prod — start it with ./dev" >&2

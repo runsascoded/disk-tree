@@ -1,0 +1,2371 @@
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --panel: #f2f1ee;
+  --line: #e2e1dc;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #8a8880;
+  --cell-ink: #1a1a19;
+  --s1: #2a78d6; --s2: #008300; --s3: #e87ba4; --s4: #eda100;
+  --s5: #1baf7a; --s6: #eb6834; --s7: #4a3aa7; --s8: #e34948;
+  --other: #a6a49b; --shared: #8f9aa6;
+  --t-unattr: #c9c7be;  // the unclaimed pool (bytes no person owns)
+  --grew: #1a8f3a; --shrank: #d7302f;
+  --mk-del-ink: #c4302a;  // sweep as TEXT (the fill token reads too dark/light for type)
+  --never-read: #b0685e;  // read lens: no GET/HEAD/LIST since logging began
+  // @disk-tree/react: opaque base under each cell's paint layer (gutters/title
+  // bars); the core default is a dark constant, so follow the theme instead.
+  --dt-treemap-container-bg: var(--panel);
+  --dt-treemap-edge: var(--line);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    color-scheme: dark;
+    --surface: #1a1a19; --panel: #232322; --line: #33332f;
+    --ink: #fff; --ink-2: #c3c2b7; --ink-3: #aaa89c;
+    --cell-ink: #1a1a19;
+    --s1: #3987e5; --s2: #008300; --s3: #d55181; --s4: #c98500;
+    --s5: #199e70; --s6: #d95926; --s7: #9085e9; --s8: #e66767;
+    --other: #5d5c55; --shared: #4c565f;
+    --t-unattr: #4a4943;
+    --grew: #4ade80; --shrank: #ff7b72;
+    --mk-del-ink: #f2635a;
+    --never-read: #6e332b;
+  }
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --surface: #1a1a19; --panel: #232322; --line: #33332f;
+  --ink: #fff; --ink-2: #c3c2b7; --ink-3: #aaa89c;
+  --cell-ink: #1a1a19;
+  --s1: #3987e5; --s2: #008300; --s3: #d55181; --s4: #c98500;
+  --s5: #199e70; --s6: #d95926; --s7: #9085e9; --s8: #e66767;
+  --other: #5d5c55; --shared: #4c565f;
+  --t-unattr: #4a4943;
+  --grew: #4ade80; --shrank: #ff7b72;
+  --mk-del-ink: #f2635a;
+  --never-read: #6e332b;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--ink);
+  font: 15px/1.5 -apple-system, 'Segoe UI', system-ui, sans-serif;
+}
+main {
+  --pad-t: 20px;
+  --pad-x: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--pad-t) var(--pad-x) 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+header h1 { font-size: 24px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+header .hrow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+// ---- The top bar (SiteNav): ☰ nav menu · page scope/controls · avatar menu.
+// Sticky, full-bleed across the page container (negative margins undo its
+// padding), the same chrome parked at the top and stuck mid-scroll.
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  margin: calc(-1 * var(--pad-t, 20px)) calc(-1 * var(--pad-x, 24px)) 0;
+  padding: 6px var(--pad-x, 24px);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--ink-2);
+  // Row 1: ☰ · brand · where the page is (crumbs) · avatar. Row 2 (home
+  // page): the controls, indented under the brand.
+  .tb-row { display: flex; align-items: center; gap: 4px 10px; min-width: 0; }
+  .tb-row2 { padding-left: 0; }
+  .tb-crumbs { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; overflow-x: auto; scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
+  .tb-menu-btn {
+    flex: none;
+    margin-left: calc(-1 * var(--pad-x, 24px) + 4px);
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px;
+    background: transparent; color: var(--ink-2);
+    border: 1px solid transparent; border-radius: 6px;
+    font-size: 20px; cursor: pointer;
+    &:hover, &[aria-expanded='true'] { background: var(--panel); border-color: var(--line); color: var(--ink); }
+  }
+  .brand {
+    flex: none;
+    font-weight: 700; font-size: 14px; letter-spacing: -0.01em;
+    color: var(--ink); text-decoration: none; white-space: nowrap;
+    margin-right: 6px;
+  }
+  .tb-mid {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+  }
+  .tb-avatar {
+    flex: none;
+    display: inline-flex;
+    background: transparent; border: 2px solid transparent; border-radius: 50%;
+    padding: 0; cursor: pointer;
+    .user-avatar { display: block; }
+    &:hover, &[aria-expanded='true'] { border-color: var(--s1); }
+  }
+  .tb-signin { flex: none; color: var(--s1); font-weight: 600; text-decoration: none; }
+  .lbl { color: var(--ink-3); font-size: 12px; margin-right: 2px; }
+  .tb-ctl, .tb-axis, .tb-scan, .tb-path { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+  .tb-scan .arrow { color: var(--ink-3); }
+  .tb-delta { font-weight: 650; text-decoration: none; font-variant-numeric: tabular-nums; &:hover { text-decoration: underline; } }
+  // Drill-path crumbs: the deepest segment is inked; ancestors drill up.
+  .tb-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13.5px;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    gap: 0;
+    .tb-suffix { color: var(--ink-3); margin-left: 8px; font-family: inherit; }
+    button {
+      background: none; border: none; padding: 0 1px; font: inherit; color: var(--ink); cursor: pointer;
+      text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 3px;
+      &:hover { text-decoration-color: var(--ink); }
+      &.here { font-weight: 700; text-decoration: none; cursor: default; }
+    }
+    .sep { color: var(--ink-3); padding: 0 2px; }
+  }
+  .filterbox { margin-left: 0; }
+  // The axis checklists' trigger: states the selection like a select would.
+  .ms-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    &.narrowed { border-color: var(--s1); }
+    .ms-all { color: var(--ink-2); font-weight: 500; }
+    .ms-sel { display: inline-flex; align-items: center; gap: 3px; }
+    .ms-glyph { font-size: 10px; }
+    .ms-caret { color: var(--ink-3); font-size: 10px; margin-left: 2px; }
+    &:disabled { opacity: 0.5; cursor: default; }
+  }
+}
+// Axis checklist popover (MultiSelect): one row per entry, tinted by its
+// `--kind`, with an "only" shortcut that appears on hover.
+.ms-pop {
+  min-width: 170px;
+  .ms-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 6px; border-radius: 5px;
+    color: var(--kind, var(--ink));
+    &:hover { background: color-mix(in oklab, var(--ink) 8%, transparent); .ms-only { opacity: 1; } }
+    &.on .ms-glyph { opacity: 1; }
+    .ms-glyph { font-size: 10px; opacity: 0.55; }
+  }
+  .ms-lbl { display: inline-flex; align-items: center; gap: 6px; flex: 1; cursor: pointer; white-space: nowrap; input { margin: 0; } }
+  .ms-allrow { color: var(--ink-2); border-bottom: 1px solid var(--line); border-radius: 0; margin-bottom: 3px; padding-bottom: 5px; }
+  .ms-only {
+    opacity: 0; font: inherit; font-size: 10.5px; letter-spacing: 0.03em;
+    background: color-mix(in oklab, var(--ink) 10%, transparent); color: var(--ink-2);
+    border: none; border-radius: 4px; padding: 1px 6px; cursor: pointer;
+    &:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 18%, transparent); }
+  }
+}
+// The map's crumb strip is the bar's first row now (App.tsx `crumbs`); the
+// legend / tiling chip / ⛶ keep the map's own bar. Fullscreen has no page
+// bar, so the strip comes back there.
+.treemap .dt-treemap-bar { justify-content: flex-end; }
+// The drill root itself is marked: one frame around the map area in that
+// state's color (per-tile borders only mark state *boundaries*, so a uniformly
+// marked view has none — this frame is what says "all of this is swept").
+.treemap.root-marked .dt-treemap-map::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  border: 3px solid var(--mk-frame); border-radius: 4px;
+}
+.treemap.root-marked-keep { --mk-frame: var(--mk-keep); }
+.treemap.root-marked-keep_last_ckpt { --mk-frame: var(--mk-klc); }
+.treemap.root-marked-sweep { --mk-frame: var(--mk-del); }
+.treemap .dt-treemap-crumbs { display: none !important; }
+.dt-treemap:fullscreen .dt-treemap-crumbs { display: flex !important; }
+// The bar's pickers — also the Diff header's two scan endpoints.
+.tb-row2-spacer { height: 0; }
+
+.tb-select {
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 6px;
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  max-width: 16ch;
+  // Own the arrow so the right padding is a known constant (native arrows vary
+  // by platform) — that's what lets FitSelect fit the box to the selected label.
+  appearance: none; -webkit-appearance: none;
+  padding: 2px 17px 2px 6px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  background-size: 8px 5px;
+  &.scan { font-variant-numeric: tabular-nums; }
+}
+// The `≠` owner-negate toggle beside the owner select: off = outline, on
+// (showing everyone-but-this-person) = filled accent.
+button.mini.clear { margin-left: 2px; padding: 0 5px; }
+button.mini.neg {
+  font: inherit; font-size: 13px; font-weight: 700; line-height: 1; cursor: pointer;
+  padding: 2px 6px; border-radius: 6px; background: var(--panel); color: var(--ink-2);
+  border: 1px solid var(--line);
+  &:hover { border-color: var(--ink-2); color: var(--ink); }
+  &.on { background: var(--accent, #58a6ff); border-color: var(--accent, #58a6ff); color: #fff; }
+}
+#diff .sub .arrow { color: var(--ink-3); }
+// Bar menus (floating): the ☰ page list and the avatar's session menu.
+.menu-pop {
+  z-index: 10000;
+  min-width: 190px;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  font-size: 13.5px;
+  display: flex;
+  flex-direction: column;
+  hr { border: none; border-top: 1px solid var(--line); margin: 5px 0; }
+  .mi {
+    display: flex; align-items: center; gap: 8px;
+    background: none; border: none; text-align: left;
+    font: inherit; color: var(--ink);
+    padding: 5px 10px; border-radius: 5px;
+    text-decoration: none; cursor: pointer;
+    &:hover, &:focus-visible { background: var(--line); outline: none; }
+    &[aria-current] { font-weight: 650; }
+    b { font-weight: 650; }
+  }
+  &.user-menu { min-width: 250px; .user-card { padding: 4px 6px 2px; } }
+}
+.scan-tip { display: grid; gap: 3px; b { color: inherit; } .classmix { margin-top: 4px; } }
+
+// Nav links: quiet tabs// Nav links: quiet tabs, not underlined prose links; the current page reads
+// bright + bold via aria-current.
+.nav-files {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-2);
+  text-decoration: none;
+  &:hover { color: var(--ink); }
+}
+.nav-files[aria-current] { color: var(--ink); font-weight: 650; }
+.uc-session {
+  display: grid; gap: 2px; margin-top: 4px; padding-top: 6px; border-top: 1px solid var(--line);
+  font-size: 12px; color: var(--ink-2);
+  code { margin-right: 4px; }
+  .uc-warn { color: var(--s4); }
+}
+.token-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.about-modal {
+  width: min(680px, calc(100vw - 32px));
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-3); margin: 14px 0 4px; }
+  p { margin: 0; }
+  b { color: var(--ink); }
+  a { color: var(--s1); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+}
+.token-modal {
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 18px 20px;
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  .token-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    strong { font-size: 15px; }
+  }
+  .token-x {
+    background: none;
+    border: none;
+    color: var(--ink-2);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  p { margin: 8px 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .token-muted { color: var(--ink-2); }
+  .token-small { font-size: 12px; }
+  .token-err { color: var(--s3); }
+  .token-warn { color: var(--s4); font-weight: 600; }
+  .token-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 12px;
+    button {
+      font: inherit;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 5px 12px;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .token-danger { color: var(--s3); }
+  }
+  .token-value {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 8px 0;
+    code {
+      flex: 1;
+      overflow-x: auto;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    button {
+      font: inherit;
+      cursor: pointer;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      color: var(--ink);
+      border-radius: 5px;
+      padding: 3px 10px;
+    }
+  }
+  .token-recipe {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 12px;
+    overflow-x: auto;
+    white-space: pre;
+    margin: 6px 0;
+  }
+}
+h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
+.sub {
+  color: var(--ink-2);
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  b { color: var(--ink); font-weight: 600; }
+  .scanpick {
+    background: var(--panel);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font: inherit;
+    font-weight: 600;
+    padding: 1px 4px;
+    cursor: pointer;
+  }
+}
+.prose {
+  max-width: 68ch;
+  color: var(--ink-2);
+  p { margin: 0; }
+  a { color: var(--s1); }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.92em;
+  }
+}
+.loading { color: var(--ink-3); }
+
+// Cross-site link (prod hosts are one-store-each; see App's `crossSite`).
+.crosslink {
+  font-size: 0.9em;
+  color: var(--ink-2);
+  text-decoration: none;
+  white-space: nowrap;
+  &:hover { color: var(--ink); text-decoration: underline; }
+}
+
+// Treemap styling: the component is @disk-tree/react's generic <Treemap>
+// (dt-treemap-* class hooks + CSS vars); marin's wrapper adds `.treemap` on
+// the outer div. `!important` is needed only where the upstream component
+// sets an inline style we want to beat.
+.treemap {
+  gap: 6px;
+  background: var(--surface);
+  // upstream label typography knobs
+  --dt-treemap-lbl-fs: 11.5px;
+  --dt-treemap-lbl-fs-sm: 9.5px;
+  --dt-treemap-lbl-pad: 3px 5px;
+
+  &:fullscreen {
+    padding: 14px;
+    .dt-treemap-map { flex-basis: 0% !important; height: auto; }
+  }
+
+  .dt-treemap-bar {
+    gap: 14px !important;
+    padding: 0 !important;
+    flex-wrap: wrap;
+  }
+  // The path keeps its natural width (never squeezed into an x-scroller);
+  // the legend takes the remaining room and wraps its items, and the whole
+  // bar wraps the legend under a long path.
+  .dt-treemap-crumbs {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    color: var(--ink-2);
+    white-space: nowrap;
+    flex: 0 0 auto !important;
+    flex-wrap: nowrap !important;
+    a {
+      color: var(--s1);
+      cursor: pointer;
+      text-decoration: none !important;
+      &:hover, &:focus-visible { text-decoration: underline !important; outline: none; }
+    }
+  }
+  // Basis wide enough that a long path pushes the legend onto its own
+  // full-width row rather than squeezing it into a one-item-wide column.
+  .dt-treemap-legend { flex: 1 1 360px; min-width: 0; }
+  .keys { display: inline-flex; gap: 10px; align-items: center; }
+  // The mark-outline key: hollow swatches (the marks are frames, not fills).
+  .li.more { color: var(--ink-3); cursor: help; }
+  .li.outl {
+    gap: 8px;
+    .olbl { color: var(--ink-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .oli { display: inline-flex; align-items: center; gap: 4px; }
+    .sw { background: transparent; border: 2px solid; box-sizing: border-box; }
+  }
+  .li { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; max-width: 100%; min-width: 0; }
+  .sw { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+  .legend {
+    display: flex;
+    gap: 6px 14px;
+    flex-wrap: wrap;
+    align-items: center;
+    .keys { flex: 0 0 auto; margin-left: auto; }
+    .copyable { cursor: pointer; }
+    // Middle elision: the head gives way, the tail (hash / step number) stays.
+    .nm { display: inline-flex; min-width: 0; max-width: 100%; }
+    .head { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .tail { flex: none; white-space: nowrap; }
+    // A run of names sharing a long prefix: the prefix once, muted, then the
+    // distinguishing parts with their swatches, tied together by a rule.
+    .li-group {
+      display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+      max-width: 100%; padding: 2px 8px 2px 7px; border-radius: 5px;
+      border: 1px solid color-mix(in oklab, var(--ink-3) 45%, var(--line));
+      .pfx { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--ink-2); cursor: help; }
+    }
+  }
+  .hint .stats { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .hint .info { margin-left: 8px; color: var(--ink-3); cursor: help; font-size: 13px; &:hover { color: var(--ink); } }
+  // Gaps tiling: the gutters are the page ground, not the parent's fill —
+  // a 2px gap in the parent's own blue is invisible.
+  &.tiling-gaps .dt-treemap-inner { background: var(--bg, var(--surface)); border-radius: 3px; }
+  .dt-treemap-fs {
+    background: var(--panel) !important;
+    border: 1px solid var(--line) !important;
+    border-radius: 6px;
+    font-size: 14px !important;
+    padding: 2px 8px;
+    &:hover { filter: brightness(1.05); }
+    &:focus-visible { outline: 2px solid var(--s1); }
+  }
+  // MarkState totals for the current view — leads the rollup bar in mark mode.
+  .state-rollup {
+    display: inline-flex;
+    gap: 14px;
+    padding-right: 12px;
+    margin-right: 2px;
+    border-right: 1px solid var(--line);
+    &.pending { color: var(--ink-3); font-style: italic; }
+  }
+  // The drilled directory's own status / mark / owner: boxed and headed by
+  // its name, so it can't be read as more legend (it sat bare under the LIs).
+  .dt-treemap-fs { display: none !important; }
+  .fs-btn {
+    font: inherit; font-size: 15px; line-height: 20px; padding: 0 4px; border-radius: 4px; cursor: pointer;
+    background: transparent; border: none; color: var(--ink-3);
+    &:hover { color: var(--ink); background: var(--line); }
+  }
+  .root-marks {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    width: 100%;
+    padding: 6px 10px;
+    .keys { margin-left: auto; align-self: flex-start; }
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel);
+    .rm-head {
+      flex: none;
+      padding-top: 1px;
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; color: var(--ink); }
+    }
+  }
+  .dt-treemap-rollup {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    font-size: 12.5px;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+    .ri { display: inline-flex; align-items: center; gap: 5px; border-radius: 4px; padding: 0 3px; margin: 0 -3px; transition: opacity .12s; }
+    .ri.pickable { cursor: pointer; }
+    .ri.pickable:hover { background: var(--line); }
+    .ri.pinned { background: var(--line); box-shadow: 0 0 0 1px var(--ink-3); }
+    .ri.faded { opacity: .35; }
+    .ri[hidden] { display: none; }
+    .ri .unpin { color: var(--ink-3); font-size: 11px; margin-left: 2px; }
+    .sw { width: 10px; height: 10px; border-radius: 3px; }
+    b { color: var(--ink); font-weight: 600; }
+    .pct { color: var(--ink-3); margin-left: 2px; }
+    .usd { color: var(--ink-2); margin-left: 2px; }
+    // size / % / $ chips: which metrics the legend rows inline (name always shows)
+    .li-metrics {
+      display: inline-flex; gap: 4px; margin-left: auto; opacity: 0.7;
+      &:hover { opacity: 1; }
+      button {
+        font: inherit; font-size: 11px; background: transparent; color: var(--ink-3);
+        border: 1px solid var(--line); border-radius: 4px; padding: 0 6px;
+        line-height: 16px; cursor: pointer;
+        &.on { background: var(--line); color: var(--ink); }
+      }
+    }
+  }
+  .dt-treemap-map {
+    // upstream sets inline `flex: 1 1 0%` (fill-parent layout); in this page
+    // flow the wrapper has no fixed height, so pin the map via flex-basis
+    // (height alone loses to a 0% basis on the flex main axis)
+    flex-basis: 520px !important;
+    height: 520px;
+  }
+  // Sibling separation is the core's inline `boxShadow` (which any class-level
+  // box-shadow here would lose to): depth-based widths via the `borderWidth`
+  // prop and per-cell adaptive `edge` colors via `colorForCell`, both in
+  // site/src/Treemap.tsx. The old class-level inset rules were dead — dropped
+  // (same cleanup cw-s3 did in `1e5ee40`; see specs/branch-parity-discipline.md).
+  .dt-treemap-cell {
+    // Cells nest, `:hover` matches every ancestor of the pointer, and `filter`
+    // compounds multiplicatively down the tree — so a leaf 3 deep used to light
+    // up at 1.07³ and kept brightening as the pointer crossed each ancestor.
+    // Only brighten the innermost hovered cell.
+    &:hover:not(:has(.dt-treemap-cell:hover)) { filter: brightness(1.07); }
+    // Hover affordance: the innermost hovered cell gets a crisp inked outline;
+    // each ancestor under the pointer a fainter one, so the nesting you're
+    // inside reads at a glance. `outline` (not box-shadow) so it doesn't fight
+    // the core's inline shared-edge stroke.
+    &:hover {
+      outline: 1px solid color-mix(in oklab, var(--ink) 45%, transparent);
+      outline-offset: -1px;
+      &:not(:has(.dt-treemap-cell:hover)) {
+        outline: 2px solid var(--ink);
+        outline-offset: -2px;
+        z-index: 1;
+      }
+    }
+    &:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+    .dt-treemap-lbl {
+      font-variant-numeric: tabular-nums;
+      font-weight: 500;
+      // Dark shadow regardless of ink polarity: it separates white ink from a
+      // mid-tone fill, and under dark ink (on the light end of a hue fan) it
+      // just reads as extra weight rather than fighting the glyph.
+      text-shadow: 0 1px 2px rgb(0 0 0 / 0.4);
+      &.sm { padding: 1px 3px !important; }
+      .sz { opacity: 0.88; font-weight: 500; }
+    }
+  }
+  .hint { color: var(--ink-3); font-size: 12px; }
+}
+
+// Login wall shown by <AuthGate> when there's no CF Access session.
+.authwall {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  .card {
+    max-width: 440px;
+    text-align: center;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 36px 32px;
+    h1 { font-size: 26px; font-weight: 700; margin: 0 0 12px; letter-spacing: -0.01em; }
+    p { margin: 0 0 10px; color: var(--ink-2); font-size: 15px; }
+    code { background: var(--surface); padding: 1px 6px; border-radius: 5px; }
+    .restrict { color: var(--ink-3); font-size: 13.5px; margin: 14px 0 22px; }
+    .signin {
+      display: inline-block;
+      background: var(--s1);
+      color: #fff;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      &:hover { filter: brightness(1.08); }
+      &:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+    }
+    .signin-how { color: var(--ink-3); font-size: 13px; margin: 18px 0 0; line-height: 1.5; }
+  }
+}
+
+// `/og` — fixed 1200×630 frame for the public og:image screenshot. Reuses
+// <Treemap redact> (cells only); head + group color-key framed around it.
+// Owner-map legend (shared by /users and its og render).
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  align-items: center;
+  margin: -0.5em 0 1em;
+  font-size: 12px;
+  color: var(--ink-2);
+  span { display: inline-flex; align-items: center; gap: 5px; }
+  i { width: 11px; height: 11px; border-radius: 2.5px; display: inline-block; }
+  .sep { width: 1px; height: 14px; background: var(--line); margin: 0 2px; }
+}
+
+.og-users {
+  .users-map { height: 100%; margin: 0; .dt-treemap { height: 100%; } }
+  .map-legend { margin: 0; font-size: 14px; }
+}
+
+// Per-user unfurl card: avatar + name + state proportion bar (percent only).
+.og-user {
+  justify-content: center;
+  gap: 44px;
+  .ogu-head {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    h1 { display: flex; align-items: center; gap: 18px; font-size: 54px; }
+    p { font-size: 22px; }
+  }
+  .ogu-bar {
+    display: flex;
+    height: 64px;
+    border-radius: 10px;
+    overflow: hidden;
+    gap: 3px;
+    background: var(--panel);
+  }
+  .ogu-legend {
+    display: flex;
+    gap: 34px;
+    font-size: 24px;
+    color: var(--ink-2);
+    span { display: inline-flex; align-items: center; gap: 10px; }
+    i { width: 20px; height: 20px; border-radius: 5px; display: inline-block; }
+    b { color: var(--ink); }
+  }
+}
+
+.og {
+  width: 1200px;
+  height: 630px;
+  padding: 30px 40px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--surface);
+  color: var(--ink);
+  overflow: hidden;
+
+  .og-head {
+    h1 { font-size: 36px; font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+    p {
+      margin: 6px 0 0;
+      font-size: 18px;
+      color: var(--ink-2);
+      code { font-size: 0.92em; background: var(--panel); padding: 1px 6px; border-radius: 5px; }
+    }
+  }
+  .og-map {
+    flex: 1;
+    min-height: 0;
+    .treemap { height: 100%; gap: 0; }
+    .dt-treemap-map { flex-basis: 0% !important; height: 100%; min-height: 0; }
+  }
+  .og-legend {
+    display: flex;
+    gap: 22px;
+    .li { display: inline-flex; align-items: center; gap: 7px; font-size: 16px; color: var(--ink-2); }
+    .sw { width: 14px; height: 14px; border-radius: 4px; }
+  }
+}
+
+.legend .gradli {
+  gap: 6px;
+  .gradbar {
+    display: inline-block;
+    width: 120px;
+    height: 10px;
+    border-radius: 3px;
+  }
+}
+
+.dotted {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+
+// "Changes since previous scan" — diff treemap section.
+.diff-tm {
+  height: 380px;
+  margin-top: 8px;
+}
+// Diff accents: brighter than the cell fills (they're read as 12px text on
+// the page background, not as a block of colour); light mode goes darker.
+.grew { color: var(--grew); }
+.shrank { color: var(--shrank); }
+// Header quick-link into the "Changes since previous scan" treemap section.
+.diff-mode {
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 1px 7px;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  &.on { background: var(--panel); color: var(--ink); }
+}
+
+.tt-ref { display: inline; }
+// The treemap's slot before any tree has landed: full width at the fetch's
+// aspect (w : 0.6w), pulsing quietly — so the page below doesn't reflow
+// when the map arrives. First paint only; later loads hold the previous tree.
+.tm-skel {
+  width: 100%; aspect-ratio: 1 / 0.6; border-radius: 6px;
+  background: var(--panel); animation: tm-pulse 1.4s ease-in-out infinite;
+}
+@keyframes tm-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 0.9; } }
+// A widget that keeps its last content while the next loads (`Busy`): the
+// host dims under a centered marker when what it shows is stale, or carries
+// a corner pill when the content is current and a fill-in/refresh is pending.
+.busy-host { position: relative; }
+.busy-host.stale > :not(.busy-overlay) { opacity: 0.45; transition: opacity 0.15s; }
+.busy-overlay {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  pointer-events: none; z-index: 2;
+  &.corner { align-items: flex-start; justify-content: flex-end; padding: 8px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 8px; padding: 5px 11px; border-radius: 999px;
+    background: var(--panel); color: var(--ink-2); font-size: 12.5px; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+  }
+  .spin {
+    width: 11px; height: 11px; border-radius: 50%; flex: none;
+    border: 2px solid var(--ink-3); border-top-color: transparent; animation: busy-spin 0.8s linear infinite;
+  }
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+.skel { width: 100%; border-radius: 6px; background: var(--panel); animation: tm-pulse 1.4s ease-in-out infinite; }
+// /files parquet cells that keep their tail: an RTL block clips at the visual
+// left (`…thoughts3_0/shard-7.parquet`); the `<bdi>` inside stays LTR.
+.files-page .cell-tail { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+// The full value behind a clipped table cell (/files parquet viewer, via
+// file-tree's `elide.tooltip`): a long GCS path, wrapped so it fits the panel.
+.tooltip-content .pin-hint { color: var(--ink-3); font-size: 10.5px; margin-top: 5px; }
+.tooltip-content.pinned { border-color: var(--ink-3); }
+.tt-ref.pinnable { cursor: pointer; }
+.tooltip-content .copy-hint { display: block; color: var(--ink-3); font-size: 11px; margin-top: 3px; }
+.tooltip-content code.elide-full {
+  display: block; max-width: 60ch; font-size: 12px; line-height: 1.35;
+  white-space: normal; overflow-wrap: anywhere; word-break: break-all;
+}
+
+.tooltip-content {
+  z-index: 10000;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid color-mix(in oklab, var(--ink-3) 55%, var(--line));
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  max-width: min(420px, 90vw);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.22);
+
+  .classmix {
+    table { border-collapse: collapse; }
+
+    td {
+      padding: 1px 0;
+      &:not(:first-child) { padding-left: 14px; }
+      &.num { text-align: right; font-variant-numeric: tabular-nums; }
+    }
+
+    .tot td {
+      border-top: 1px solid var(--line);
+      font-weight: 600;
+    }
+
+    .note {
+      margin-top: 5px;
+      color: var(--muted);
+      max-width: 300px;
+    }
+  }
+}
+
+.tip, .dt-treemap-tip {
+  position: fixed;
+  z-index: 10;
+  pointer-events: none;
+
+  &.pinned {
+    pointer-events: auto;
+    user-select: text;
+    border-color: var(--accent, #7aa2f7) !important;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.3) !important;
+
+    .path { padding-right: 18px; }
+  }
+
+  .unpin {
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 4px;
+
+    &:hover { color: var(--ink); }
+  }
+
+  .classes-row {
+    margin-top: 3px;
+    display: flex;
+    gap: 10px;
+    color: var(--muted);
+
+    .usd { color: var(--ink); }
+  }
+  background: var(--panel) !important;
+  color: var(--ink) !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 6px !important;
+  padding: 7px 10px !important;
+  font-size: 12.5px !important;
+  width: max-content;
+  max-width: min(560px, 90vw) !important;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 0.18) !important;
+  .path {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    word-break: break-all;
+    // The path is drillable per-segment crumbs on one flowing line: the scheme
+    // + ancestors dim (underlined = tap to drill up), the basename bold/bright.
+    .crumbs { flex: 1 1 auto; min-width: 0; }
+    .dirname { color: var(--ink-2); }
+    button.seg {
+      background: none; border: none; padding: 0; font: inherit; cursor: pointer;
+      color: var(--ink-2);
+      text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 2px;
+      &:hover { color: var(--ink); text-decoration-color: var(--ink); }
+    }
+    span.seg { color: var(--ink-2); }
+    .seg.basename { font-weight: 650; color: var(--ink); text-decoration: none; cursor: default; }
+    .sep { color: var(--ink-3); padding: 0 1px; }
+    .path-copy {
+      flex: none; display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 20px; padding: 0;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
+      color: var(--ink-2); cursor: pointer; font-size: 12px;
+      &:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 9%, transparent); }
+      .copied { color: var(--keep, #6cc070); font-weight: 700; }
+    }
+  }
+  .nums { color: var(--ink-2); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .users {
+    margin-top: 3px;
+    color: var(--ink-2);
+    font-variant-numeric: tabular-nums;
+    font-size: 12px;
+    .tt-user { display: flex; align-items: center; gap: 5px; }
+    .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  }
+}
+
+.agechart {
+  svg { width: 100%; height: auto; display: block; }
+  .tick { fill: var(--ink-3); font-size: 10px; }
+  .hoverband { fill: var(--ink); opacity: 0.06; }
+  .legend {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+    .li { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-2); font-size: 12px; }
+    .sw { width: 10px; height: 10px; border-radius: 3px; }
+  }
+  .ctl { margin-left: auto; display: inline-flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; }
+}
+
+// Mark-provenance tooltip body (inherited-from + the marker's memo).
+.prov-tip { display: flex; flex-direction: column; gap: 4px; code { color: var(--ink); } .memo { font-style: italic; } }
+// Attribution as a distribution (OwnerBar): who holds the bytes, in the
+// color-by-owner palette; names + shares in the tooltip.
+.own-bar {
+  display: inline-flex; height: 9px; border-radius: 3px; overflow: hidden; vertical-align: middle;
+  background: var(--t-unattr); cursor: help;
+  i { display: block; height: 100%; }
+}
+.state-tip { display: flex; flex-direction: column; gap: 5px; max-width: 360px; b { margin-right: 2px; } }
+.own-tip {
+  display: flex; flex-direction: column; gap: 3px; min-width: 220px;
+  .row { display: flex; align-items: center; gap: 5px; }
+  .row i { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+  .row .n { margin-left: auto; color: var(--ink-2); font-variant-numeric: tabular-nums; padding-left: 10px; }
+  .row.pick { cursor: pointer; border-radius: 3px; margin: 0 -4px; padding: 0 4px; &:hover { background: var(--line); } }
+  .more { color: var(--s1); cursor: pointer; font-size: 11.5px; &:hover { text-decoration: underline; } }
+  .how { color: var(--ink-3); font-size: 11px; margin-top: 3px; }
+}
+// Placeholders: the default (50% of the text color) vanished on the dark ground.
+input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
+// Owner + provenance (OwnerFactChip): the owner's chip with a small mark at
+// its shoulder — the assigner's avatar, or a glyph for the pipeline signal.
+.owner-fact {
+  display: inline-flex; align-items: center; gap: 3px;
+  .mark {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 13px; height: 13px; border-radius: 50%; flex: none;
+    font-size: 9px; font-weight: 700; line-height: 1;
+    color: var(--ink-2); background: var(--panel); border: 1px solid var(--line);
+    &.by { padding: 0; overflow: hidden; border-color: var(--s1); }
+    &.src-wandb-run, &.src-wandb-config, &.src-executor-wandb { color: #ffbe00; border-color: color-mix(in oklab, #ffbe00 50%, var(--line)); }
+  }
+}
+// Anything with a tooltip behind it: a dotted underline says "hover me".
+.has-tt { text-decoration: underline dotted color-mix(in oklab, var(--ink-2) 60%, transparent); text-underline-offset: 3px; cursor: help; }
+
+// Small radio strips (age chart granularity/axis, size-chart y-range).
+.gran {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  .lbl { color: var(--ink-3); font-size: 11.5px; margin-right: 4px; }
+  button {
+    background: var(--panel);
+    color: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font: inherit;
+    font-size: 11.5px;
+    line-height: 1.4;
+    padding: 1px 8px;
+    cursor: pointer;
+    &.on { background: var(--s1); border-color: var(--s1); color: #fff; }
+    &:hover:not(.on) { filter: brightness(1.05); }
+  }
+}
+#over-time h2 .gran { margin-left: 12px; font-weight: 400; vertical-align: middle; }
+.sub .gran { margin-left: 10px; vertical-align: middle; }
+
+.classes {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  th, td { text-align: left; padding: 4px 18px 4px 0; border-bottom: 1px solid var(--line); }
+  th { color: var(--ink-2); font-weight: 600; font-size: 13px; }
+}
+
+.attrib {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  h2 { margin-bottom: 0; }
+  .feedback { margin-top: 8px; }
+  details {
+    summary {
+      cursor: pointer;
+      color: var(--ink-2);
+      font-size: 14px;
+      font-weight: 600;
+      &:hover { color: var(--ink); }
+    }
+    &[open] summary { margin-bottom: 6px; }
+  }
+  .rulestable {
+    font-size: 13px;
+    td, th { padding-right: 14px; }
+    code { font-size: 12px; }
+    .aliases { color: var(--ink-2); }
+  }
+  .teamchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    .sw { width: 9px; height: 9px; border-radius: 2px; }
+  }
+  .note { color: var(--ink-2); font-size: 12.5px; }
+  .todo {
+    background: var(--s4);
+    color: #1a1a19;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    margin-right: 6px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dt-treemap-cell { transition: filter 80ms linear; }
+}
+
+// Disambiguation strip under the header when `?d` matches several scans
+// (e.g. `?d=8-19` with two runs that day) — same button language as .storectl.
+.disambig {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  code { font-size: 12px; }
+  button {
+    background: var(--panel);
+    color: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 12px;
+    padding: 2px 8px;
+    cursor: pointer;
+    &.on {
+      background: var(--s1);
+      border-color: var(--s1);
+      color: #fff;
+    }
+    &:hover:not(.on) { filter: brightness(1.05); }
+  }
+}
+
+
+.admin-page {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px 16px;
+
+  h1 { margin-bottom: 8px; }
+
+  .mint {
+    display: grid;
+    grid-template-columns: max-content minmax(200px, 340px) 1fr;
+    gap: 8px 12px;
+    align-items: center;
+    margin: 16px 0;
+
+    .field { display: contents; }
+    .field.submit {
+      display: flex;
+      grid-column: 2;
+      gap: 12px;
+      align-items: center;
+    }
+    // First/last and avatar-url pairs share a cell: lay them out side by side.
+    .field .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      input { flex: 1; min-width: 0; }
+    }
+    .avatar-preview {
+      flex: none;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1px solid var(--ink-3, #888);
+    }
+    label { font-weight: 600; }
+    input {
+      padding: 6px 8px;
+      background: var(--bg-1, transparent);
+      color: inherit;
+      border: 1px solid var(--ink-3, #888);
+      border-radius: 4px;
+    }
+    // The read-only checkbox is a small replaced element; without this it stretches
+    // to fill its grid cell and the glyph floats centered. Pin it to the cell start.
+    input[type="checkbox"] { justify-self: start; width: 15px; height: 15px; padding: 0; }
+    .hint {
+      font-size: 12px;
+      color: var(--ink-2);
+      code { font-size: 11px; }
+    }
+    button { padding: 6px 12px; cursor: pointer; }
+    .err { color: #d33; }
+  }
+
+  .minted {
+    margin: 12px 0;
+    padding: 10px 12px;
+    border: 1px solid var(--ink-3, #888);
+    border-radius: 6px;
+
+    .token-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      code { overflow-wrap: anywhere; user-select: all; }
+    }
+  }
+
+  .grants {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+
+    th, td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--ink-3, #4443); }
+    // Holder cell: the link's subject — small round avatar + their name.
+    .holder { display: inline-flex; align-items: center; gap: 6px; }
+    .grant-avi {
+      flex: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      object-fit: cover;
+    }
+    // Who minted the link, under its created timestamp.
+    .by { font-size: 11px; color: var(--ink-2); }
+    // Rotate / revoke: side-by-side icon buttons, muted until hovered.
+    .row-actions { display: inline-flex; align-items: center; gap: 10px; }
+    .icon-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 4px; line-height: 0; cursor: pointer;
+      background: transparent; color: var(--ink-2);
+      border: 1px solid transparent; border-radius: 4px;
+      &:hover { color: var(--ink); border-color: var(--ink-3, #888); }
+      &.danger:hover { color: #d33; border-color: #d33; }
+      &:disabled { opacity: 0.4; cursor: default; border-color: transparent; }
+    }
+    tr.revoked td { opacity: 0.5; }
+    .revoked-label { font-size: 12px; }
+
+    // Long ledger: the table scrolls inside its own box (sideways on a phone,
+    // and vertically past ~70vh) and the header row stays pinned to the box top.
+    thead th {
+      position: sticky; top: 0; z-index: 1;
+      background: var(--surface);
+    }
+  }
+  .grants-toolbar {
+    display: inline-flex; align-items: center; gap: 6px;
+    margin: 8px 0 2px; font-size: 13px; color: var(--ink-2); cursor: pointer;
+    input { margin: 0; }
+  }
+  .table-scroll { overflow: auto; max-height: 70vh; max-width: 100%; }
+
+  // Phone: the 3-column label / input / hint grid squeezes the hint to one word
+  // per line — stack each field instead, hint at full width under its input.
+  @media (max-width: 640px) {
+    .mint {
+      display: block;
+      .field { display: block; margin: 0 0 14px; }
+      .field.submit { display: flex; margin-top: 4px; }
+      label { display: block; margin-bottom: 4px; }
+      & > .field > input:not([type="checkbox"]) { width: 100%; box-sizing: border-box; }
+      input.days { width: 6em; }
+      .hint { display: block; margin-top: 4px; }
+    }
+  }
+}
+
+.admin-page {
+  .crumbs { font-size: 13px; color: var(--ink-2); }
+
+  .table-list {
+    list-style: none;
+    padding: 0;
+    li { margin: 6px 0; }
+    .ro-tag {
+      margin-left: 8px;
+      font-size: 11px;
+      color: var(--ink-2);
+      border: 1px solid var(--ink-3, #888);
+      border-radius: 3px;
+      padding: 1px 5px;
+    }
+    .desc { margin-left: 10px; color: var(--ink-2); font-size: 13px; }
+  }
+
+  .db-table {
+    .add-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0;
+      input {
+        padding: 6px 8px;
+        background: var(--bg-1, transparent);
+        color: inherit;
+        border: 1px solid var(--ink-3, #888);
+        border-radius: 4px;
+      }
+      button { padding: 6px 12px; cursor: pointer; }
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      th, td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--ink-3, #4443); }
+      th.sortable { cursor: pointer; user-select: none; }
+      td input {
+        width: 100%;
+        padding: 3px 5px;
+        background: var(--bg-1, transparent);
+        color: inherit;
+        border: 1px solid var(--s1, #58f);
+        border-radius: 3px;
+        font: inherit;
+      }
+      .cell.editable { cursor: pointer; border-bottom: 1px dashed var(--ink-3, #8886); }
+      .empty { color: var(--ink-2); }
+      .rm {
+        background: none;
+        border: none;
+        color: var(--ink-2);
+        cursor: pointer;
+        &:hover { color: #d33; }
+      }
+    }
+    .row-count { color: var(--ink-2); font-size: 12px; }
+  }
+  .err { color: #d33; }
+}
+
+// Mark & sweep (/mark)
+:root {
+  // Keep is BLUE, not green: (a) red/green is the classic colorblind trap
+  // (deutan/protan ~8% of men) — blue/red stays separable under all common
+  // CVD; (b) green read as "good/go", which subtly encouraged keeping —
+  // the opposite of the cleanup's aim. Amber KLC stays distinct from both.
+  --mk-keep: #3d8bfd;
+  --mk-klc: #d4a72c;
+  --mk-del: #d3382f;
+}
+
+
+// Micro-hue mark ring: frames an explicitly-marked cell in its state color,
+// layered over the macro-hue fill. `borderColor` is set inline per action.
+.mark-edge {
+  position: absolute;
+  inset: 0;
+  border: 2.5px solid transparent;
+  border-radius: 3px;
+  box-sizing: border-box;
+  pointer-events: none;
+  // keep_last_ckpt: a keep+sweep barber-pole ring — "both states live inside
+  // this rect" (border-image can't round corners; the straight ring is the
+  // trade for a real two-color edge).
+  &.klc {
+    border-radius: 0;
+    border-image: repeating-linear-gradient(45deg, var(--mk-keep) 0 5px, var(--mk-del) 5px 10px) 1;
+  }
+}
+
+// Corner badge on the top-most marked cell: actor avatar + state glyph. The
+// whole badge is transparent to hover so the cell tooltip (with full mark
+// provenance) still shows over it.
+.mark-badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+  pointer-events: none;
+  .user-avatar { box-shadow: 0 0 0 1.5px rgba(0, 0, 0, 0.35); }
+  .mk {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    pointer-events: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  }
+}
+
+.mark-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+  width: 100%;
+  font-size: 12.5px;
+  .lbl { color: var(--ink-2); text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.03em; min-width: 52px; }
+  .state {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    .prov { color: var(--ink-2); display: inline-flex; align-items: center; gap: 4px; }
+    .memo-tag {
+      margin-left: 4px; padding: 0 4px; border-radius: 3px; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.03em;
+      border: 1px solid var(--line); color: var(--ink-3);
+    }
+    .under {
+      color: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 0 5px;
+      font-size: 11.5px;
+      i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; vertical-align: -1px; }
+    }
+  }
+  // The decision as one select, colored by the state it currently holds
+  // (dashed border = inherited from an ancestor). Read-only viewers get the
+  // word in the same color.
+  select.state-sel, .state-word {
+    --act: var(--ink-2);
+    &.keep { --act: var(--mk-keep); }
+    &.keep_last_ckpt { --act: var(--mk-klc); }
+    &.sweep { --act: var(--mk-del-ink); }
+  }
+  select.state-sel {
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    color: var(--act); background: var(--surface);
+    border: 1px solid var(--act); border-radius: 5px; padding: 2px 6px;
+    cursor: pointer;
+    &.none { font-weight: 500; }
+    &.inh { border-style: dashed; }
+    &.dirty { box-shadow: 0 0 0 2px color-mix(in oklab, var(--act) 35%, transparent); }
+  }
+  button.save {
+    font: inherit; font-size: 12px; padding: 2px 9px; border-radius: 5px; cursor: pointer;
+    background: var(--s1); color: #fff; border: 1px solid var(--s1);
+    &:disabled { background: transparent; color: var(--ink-3); border-color: var(--line); cursor: default; }
+  }
+  .state-word { color: var(--act); }
+  input.note {
+    padding: 2px 6px; background: var(--surface); color: inherit;
+    border: 1px solid var(--line); border-radius: 4px; font-size: 12px;
+  }
+  // Owner row — claim for yourself, or assign to anyone via the name picker.
+  .owner {
+    display: inline-flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 12px;
+    .none { color: var(--ink-2); font-style: italic; }
+    button.quiet { color: var(--ink-3); border-color: transparent; }
+    .classes { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; .lbl { min-width: 0; } }
+    input.assign {
+      padding: 2px 6px;
+      background: var(--surface);
+      color: inherit;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    button {
+      background: var(--panel);
+      color: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      font-size: 12px;
+      padding: 2px 8px;
+      cursor: pointer;
+      &:hover { filter: brightness(1.08); }
+    }
+  }
+  .guest-note {
+    color: var(--ink-2);
+    font-size: 12px;
+    a { color: var(--s1); }
+  }
+  .err { color: #d33; }
+}
+
+// Recency-override confirm strip (MarkControls + bulk bar).
+.override-confirm {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink);
+  border: 1px solid var(--mk-del);
+  border-radius: 5px;
+  padding: 2px 8px;
+  button {
+    background: var(--panel);
+    color: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font-size: 12px;
+    padding: 1px 7px;
+    cursor: pointer;
+    &:first-of-type { border-color: var(--mk-del); color: var(--mk-del); }
+  }
+}
+
+// In the treemap tooltip: marking is only possible once the tip is pinned
+// (unpinned tips are pointer-events: none), so don't tease the controls on hover.
+// Controls are hidden while the tip is a passive hover preview, but appear once
+// you move onto the tip (or pin it) — the tip is interactive + anchored now, so
+// hovering into it to mark is a supported gesture, not only click-to-pin.
+.dt-treemap-tip:not(.pinned):not(:hover) .mark-controls { display: none; }
+.dt-treemap-tip.pinned .tt-pin-hint, .dt-treemap-tip:hover .tt-pin-hint { display: none; }
+.dt-treemap-tip.pinned .mark-controls,
+.dt-treemap-tip:hover .mark-controls {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+// Docked tip (tipMode="dock"): the panel sits in flow below the footer, full
+// width, and updates in place instead of floating. Its mark controls / path
+// actions are always live here — the panel is interactive by construction, so
+// there's no "hover onto the floating tip" gesture to gate them behind.
+// The docked tip floats OVER the table below instead of sitting in the page
+// flow: a same-height dock is impossible (a many-user path is taller than a
+// single-owner one), and reserving space for the tallest tip both wastes it on
+// short tips and still jumps on the tall ones. Out of flow, nothing under the
+// treemap ever moves — the map stays put while you hover it, and the table is
+// only *visually* covered (you're reading the map, not the table, mid-hover).
+// A non-modal popover on desktop; on a phone, where there's no hover, it's a
+// tap-pinned bottom-sheet card — `max-height` + scroll bounds either one.
+.dt-treemap { position: relative; }
+.dt-treemap-tip.dock {
+  position: absolute !important;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 20;
+  max-width: 100% !important;
+  width: 100%;
+  margin-top: 2px;
+  max-height: 50vh;
+  overflow-y: auto;
+  // Reads as a card floating over the table: opaque fill + a ring and lift.
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35) !important;
+  border: 1px solid var(--dt-treemap-tip-border, var(--line));
+  // A full-width panel holds a whole GCS/S3 path on one line otherwise —
+  // wrap it (the float tip was narrow enough to wrap on its own).
+  overflow-wrap: anywhere;
+  background: color-mix(in oklab, var(--panel) 96%, var(--surface)) !important;
+  // Idle = nothing floating, table fully visible (out of flow, so no jump when
+  // a hover fills it). The bottom help line still teaches the hover gesture.
+  &.empty { display: none !important; }
+  .dt-treemap-tipdock-hint { font-size: 12px; }
+}
+
+// The children table is wider than a phone: it scrolls inside its own box
+// rather than widening the page (which dragged the whole header off-screen).
+#tbl { overflow-x: auto; }
+// The treemap children table (was also shared with the /mark worklists).
+.children-tbl {
+  .worklist {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    th, td { padding: 4px 8px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    // Names elide from the middle in JS (`elideMid`) and never wrap; the
+    // CSS ellipsis below is the fallback for columns narrower than the
+    // character budget (phones).
+    th:first-child { white-space: normal; }
+    th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    th.sortable {
+      cursor: pointer;
+      user-select: none;
+      &:hover { color: var(--ink); }
+      &.on { color: var(--s1); }
+    }
+    .prefix {
+      a { cursor: pointer; &:hover { text-decoration: underline; } }
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      max-width: 480px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 11.5px;
+      white-space: nowrap;
+      margin-right: 4px;
+      .sw { width: 8px; height: 8px; border-radius: 2px; }
+      &.unmarked { color: var(--ink-2); }
+    }
+    .never { color: var(--never-read); font-weight: 600; filter: brightness(1.4); }
+    .none { color: var(--ink-3); }
+    td.created {
+      white-space: nowrap;
+      // Dot + month as a 2-col group, flush-right in the cell (a trailing
+      // empty year track used to leave dead space that shoved it left). Month
+      // track floors at 3ch so bare months align; a year suffix grows it.
+      .cm { display: inline-grid; grid-template-columns: 7px minmax(3ch, max-content); gap: 0 5px; align-items: center; justify-items: end; }
+      i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+      .yr { color: var(--ink-3); font-size: 11px; }
+    }
+    td.owners, td.state { white-space: nowrap; }
+    // One dot per decision: hollow = available, filled = this row's own mark.
+    .actions {
+      white-space: nowrap;
+      display: inline-flex; align-items: center; gap: 4px;
+      .dot-gap { width: 14px; height: 14px; }
+      .tail { display: inline-flex; align-items: center; gap: 4px; margin-left: 2px; }
+      // The trash-can: stage this prefix for deletion (opt-in model). A legible
+      // red at rest (the grey emoji was near-invisible in dark mode).
+      button.trash {
+        border: none; background: transparent; cursor: pointer; padding: 2px 4px;
+        display: inline-flex; align-items: center; border-radius: 4px; line-height: 1;
+        font-size: 14px; color: color-mix(in oklab, #e5484d 72%, var(--ink-3));
+        &:hover { color: #f2555a; background: color-mix(in oklab, #d33 16%, transparent); }
+      }
+      button.dot {
+        width: 14px; height: 14px; padding: 0; border-radius: 50%; cursor: pointer;
+        background: transparent; border: 2px solid var(--act, var(--ink-3)); color: var(--act, var(--ink-3));
+        font-size: 11px; line-height: 1;
+        &.on { background: var(--act); }
+        &.inh { border-style: dashed; background: color-mix(in oklab, var(--act) 30%, transparent); }
+        &.clear { border-color: var(--line); color: var(--ink-3); &:hover { color: var(--ink); border-color: var(--ink-3); } }
+        &:hover:not(.on):not(.clear) { background: color-mix(in oklab, var(--act) 30%, transparent); }
+      }
+
+    }
+  }
+  .more {
+    margin-top: 8px;
+    background: var(--panel);
+    color: var(--ink-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    font-size: 12.5px;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+  .pager {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+    button {
+      background: var(--panel);
+      color: var(--ink-2);
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 3px 10px;
+      cursor: pointer;
+      &:disabled { opacity: 0.4; cursor: default; }
+    }
+    .pager-count { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  }
+  .err { color: #d33; }
+}
+
+.children-tbl { margin-top: 10px; }
+// Row selection (rowSelection.ts) on the children table: the checkbox
+// column, the cursor / selected row tints, and the bulk bar above the table.
+.worklist.selectable {
+  tbody tr { cursor: default; }
+  tr.sel td { background: color-mix(in oklab, var(--s1) 14%, transparent); }
+  tr.cur td { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--s1) 55%, transparent); }
+  .col-sel { width: 22px; padding-right: 0 !important; input { vertical-align: middle; } }
+}
+.children-tbl .sel-bar {
+  display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-left: auto; padding: 2px 10px; border-radius: 6px;
+  background: color-mix(in oklab, var(--s1) 12%, var(--panel)); border: 1px solid color-mix(in oklab, var(--s1) 35%, var(--line));
+  font-size: 12.5px; color: var(--ink-2);
+  b { color: var(--ink); }
+  .acts { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; flex-wrap: wrap; }
+  .lbl { color: var(--ink-2); text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.03em; margin-right: 2px; }
+  input.memo {
+    font: inherit; font-size: 12px; width: 15ch; max-width: 40vw; padding: 2px 7px; border-radius: 4px;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    &::placeholder { color: var(--ink-3); }
+    &:focus { outline: none; border-color: color-mix(in oklab, var(--s1) 55%, var(--line)); }
+  }
+  button.trash {
+    font: inherit; font-size: 12px; cursor: pointer; padding: 2px 8px; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 5px;
+    background: color-mix(in oklab, #d33 14%, var(--panel)); color: var(--ink);
+    border: 1px solid color-mix(in oklab, #d33 40%, var(--line));
+    &:hover { background: color-mix(in oklab, #d33 24%, var(--panel)); }
+    svg { color: #f2555a; }
+  }
+  button.dot {
+    width: 14px; height: 14px; padding: 0; border-radius: 50%; cursor: pointer;
+    background: transparent; border: 2px solid var(--act, var(--ink-3)); color: var(--ink-3); font-size: 11px; line-height: 1;
+    &:hover { background: color-mix(in oklab, var(--act, var(--ink-3)) 35%, transparent); }
+    &.clear { border-color: var(--line); &:hover { color: var(--ink); border-color: var(--ink-3); } }
+  }
+  button.quiet { font: inherit; font-size: 12px; background: transparent; color: var(--ink-3); border: 1px solid transparent; border-radius: 4px; padding: 1px 6px; cursor: pointer; &:hover { color: var(--ink); } }
+}
+.children-tbl .pager {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0; font-size: 12px; color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  &.top { min-height: 28px; }
+  .pg { display: inline-flex; align-items: center; gap: 4px; }
+  .pg > span { padding: 0 6px; }
+  select.psize { margin-left: 8px; font: inherit; font-size: 11.5px; background: var(--panel); color: var(--ink-2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 4px; }
+  button {
+    font: inherit; font-size: 13px; line-height: 1; padding: 2px 8px; border-radius: 4px; cursor: pointer;
+    background: var(--panel); color: var(--ink-2); border: 1px solid var(--line);
+    &:disabled { opacity: 0.35; cursor: default; }
+    &:hover:not(:disabled) { color: var(--ink); }
+  }
+}
+
+// "no reads since …" callout in treemap tooltips (dark tip bg → soft red tint)
+.dt-treemap-tip .never-read { color: #e0917f; }
+// Mark provenance line in the cell tooltip (who/when, inherited or own).
+.dt-treemap-tip .tt-mark { margin-top: 6px; font-size: 12.5px; }
+.dt-treemap-tip .tt-mark code { font-size: 11px; opacity: 0.85; }
+
+.typed-modal {
+  .sub { margin: 0 0 10px; font-size: 13px; }
+  .typed-path {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    input {
+      padding: 5px 8px;
+      background: var(--panel);
+      color: inherit;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+    }
+    .err { color: #d33; font-size: 12px; }
+  }
+}
+
+.filterbox {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 8px;
+  input {
+    padding: 3px 8px;
+    background: var(--panel);
+    color: inherit;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 12.5px;
+  }
+  .fnote {
+    font-size: 12px;
+    color: var(--ink-2);
+    display: inline-flex;
+    gap: 4px;
+    align-items: center;
+    white-space: nowrap;
+    button { background: none; border: none; color: var(--ink-2); cursor: pointer; padding: 0 2px; }
+  }
+}
+
+// The deepest breadcrumb taps open this path card (PathPopover, portaled to
+// <body>): the full prefix + a copy button. Tap-only, so it never rides in on a
+// fresh page load the way the old hover tip did.
+.tb-path button.here.path-pop-btn {
+  cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 3px;
+  &:hover { text-decoration-color: var(--ink); }
+}
+.path-pop {
+  z-index: 10001;
+  display: flex; align-items: center; gap: 8px;
+  max-width: min(92vw, 560px);
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 9px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  .full { word-break: break-all; }
+  .path-copy {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 22px; padding: 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--ink-2); cursor: pointer; font-size: 12px;
+    &:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 9%, transparent); }
+    .copied { color: var(--keep, #6cc070); font-weight: 700; }
+  }
+}
+
+.marks-page {
+  .memo { color: var(--ink-2); font-style: italic; }
+  .marks-feed td { vertical-align: top; }
+  // th defaults to centered while td is left — align them.
+  .worklist {
+    th, td { text-align: left; }
+    th.num, td.num { text-align: right; }
+  }
+}
+
+// Totals footer on children/worklist tables.
+.worklist .total-row td {
+  border-top: 2px solid var(--line);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+// `/users` table: (bytes, est. $/mo) column pairs under one group header per
+// state; the $ sub-columns read as annotations of the bytes, not peers.
+.user-page .worklist thead {
+  .groups th { text-align: center; border-bottom: none; padding-bottom: 0; }
+  .groups th:first-child { border-bottom: none; }
+  .subs th { font-weight: 400; font-size: 11px; color: var(--ink-3); padding-top: 0; }
+}
+.user-page .worklist .usd { padding-left: 0; }
+
+// Per-user estate pages (`/users`, `/user/:id`): state rollup strip + tables.
+.user-page {
+  .user-head {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .user-link {
+    color: inherit;
+    text-decoration: none;
+    cursor: pointer;
+    .user-chip { cursor: pointer; } // override the chip's default `cursor: default`
+    &:hover .user-chip { background: color-mix(in oklab, var(--ink) 8%, transparent); }
+  }
+  // Fixed square boxes so glyph / avatar / name columns align across rows
+  // (the OA branch mark and block-S have different aspect ratios).
+  .csv-btn {
+    font: inherit;
+    font-size: 0.85em;
+    cursor: pointer;
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 3px 10px;
+    &:hover { filter: brightness(1.08); }
+  }
+  .user-cell { display: inline-flex; align-items: center; gap: 8px; }
+  // Full-height, vertically-flush hover targets down the user column: the td
+  // sheds its padding into the chip, so scanning the list never crosses a
+  // dead zone (which flickered the hover card per row).
+  .user-td {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    .user-link { display: block; }
+    .user-chip { display: flex; width: 100%; padding: 6px 4px; gap: 8px; }
+  }
+  .class-tt {
+    border-collapse: collapse;
+    td { padding: 1px 6px 1px 0; &:last-child { padding-right: 0; } }
+    .num { text-align: right; font-variant-numeric: tabular-nums; }
+  }
+  .users-map {
+    height: 300px;
+    margin: 0.9em 0 1.1em;
+    .dt-treemap { height: 100%; }
+    // Every tile navigates (users → their page, pools → home lenses).
+    .dt-treemap-cell { cursor: pointer; }
+  }
+  .tt-hint { color: var(--ink-2); font-size: 0.85em; margin-top: 2px; }
+  h2 { margin: 1.2em 0 0.2em; font-size: 1.1em; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .user-mini-map { margin: 1em 0 0.4em; }
+  .state-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0.8em 0 0.4em;
+    .state-cell {
+      display: grid;
+      gap: 2px;
+      border: 1px solid var(--line);
+      border-left-width: 4px;
+      border-radius: 6px;
+      padding: 8px 14px;
+      min-width: 120px;
+      b { font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.04em; }
+      .state-b { font-size: 1.25em; font-weight: 600; }
+      .state-n { font-size: 0.85em; color: var(--ink-2); }
+    }
+  }
+}
+
+// Action chip (glyph + label) in the marks feed and the scoped mark history —
+// both tables carry `.worklist`, so this styles the chip regardless of page.
+.worklist .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 11.5px;
+  white-space: nowrap;
+  .glyph { font-weight: 700; font-size: 12.5px; line-height: 1; }
+}
+
+.user-avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  vertical-align: middle;
+  flex: none;
+  &.fallback {
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    line-height: 1;
+  }
+}
+.who-chip, .user-chip { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.user-chip {
+  cursor: default;
+  border-radius: 5px;
+  outline: none;
+  &:hover, &:focus-visible { background: color-mix(in oklab, var(--ink) 8%, transparent); }
+}
+.user-card {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  .uc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; b { font-size: 1.05em; } }
+  .uc-id { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; }
+  .uc-sub { color: var(--ink-2); font-size: 0.9em; word-break: break-all; }
+  .uc-link { font-size: 0.9em; color: var(--link, #6ea8fe); text-decoration: none; &:hover { text-decoration: underline; } }
+}
+// The identity hover card is interactive (safePolygon) — let pointer events through.
+.user-card-pop { pointer-events: auto; }
+
+// Mark provenance tooltip: state swatch + avatar + text row.
+.mark-prov { display: inline-flex; align-items: center; gap: 6px;
+  .sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+}
+// Legend rows align their avatar with the swatch + text.
+.ri .user-avatar { margin: 0 1px; vertical-align: middle; }
+
+// Bulk actions over filter matches (BulkBar; specs/selection-actions.md).
+// Mirrors the MarkControls action-button look, inline next to the match chip.
+.bulkbar {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+  .bb-scope { color: var(--ink-2); }
+  button.act {
+    background: transparent;
+    border: 1px solid var(--act, var(--line));
+    color: var(--act, var(--ink-2));
+    border-radius: 5px;
+    font-size: 12px;
+    padding: 1px 8px;
+    cursor: pointer;
+    &.keep { --act: var(--mk-keep); }
+    &.sweep { --act: var(--mk-del); }
+    &.clear { --act: var(--ink-2); }
+    &.claim { --act: var(--s1); }
+    &.go { --act: var(--mk-keep); font-weight: 600; }
+    &:disabled { opacity: 0.45; cursor: default; }
+  }
+  input {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    color: var(--ink);
+    font-size: 12px;
+    padding: 1px 6px;
+  }
+  .bb-confirm { color: var(--ink); }
+  .bb-warn { color: var(--s3); }
+  .bb-progress { color: var(--s1); }
+}
+
+// `gaps` treemap-tiling chip — sits in the crumbs bar beside ⛶, so it stays
+// quiet: small, muted, only a touch inked when on.
+// ⚙ map-display prefs (prefs.tsx): a native <details> whose menu floats
+// below-right of the gear, so opening it shifts nothing in the key line.
+.map-settings {
+  position: relative;
+  summary {
+    list-style: none; cursor: pointer; color: var(--ink-3); font-size: 19px; line-height: 20px;
+    padding: 0 3px; border-radius: 4px; user-select: none;
+    &::-webkit-details-marker { display: none; }
+    &:hover { color: var(--ink); background: var(--line); }
+  }
+  &[open] summary { color: var(--ink); }
+  .menu {
+    position: absolute; right: 0; top: 22px; z-index: 30;
+    touch-action: manipulation;  // no double-tap zoom delay on the toggles
+    display: flex; flex-direction: column; gap: 8px;
+    min-width: 190px; padding: 8px 10px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    font-size: 12px; color: var(--ink-2); white-space: nowrap;
+  }
+  .row { display: flex; align-items: center; gap: 8px; cursor: default; }
+  label.row { cursor: pointer; }
+  .seg {
+    margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
+    button {
+      font: inherit; font-size: 11px; padding: 1px 7px; cursor: pointer;
+      background: transparent; color: var(--ink-3); border: none;
+      &.on { background: var(--line); color: var(--ink); }
+      & + button { border-left: 1px solid var(--line); }
+    }
+  }
+}
+
+// /sweep console (specs/sweep-executor.md § Phase 2)
+.sweep-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px 24px 48px;
+  h1 { font-size: 22px; margin: 10px 0 4px; }
+  h2 { margin-top: 28px; }
+  .sub { color: var(--ink-2); max-width: 80ch; }
+  .err { color: var(--s3); }
+  .dim { color: var(--ink-3); }
+  .ok { color: #3fb950; font-weight: 600; }
+  .real { color: var(--mk-del); }
+  .pct { color: var(--ink-3); }
+  .match-tag {
+    margin-left: 6px; font-size: 11px; font-weight: 650; color: #3fb950;
+    border: 1px solid #3fb95055; border-radius: 5px; padding: 0 4px;
+  }
+  .warn-tag { color: #d29922; font-weight: 650; }
+  .hashelp { border-bottom: 1px dotted var(--ink-3); cursor: help; }
+  .table-fold { font-size: 13px; margin: 6px 0 0 2px; }
+  .btn-sub { font-weight: 400; opacity: 0.85; }
+  .sweep-table {
+    width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 10px;
+    th { text-align: left; color: var(--ink-3); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tr.approved td { background: #3fb95012; }
+    tr.matched td:first-child { box-shadow: inset 2px 0 0 #3fb95088; }
+    code { font-size: 12.5px; }
+    // Cells wrap between atoms, never inside one: `106 Ti`, `of 106 Ti`,
+    // `by Ryan`, `= sweeper`, a user chip. The path column may break anywhere.
+    .nb, .user-chip { white-space: nowrap; display: inline-block; }
+    // The path column may break anywhere, but never below a readable width:
+    // past that the table scrolls in its box instead of crushing the path.
+    td:first-child { overflow-wrap: anywhere; min-width: 16em; }
+    @media (max-width: 720px) { .col-objects { display: none; } }
+    // Selection: the checkbox column is the mouse/touch handle; the path
+    // column comes second, so the min-width rule targets it explicitly.
+    th.col-sel, td.col-sel { width: 1.6em; padding-right: 0; input { margin: 0; vertical-align: middle; cursor: pointer; } }
+    td:first-child { min-width: 0; overflow-wrap: normal; }
+    td:nth-child(2) { overflow-wrap: anywhere; min-width: 16em; }
+    // Status holds `approved [avatar] [↩]` on one line (revoke is a compact
+    // icon, not the wrapping word it used to be); the path column gets the room.
+    td:last-child { min-width: 8.5em; white-space: nowrap; }
+    tbody tr { cursor: default; }
+    tr.sel td { background: color-mix(in srgb, var(--accent, #58a6ff) 14%, transparent); }
+    // The cursor is the keyboard row (j/k target) and the anchor a shift-click
+    // or shift+j/k extends *from* — a distinct concept from what's selected. A
+    // full inset ring reads as "the active row" without colliding with the
+    // green owner-match bar (`tr.matched td:first-child`) or looking like a
+    // stray corner at the top of a multi-row selection.
+    tr.cur td { box-shadow: inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
+    tr.cur td:first-child { box-shadow: inset 2px 0 0 var(--accent, #58a6ff), inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
+    tr.cur td:last-child { box-shadow: inset -2px 0 0 var(--accent, #58a6ff), inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
+    // The approve marks live beside the size they approve: yellow ✓ on the
+    // band's whole size, green ✓ on the sweeper's slice estimate.
+    button.mini.ico { padding: 0 5px; margin-left: 5px; line-height: 1.25; font-size: 11.5px; }
+    // Band expand caret + its detail row (the non-sweeper residue, on demand).
+    button.caret {
+      background: none; border: 0; color: var(--ink-3); cursor: pointer; padding: 0 5px 0 0;
+      font-size: 10px; transition: transform 0.12s; display: inline-block;
+      &.open { transform: rotate(90deg); color: var(--ink); }
+      &:hover { color: var(--ink); }
+    }
+    tr.band-detail td { padding: 4px 8px 8px 8px; border-bottom: 1px solid var(--line); }
+    .band-conflicts {
+      font-size: 12.5px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+      .conflict-owner { display: inline-flex; align-items: center; gap: 3px; text-decoration: none; color: var(--ink);
+        padding: 1px 6px; border: 1px solid var(--line); border-radius: 999px;
+        &:hover { border-color: var(--ink-2); } .user-chip { vertical-align: middle; } }
+      .conflict-all { margin-left: auto; color: var(--accent, #58a6ff); }
+    }
+    // Revoke: a compact undo glyph riding beside the approver avatar, so the
+    // status cell stays one line (was the wrapping word "revoke").
+    button.mini.ico.revoke { display: inline-flex; align-items: center; padding: 2px 4px; vertical-align: middle; svg { width: 12px; height: 12px; } }
+  }
+  // Dry runs sit on a faint grey; real runs stay plain (their mode cell is
+  // already the red word).
+  .sweep-table tr.mode-dry { background: rgba(128, 128, 128, 0.09); }
+  .sweep-table .prog progress { width: 90px; height: 8px; vertical-align: middle; margin-right: 4px; }
+  // Runs: live rows blue, failed rows a faint red, finished rows a faint
+  // green; dry runs keep their grey underneath. A failed job's last Batch
+  // event folds into a "why" details so the row stays one line tall.
+  .sweep-table.runs {
+    // Column 2 is the actor's avatar, not the bands table's path: undo that
+    // column's 16em floor; the job id and the mode stay whole.
+    td:nth-child(2) { min-width: 0; overflow-wrap: normal; white-space: nowrap; }
+    td:first-child code, td.mode { white-space: nowrap; }
+    tr.live td { background: color-mix(in srgb, #58a6ff 8%, transparent); }
+    tr.failed td { background: color-mix(in srgb, var(--mk-del) 9%, transparent); }
+    tr.ok td { background: color-mix(in srgb, var(--mk-keep, #3fb950) 5%, transparent); }
+    // Stop: a quiet outline in the delete red; filled on hover, muted once sent.
+    button.mini.stop {
+      font: inherit; font-size: 12px; font-weight: 600; line-height: 1; cursor: pointer;
+      padding: 3px 9px; border-radius: 6px; background: transparent;
+      color: var(--mk-del); border: 1px solid color-mix(in srgb, var(--mk-del) 60%, transparent);
+      &:hover:not(:disabled) { background: var(--mk-del); color: #fff; border-color: var(--mk-del); }
+      &:disabled { cursor: default; color: var(--ink-3); border-color: var(--line); }
+    }
+    details.why summary { cursor: pointer; list-style: none; }
+    details.why summary::before { content: '▸ '; }
+    details.why[open] summary::before { content: '▾ '; }
+    details.why div { max-width: 28em; white-space: normal; }
+  }
+  .runs-pager { margin-top: 6px; }
+  .sweep-table.jobs {
+    tr.live td { background: color-mix(in srgb, #58a6ff 8%, transparent); }
+    tr.failed td { background: color-mix(in srgb, var(--mk-del) 10%, transparent); }
+    .live-tag { color: #58a6ff; font-weight: 600; }
+    .small { font-size: 12px; max-width: 28em; }
+  }
+  // Approved indicator: a ✓ glyph (green = slice, amber = full band), the same
+  // colour language as the ✓ approve buttons and the ↩ revoke — the status cell
+  // reads as three compact tokens: [✓ approved] [avatar who] [↩ revoke].
+  .sweep-table .appr-ico { font-weight: 700; font-size: 14px; vertical-align: middle; cursor: default;
+    &.go { color: #3fb950; } &.warn { color: #d29922; } }
+  .sweep-table .approver { display: inline-block; vertical-align: middle; margin: 0 4px 0 2px; line-height: 0; cursor: default; }
+  .go-ink { color: #3fb950; font-weight: 650; }
+  .warn-ink { color: #d29922; font-weight: 650; }
+  details.intro {
+    margin: 6px 0 0;
+    summary { cursor: pointer; color: var(--ink-2); font-size: 13px; user-select: none; &::marker { color: var(--ink-3); } }
+    .sub { margin: 6px 0 0; }
+  }
+  .plan-line { margin: 10px 0 0; font-size: 13.5px; }
+  .sweep-tools {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-top: 12px; font-size: 13px;
+    // Rides under the sticky page bar while the table scrolls, so the
+    // status chips, filter and selection bar stay in reach.
+    position: sticky; top: var(--topbar-h, 48px); z-index: 3;
+    padding: 6px 0; background: var(--surface);
+    .tb-axis { display: inline-flex; align-items: center; gap: 6px; .lbl { color: var(--ink-3); font-size: 12px; } }
+    input.filter {
+      flex: 1 1 18em; max-width: 34em; font: inherit; padding: 3px 8px;
+      background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+    }
+    .sel-bar { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 2px; b { margin: 0 2px; } }
+  }
+  .pager {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12.5px;
+    button.mini { margin-left: 3px; &.on { border-color: var(--ink-2); color: var(--ink); font-weight: 650; } }
+    .kbd-hint { margin-left: auto; }
+    kbd { font: inherit; font-size: 11.5px; padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--panel); }
+  }
+  // A wide table scrolls inside its own box; the page never scrolls sideways.
+  .table-scroll { overflow-x: auto; max-width: 100%; }
+  .dispatch { flex-direction: column; align-items: flex-start; }
+  .dispatch-sum { margin: 0 0 2px; font-size: 13.5px; .user-chip { vertical-align: middle; } }
+  .dispatch-note { margin: 0 0 6px; font-size: 12.5px; }
+  .dispatch-btns { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .dispatch-buckets-wrap { margin: 0 0 8px; font-size: 12.5px; summary { cursor: pointer; } }
+  .dispatch-buckets {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 6px 0 0; font-size: 12.5px;
+    label { cursor: pointer; }
+    label.off { opacity: .55; }
+    input { vertical-align: -2px; }
+  }
+  button.mini {
+    font-size: 12px; padding: 1px 8px; margin-left: 6px; cursor: pointer;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 6px;
+    &.go { border-color: #3fb950; color: #3fb950; font-weight: 650; }
+    &.warn { border-color: #d29922; color: #d29922; }
+    &.danger { border-color: var(--mk-del); color: var(--mk-del); font-weight: 650; }
+    &.danger.armed { background: var(--mk-del); color: #fff; }
+    &:hover { border-color: var(--ink-2); }
+    &:disabled { opacity: 0.45; cursor: default; }
+  }
+  .dispatch {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin-top: 14px; padding: 10px 12px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+    button.mini { margin-left: 0; font-size: 13px; padding: 3px 12px; }
+    .ok { font-weight: 500; font-size: 13px; }
+    .err { font-size: 13px; }
+  }
+}
+
+// ---- page-scope consistency: stuck control strip, mark-feed filters, chart window ----
+
+// TimeSeries window band (the Diff range) + brush: the core defaults are
+// white-on-dark; give light mode ink-based values.
+:root {
+  --dt-ts-window: rgb(0 0 0 / 0.06);
+  --dt-ts-brush: rgb(0 0 0 / 0.12);
+  --dt-ts-window-edge: rgb(0 0 0 / 0.35);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme='light'])) {
+    --dt-ts-window: rgb(255 255 255 / 0.07);
+    --dt-ts-brush: rgb(255 255 255 / 0.14);
+    --dt-ts-window-edge: rgb(255 255 255 / 0.4);
+  }
+}
+:root[data-theme='dark'] {
+  --dt-ts-window: rgb(255 255 255 / 0.07);
+  --dt-ts-brush: rgb(255 255 255 / 0.14);
+  --dt-ts-window-edge: rgb(255 255 255 / 0.4);
+}
+
+.mark-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 0 0 8px;
+  .mark-kinds { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+}
+// Toggle chips (the bar's mark/owner axes, the mark feed's action types):
+// pill, tinted by `--kind`, dimmed when off.
+.kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--panel);
+  color: var(--kind, var(--ink-2));
+  border: 1px solid var(--kind, var(--line));
+  border-radius: 999px;
+  font: inherit;
+  font-size: 11.5px;
+  line-height: 1.4;
+  padding: 1px 9px 1px 7px;
+  cursor: pointer;
+  opacity: 0.45;
+  filter: saturate(0.4);
+  .glyph { font-size: 10px; }
+  &.on { opacity: 1; filter: none; background: color-mix(in oklab, var(--kind, var(--ink-2)) 16%, var(--panel)); }
+  &:hover { opacity: 0.85; filter: none; }
+  &.window { color: var(--ink-2); border-color: var(--line); border-style: dashed; &.on { border-style: solid; color: var(--ink); } }
+}
+
+// Anchored sections scroll in under the sticky bar otherwise (its height is
+// published as --topbar-h; it wraps to more rows on narrow viewports).
+#tree-map, #tbl, #over-time, #marks, #diff, #mtime, #bands, #dispatch, #dispatches, #runs { scroll-margin-top: var(--topbar-h, 48px); }
+.sweep-table tr[id^='run-'] { scroll-margin-top: calc(var(--topbar-h, 48px) + 8px); }
+.leaf-note { margin: -8px 0 4px; color: var(--ink-2); code { color: var(--ink); } }
+// Nothing drawable under the drilled node: the canvas folds away (the mark
+// controls / rollup above it stay).
+#tree-map.leaf .dt-treemap-map { flex-basis: 0 !important; height: 0; }
+#tree-map.leaf .hint { display: none; }  // "click a directory to drill in" — nothing to click
+#tree-map.leaf .dt-treemap-map::after { display: none; }  // the root-mark frame would draw as a bare bar
+
+// Assignments heatmap (/assignments): assigner rows × assignee columns.
+.assignments-page {
+  padding: 1rem; max-width: 1100px; margin: 0 auto;
+  header h1 { margin: 0 0 4px; }
+  .hrow { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  .mode-toggle { display: inline-flex; gap: 4px;
+    button.mini.on { border-color: var(--accent, #58a6ff); color: var(--accent, #58a6ff); font-weight: 650; } }
+  // A sweeper marked data someone else owns — the conflict to vet.
+  table.heatmap td.cell.conflict { outline: 2px solid var(--mk-del); outline-offset: -2px; }
+  .sub { color: var(--ink-2); font-size: 13.5px; max-width: 70ch; margin: 0 0 14px; }
+  .err { color: var(--mk-del); }
+  table.heatmap {
+    border-collapse: collapse; font-size: 12.5px;
+    th, td { border: 1px solid var(--line); padding: 3px 6px; text-align: center; white-space: nowrap; }
+    th.corner { text-align: left; font-weight: 500; .dim { font-size: 11px; } }
+    th.row-head { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; }
+    th.col-head { vertical-align: bottom; }
+    td.cell { font-variant-numeric: tabular-nums; min-width: 4.5em; }
+    .cell-link { color: var(--ink); text-decoration: none; display: block; }
+    .cell-link:hover { text-decoration: underline; }
+    .empty { color: var(--ink-3); }
+  }
+}
+
+// Phones: the path is the header. The brand and the size suffix cede the
+// row to the crumbs (which scroll, tail-first); the map's fullscreen button
+// and the mark panel's fixed-width labels go too.
+@media (max-width: 640px) {
+  .topbar .brand { display: none; }
+  .topbar .tb-suffix { display: none; }
+  // The path clips itself with an ellipsis on wide screens; on a phone the
+  // crumbs box scrolls instead (tail-first), so let it overflow.
+  .topbar .tb-path { white-space: nowrap; overflow: visible; text-overflow: clip; }
+  // The controls are an overlay under the pinned path row — OUT of page flow,
+  // so showing/hiding moves no content and can't perturb the scroll position.
+  // Auto-hide on scroll down, return on scroll up (SiteNav watches direction).
+  .topbar .tb-row2 {
+    position: absolute; top: 100%; left: 0; right: 0;
+    margin: 0; padding: 3px var(--pad-x, 24px) 7px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.18);
+    // Behind the bar's own (opaque) background, so hiding slides the tray up
+    // and tucks it out of sight under the path row rather than fading in place.
+    z-index: -1;
+    transition: transform 0.22s ease, opacity 0.18s ease;
+  }
+  .topbar.ctrl-hidden .tb-row2 { transform: translateY(-100%); opacity: 0; pointer-events: none; }
+  .tb-row2-spacer { height: var(--tb-row2-h, 0); }
+  // Legend as a table: two owner columns, swatch / name / size lined up so the
+  // sizes read down a column instead of scattering with the name lengths.
+  // `.treemap` prefix to match the base rule's specificity.
+  .treemap .dt-treemap-rollup {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px 16px;
+    align-items: center;
+    // Rows that aren't per-owner keys span the full width.
+    > .state-rollup, > .li-metrics, > .li-group, > .approx-mark { grid-column: 1 / -1; }
+    .ri {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      > b, .pct, .usd { justify-self: end; }
+    }
+  }
+  // Empty filter collapses to a search glyph; tap (focus) expands it.
+  .filterbox input {
+    box-sizing: border-box;
+    transition: width 0.2s ease;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='4.5' fill='none' stroke='%23888' stroke-width='1.6'/%3E%3Cline x1='10.5' y1='10.5' x2='14' y2='14' stroke='%23888' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: left 7px center;
+    background-size: 13px;
+    padding-left: 26px;
+  }
+  .filterbox input:placeholder-shown:not(:focus) { width: 34px; }
+  .treemap .dt-treemap-fs { display: none; }
+  .mark-controls .lbl { min-width: 0; }
+  .root-marks { flex-direction: column; gap: 4px; padding: 6px 8px; .keys { margin-left: auto; } }
+}
+
+// Ownership assignment select (panel + table rows): sized to its placeholder
+// ("assign…"), not the longest name in it.
+select.assign-sel {
+  font: inherit; font-size: 12px; padding: 1px 4px; border-radius: 4px; cursor: pointer; width: 7.5em;
+  background: var(--panel); color: var(--ink-2); border: 1px solid var(--line);
+  &:hover { color: var(--ink); border-color: var(--ink-3); }
+  &.compact { font-size: 10.5px; padding: 0 2px; width: 6.5em; background: transparent; color: var(--ink-3); }
+}
+// Storage-class swatches in the class-mix table (same palette as the CLASS bar).
+.classmix td .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+// The home page's "Bucket lifecycle" fold (LifecycleFold.tsx): a <details>
+// with an icon + one-line summary, and the rules table inside.
+.fold {
+  margin: 10px 0 4px;
+  > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; list-style: none; color: var(--ink-2); }
+  > summary::-webkit-details-marker { display: none; }
+  > summary::before { content: '▸'; color: var(--ink-3); font-size: 11px; width: 10px; }
+  &[open] > summary::before { content: '▾'; }
+  .fold-icon { color: var(--ink-3); font-size: 15px; }
+  .tab-note { color: var(--ink-3); font-size: 12px; margin: 6px 0 0; }
+  .tbl-scroll { overflow-x: auto; margin-top: 6px; }
+}
+.fold.lifecycle { max-width: none; }
+.lifecycle-tbl {
+  th, td { white-space: nowrap; }
+  td.id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  code.clip { display: inline-block; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  td.buckets { color: var(--ink-2); white-space: nowrap; }
+  tr.removed td { color: var(--ink-3); text-decoration: line-through; }
+  .chip { margin-left: 6px; font-size: 10.5px; padding: 1px 6px; border-radius: 8px; border: 1px solid var(--line); vertical-align: 1px; }
+  .chip.new { color: var(--grew, #3fb950); border-color: currentColor; }
+  .chip.removed { color: var(--shrank, #f85149); border-color: currentColor; text-decoration: none; }
+  .chip.changed { color: var(--ink-2); border-color: currentColor; cursor: help; }
+}
+// The diff crumb's "⊕ first scanned" term: a root that entered the scan.
+.diff-tm .first { color: var(--ink-3); }
+
+// The help line (specs/edu-drawer.md): one fixed strip that mirrors the
+// hovered/focused control's explanation; nothing floats over controls.
+:root { --help-line-h: 34px; }
+.help-line {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 900;
+  box-sizing: border-box; min-height: var(--help-line-h); padding: 7px 16px;
+  padding-right: 72px;  // clear the SpeedDial
+  background: var(--panel); color: var(--ink-2); border-top: 1px solid var(--line);
+  font-size: 12.5px; line-height: 1.45;
+  .idle { color: var(--ink-3); }
+  kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; }
+  b, code { color: var(--ink); }
+  @media (max-width: 640px) {
+    padding-right: 16px; padding-bottom: calc(7px + env(safe-area-inset-bottom));
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+}
+body:has(.help-line) { padding-bottom: var(--help-line-h); }
+// A control with an explanation: the same quiet underline `.has-tt` used.
+.has-help { border-bottom: 1px dotted var(--ink-3); cursor: help; }
+.has-help:has(select), .has-help:has(button), .has-help:has(input) { border-bottom: none; cursor: default; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+// Size-over-time header: the ⓘ (its explanation lives in the help line) and
+// the range/axis/roots toggles wrap under the title on a phone.
+#over-time h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+#over-time h2 .info { color: var(--ink-3); font-size: 15px; cursor: help; }
+#over-time h2 .gran { margin-left: 0; }
+// The diff treemap's bar on a phone: the crumb (path + movement arithmetic)
+// wraps instead of running under the legend, and the legend takes its own row.
+.diff-tm .dt-treemap-bar { flex-wrap: wrap !important; }  // the package's bar is one row; the crumb + legend take a row each
+.diff-tm .dt-treemap-crumbs { white-space: normal !important; flex-wrap: wrap !important; flex: 1 1 100% !important; row-gap: 2px; }
+.diff-tm .dt-treemap-crumbs > span:last-child { white-space: normal !important; }
+.diff-tm .dt-treemap-legend { flex: 1 1 100%; }

@@ -1,0 +1,43 @@
+# CF Pages project config (oa-gcs-usage). `wrangler pages deploy` reads this,
+# so bindings + vars declared here apply to the deployment it creates.
+name = "oa-gcs-usage"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-06-01"
+
+# Auth backend (@open-athena/auth, Tier 2): D1 holds grants + access_log +
+# access_requests (package migrations 0001–0006) and the mark & sweep tables
+# (0007). Created with `wrangler d1 create oa-gcs-usage-auth`; apply migrations
+# with `wrangler d1 migrations apply oa-gcs-usage-auth --remote`.
+[[d1_databases]]
+binding = "DB"
+database_name = "oa-gcs-usage-auth"
+database_id = "e52398b7-5538-4bc4-83db-3355a1b5ef9a"
+# Local dev runs against the REAL prod D1 (read-write) — dev-only: deploys
+# ignore `remote`. Needs CLOUDFLARE_API_TOKEN (direnv) + CLOUDFLARE_ACCOUNT_ID.
+remote = true
+
+# Workers Logs: retain console output + uncaught exceptions from the Pages
+# Functions (a few days, in the dashboard) — without this a 500 leaves no trace
+# once the request is gone (`wrangler pages deployment tail` is live-only).
+# Global second cache tier for the per-scan-immutable JSON endpoints
+# (`/api/subtree`, `/api/diff`): the Workers Cache API is per data-center, so
+# the daily job's warm-up (`dt-cloud warm-cache`) only reaches everyone
+# through KV. Created with `wrangler kv namespace create oa-gcs-usage-cache`.
+[[kv_namespaces]]
+binding = "CACHE_KV"
+id = "757702a080a549418f16a5ae096529c4"
+
+[observability]
+enabled = true
+
+[vars]
+# Zero Trust team domain whose JWTs the SSO hand-off + edge fallback accept.
+ACCESS_TEAM_DOMAIN = "https://openathena-ai-pages.cloudflareaccess.com"
+# AUD tag of the "GCS usage" Access app (gcs.oa.dev + pages.dev, `/auth/sso`).
+ACCESS_AUD = "a75188138fbb860cdcede865b65856c59240270a5135fb7d97b9342ba8c56864"
+# Domain whose SSO identities are staff (gcs + cw + admin scopes).
+STAFF_DOMAIN = "openathena.ai"
+
+# Secrets (set with `wrangler pages secret put <NAME> --project-name oa-gcs-usage`):
+#   SESSION_SECRET   — HMAC key for session cookies + IP hashing
+#   GCS_HMAC_KEY_ID / GCS_HMAC_SECRET — existing read-only GCS proxy creds
