@@ -1,101 +1,77 @@
-# Union-of-roots view as the shared upstream base
+# disk-tree as the shared base for the cloud-usage viewers
 
-Status: **in progress** (2026-09-20) — Phases 1–2 landed (breadcrumb registry + per-scheme landings), then **collapsed to single-cloud** for this deployment (below); Phases 3 (Header nav) + 4 (contract/mgu adoption) pending.
-
-## Single-cloud collapse (2026-09-20, revises Phase 2 for *this* deployment)
-
-The demo is served from `r2.rbw.sh` and has only R2 roots (no GCS to demo), so the `/r2` path segment is pure redundancy — the host already says "R2". This deployment therefore adopts the **single-cloud** shape the spec reserved for mgu gcs/cw-s3:
-- `r2`'s scheme-landing is **`/`** (not `/r2`), so `/` *is* the R2 union and the `r2://` breadcrumb crumb links there. `/r2` redirects to `/`; `/r2/<bucket>…` (ScanDetails) is unchanged (`uriToPath` still maps `r2://` → `/r2/…`).
-- `/scans` keeps the **scheme-agnostic** all-scans `ScanList` (full `r2://…` / `/local` / `gcs://` paths) — the view a future multi-cloud deploy would restore to `/`.
-- A scheme-scoped `ScanList` (e.g. `/`) **strips its own `<scheme>://` prefix** from every bucket cell + table row (`r2://ctbk` → `ctbk`) — implied by the treemap's root label — and drops the redundant `<h1>` (the treemap root row `r2:// — 873 G` is the page's one title).
-- `ScanDetails`'s treemap-root cell and table-root row show the location's **basename** (`gbfs`) instead of `.`; the full navigable path stays in the breadcrumb above.
-
-Re-generalizing to multi-cloud later = set `r2.landing` back to `/r2`, register `/r2` as `<ScanList scheme="r2">`, and move the union to a top-root crumb (see **Multi-account** below). No component changes.
+Status: **in progress** (2026-09-20). Union view + single-cloud collapse landed (`786b5bb`). **Direction (2026-09-20): disk-tree `main` is the shared base; the public Map shell (`site/`) + ingestion (`cloud/`) get hoisted *into* this repo from mgu, and all public deploys build from it.** mgu is a fork of disk-tree (merge-base `109ab11`, 2026-08-19), so this is a **code move (CP/`mv`), not a from-scratch build.**
 
 ## Goal
 
-Make disk-tree `main`'s multi-root / union scan view the **canonical shared implementation** that the `gcs` and `cw-s3` deployments (mgu branches) consume with *minimal* per-branch code — "as simple as possible, no simpler." Each deployment should differ only in **which schemes it registers** and **its backend implementation of the API contract**; every view component is shared verbatim.
+disk-tree `main` is the **canonical base** for every cloud-storage-usage viewer:
+- **r2.rbw.sh** — public R2 bucket viewer (ctbk, crashes, jc-taxes).
+- **gcs.oa.dev / cw-s3.oa.dev** (mgu `site/`) — cloud-usage maps (auth-gated, owner/marks on gcs).
+- a future **multi-cloud/local superset** (disky/blobby.rbw.sh, rename TBD) — the full scan-manager.
 
-This is **not a port into disk-tree**. The union view already lives here and is *ahead* of gcs/cw:
-- `ui/src/components/UnionTreemap.tsx` — the generalized navigable synthetic-root treemap (`{items, rootName}`; sums scanned children; each cell links via `uriToPath`). **disk-tree-only** — gcs/cw never had it (they have only an inline `BucketsTreemap` on `/s3`, and a plain table on `/`).
-- Used by `ScanList.tsx` (`rootName="all scans"`, the `/` landing) and `S3BucketList.tsx` (`rootName="S3"`, the `/s3` page).
-- `schemes.ts` is a single-file scheme↔route model (one-line to add a scheme), near-identical across all branches.
+Each deploy differs only in **config** (schemes/buckets, capabilities, auth on/off, store), never in forked view code. Where disk-tree and mgu each have a *better* implementation of a feature, the base takes it and the other deploy **adopts** it — merge, not replace. Instance that surfaced this: **mgu's static OG → disk-tree's dynamic edge-rendered OG.**
 
-The work is therefore **removing the per-scheme special-casing** that would force gcs/cw to customize, pushing it into `schemes.ts` config + a stable API contract. The mgu branches (`gcs` == `cw-s3` == `factored/…` for this feature) are an older *subset*; treat them only as a reference for the (identical) scheme/breadcrumb conventions. mgu@cw-s3's "second root" is **data/config, not code**.
+## The key fact — mgu is a fork; its Map is two additive subtrees
 
-## Divergence points to eliminate (what forces per-branch code today)
+`git merge-base main m/gcs` = `109ab11` (2026-08-19). Divergence: 199 disk-tree-only vs 642 mgu-only commits. The entire mgu Map app lives in **two directories disk-tree does not have** (purely additive — zero conflict on checkout):
+- **`site/`** (207 files) — the public Map SPA + all CF Functions (`subtree`/`diff`/`series`/`estate`/…), the **D1-tiers** reader/index (`site/functions/_lib/index.ts`, `view.ts`), `SiteNav.tsx`, `stores.ts`. Imports `@rdub/treemap` + `@disk-tree/react` as **`workspace:*`** — already built to resolve the shared libs from a monorepo `packages/*` (which disk-tree is).
+- **`cloud/`** (57 files) — the `dt_cloud` ingestion CLI (listing → build-index → `index-tiers` → `index-sync` → D1), built on `src/disk_tree`.
 
-1. **Breadcrumb hardcodes `s3`** — `ui/src/components/ScanDetails.tsx:103–105`:
-   ```tsx
-   routeType === 's3'
-     ? <Link to="/s3">s3://</Link>
-     : <span>{routeType}://</span>
-   ```
-   Only s3's top crumb navigates (to its `/s3` landing); `r2`/`gcs`/`ssh` render dead text, so drilling into a bucket has **no breadcrumb back up** to the union root — and any new scheme needs a breadcrumb edit. This is the gap behind the "frame it as a top-root `r2://` with a breadcrumb" ask.
-2. **Header scheme-nav hardcodes `s3`** — `ui/src/components/Header.tsx:18,76`: `isS3Page = path.startsWith('/s3')` + a literal `<Link to="/s3/">`. The "buckets" nav entry + active-highlight exist only for s3.
-3. **The scheme-landing page is s3-only** — `ui/src/components/S3BucketList.tsx` hardcodes `s3://` throughout (scan input adornment, `startScan(\`s3://…\`)`, bucket-name parsing, `items=…path:\`s3://\${b.name}\``). gcs/cw cannot get an equivalent `/gcs` / `/cw` bucket-list landing without forking this component.
+So bringing the Map into disk-tree is `git checkout m/gcs -- site/ cloud/` + `pnpm-workspace` add `"site"` + reconcile against disk-tree's (ahead) `packages/*`/`src/disk_tree`. **Not** designing `/api/subtree`, D1-tiers, or Map chrome — they exist.
 
-## Design — a scheme-descriptor registry in `schemes.ts`
+## Already shared (the floor)
 
-Add one declarative table; `Header`, `Breadcrumbs`, and the generalized bucket-list page read from it. Adding a scheme stays a one-line edit; nothing scheme-specific survives in the view components.
+Both apps build on the same libraries — `@rdub/treemap` (core `Treemap`/`squarify`/layout/colors/diff) and `@disk-tree/react` (re-export + `StalenessScatter`/`AgeHistograms`/`BytesOverTime`). mgu `site/` and disk-tree `ui/` are two *shells* over this floor. The hoist brings the `site/` shell + `cloud/` ingestion home too, so the whole viewer base — not just the libs — lives in this repo.
 
-```ts
-export interface SchemeDesc {
-  scheme: RouteType            // 'file' | 's3' | 'gcs' | 'r2' | 'ssh'
-  label: string                // breadcrumb/nav label, e.g. 'r2://', '/'
-  landing: string | null       // path the top crumb + nav link target: a dedicated
-                               // bucket-list page ('/s3') if it has one, else '/'
-                               // (the union root), else null (no up-link)
-  liveScan: boolean            // startScan reachable (drives S3BucketList's scan UI)
-  // delete stays supportsDelete(); could fold in here later
-}
-export const SCHEMES: Record<RouteType, SchemeDesc>
-export function schemeLanding(rt: RouteType): string | null  // SCHEMES[rt].landing
-```
+## The two shells (both end up here)
 
-- **Breadcrumb** becomes scheme-agnostic:
-  ```tsx
-  const up = schemeLanding(routeType)
-  {!isFile && (up ? <Link to={up}>{label}</Link> : <span>{routeType}://</span>)}
-  ```
-  For this R2 deploy `schemeLanding('r2') === '/'`, so `r2://` links up to the union landing — the whole screenshot ask, and correct for gcs/ssh/any future scheme with zero edits.
-- **Header** renders a nav link per scheme whose `landing` is a dedicated page (not `/`), highlighting by `path.startsWith(landing)` — no `isS3Page`.
-- **Per-scheme landing page** (decided 2026-09-20): each cloud scheme this deployment supports gets a dedicated landing at `/<scheme>` (`/r2` = the R2 buckets, `/gcs` = GCS) so a *multi-cloud* deployment can disambiguate; a *single*-cloud deployment (mgu gcs/cw-s3) that needs no disambiguator sets its one scheme's `landing` to `/`. That page is **`ScanList` filtered to the scheme** (`<ScanList scheme="r2">`) — scans-derived, so it works on the **static demo** (which has no live cloud lister; `/api/scans` is all it needs) and reuses the existing union treemap verbatim. `s3` is the exception: it keeps the richer **live** `S3BucketList` (lists *all* account buckets incl. unscanned, with scan buttons) at `/s3` — a local-Flask capability the demo disables (`caps.s3 === false`). So the per-scheme *component* varies by live-lister capability, not by scheme; `S3BucketList` is not generalized (no live r2/gcs lister exists to generalize toward).
+| | disk-tree `ui/` → **superset** (disky) | mgu `site/` → **public Map** (r2/gcs/cw) |
+|---|---|---|
+| Chrome | scan-manager: Scans/Recent/Local/S3, live scan, delete | Map-first: ☰ menu, "all buckets" root, scope controls |
+| Landing treemap | `UnionTreemap` — flat bucket leaves | "the Map" — deeply nested pixel-budget subtree |
+| Read backend | per-`<uuid>` parquet, direct hyparquet footer reads | tiered parquets + **D1** footer index (`d1-tiers`) |
+| OG | **dynamic** edge-rendered | static pre-gen → **adopts disk-tree's dynamic** |
+| owners/marks/sweep, storage-class/write-time | — | ledger (gcs; off for cw) + per-node columns |
 
-## Breadcrumb: super-root navigability
+`ui/` is the superset shell; `site/` is the public shell. Both live in disk-tree; a deploy picks one.
 
-- Top scheme crumb links to the scheme's `landing` (`r2://` → `/r2`, `gcs://` → `/gcs`, `s3://` → `/s3`); a scheme with `landing: '/'` links to the union root instead.
-- Fuller two-tier crumb (`all ▸ scheme ▸ bucket ▸ path`, where `all`→`/` and the scheme crumb→its landing) is deferred to **Multi-account** below; not needed while a deploy is effectively single-scheme.
+## Backend — standardize on `d1-tiers` (decided)
 
-## API contract (the backend seam)
+Not a real fork. `direct` (disk-tree's no-D1 footer reads) buys only ops simplicity, which is moot: the gated deploy already runs a D1 (`disk-tree-auth`), so the footer index is new *tables*, not a new binding — and `d1-tiers` is required for gcs/marin scale (34M dirs) regardless. Two backends would violate "one base." Every deploy uses `site/`'s `d1-tiers` reader; r2.rbw.sh gains a D1 + the tier/index-sync ingestion (trivial at ctbk/crashes scale).
 
-The union landing is driven entirely by JSON; each deployment implements it in its own stack, and that is the *only* backend delta:
-- `GET /api/scans` → `[{ path|uri, size, n_children, n_desc, time }]` — newest scan per root.
-- `GET /api/s3/buckets` (for deployments with a dedicated bucket-list page) → `[{ name, size, last_scanned, … }]`.
-- disk-tree `main`: Cloudflare Pages Functions (`ui/functions/api/scans.ts` → `latestPerPath(getScans(env))`, `ui/cfn/manifests.ts`). gcs/cw: Python Flask (`src/disk_tree/server.py` `get_scans` / `list_s3_buckets`).
-- The **super-root has no server row**: `UnionTreemap` sums child sizes client-side, and there is **no per-super-root scan time**. Per-root scan time stays a per-row field (`Scan.time`).
+## Naming
 
-## Non-goal — scan-time skew
+`dt_cloud`'s `webdata` (listing → `path-index.parquet` + layer-3 JSONs) is a bad name — rename during the hoist. Candidates: `web-index` (pairs with `index-tiers`/`index-sync`) or `publish`. Final pick TBD (user's call).
 
-Roots are scanned by separate jobs (even one nightly cron scans buckets sequentially; a 920K-object `ctbk` list takes minutes, `crashes` seconds), so they are never byte-synchronous. That is fine: summing sizes across roots is meaningful for a usage overview (unlike a *diff*, which needs a common baseline). With all roots on the same cron there is **no need to distinguish or surface per-root scan time** in the union view — the union root simply aggregates. No per-root scan-time UX.
+## Per-deploy config (thin deltas)
 
-## Per-branch delta (the target)
+| deploy | shell | schemes/buckets | auth | owners/marks | OG |
+|---|---|---|---|---|---|
+| r2.rbw.sh | `site/` (Map) | r2: ctbk, crashes, jc-taxes | public | off | dynamic |
+| gcs.oa.dev | `site/` (Map) | gs://… | CF Access | on | dynamic (adopt) |
+| cw-s3.oa.dev | `site/` (Map) | cw s3://… | CF Access | off | dynamic (adopt) |
+| disky.rbw.sh | `ui/` (superset) | file+r2+gcs+s3+ssh | none/local | off | dynamic |
 
-| deployment | schemes registered | backend | dedicated bucket-list page |
-|---|---|---|---|
-| disk-tree `main` (R2, **single-cloud** for now) | `file, r2` (+ gcs/s3/ssh as added) | CF Pages Functions | none — `r2 → /`; `/scans` = agnostic list |
-| mgu `gcs` (single-cloud) | `file, gcs` | Flask | none — `gcs → /` |
-| mgu `cw-s3` (single-cloud) | `file, s3` | Flask | `/s3` (live `S3BucketList`), or `s3 → /` |
+All `site/` code shared; only this row + wrangler vars/store config differ.
 
-All view components (`UnionTreemap`, `ScanList`, `SchemeBucketList`, `Breadcrumbs`, `Header`) shared verbatim; only the `SCHEMES` registry entries + backend differ.
+## Phased plan (mv-shaped)
+
+1. **Hoist** `site/` + `cloud/` from `m/gcs` into disk-tree; add `"site"` to `pnpm-workspace`, `cloud/` to the python project; `pnpm i`, build, reconcile any `packages/*`/`src/disk_tree` API drift (par-construct only where the fork diverged). Goal: `site/` builds + serves against disk-tree's base libs.
+2. **Generalize + go public for r2**: env-drive the hardcoded GCS bucket seam (`makeStore` endpoint/bucket, `index.ts:34,113`); add a public/anonymous mode to `requireViewer`/`scopesFor`; add an `r2` `stores.ts` row + wrangler vars; stand up `dt_cloud` ingestion (renamed) over ctbk/crashes → tiers + D1. Deploy `site/` at r2.rbw.sh.
+3. **CP disk-tree's edge-OG into `site/`** (replace static OG); pull in diff-index if it beats mgu's `/api/diff`. In-place now that code is co-located.
+4. **gcs/cw-s3 track this repo's `site/`** — deltas only (owner/marks config, their D1). Handoff spec into the mgu repo (`/Users/ryan/c/oa/marin-gcs-usage/specs/`) for an mgu-session.
+5. **Superset** (`ui/` → disky/blobby): unchanged multi-cloud/local scan-manager. Rename TBD.
+
+## Landed so far
+
+- **Breadcrumb registry + per-scheme landings + single-cloud collapse** (`dab2d2e`, `786b5bb`): `SCHEMES` descriptor drives the breadcrumb/landing; on r2.rbw.sh `/` is the R2 union (`r2 → /`), `/scans` the scheme-agnostic list, `/r2` redirects; scheme-scoped `ScanList` strips its `<scheme>://` prefix; `ScanDetails` root cell/row shows the basename. These live in `ui/` (the superset shell) — the Map shell (`site/`) supersedes them for the public deploys once hoisted.
+
+## Reconciliation risks (Phase 1)
+
+- **Package API drift** — `site/` was built against mgu's `packages/*` (base + mgu commits); disk-tree's are base + 199 commits (dynamic-OG/diff work). `site/` consumes public API, so mostly fine, but expect a few adapt/par-construct spots. If mgu *added* to `packages/*` and disk-tree lacks it, CP that package delta too (it's a shared-core improvement).
+- **`cloud/` ↔ `src/disk_tree`** — `dt_cloud` uses the engine; reconcile against disk-tree's version.
+- **`@rdub/file-tree` github-pin** in `site/package.json` — carry it as-is.
 
 ## Deferred — multi-account tier
 
-A true `all ▸ scheme ▸ account ▸ bucket ▸ path` hierarchy (mgu@cw-s3's "second root" generalized to *accounts within a scheme*) is net-new in **all** branches. It earns its keep only when one deployment serves >1 account/scheme. Build it on `UnionTreemap` + an account grouping in the descriptor when needed; scan-time skew stays a non-goal.
-
-## Phased implementation
-
-1. **Breadcrumb + `schemeLanding()`** — **DONE 2026-09-20** (`5502957`+): added `SchemeDesc`/`SCHEMES`/`schemeLanding` to `schemes.ts`; rewrote the `ScanDetails.tsx` top crumb to read the registry. Verified (CIC): `gcs://` (and `r2://`, same path) top crumb now `href="/"`, `s3://` still `/s3`; `tsc -b` clean. `ScanList` `rootName` kept `"all scans"` — the `/` union root is scheme-agnostic, so that label is correct (not `r2://`).
-2. **Per-scheme landings** — **DONE 2026-09-20**: `SCHEMES` cloud landings → `/<scheme>` (`r2 → /r2`, `gcs → /gcs`, `s3 → /s3`, `ssh → /`); `ScanList` gained an optional `scheme` prop (filters `/api/scans` to `<scheme>://`, scheme-named root/title); `App.tsx` routes `/r2`, `/gcs` → `<ScanList scheme=…>`. Verified (CIC): `/r2` renders the R2 buckets as `r2://`; `/gcs/b1/b` breadcrumb top crumb `href="/gcs"`; `tsc -b` clean.
-3. **Header nav from the registry**: drop `isS3Page`; surface a nav link per cloud scheme that has scans (or is configured), from `SCHEMES`. *(pending — needs the "which schemes to surface" call: data-driven by present scans vs configured list.)*
-4. **Contract doc + mgu adoption**: freeze the `/api/scans` (+ live `/api/s3/buckets`) shapes; gcs/cw drop their table-only landing and adopt `UnionTreemap` + the shared components, differing only in `SCHEMES` + backend. *(pending)*
+A true `all ▸ scheme ▸ account ▸ bucket ▸ path` hierarchy earns its keep only when a deployment serves >1 account/scheme; build it on the shared shell + a store grouping when needed. Scan-time skew stays a non-goal (roots scanned by separate jobs, never byte-synchronous; the map aggregates child sizes, no per-super-root scan time).
