@@ -95,7 +95,11 @@ export const SCHEMES: Record<RouteType, SchemeDesc> = {
   // scheme's landing to `/`. `ssh` has hosts, not buckets — no landing page.
   s3: { label: 's3://', landing: '/s3' },
   gcs: { label: 'gcs://', landing: '/gcs' },
-  r2: { label: 'r2://', landing: '/r2' },
+  // This deployment is effectively single-cloud (R2 only — no GCS to demo), and
+  // the host is already `r2.rbw.sh`, so `r2` needs no `/r2` disambiguator: its
+  // landing IS `/` (the union root). A multi-cloud deployment would set this to
+  // `/r2` and register a sibling `/gcs`, etc. (spec `union-of-roots.md`).
+  r2: { label: 'r2://', landing: '/' },
   ssh: { label: 'ssh://', landing: '/' },
 }
 

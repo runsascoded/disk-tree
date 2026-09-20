@@ -272,8 +272,10 @@ function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanSt
   return <span style={{ opacity: 0.4 }}>-</span>
 }
 
-function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, sel, collapsedRows, tableRef }: {
+function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, sel, collapsedRows, tableRef }: {
   root: Row
+  /** The root row's Path cell — the location's basename (`gbfs`), not `.`. */
+  rootLabel: string
   children: Row[]
   uri: string
   routeType: RouteType
@@ -338,7 +340,7 @@ function DetailsTable({ root, children, uri, routeType, onScanChild, scanningPat
         <tr className="root">
           <td className="col-checkbox"></td>
           <td className="col-icon">{root.kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
-          <td className="col-path"><code>.</code></td>
+          <td className="col-path"><code>{rootLabel}</code></td>
           <td className="col-numeric">{formatSize(root.size)}</td>
           <td className="col-numeric">{timeAgo(root.mtime)}</td>
           <td className="col-numeric">{root.n_children?.toLocaleString()}</td>
@@ -694,6 +696,7 @@ function buildFilterTree(result: FilterResult, rootLabel: string, rootUri?: stri
 
 function Treemap({
   root,
+  rootLabel,
   rows,
   ageLens,
   query,
@@ -701,6 +704,8 @@ function Treemap({
   filterResult,
 }: {
   root: Row
+  /** The root cell's label — the location's basename (`gbfs`), not `.`. */
+  rootLabel: string
   rows: Row[]
   ageLens: boolean
   query: string
@@ -714,12 +719,12 @@ function Treemap({
   const tree = useMemo(
     () => ({
       path: '.',
-      label: root.path.split('/').pop() || '.',
+      label: rootLabel,
       size: root.size ?? 0,
       uri: root.uri,
       children: buildDTNodes(rows, '.', root.size ?? null),
     } satisfies DTNode),
-    [root, rows],
+    [root, rootLabel, rows],
   )
 
   // Drilling past the depth the response carried fetches that subtree, so the
@@ -748,8 +753,8 @@ function Treemap({
   const matches = useMemo(() => parseQuery(query), [query])
 
   const filterTree = useMemo(
-    () => (filterResult ? buildFilterTree(filterResult, root.path.split('/').pop() || '.', root.uri) : null),
-    [filterResult, root],
+    () => (filterResult ? buildFilterTree(filterResult, rootLabel, root.uri) : null),
+    [filterResult, root, rootLabel],
   )
 
   return (
@@ -1138,6 +1143,14 @@ export function ScanDetails() {
   const pathname = window.location.pathname
   const routeType: RouteType = detectRouteType(pathname)
   const uri = segmentsToUri(routeType, pathSegments)
+
+  // The current location's own name, for the treemap's root cell and the table's
+  // root row (the full navigable path already sits in the breadcrumb above, so
+  // `.` there was redundant *and* uninformative). Basename of the uri: `gbfs`
+  // for `r2://ctbk/gbfs`; the bare scheme/`/` root falls back to its label.
+  const rootLabel = isSchemeRoot(uri)
+    ? (routeType === 'file' ? '/' : `${routeType}://`)
+    : (uri.replace(/\/+$/, '').split('/').pop() || uri)
 
   // Selected scan ID for time-travel (undefined = latest)
   const [selectedScanId, setSelectedScanId] = useState<number | undefined>(undefined)
@@ -1567,6 +1580,7 @@ export function ScanDetails() {
         {viz === 'treemap' ? (
           <Treemap
             root={root}
+            rootLabel={rootLabel}
             rows={rows}
             ageLens={ageLens}
             query={filter}
@@ -1759,6 +1773,7 @@ export function ScanDetails() {
       <div style={{ overflowX: 'auto' }}>
       <DetailsTable
         root={root}
+        rootLabel={rootLabel}
         children={paginatedChildren}
         uri={uri}
         routeType={routeType}

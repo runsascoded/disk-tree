@@ -1,6 +1,16 @@
 # Union-of-roots view as the shared upstream base
 
-Status: **in progress** (2026-09-20) — Phases 1–2 landed (breadcrumb registry + per-scheme `/r2`,`/gcs` landings); Phases 3 (Header nav) + 4 (contract/mgu adoption) pending.
+Status: **in progress** (2026-09-20) — Phases 1–2 landed (breadcrumb registry + per-scheme landings), then **collapsed to single-cloud** for this deployment (below); Phases 3 (Header nav) + 4 (contract/mgu adoption) pending.
+
+## Single-cloud collapse (2026-09-20, revises Phase 2 for *this* deployment)
+
+The demo is served from `r2.rbw.sh` and has only R2 roots (no GCS to demo), so the `/r2` path segment is pure redundancy — the host already says "R2". This deployment therefore adopts the **single-cloud** shape the spec reserved for mgu gcs/cw-s3:
+- `r2`'s scheme-landing is **`/`** (not `/r2`), so `/` *is* the R2 union and the `r2://` breadcrumb crumb links there. `/r2` redirects to `/`; `/r2/<bucket>…` (ScanDetails) is unchanged (`uriToPath` still maps `r2://` → `/r2/…`).
+- `/scans` keeps the **scheme-agnostic** all-scans `ScanList` (full `r2://…` / `/local` / `gcs://` paths) — the view a future multi-cloud deploy would restore to `/`.
+- A scheme-scoped `ScanList` (e.g. `/`) **strips its own `<scheme>://` prefix** from every bucket cell + table row (`r2://ctbk` → `ctbk`) — implied by the treemap's root label — and drops the redundant `<h1>` (the treemap root row `r2:// — 873 G` is the page's one title).
+- `ScanDetails`'s treemap-root cell and table-root row show the location's **basename** (`gbfs`) instead of `.`; the full navigable path stays in the breadcrumb above.
+
+Re-generalizing to multi-cloud later = set `r2.landing` back to `/r2`, register `/r2` as `<ScanList scheme="r2">`, and move the union to a top-root crumb (see **Multi-account** below). No component changes.
 
 ## Goal
 
@@ -73,7 +83,7 @@ Roots are scanned by separate jobs (even one nightly cron scans buckets sequenti
 
 | deployment | schemes registered | backend | dedicated bucket-list page |
 |---|---|---|---|
-| disk-tree `main` (R2, multi-cloud) | `file, r2` (+ gcs/s3/ssh as added) | CF Pages Functions | `/r2`, `/gcs` (scans-filtered `ScanList`) |
+| disk-tree `main` (R2, **single-cloud** for now) | `file, r2` (+ gcs/s3/ssh as added) | CF Pages Functions | none — `r2 → /`; `/scans` = agnostic list |
 | mgu `gcs` (single-cloud) | `file, gcs` | Flask | none — `gcs → /` |
 | mgu `cw-s3` (single-cloud) | `file, s3` | Flask | `/s3` (live `S3BucketList`), or `s3 → /` |
 

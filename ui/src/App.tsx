@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider, CssBaseline, Tooltip } from '@mui/material'
 import { HotkeysProvider, ShortcutsModal, Omnibar, SequenceModal, LookupModal } from 'use-kbd'
 import 'use-kbd/styles.css'
@@ -43,15 +43,19 @@ function App() {
                 (specs/done/pages-auth.md); elsewhere `Gate` is a pass-through. */}
             <Gate>
             <Routes>
-              <Route path="/" element={<ScanList />} />
+              {/* This deployment is single-cloud R2 on `r2.rbw.sh`, so the R2
+                  union IS the home page; `/scans` keeps the scheme-agnostic
+                  all-scans list, and the old `/r2` landing redirects here. */}
+              <Route path="/" element={<ScanList scheme="r2" />} />
+              <Route path="/scans" element={<ScanList />} />
+              <Route path="/r2" element={<Navigate to="/" replace />} />
               <Route path="/access" element={<AccessPage />} />
               <Route path="/staged" element={<StagedPage />} />
               <Route path="/file/*" element={<ScanDetails />} />
               <Route path="/s3" element={<S3BucketList />} />
               <Route path="/s3/*" element={<ScanDetails />} />
-              {/* Per-scheme landings: the scheme's roots as a union treemap
-                  (scans-derived; s3 keeps its live bucket lister above). */}
-              <Route path="/r2" element={<ScanList scheme="r2" />} />
+              {/* Per-scheme landing for any other cloud (scans-derived union
+                  treemap; s3 keeps its live bucket lister above). */}
               <Route path="/gcs" element={<ScanList scheme="gcs" />} />
               <Route path="/gcs/*" element={<ScanDetails />} />
               <Route path="/r2/*" element={<ScanDetails />} />

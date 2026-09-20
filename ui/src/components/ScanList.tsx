@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Box,
@@ -177,10 +177,36 @@ export function ScanList({ scheme }: { scheme?: Exclude<RouteType, 'file'> } = {
   const [pageSize, setPageSize] = useState(50)
 
   const caps = useCapabilities()
-  const columns = useMemo(
-    () => (caps?.compare ? [...scanColumns, compareColumn] : scanColumns),
-    [caps?.compare],
+
+  // On a scheme-scoped landing (`/` = R2 here) the `<scheme>://` prefix is
+  // implied by the page/root label above, so strip it from every bucket cell
+  // and table row — `r2://ctbk` → `ctbk`. Links still target the full URI.
+  const stripPrefix = useCallback(
+    (p: string) => {
+      if (!scheme) return p
+      const prefix = `${scheme}://`
+      return p.startsWith(prefix) ? p.slice(prefix.length) : p
+    },
+    [scheme],
   )
+
+  const columns = useMemo(() => {
+    const base: Column<Scan>[] = scheme
+      ? [
+          {
+            key: 'path',
+            label: 'Path',
+            render: scan => (
+              <Link to={uriToPath(scan.path)}>
+                <code>{stripPrefix(scan.path)}</code>
+              </Link>
+            ),
+          },
+          ...scanColumns.slice(1),
+        ]
+      : scanColumns
+    return caps?.compare ? [...base, compareColumn] : base
+  }, [caps?.compare, scheme, stripPrefix])
 
   // Live progress from SSE
   const scanProgress = useScanProgress()
@@ -233,13 +259,14 @@ export function ScanList({ scheme }: { scheme?: Exclude<RouteType, 'file'> } = {
 
   return (
     <div>
-      <h1>{scheme ? `${scheme}://` : 'Scans'}</h1>
       <NewScanForm onStarted={handleNewScan} />
       <LiveScanProgress progress={scanProgress} />
       {/* Union of the (scheme-scoped) scans as one treemap — each cell drills
-          into that scan, so the separate rows below read as a single top map. */}
+          into that scan, so the separate rows below read as a single top map.
+          The treemap's own root row (`r2:// — 873 G`) is the page's one title,
+          so there's no separate `<h1>` repeating it. */}
       <UnionTreemap
-        items={visibleScans.map(s => ({ name: s.path, size: s.size ?? 0, path: s.path }))}
+        items={visibleScans.map(s => ({ name: stripPrefix(s.path), size: s.size ?? 0, path: s.path }))}
         rootName={scheme ? `${scheme}://` : 'all scans'}
       />
       <Tooltip title="Previously completed scans. Click a path to browse its contents.">
