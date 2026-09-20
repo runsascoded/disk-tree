@@ -23,6 +23,8 @@ import {
   childLinkPrefix,
   detectRouteType,
   isSchemeRoot,
+  SCHEMES,
+  schemeLanding,
   segmentsToUri,
   supportsDelete,
   uriToPath,
@@ -97,13 +99,14 @@ function Breadcrumbs({ uri, routeType }: { uri: string; routeType: RouteType }) 
 
   return (
     <div className="breadcrumbs">
-      {!isFile && (
-        // Only s3 has a bucket-list landing page (/s3); other schemes
-        // just show the scheme prefix as text.
-        routeType === 's3'
-          ? <Link to="/s3">s3://</Link>
-          : <span>{routeType}://</span>
-      )}
+      {!isFile && (() => {
+        // The top crumb links up to the scheme's landing (a dedicated
+        // bucket-list page like /s3, else the `/` union root) — driven by the
+        // SCHEMES registry, so no scheme is special-cased here.
+        const up = schemeLanding(routeType)
+        const { label } = SCHEMES[routeType]
+        return up ? <Link to={up}>{label}</Link> : <span>{label}</span>
+      })()}
       {isFile && <Link to="/file/" className="breadcrumb-sep">/</Link>}
       {paths.map((path, idx) => (
         <span key={idx}>

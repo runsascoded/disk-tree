@@ -49,6 +49,10 @@ function App() {
               <Route path="/file/*" element={<ScanDetails />} />
               <Route path="/s3" element={<S3BucketList />} />
               <Route path="/s3/*" element={<ScanDetails />} />
+              {/* Per-scheme landings: the scheme's roots as a union treemap
+                  (scans-derived; s3 keeps its live bucket lister above). */}
+              <Route path="/r2" element={<ScanList scheme="r2" />} />
+              <Route path="/gcs" element={<ScanList scheme="gcs" />} />
               <Route path="/gcs/*" element={<ScanDetails />} />
               <Route path="/r2/*" element={<ScanDetails />} />
               <Route path="/ssh/*" element={<ScanDetails />} />

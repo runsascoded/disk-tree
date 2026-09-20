@@ -21,7 +21,7 @@ import { DataTable } from './DataTable'
 import type { Column } from './DataTable'
 import { UnionTreemap } from './UnionTreemap'
 import { elapsed, formatCount } from '../utils/format'
-import { uriToPath } from '../schemes'
+import { uriToPath, type RouteType } from '../schemes'
 
 const scanColumns: Column<Scan>[] = [
   {
@@ -163,7 +163,13 @@ function NewScanForm({ onStarted }: { onStarted: (job: ScanJob) => void }) {
   )
 }
 
-export function ScanList() {
+/**
+ * The scan landing. Without `scheme` it is the `/` union root over *every*
+ * scan ("all scans"); with a `scheme` it is that scheme's root (`/r2` → the R2
+ * buckets), filtered to scans under `<scheme>://`. Same component, so a
+ * multi-cloud deployment gets a per-cloud page for free (spec `union-of-roots.md`).
+ */
+export function ScanList({ scheme }: { scheme?: Exclude<RouteType, 'file'> } = {}) {
   const [scans, setScans] = useState<Scan[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -179,12 +185,18 @@ export function ScanList() {
   // Live progress from SSE
   const scanProgress = useScanProgress()
 
+  // Scope to one scheme's roots when this is a per-scheme landing (`/r2`).
+  const visibleScans = useMemo(
+    () => (scheme ? scans.filter(s => s.path.startsWith(`${scheme}://`)) : scans),
+    [scans, scheme],
+  )
+
   // Pagination
-  const totalPages = Math.ceil(scans.length / pageSize)
+  const totalPages = Math.ceil(visibleScans.length / pageSize)
   const paginatedScans = useMemo(() => {
     const start = page * pageSize
-    return scans.slice(start, start + pageSize)
-  }, [scans, page, pageSize])
+    return visibleScans.slice(start, start + pageSize)
+  }, [visibleScans, page, pageSize])
 
   const loadData = async () => {
     try {
@@ -221,14 +233,14 @@ export function ScanList() {
 
   return (
     <div>
-      <h1>Scans</h1>
+      <h1>{scheme ? `${scheme}://` : 'Scans'}</h1>
       <NewScanForm onStarted={handleNewScan} />
       <LiveScanProgress progress={scanProgress} />
-      {/* Union of every scan as one treemap — each cell drills into that scan,
-          so the separate rows below read as a single top-level map. */}
+      {/* Union of the (scheme-scoped) scans as one treemap — each cell drills
+          into that scan, so the separate rows below read as a single top map. */}
       <UnionTreemap
-        items={scans.map(s => ({ name: s.path, size: s.size ?? 0, path: s.path }))}
-        rootName="all scans"
+        items={visibleScans.map(s => ({ name: s.path, size: s.size ?? 0, path: s.path }))}
+        rootName={scheme ? `${scheme}://` : 'all scans'}
       />
       <Tooltip title="Previously completed scans. Click a path to browse its contents.">
         <Typography variant="subtitle2" sx={{ mb: 1, mt: 2 }}>Completed Scans</Typography>
@@ -238,10 +250,10 @@ export function ScanList() {
         data={paginatedScans}
         rowKey={scan => scan.id}
       />
-      {scans.length > pageSize && (
+      {visibleScans.length > pageSize && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1, fontSize: '0.85rem' }}>
           <span style={{ opacity: 0.7 }}>
-            {page * pageSize + 1}-{Math.min((page + 1) * pageSize, scans.length)} of {scans.length}
+            {page * pageSize + 1}-{Math.min((page + 1) * pageSize, visibleScans.length)} of {visibleScans.length}
           </span>
           <Box sx={{ display: 'flex', gap: 0.5 }}>
             <Button size="small" disabled={page === 0} onClick={() => setPage(0)} sx={{ minWidth: 0, padding: '2px 6px' }}>
