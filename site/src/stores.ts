@@ -52,7 +52,7 @@ export interface Store {
   objectsNote: string
 }
 
-export const STORES: Store[] = [
+const REGISTRY: Store[] = [
   {
     key: 'cw',
     label: 'CoreWeave',
@@ -72,7 +72,31 @@ export const STORES: Store[] = [
     rootLabel: 'all buckets',
     objectsNote: 'CoreWeave objects are written once by the training jobs and never rewritten in place, so created is the object’s only time.',
   },
+  {
+    key: 'r2',
+    label: 'R2',
+    title: 'disk-tree — public R2 buckets',
+    desc: 'Storage usage of public Cloudflare R2 buckets (ctbk, crashes, jc-taxes) — treemap, sizes over time, and diffs. A public disk-tree demo.',
+    path: '/',
+    scheme: 'r2://',
+    base: '/data/r2',
+    ogImage: '/og.jpg',
+    prices: false,
+    marks: false,
+    owners: false,
+    sweep: 'plan',
+    buckets: ['ctbk', 'crashes', 'jc-taxes'],
+    rootLabel: 'all buckets',
+    objectsNote: 'Public R2 buckets scanned daily by disk-tree; created is each object’s upload time.',
+  },
 ]
+
+// A deployment serves one store, selected by VITE_STORE at build time (unset =
+// the first registry store, so the cw-s3 build is unchanged). The "deployment
+// as configuration" seam for the shared base (specs/union-of-roots.md).
+export const STORES: Store[] = import.meta.env.VITE_STORE
+  ? REGISTRY.filter(s => s.key === import.meta.env.VITE_STORE)
+  : [REGISTRY[0]]
 
 export const DEFAULT_STORE = STORES[0]
 
