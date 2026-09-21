@@ -79,11 +79,34 @@ gcs's fold-in BASE features (all mgu-owned): guest-chip/grant-subject auth + rea
 
 1. ✅ Union view + single-cloud collapse in `ui/` (`dab2d2e`, `786b5bb`).
 2. ✅ Establish the discovery + division (this spec). Superseded the raw-gcs hoist.
-3. **Re-seed `cloud` from `m/cw-s3`** (union tip) over DT `main`; reconcile the `packages/*` delta (`pendingCell`, tipMode) so `site/` builds against DT's base. Confirm `ui/` unregressed.
-4. **DT lane — go public for r2**: public/no-gate auth mode; env-generalize `makeStore`; r2 `Store` row + wrangler vars; `dt_cloud` ingestion over ctbk/crashes → tiers + D1. Deploy `site/` at r2.rbw.sh.
-5. **Adopt mgu's converged `main`** when it lands (merge; DT's lane rides on top).
-6. **Dynamic edge-OG** into `site/`.
-7. **Superset** (`ui/` → disky/blobby domain), unchanged multi-cloud/local scan-manager.
+3. ✅ Re-seed `cloud` from `m/cw-s3` (union tip) over DT `main`; reconciled the `packages/*` delta (`renderTipDefault`, `Series.dots/strokeWidth`); `ui/` unregressed (`cbb6e33`).
+4. ✅ **DT lane — r2 is LIVE** (2026-09-21, [[r2-rbw-sh-deploy]]): public/no-gate auth (`PUBLIC_READ`), env-generalized store seam (`storeCreds`/`storeReady`/`STORE_*`, incl. the data proxy), `r2` `Store` row + `VITE_STORE` selector + `wrangler.r2.toml`, ingestion (existing `disk-tree bulk-list` + `dt-cloud webdata`/`index-tiers`/`index-sync` — zero new code), `disk-tree-demo-db` D1, daily cron. r2.rbw.sh = the union Map over ctbk/crashes/jc-taxes.
+5. **Adopt mgu's converged `main`** when it lands (merge; DT's lane rides on top). See *Rebase readiness*.
+6. **Dynamic edge-OG** into `site/` (+ diff-index-in-site) — DT base features not yet folded into the shell.
+7. **Age index / `pyrmts`** — DEFERRED: cw is mid-redesign (per-deploy tier configs, viewport-responsive bins, a possible on-disk pivot sharding by path/dt, cross-scan RLE — `m/cw-s3:specs/age-index.md`, live in worktree session `41e25a3f`). r2's age chart is hidden until it lands; adopt uniformly then (base feature). Do NOT build the current `write_age_pyramid` into the r2 job.
+8. **Superset** (`ui/` → disky/blobby domain), unchanged multi-cloud/local scan-manager.
+
+## Rebase readiness — what makes `cloud` the base cw+gcs move onto (2026-09-21)
+
+**State of `cloud` HEAD:** `site/`+`cloud/` ≈ the cw-s3 union tip (as of `cbb6e33`) + DT's **additive, backward-compatible** r2/public/store-seam/public-auth/data-proxy layer + DT's superset `packages/*` + the `ui/` superset. It builds clean and does **not** regress a gcs/cw build (`VITE_STORE` unset = the default store; `STORE_*`/`PUBLIC_READ` unset = GCS defaults + the old gate). So HEAD is a **safe target that adds capability without breaking** either deploy.
+
+Caveat: the union was adopted by file-copy (`git checkout m/cw-s3 -- site cloud`), so `cloud` and the mgu branches share only the **old** fork base — a "rebase onto" is conceptual (replay the delta), not a fast-forward.
+
+**cw — the near-ready one** (it's the union carrier):
+- `cloud`'s `site/cloud` = cw-s3 at adoption + additive layer. cw has moved a little past (age-index, "review round" UI polish, a `packages/treemap` reflow fix).
+- Path: cw replays its post-adoption delta onto `cloud`; residual conflict is only the handful of files DT also touched — `_lib/{auth,index}.ts`, `data/[[path]].ts`, `packages/{treemap,react}`. All small + BC.
+- **To minimize even that:** DT should upstream its store-seam + public-auth + data-proxy commits into cw's line (or cw CPs them) so those files converge *before* the replay, and **packages unify at DT's superset** (cw stops editing its net-negative fork; consumes `@rdub/treemap`/`@disk-tree/react` via `workspace:*`).
+
+**gcs — needs the convergence first** (it's a divergent peer, not a union descendant): gcs stripped the cw stack and added its own BASE features (guest-chip auth-as-config, plans-absorbs-marks, help/edu-drawer, page-scope-bar, lifecycle engine). It cannot cleanly move onto the cw-flavored union until those are expressed as **config on the union** — which *is* `convergence.md`'s 4 seams + config-fold. So gcs's prerequisite is mgu's convergence, and disk-tree HEAD is its **target**, not yet portable-onto.
+
+**What still needs doing for `cloud` to be the complete base (ranked):**
+1. **mgu lands `convergence.md`** — the single funnel that extracts both deploys' BASE features into config-gated form and unifies the 4 seams (sweep→plan-first+adapters, marks→`actions` WAL, one D1 lineage, digest engine+profile). Nothing else lets gcs become config-only. **Critical path.**
+2. **Unify `packages/*`** at DT's superset — one `@rdub/treemap`/`@disk-tree/react`; cw/gcs consume, stop diverging. (DT already holds the superset API; the remaining work is cw/gcs adopting it.)
+3. **Fold DT's own base features into `site/`** — dynamic edge-OG (replaces static) and the persisted diff-index backend — so the base *has* them and gcs/cw adopt on move rather than carry as delta.
+4. **Adopt the `pyrmts` age index** once cw's redesign settles (base feature; r2 waits).
+5. **Decide where the convergence lands** — cleanest is for mgu to push its convergence commits **onto `cloud`** (one convergence, on the base) rather than a separate mgu branch DT re-adopts. That makes cw/gcs fork off `cloud` directly.
+
+**US-first, to keep cw/gcs deltas config-only + legible:** don't US gcs's BASE features piecemeal now (it races the convergence — let `convergence.md` be the funnel). Do US, here, *before* the moves: DT's dynamic-OG + diff-index into `site/` (#3), and DT's `_lib` store-seam/public-auth commits into cw's line (#2/cw section) so the shared files are pre-converged.
 
 ## Coordination
 
@@ -91,4 +114,4 @@ mgu convergence lives in `m/cw-s3:specs/convergence.md` (+ `denovo-factor.md`, `
 
 ## Naming
 
-`dt_cloud` (renamed from `gcs_usage` on mgu, CLI `dt-cloud`). Its `webdata` verb — user flagged as a bad name; rename during the r2 ingestion work. Candidates: `web-index` / `publish`. Final pick TBD (user).
+`dt_cloud` (renamed from `gcs_usage` on mgu, CLI `dt-cloud`). Its `webdata` verb → rename to **`path-index`** (it builds the served path-index tiers + snapshot; `index` would collide with `disk-tree index` = "scan a source", and both CLIs run in the same pipeline). Deferred as a **coordinated convergence item** — `cloud/` is shared with mgu (still `webdata`), so renaming now would diverge the shared package mid-convergence; apply when mgu's convergence lands. Recorded in the mgu handoff (`specs/disk-tree-as-base.md`).
