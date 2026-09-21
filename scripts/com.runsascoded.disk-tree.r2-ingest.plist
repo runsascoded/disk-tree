@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.runsascoded.disk-tree.r2-ingest</string>
+
+    <!-- The daily r2.rbw.sh ingestion (scripts/r2-ingest.sh). It sources .envrc
+         via `direnv export`, so only direnv + the Homebrew tools it shells out
+         to (aws, uv, node) need to be on PATH here; direnv adds the venv. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/ryan/c/disk-tree/scripts/r2-ingest.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- Daily at 07:15 local. launchd runs a missed fire once after wake. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>15</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>LowPriorityIO</key>
+    <true/>
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/ryan/.config/disk-tree/logs/r2-ingest.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/ryan/.config/disk-tree/logs/r2-ingest.err.log</string>
+</dict>
+</plist>
