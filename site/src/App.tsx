@@ -1280,7 +1280,9 @@ function AppContent() {
       )}
 
 
-      {!lensScoped && (
+      {/* Hidden when there's no age index for this deploy (e.g. r2 has no
+          age-pyramid tier yet): show while loading or once rows arrive. */}
+      {!lensScoped && (ageQ.isPending || age.length > 0) && (
       <section id="mtime">
         {/* Granularity is auto-picked (and user-switchable) inside AgeChart, so
             the heading stays unit-free rather than lying about "month". */}

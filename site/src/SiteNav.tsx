@@ -20,7 +20,7 @@ import { MdMenu } from 'react-icons/md'
 import { Link, useLocation } from 'react-router-dom'
 import { AboutModal } from './About'
 import { Avatar } from './Avatar'
-import { signInUrl, useCanMark, useIdent, useSignOut } from './auth'
+import { AUTH_MODE, signInUrl, useCanMark, useIdent, useSignOut } from './auth'
 import { IDENTITIES } from './identities.gen'
 import { REPO_URL } from './SiteKbd'
 import { useMyUser, useUserEmails } from './sweep'
@@ -206,7 +206,8 @@ function UserMenu() {
   const [tokenOpen, setTokenOpen] = useState(false)
   const { units, suffixB, toggleUnits, toggleSuffixB } = useUnits()
   const m = useMenu('bottom-end')
-  if (!ident) return <a className="tb-signin" href={signInUrl()}>sign in</a>
+  // Public deploys have no auth — no sign-in affordance.
+  if (!ident) return AUTH_MODE === 'public' ? null : <a className="tb-signin" href={signInUrl()}>sign in</a>
   const who = myUser ?? ident.email
   return (
     <>
