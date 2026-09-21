@@ -417,10 +417,9 @@ def write_webdata(
         con.execute(f"COPY (SELECT {cols} FROM ptu ORDER BY usr NULLS LAST, depth, path) TO '{by_user}' {rg}")
         err(f"path-index: wrote {by_user}")
         _rss("path-index-variants")
-        # Sidecars (specs/index-extras.md): checkpoint-shaped dirs over the
-        # FULL dir list, and the attributing prefixes' provenance.
+        # Provenance sidecar: the attributing prefixes' user/source/evidence.
         from .extras import write_extras
-        write_extras(con, "dir_agg", pfx_df if attr else None, path_index.parent)
+        write_extras(pfx_df if attr else None, path_index.parent)
         _rss("extras")
 
     # Per-path subtree totals: the coarse tiers' floor test. Staged (its own

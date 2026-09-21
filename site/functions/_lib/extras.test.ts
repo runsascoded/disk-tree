@@ -37,12 +37,8 @@ describe('blockSpan', () => {
 
 describe('viewOf', () => {
   const v = viewOf(
-    ['b/grug/run1', 'b/grug/run1/checkpoints'],
     ['b/grug\tcalvin\twandb-run\tent/proj/abc', 'b/data\tryan\tmanual\t', 'b/grug/run9\tkevin\t\t'],
   )
-  it('holds the checkpoint dirs', () => {
-    expect([...v.ck].sort()).toEqual(['b/grug/run1', 'b/grug/run1/checkpoints'])
-  })
   it('resolves provenance from the deepest attributing ancestor with that user', () => {
     expect(v.provenance('b/grug/run1/checkpoints', 'calvin')).toEqual(['wandb-run', 'ent/proj/abc', 'b/grug'])
     expect(v.provenance('b/data/x', 'ryan')).toEqual(['manual', null, 'b/data'])

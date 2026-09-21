@@ -386,11 +386,8 @@ const isRunDir = (n: TreeNode): boolean =>
  * there; the CLI/API still accepts KLC at any depth for a curated run list.
  * A node's own name is intentionally not enough: naming a dir `checkpoints`
  * doesn't put the steps within reach if they are deep below.
- * Folding can hide children, so an unknown shape is simply not offered.
- * (A per-row "checkpoints within N" flag from the index would be exact —
- * specs/children-table-selection.md § later.) */
+ * Folding can hide children, so an unknown shape is simply not offered. */
 export const looksCkpt = (n: TreeNode, _uri?: string): boolean =>
-  n.k === 1 ||
   isRunDir(n) ||
   (n.c ?? []).some(isRunDir)
 

@@ -1,23 +1,18 @@
 /**
- * Index extras (specs/index-extras.md): per-scan sidecars beside the index
- * tiers — `ck.txt` (checkpoint-shaped dirs, decided over each dir's FULL
- * child list) and `attr.tsv` (every attributing prefix → user, source,
- * evidence). Both are sorted by key with a block index (`<name>.idx.json`),
- * so a view fetches only the byte range covering its subtree (keys under
- * `P` are contiguous in sorted order) plus, for provenance, the blocks
- * holding P's ancestors. The small indexes are memoized per (scan,
- * generation) per isolate; a scan without sidecars (older generations, until
- * `dt-cloud index-extras` backfills) yields `null` and every consumer keeps
- * today's behaviour.
+ * Index extras: the per-scan provenance sidecar beside the index tiers —
+ * `attr.tsv` (every attributing prefix → user, source, evidence), sorted by
+ * key with a block index (`attr.tsv.idx.json`), so a view fetches only the
+ * byte range covering its subtree (keys under `P` are contiguous in sorted
+ * order) plus the blocks holding P's ancestors. The index is memoized per
+ * (scan, generation) per isolate; a scan without the sidecar (older
+ * generations, until `dt-cloud index-extras` backfills) yields `null` and
+ * every consumer keeps today's behaviour.
  */
 import type { Env } from './auth.js'
 import { makeStore } from './index.js'
 import { shared } from './shared.js'
 
 export type Provenance = [source: string, evidence: string | null, prefix: string]
-
-/** A dir whose own name says checkpoint (mirrors `dt_cloud.extras.CKPT_NAME_RE` and the client's `looksCkpt`). */
-export const CKPT_NAME_RE = /(^|[-_.])(ckpts?|checkpoints?)([-_.]|$)/i
 
 export interface BlockIndex { v: number; n: number; size: number; keys: string[]; offsets: number[] }
 
@@ -27,14 +22,12 @@ export interface BlockIndex { v: number; n: number; size: number; keys: string[]
 const MAX_RANGE = 8 * 1024 * 1024
 
 export interface ExtrasView {
-  /** Checkpoint-shaped dirs under (and at) the view root. */
-  ck: ReadonlySet<string>
   /** The provenance of `user`'s bytes under `path`: the deepest attributing
    *  ancestor-or-self whose user is `user`, or null. */
   provenance(path: string, user: string): Provenance | null
 }
 
-const idxMemo = new Map<string, Promise<{ dir: string; ck: BlockIndex | null; attr: BlockIndex | null } | null>>()
+const idxMemo = new Map<string, Promise<{ dir: string; attr: BlockIndex | null } | null>>()
 const TTL_MS = 10 * 60_000
 // A scan WITHOUT sidecars is re-probed after a minute, so a backfill shows
 // up promptly rather than after the isolate's next recycle. Tracked by
@@ -61,9 +54,9 @@ async function indexes(env: Env, date: string) {
   const miss = missAt.get(key)
   if (miss != null && Date.now() - miss > MISS_TTL_MS) { idxMemo.delete(key); missAt.delete(key) }
   const got = await shared(idxMemo, key, async () => {
-    const [ck, attr] = await Promise.all([readJson(env, `${dir}/ck.txt.idx.json`), readJson(env, `${dir}/attr.tsv.idx.json`)])
-    if (!ck && !attr) return null
-    return { dir, ck: ck as BlockIndex | null, attr: attr as BlockIndex | null }
+    const attr = await readJson(env, `${dir}/attr.tsv.idx.json`)
+    if (!attr) return null
+    return { dir, attr: attr as BlockIndex | null }
   }, TTL_MS)
   if (!got) missAt.set(key, missAt.get(key) ?? Date.now())
   else missAt.delete(key)
@@ -126,29 +119,26 @@ const ancestorsOf = (path: string): string[] => {
 }
 
 /**
- * The extras a view rooted at `path` needs: the checkpoint dirs under it and
- * an attribution map covering its subtree plus its ancestors. Null when the
- * scan has no sidecars.
+ * The extras a view rooted at `path` needs: an attribution map covering its
+ * subtree plus its ancestors. Null when the scan has no sidecar.
  */
 export async function extrasFor(env: Env, date: string, path: string): Promise<ExtrasView | null> {
   const ix = await indexes(env, date)
   if (!ix) return null
   const lo = path
   const hi = path === '' ? '￿' : path + '0' // '0' sorts just past '/'
-  const [ckLines, attrLines, ancLines] = await Promise.all([
-    ix.ck ? rangeLines(env, `${ix.dir}/ck.txt`, ix.ck, lo, hi) : Promise.resolve([]),
+  const [attrLines, ancLines] = await Promise.all([
     ix.attr ? rangeLines(env, `${ix.dir}/attr.tsv`, ix.attr, lo, hi) : Promise.resolve([]),
     // The root's ancestors: one block each (deduped), for inherited provenance.
     ix.attr
       ? Promise.all([...new Set(ancestorsOf(path).slice(1).map(a => blockOf(ix.attr!, a)))].map(b => readBlocks(env, `${ix.dir}/attr.tsv`, ix.attr!, b, b)))
       : Promise.resolve([]),
   ])
-  return viewOf(ckLines ?? [], [...(attrLines ?? []), ...ancLines.flatMap(l => l ?? [])])
+  return viewOf([...(attrLines ?? []), ...ancLines.flatMap(l => l ?? [])])
 }
 
 /** An `ExtrasView` over already-fetched lines (the pure half, for tests). */
-export function viewOf(ckLines: string[], attrLines: string[]): ExtrasView {
-  const ck = new Set(ckLines)
+export function viewOf(attrLines: string[]): ExtrasView {
   const attr = new Map<string, [string, string | null, string | null]>()
   for (const line of attrLines) {
     const [k, u, src, ev] = line.split('\t')
@@ -161,5 +151,5 @@ export function viewOf(ckLines: string[], attrLines: string[]): ExtrasView {
     }
     return null
   }
-  return { ck, provenance }
+  return { provenance }
 }

@@ -929,16 +929,15 @@ def index_blob(bucket: str, listing_dir: str | None, gen: str, key: str | None, 
 
 
 @main.command("index-extras")
-@option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s) (as `webdata -a`); omit for ck.json only")
+@option("-a", "--attribution", "attributions", multiple=True, required=True, help="Attribution parquet(s) (as `webdata -a`)")
 @option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
-@option("-o", "--out", "out_dir", type=Path, default=None, help="Where to write ck.json / attr.json (default: beside the index)")
+@option("-o", "--out", "out_dir", type=Path, default=None, help="Where to write attr.tsv (default: beside the index)")
 @option("-P", "--path-index", "path_index", type=Path, required=True, help="Floor-free path-index.parquet of the scan (every dir is a row)")
 @argument("date")
 def index_extras(attributions: tuple[str, ...], identities_path: Path, out_dir: Path | None, path_index: Path, date: str) -> None:
-    """Backfill a scan's index sidecars (specs/index-extras.md) from its
-    floor-free path index (+ attribution parquets): `ck.json`, the
-    checkpoint-shaped dirs; `attr.json`, each attributing prefix's user /
-    source / evidence. `webdata` writes the same files for a fresh scan."""
+    """Backfill a scan's provenance sidecar (`attr.tsv`) from its floor-free
+    path index + attribution parquets: each attributing prefix's user /
+    source / evidence. `webdata` writes the same file for a fresh scan."""
     import duckdb
 
     from .extras import write_extras
@@ -947,15 +946,13 @@ def index_extras(attributions: tuple[str, ...], identities_path: Path, out_dir: 
     con = duckdb.connect()
     src = f"read_parquet('{path_index}')"
     con.execute(f"CREATE TEMP VIEW idx_dirs AS SELECT DISTINCT path AS fp FROM {src}")
-    pfx_df = None
-    if attributions:
-        # Path-glob rules expand against `(bucket, name)` dirs — from the index's own paths.
-        con.execute(
-            "CREATE TEMP VIEW listing_dirs AS SELECT split_part(fp, '/', 1) AS bucket,"
-            " CASE WHEN position('/' IN fp) > 0 THEN substr(fp, position('/' IN fp) + 1) END AS name FROM idx_dirs"
-        )
-        pfx_df = prefix_labels(con, attributions, identities_path, "listing_dirs")
-    counts = write_extras(con, "idx_dirs", pfx_df, out_dir or path_index.parent)
+    # Path-glob rules expand against `(bucket, name)` dirs — from the index's own paths.
+    con.execute(
+        "CREATE TEMP VIEW listing_dirs AS SELECT split_part(fp, '/', 1) AS bucket,"
+        " CASE WHEN position('/' IN fp) > 0 THEN substr(fp, position('/' IN fp) + 1) END AS name FROM idx_dirs"
+    )
+    pfx_df = prefix_labels(con, attributions, identities_path, "listing_dirs")
+    counts = write_extras(pfx_df, out_dir or path_index.parent)
     err(f"index-extras {date}: {json.dumps(counts)}")
 
 

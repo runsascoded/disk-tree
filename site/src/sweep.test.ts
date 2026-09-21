@@ -16,8 +16,7 @@ describe('looksCkpt within ~2 levels', () => {
   it('does not offer higher up (steps 3+ levels down)', () => {
     expect(looksCkpt(marin)).toBe(false)
   })
-  it('a single object (a leaf checkpoint file) is offerable', () => {
-    expect(looksCkpt(step('step-100.safetensors'))).toBe(false)  // no k
-    expect(looksCkpt({ ...step('x'), k: 1 } as TreeNode)).toBe(true)
+  it('a leaf with no step-numbered children is not offerable', () => {
+    expect(looksCkpt(step('step-100.safetensors'))).toBe(false)
   })
 })

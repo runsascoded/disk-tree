@@ -8,7 +8,6 @@ export interface TreeNode {
   cb?: Record<string, number>  // non-STANDARD class -> bytes ("2" NL, "3" CL, "4" AR); STANDARD = b - sum
   c?: TreeNode[]
   f?: number                   // an `(other)` fold: how many children it stands in for (drives the dust hatch density)
-  k?: 1                        // checkpoint-shaped dir, decided at index time over the FULL child list (specs/index-extras.md)
   pv?: Provenance              // provenance of the top owner's inferred attribution (absent when assigned, or no extras for the scan)
 }
 
