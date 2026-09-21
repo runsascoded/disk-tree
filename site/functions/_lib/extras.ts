@@ -88,14 +88,25 @@ export function blockOf(idx: BlockIndex, key: string): number {
   return ans
 }
 
-/** The lines of blocks `from..to` (inclusive), or null when over budget. */
-async function readBlocks(env: Env, key: string, idx: BlockIndex, from: number, to: number): Promise<string[] | null> {
+/** The byte span `[start, end)` covering blocks `from..to` (inclusive),
+ *  clamped to the index; null when the range is empty — `to < from`, or
+ *  `from` past the last block (an empty sidecar has zero blocks, so *every*
+ *  range is empty). Guards the reader from fabricating a `[undefined, 0]`
+ *  range out of an empty `offsets`, which becomes a malformed store GET. */
+export function blockSpan(idx: BlockIndex, from: number, to: number): [number, number] | null {
   if (from < 0) from = 0
-  if (to < from) return []
+  if (to < from || from >= idx.offsets.length) return null
   const start = idx.offsets[from]
   const end = to + 1 < idx.offsets.length ? idx.offsets[to + 1] : idx.size
+  return end <= start ? null : [start, end]
+}
+
+/** The lines of blocks `from..to` (inclusive), or null when over budget. */
+async function readBlocks(env: Env, key: string, idx: BlockIndex, from: number, to: number): Promise<string[] | null> {
+  const span = blockSpan(idx, from, to)
+  if (!span) return []
+  const [start, end] = span
   if (end - start > MAX_RANGE) return null
-  if (end <= start) return []
   const { bytes } = await makeStore(env).get(key, { offset: start, length: end - start })
   const text = new TextDecoder().decode(bytes)
   return text.split('\n').filter(Boolean)

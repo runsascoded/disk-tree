@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { blockOf, viewOf, type BlockIndex } from './extras.js'
+import { blockOf, blockSpan, viewOf, type BlockIndex } from './extras.js'
 
 const idx: BlockIndex = { v: 1, n: 0, size: 0, keys: ['a/1', 'b/2', 'd/1'], offsets: [0, 100, 200] }
+const sized: BlockIndex = { v: 1, n: 3, size: 260, keys: ['a/1', 'b/2', 'd/1'], offsets: [0, 100, 200] }
+const empty: BlockIndex = { v: 1, n: 0, size: 0, keys: [], offsets: [] }
 
 describe('blockOf', () => {
   it('finds the block whose first key is ≤ the key', () => {
@@ -14,6 +16,22 @@ describe('blockOf', () => {
   })
   it('is −1 before the first key', () => {
     expect(blockOf(idx, '0')).toBe(-1)
+  })
+})
+
+describe('blockSpan', () => {
+  it('spans blocks from..to, ending at the next offset or the file size', () => {
+    expect(blockSpan(sized, 0, 0)).toEqual([0, 100])
+    expect(blockSpan(sized, 1, 2)).toEqual([100, 260])
+    expect(blockSpan(sized, 0, 2)).toEqual([0, 260])
+    expect(blockSpan(sized, 2, 5)).toEqual([200, 260]) // `to` past the last block clamps to size
+  })
+  it('is null when there is nothing to read', () => {
+    // The regression: an empty sidecar (0 blocks) must not synthesize a range.
+    expect(blockSpan(empty, -1, 0)).toBeNull()
+    expect(blockSpan(empty, 0, 0)).toBeNull()
+    expect(blockSpan(sized, -1, -1)).toBeNull() // key sorts before the first block
+    expect(blockSpan(sized, 5, 5)).toBeNull() // `from` past the last block
   })
 })
 
