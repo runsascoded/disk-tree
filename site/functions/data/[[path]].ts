@@ -13,6 +13,7 @@
 // because public/data/ is no longer shipped (see the build).
 import { S3Store } from '@rdub/file-tree/stores/s3'
 import { type Env, requireViewer } from '../_lib/auth.js'
+import { storeCreds, storeReady } from '../_lib/index.js'
 
 const BUCKET = 'oa-gcs-usage-dvx'
 // Scan ids are `YYYY-MM-DD`, optionally sub-daily as `YYYY-MM-DDTHHMM` (no
@@ -23,21 +24,20 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{4})?$/
 const CACHE = 'private, max-age=300' // daily cadence — ≤5min staleness is fine
 
 export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Response> => {
-  const { GCS_HMAC_KEY_ID, GCS_HMAC_SECRET } = ctx.env
-  if (!GCS_HMAC_KEY_ID || !GCS_HMAC_SECRET) {
-    return new Response('data proxy not configured (missing GCS HMAC creds)', { status: 503 })
+  if (!storeReady(ctx.env)) {
+    return new Response('data proxy not configured (missing index store creds)', { status: 503 })
   }
-  // Every payload is members-only: the edge (CF Access) session is the identity.
+  // Every payload is members-only: the edge (CF Access) session is the identity
+  // (a public deploy grants the base viewer scope via PUBLIC_READ).
   const rel = new URL(ctx.request.url).pathname.replace(/^\/data\//, '')
   const gated = await requireViewer(ctx)
   if (gated instanceof Response) return gated
   const store = S3Store({
-    endpoint: 'https://storage.googleapis.com', // GCS XML API is S3-compatible
-    bucket: BUCKET,
-    region: 'us-east1', // bucket location; GCS validates the SigV4 credential-scope region
+    endpoint: ctx.env.STORE_ENDPOINT ?? 'https://storage.googleapis.com', // GCS XML API is S3-compatible
+    bucket: ctx.env.STORE_BUCKET ?? BUCKET,
+    region: ctx.env.STORE_REGION ?? 'us-east1', // bucket location; GCS validates the SigV4 credential-scope region
     prefixes: ['snapshots/'], // allow-list: only the published snapshots
-    accessKeyId: GCS_HMAC_KEY_ID,
-    secretAccessKey: GCS_HMAC_SECRET,
+    ...storeCreds(ctx.env),
   })
 
   try {
