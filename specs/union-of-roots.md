@@ -85,6 +85,7 @@ gcs's fold-in BASE features (all mgu-owned): guest-chip/grant-subject auth + rea
 6. **Dynamic edge-OG** into `site/` (+ diff-index-in-site) — DT base features not yet folded into the shell.
 7. **Age index / `pyrmts`** — DEFERRED: cw is mid-redesign (per-deploy tier configs, viewport-responsive bins, a possible on-disk pivot sharding by path/dt, cross-scan RLE — `m/cw-s3:specs/age-index.md`, live in worktree session `41e25a3f`). r2's age chart is hidden until it lands; adopt uniformly then (base feature). Do NOT build the current `write_age_pyramid` into the r2 job.
 8. **Superset** (`ui/` → disky/blobby domain), unchanged multi-cloud/local scan-manager.
+9. **Retire KLC** (`keep_last_ckpt`) — a mark+sweep-era action being phased out everywhere. Its *plumbing* (the `ck.txt` index-extras sidecar + `node.k` flag) is **done** on `cloud` (`76cdd17`); the *mark action* (persisted enum, live D1 rows, `sweep_plan.py` planner) rides mgu's D1-lineage merge. See *KLC retirement*.
 
 ## Rebase readiness — what makes `cloud` the base cw+gcs move onto (2026-09-21)
 
@@ -107,6 +108,13 @@ Caveat: the union was adopted by file-copy (`git checkout m/cw-s3 -- site cloud`
 5. **Decide where the convergence lands** — cleanest is for mgu to push its convergence commits **onto `cloud`** (one convergence, on the base) rather than a separate mgu branch DT re-adopts. That makes cw/gcs fork off `cloud` directly.
 
 **US-first, to keep cw/gcs deltas config-only + legible:** don't US gcs's BASE features piecemeal now (it races the convergence — let `convergence.md` be the funnel). Do US, here, *before* the moves: DT's dynamic-OG + diff-index into `site/` (#3), and DT's `_lib` store-seam/public-auth commits into cw's line (#2/cw section) so the shared files are pre-converged.
+
+## KLC retirement (2026-09-21)
+
+`keep_last_ckpt` (KLC) — the "keep the latest checkpoint, sweep older ones" mark action — is being phased out everywhere (base + gcs + cw). It only made sense in the old mark+sweep world; agent-driven keep marks (e.g. "keep every 10th, back from latest") replaced the need. Removal splits by blast radius:
+
+- **Plumbing — done on `cloud` (`76cdd17`).** The `ck.txt` index-extras sidecar only fed `node.k`, the precise checkpoint-shape flag gating the KLC button. Excised edge/ingestion-only (no marks schema): `dt_cloud.extras` stops emitting `ck.txt` (`write_extras(pfx_df, out_dir)` → `attr.tsv` only); `_lib/extras.ts` `ExtrasView` drops `ck`; `view.ts` stops setting `node.k`; client drops `TreeNode.k`. `looksCkpt` keeps offering the (still-present) button via its heuristics. **`attr.tsv` provenance is untouched** (separate owners concern). Also fixed an r2 500 (empty `ck.txt` on checkpoint-free buckets; reader hardened in `74c48b2`).
+- **The mark action — rides mgu's convergence.** `keep_last_ckpt` is a persisted enum with live rows in gcs/cw D1s, in the `CHECK` constraints (all three lineages), edge validators + `totals` decomposition, the client `klcSplits`/`Treemap` barber-pole ring, and a parallel Python planner (`sweep_plan.py`). Enum removal + row migration (`keep_last_ckpt` → `keep`) belongs in the D1-lineage merge, not a separate pass that races it. When the enum is gone, DT does the base-side cleanup of `looksCkpt` + the KLC button/CSS/glyph.
 
 ## Coordination
 
