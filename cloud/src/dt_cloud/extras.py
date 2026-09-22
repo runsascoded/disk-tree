@@ -1,5 +1,5 @@
 """Index extras: a provenance sidecar beside a scan's index tiers, written by
-``webdata`` for a fresh scan and by ``dt-cloud index-extras`` as the backfill
+``path-index`` for a fresh scan and by ``dt-cloud index-extras`` as the backfill
 for archived generations.
 
 - ``attr.tsv``: every attributing prefix → ``user  source  evidence`` —

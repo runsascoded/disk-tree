@@ -1,6 +1,6 @@
 """Shared attribution-prefix loading + deepest-prefix lookup.
 
-Used by ``report``/``gaps`` (cli) and ``webdata`` (viz). Attribution parquets
+Used by ``report``/``gaps`` (cli) and ``path-index`` (viz). Attribution parquets
 store raw users as of build time; loading re-resolves them against the
 *current* identities.yaml, and folds in ``prefix_owners`` manual rows (a ``*``
 in the bucket position fans out over the listing's buckets), so curation

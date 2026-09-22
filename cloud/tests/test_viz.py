@@ -1,4 +1,4 @@
-"""End-to-end test of `write_webdata` on a tiny synthetic listing.
+"""End-to-end test of `write_path_index` on a tiny synthetic listing.
 
 The tree is built at arbitrary depth (specs/tree-builder-unification.md): dirs
 are linked parent→child with no d1..d4 cap, and a directory's own direct files
@@ -14,7 +14,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from dt_cloud.viz import write_webdata
+from dt_cloud.viz import write_path_index
 
 IDENTITIES_YAML = """\
 users:
@@ -76,13 +76,13 @@ def attribution(tmp_path: Path) -> str:
     return str(path)
 
 
-def test_write_webdata_attr(tmp_path: Path, listing: str, attribution: str):
+def test_write_path_index_attr(tmp_path: Path, listing: str, attribution: str):
     identities_path = tmp_path / "identities.yaml"
     identities_path.write_text(IDENTITIES_YAML)
     out = tmp_path / "out"
 
     pidx = tmp_path / "path-index.parquet"
-    meta = write_webdata((listing,), out, "2026-07-20", (attribution,), identities_path, path_index=pidx)
+    meta = write_path_index((listing,), out, "2026-07-20", (attribution,), identities_path, path_index=pidx)
 
     assert meta == {
         "asof": "2026-07-20",
@@ -150,7 +150,7 @@ def test_access_rows_on_or_after_scan_date_are_excluded(tmp_path: Path, listing:
     identities_path.write_text(IDENTITIES_YAML)
     out = tmp_path / "out"
     pidx = tmp_path / "path-index.parquet"
-    meta = write_webdata((listing,), out, "2026-07-20", (attribution,), identities_path, access=(access,), path_index=pidx)
+    meta = write_path_index((listing,), out, "2026-07-20", (attribution,), identities_path, access=(access,), path_index=pidx)
     rd = epoch_day(TS["d0703"])
     assert meta["access"] == {"from": rd, "to": rd}
     a_by_path = pd.read_parquet(pidx).groupby("path")["a"].max().to_dict()
@@ -162,7 +162,7 @@ def test_age_rows_carry_last_read(tmp_path: Path, listing: str, attribution: str
     identities_path = tmp_path / "identities.yaml"
     identities_path.write_text(IDENTITIES_YAML)
     out = tmp_path / "out"
-    meta = write_webdata((listing,), out, "2026-07-20", (attribution,), identities_path, access=(access,))
+    meta = write_path_index((listing,), out, "2026-07-20", (attribution,), identities_path, access=(access,))
     rd = epoch_day(TS["d0703"])
     assert meta["access"] == {"from": rd, "to": rd}
     # Strata whose dir was read carry `a` (its last-read epoch day); the rest
@@ -184,7 +184,7 @@ def test_path_index_carries_read_day(tmp_path: Path, listing: str, attribution: 
     identities_path.write_text(IDENTITIES_YAML)
     out = tmp_path / "out"
     pidx = tmp_path / "path-index.parquet"
-    write_webdata((listing,), out, "2026-07-20", (attribution,), identities_path, access=(access,), path_index=pidx)
+    write_path_index((listing,), out, "2026-07-20", (attribution,), identities_path, access=(access,), path_index=pidx)
     rd = epoch_day(TS["d0703"])
     df = pd.read_parquet(pidx)
     assert list(df.columns) == ["path", "depth", "usr", "b", "o", "wts", "wb", "c2", "c3", "c4", "a"]
@@ -211,7 +211,7 @@ def test_coarse_tiers_are_exact_subsets(tmp_path: Path, listing: str, attributio
     identities_path.write_text(IDENTITIES_YAML)
     out = tmp_path / "out"
     pidx = tmp_path / "path-index.parquet"
-    meta = write_webdata((listing,), out, "2026-07-20", (attribution,), identities_path, path_index=pidx)
+    meta = write_path_index((listing,), out, "2026-07-20", (attribution,), identities_path, path_index=pidx)
     full = pd.read_parquet(pidx)
     fleet = int(full[full.depth == 1]["b"].sum())
     assert fleet == 380 * GB
@@ -242,9 +242,9 @@ def test_coarse_tiers_are_exact_subsets(tmp_path: Path, listing: str, attributio
     assert uk == sorted(uk)
 
 
-def test_write_webdata_plain(tmp_path: Path, listing: str):
+def test_write_path_index_plain(tmp_path: Path, listing: str):
     out = tmp_path / "out"
-    meta = write_webdata((listing,), out, "2026-07-20")
+    meta = write_path_index((listing,), out, "2026-07-20")
     assert "users" not in meta
     assert meta["total_bytes"] == 380 * GB
     age = json.loads((out / "age.json").read_text())
@@ -292,7 +292,7 @@ prefix_owners:
     ).to_parquet(attribution_path)
     out = tmp_path / "out"
     pidx = tmp_path / "path-index.parquet"
-    write_webdata((str(listing_path),), out, "2026-07-28", (str(attribution_path),), identities_path, path_index=pidx)
+    write_path_index((str(listing_path),), out, "2026-07-28", (str(attribution_path),), identities_path, path_index=pidx)
     df = pd.read_parquet(pidx)
     b1 = {(r.usr if isinstance(r.usr, str) else None): int(r.b) for r in df[df.path == "b1"].itertuples()}
     assert b1 == {"ryan-williams": 100 * GB, None: 60 * GB}  # the 60 GB under shared/ is nobody's
@@ -306,7 +306,7 @@ def test_dir_cache_roundtrip(tmp_path: Path, listing: str, attribution: str):
     cache = tmp_path / "dir-cache"
 
     cold_out = tmp_path / "cold"
-    write_webdata((listing,), cold_out, "2026-07-20", (attribution,), identities_path, dir_cache=cache)
+    write_path_index((listing,), cold_out, "2026-07-20", (attribution,), identities_path, dir_cache=cache)
     assert sorted(p.name for p in cache.iterdir()) == ["age-days.parquet", "dir-stats.parquet"]
 
     # Warm: point the listing at a copy that we then corrupt — object rows must
@@ -323,7 +323,7 @@ def test_dir_cache_roundtrip(tmp_path: Path, listing: str, attribution: str):
         }
     ).to_parquet(bogus)
     warm_out = tmp_path / "warm"
-    write_webdata((str(bogus),), warm_out, "2026-07-20", (attribution,), identities_path, dir_cache=cache)
+    write_path_index((str(bogus),), warm_out, "2026-07-20", (attribution,), identities_path, dir_cache=cache)
 
     for name in ("age.json", "meta.json"):
         assert (warm_out / name).read_bytes() == (cold_out / name).read_bytes()
@@ -331,10 +331,10 @@ def test_dir_cache_roundtrip(tmp_path: Path, listing: str, attribution: str):
     assert meta["total_bytes"] == 380 * GB  # cache content won, bogus listing ignored
 
 
-def test_index_tiers_backfill_matches_webdata(tmp_path: Path, listing: str, attribution: str):
+def test_index_tiers_backfill_matches_path_index(tmp_path: Path, listing: str, attribution: str):
     """`dt-cloud index-tiers` (the backfill for archived scans) derives the
     coarse tiers from a floor-free path index and must produce byte-identical
-    files to the ones `webdata` writes on a fresh scan — same rows, same sort,
+    files to the ones `path-index` writes on a fresh scan — same rows, same sort,
     same KV floor. An index carrying the retired `team` column is accepted too."""
     from click.testing import CliRunner
 
@@ -345,7 +345,7 @@ def test_index_tiers_backfill_matches_webdata(tmp_path: Path, listing: str, attr
     identities_path.write_text(IDENTITIES_YAML)
     fresh = tmp_path / "fresh"
     fresh.mkdir()
-    write_webdata((listing,), tmp_path / "out", "2026-07-20", (attribution,), identities_path, path_index=fresh / "path-index.parquet")
+    write_path_index((listing,), tmp_path / "out", "2026-07-20", (attribution,), identities_path, path_index=fresh / "path-index.parquet")
     old = tmp_path / "old"
     old.mkdir()
     df = pd.read_parquet(fresh / "path-index.parquet")

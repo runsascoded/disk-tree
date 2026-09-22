@@ -449,7 +449,7 @@ def wandb_mine(
     )
 
 
-@main.command()
+@main.command("path-index")
 @option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s); adds per-node user overlays")
 @option("-c", "--dir-cache", "dir_cache", type=Path, default=None, help="Layer-2 cache dir (dir-stats/age-days parquet): attribution-independent rollups reused by re-attribution runs — see specs/dir-agg-cache.md")
 @option("-d", "--asof", required=True, help="Scan date the listing came from (YYYY-MM-DD)")
@@ -458,7 +458,7 @@ def wandb_mine(
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Output dir for JSON files [default: site/public/data/<asof>]")
 @option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the complete floor-free path index parquet here (pixel-budget subtree API; specs/path-index-lazy-drill.md)")
 @option("-x", "--access", "access", multiple=True, help="Access-log layer-2a agg parquet glob(s); adds per-node last-read ('a') for the read-recency lens")
-def webdata(
+def build_path_index(
     attributions: tuple[str, ...],
     dir_cache: Path | None,
     asof: str,
@@ -476,11 +476,11 @@ def webdata(
     import json
     import re
 
-    from .viz import write_webdata
+    from .viz import write_path_index
 
     if out_dir is None:
         out_dir = Path("site/public/data") / asof
-    meta = write_webdata(listings, out_dir, asof, attributions, identities_path, access=access, dir_cache=dir_cache, path_index=path_index)
+    meta = write_path_index(listings, out_dir, asof, attributions, identities_path, access=access, dir_cache=dir_cache, path_index=path_index)
     err(f"wrote {out_dir}/: age.json meta.json ({meta['total_bytes']/1e12:.0f} TB, {meta['total_objects']:,} objects)")
     data_root = out_dir.parent
     dates = sorted(
@@ -503,7 +503,7 @@ def webdata(
 def stage(out_root: Path, workers: int, globs: tuple[str, ...]) -> None:
     """Stage /gcs/<bucket>/<pattern> globs onto local disk (parallel download).
 
-    gcsfuse reads are slow (~20-50 MB/s) and webdata makes several passes over
+    gcsfuse reads are slow (~20-50 MB/s) and path-index makes several passes over
     its inputs; staging to local NVMe first makes those passes local-speed.
     Already-staged files (same size) are skipped, so re-runs are idempotent.
     """
@@ -912,7 +912,7 @@ def index_tiers(mem: str, path_index: Path, threads: int, tmp_dir: Path | None, 
     """Backfill the coarse index tiers for an archived scan from its floor-free
     path index (specs/view-serving.md §1): the per-path subtree totals, then one
     parquet per E in COARSE_EXPS × {by-path, by-user}, floors in the KV metadata.
-    Same code path `webdata` runs on a fresh scan; `index-sync` records the
+    Same code path `path-index` runs on a fresh scan; `index-sync` records the
     floors in D1. An old index's `team` column is dropped on the way."""
     import duckdb
 
@@ -928,7 +928,7 @@ def index_tiers(mem: str, path_index: Path, threads: int, tmp_dir: Path | None, 
 
 
 @main.command("labels")
-@option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s) (as `webdata -a`)")
+@option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s) (as `path-index -a`)")
 @option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s) — path-glob rules expand against their dirs")
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: one labels-<bucket>.parquet per bucket")
@@ -936,7 +936,7 @@ def labels(attributions: tuple[str, ...], identities_path: Path, listings: tuple
     """Export mgu's attribution as DT label tables — `(prefix, usr)` per bucket,
     prefix relative to the bucket — for `disk-tree import -e duckdb -L
     labels-<bucket>.parquet -c usr` (spec mgu-scale-unification.md §B): the
-    same prefix map `webdata` attributes with, so the two cascades can be
+    same prefix map `path-index` attributes with, so the two cascades can be
     compared slice for slice."""
     import duckdb
 
@@ -971,7 +971,7 @@ def index_blob(bucket: str, listing_dir: str | None, gen: str, key: str | None, 
 
 
 @main.command("index-extras")
-@option("-a", "--attribution", "attributions", multiple=True, required=True, help="Attribution parquet(s) (as `webdata -a`)")
+@option("-a", "--attribution", "attributions", multiple=True, required=True, help="Attribution parquet(s) (as `path-index -a`)")
 @option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Where to write attr.tsv (default: beside the index)")
 @option("-P", "--path-index", "path_index", type=Path, required=True, help="Floor-free path-index.parquet of the scan (every dir is a row)")
@@ -979,7 +979,7 @@ def index_blob(bucket: str, listing_dir: str | None, gen: str, key: str | None, 
 def index_extras(attributions: tuple[str, ...], identities_path: Path, out_dir: Path | None, path_index: Path, date: str) -> None:
     """Backfill a scan's provenance sidecar (`attr.tsv`) from its floor-free
     path index + attribution parquets: each attributing prefix's user /
-    source / evidence. `webdata` writes the same file for a fresh scan."""
+    source / evidence. `path-index` writes the same file for a fresh scan."""
     import duckdb
 
     from .extras import write_extras

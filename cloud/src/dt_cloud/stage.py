@@ -1,6 +1,6 @@
 """Stage GCS parquet inputs onto local disk before DuckDB runs.
 
-gcsfuse reads cap out around 20-50 MB/s and webdata makes ~4 full passes over
+gcsfuse reads cap out around 20-50 MB/s and path-index makes ~4 full passes over
 its inputs; a parallel download to local (NVMe) disk turns hours of FUSE reads
 into minutes of copy plus fast local scans.
 """

@@ -36,7 +36,7 @@ list "$R2_RO_ACCESS_KEY_ID"      "$R2_RO_SECRET_ACCESS_KEY"      jc-taxes "$R2_E
 
 # 2. Union all three (grouped by bucket → the Map's top cells) → path-index +
 #    coarse tiers (beside -P) + snapshot JSONs.
-( cd cloud && uv run dt-cloud webdata -d "$DATE" -l "$WORK/listing/*/*.parquet" \
+( cd cloud && uv run dt-cloud path-index -d "$DATE" -l "$WORK/listing/*/*.parquet" \
     -P "$WORK/index/path-index.parquet" -o "$WORK/snap" )
 
 # 3. Upload tiers + snapshot to the index bucket (RW), then footers → D1.

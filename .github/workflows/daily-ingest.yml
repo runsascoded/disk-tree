@@ -55,7 +55,7 @@ jobs:
           list "${{ secrets.R2_RO_ACCESS_KEY_ID }}"      "${{ secrets.R2_RO_SECRET_ACCESS_KEY }}"      jc-taxes "$RAC_ENDPOINT"
       - name: Union → path-index + coarse tiers + snapshot
         run: |
-          cd cloud && uv run dt-cloud webdata -d "${{ steps.d.outputs.date }}" \
+          cd cloud && uv run dt-cloud path-index -d "${{ steps.d.outputs.date }}" \
             -l "$GITHUB_WORKSPACE/work/listing/*/*.parquet" \
             -P "$GITHUB_WORKSPACE/work/index/path-index.parquet" \
             -o "$GITHUB_WORKSPACE/work/snap"

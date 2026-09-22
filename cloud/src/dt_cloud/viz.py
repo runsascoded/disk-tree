@@ -1,4 +1,4 @@
-"""Data extracts for the web viz (``dt-cloud webdata``).
+"""Data extracts for the web viz (``dt-cloud path-index``).
 
 Everything here is laptop-scale DuckDB over the deduped listing parquet:
 a nested prefix tree for the treemap, created-day age strata, and a
@@ -30,7 +30,7 @@ def prefix_labels(
 ) -> "pd.DataFrame":
     """The attribution prefix map as rows ``(key, user, depth)`` — ``key`` is
     ``<bucket>[/<dir>…]`` (no ``gs://``, no trailing slash), deepest-prefix
-    semantics applied by the caller (``webdata``'s per-depth joins, or DT's
+    semantics applied by the caller (``path-index``'s per-depth joins, or DT's
     ``import --label``). Path-glob rules expand against ``listing_src``'s dirs
     (``(bucket, name)``); identities resolve to canonical users.
 
@@ -116,9 +116,9 @@ def write_coarse_tiers(
 
     ``rows`` is a table/relation holding the floor-free index rows
     (``path, depth, usr, b, o, wts, wb, c2, c3, c4, a``) — ``ptu`` inside
-    ``webdata``, or ``read_parquet(...)`` of an archived path-index for a
+    ``path-index``, or ``read_parquet(...)`` of an archived path-index for a
     backfill (``dt-cloud index-tiers``). A temp table ``tot`` (``path, pb`` =
-    per-path subtree bytes) must exist; the caller builds it since ``webdata``
+    per-path subtree bytes) must exist; the caller builds it since ``path-index``
     reuses it for the fold.
 
     Each tier E keeps the SAME rows, restricted to paths whose subtree clears
@@ -150,7 +150,7 @@ def write_coarse_tiers(
     return floors, counts
 
 
-def write_webdata(
+def write_path_index(
     listings: tuple[str, ...],
     out_dir: Path,
     asof: str,
