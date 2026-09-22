@@ -150,6 +150,9 @@ export function indexKey(dir: string, variant: string): string {
   // Phase B: one path-major pyramid tier per bin (`age-pyramid-<bin>`).
   const pm = /^age-pyramid-(\d+(?:min|h|d|mo|y))$/.exec(variant)
   if (pm) return `${dir}/age-pyramid-${pm[1]}.parquet`
+  // The cross-scan over-time index — a standalone singleton, own base name
+  // (specs/obs-axis-indexing.md Phase 1).
+  if (variant === 'over-time') return `${dir}/over-time.parquet`
   const m = /^(?:(coarse\d+)(?:-(user))?|(path|user))$/.exec(variant)
   if (!m) throw new Error(`bad index variant '${variant}'`)
   const tier = m[1] ? `-${m[1]}` : ''

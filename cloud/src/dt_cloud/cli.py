@@ -786,6 +786,48 @@ def index_write(bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_d
     print(json.dumps(s))
 
 
+@main.command("over-time-write")
+@option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket the D1 `path` dirs resolve against")
+@option("-m", "--mem", default="8GB", help="DuckDB memory limit")
+@option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: over-time.parquet + over-time.scans.json")
+@option("-r", "--data-root", default=None, help="Root the D1 pointer dirs resolve against (default /gcs/<bucket>, the Batch mount; pass a local dir or gs://<bucket> otherwise)")
+@option("-t", "--threads", default=8, type=int, help="DuckDB threads")
+@option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
+@argument("scans", nargs=-1)
+def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None, threads: int, tmp_dir: Path | None, scans: tuple[str, ...]) -> None:
+    """Write the cross-scan over-time index from published scans' path-indices
+    (specs/obs-axis-indexing.md Phase 1). SCANS are scan ids, oldest-first order
+    not required — sorted here; each a bare `<date>` (its `path` parquet resolved
+    from the D1 pointer under `--data-root`) or an explicit `<date>=<parquet>`.
+    No SCANS = every scan with a synced `path` variant. `index-sync -v over-time`
+    then publishes the footer."""
+    from .index_footer import index_dir, synced_variants
+    from .overtime import write_over_time_index
+
+    root = data_root or f"/gcs/{bucket}"
+    explicit = {s.split("=", 1)[0]: s.split("=", 1)[1] for s in scans if "=" in s}
+    bare = [s for s in scans if "=" not in s]
+    if scans:
+        dates = sorted(set(bare) | set(explicit))
+    else:
+        dates = sorted({d for d, v in synced_variants() if v == "path"})
+    pairs: list[tuple[str, str]] = []
+    for d in dates:
+        if d in explicit:
+            pairs.append((d, explicit[d]))
+            continue
+        dir_ = index_dir(d, "path")
+        if dir_ is None:
+            err(f"over-time-write: no `path` pointer for {d}, skipping")
+            continue
+        pairs.append((d, f"{root}/{dir_}/path-index.parquet"))
+    if not pairs:
+        raise SystemExit("over-time-write: no scans resolved")
+    s = write_over_time_index(pairs, out_dir, mem=mem, threads=threads, tmp_dir=tmp_dir)
+    err(f"over-time-write: {s['rows']:,} intervals / {s['paths']:,} paths over {len(s['scans'])} scans → {s['file']}")
+    print(json.dumps(s))
+
+
 @main.command("index-sync")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
 @option("-C", "--coarse-only", is_flag=True, help="Only the coarse tiers (a backfill; the floor-free variants keep their pointer)")

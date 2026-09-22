@@ -19,6 +19,7 @@ import { type Lens, makeStore, storeReady } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { classKey, parseClasses, parseOwner } from '../_lib/scope.js'
 import { readRootAgg, readRootRows } from '../_lib/view.js'
+import { readOverTime } from '../_lib/overTime.js'
 import { parsePaths } from '../_lib/filter.js'
 import { metaRoots, rootPoints, type RootRow } from '../_lib/series.js'
 
@@ -96,6 +97,13 @@ export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
   const head = lens ? await ledgerHead(env) : 0
   // Unscoped whole-bucket series only: scans without tiers still have a total in meta.json.
   const extra = path === '' && !paths.length && !lens && !owner && !classes ? await unindexedScans(env, new Set(dates)) : []
+  // Fast path (specs/obs-axis-indexing.md Phase 1): the plain per-path series
+  // (no split / paths / lens / owner / class scope) reads the cross-scan
+  // over-time index once instead of one point read per scan. `point()` below
+  // takes a covered scan from here; scans newer than the index (or not in it)
+  // fall through to the per-scan read. null = index absent → all per-scan.
+  const simple = !split && !paths.length && !lens && !owner && !classes
+  const ot = simple ? await readOverTime(env, path) : null
   const cacheKey = new Request(`https://series.cache/${encodeURIComponent(path)}?P=${encodeURIComponent(paths.join(','))}&l=${lensRaw ?? ''}&o=${owner ?? ''}&cl=${classKey(classes)}&s=${split ?? ''}&d=${dates.join(',')}&x=${extra.join(',')}&head=${head}`)
   const cache = (caches as unknown as { default: Cache }).default
   const hit = await cache.match(cacheKey)
@@ -110,6 +118,8 @@ export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
   // since a silently absent point looks like a gap in the data.
   const point = async (date: string, tries = 2): Promise<{ date: string; b: number; o: number } | null> => {
     try {
+      const covered = ot?.get(date)
+      if (covered) return { date, ...covered }
       if (split) {
         const rows = await readRootRows(env, date)
         if (!rows) return null
