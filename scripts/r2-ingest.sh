@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Daily r2.rbw.sh ingestion: scan the public R2 buckets (ctbk, crashes,
-# jc-taxes) → union path-index + coarse tiers + snapshot → upload to the
-# disk-tree-demo bucket → publish footers to the disk-tree-demo-db D1. The Map
-# (site/) reads that index. Invoked by com.runsascoded.disk-tree.r2-ingest;
-# idempotent per date (a re-run lands a fresh generation and flips the pointer).
+# r2.rbw.sh ingestion — the LOCAL / manual runner. The daily schedule now lives
+# in GitHub Actions (.github/workflows/daily-ingest.yml, 07:15 UTC + manual
+# dispatch); this script stays as a laptop fallback / one-off freshener.
+# Scan the public R2 buckets (ctbk, crashes, jc-taxes) → union path-index +
+# coarse tiers + snapshot → upload to the disk-tree-demo bucket → publish footers
+# to the disk-tree-demo-db D1. The Map (site/) reads that index. Idempotent per
+# date (a re-run lands a fresh generation and flips the pointer).
 #
 # Creds come from .envrc via direnv (R2_HCCS_RO_* for HCCS ctbk/crashes,
 # R2_RO_* for RAC jc-taxes, R2_RW_* to write disk-tree-demo, CF_TOKEN +
