@@ -72,6 +72,7 @@ jobs:
       - name: Publish footers → D1
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           D1_DB_ID: 261d0c80-8f73-442e-979a-4e25725b2271
           D1_DB_NAME: disk-tree-demo-db
           INDEX_VARIANTS: path
