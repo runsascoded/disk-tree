@@ -1,6 +1,6 @@
 # pyrmts adoption: one engine for age / over-time / diff, plus redundant-scan compression
 
-Status: **spec, no code** (2026-09-22). Direction set by the user ("we should probably adopt here, especially for our public demo where scans will be largely redundant"). Design inputs from three pyrmts-session heads-ups (2026-09-22) are folded in; pyrmts has confirmed the plan shape and will review this spec — particularly §3 (the union-path-index → `Pyramid` mapping) and §3.2 (per-location dataset scoping).
+Status: **spec, no code** (2026-09-22). Direction set by the user ("we should probably adopt here, especially for our public demo where scans will be largely redundant"). Design inputs from three pyrmts-session heads-ups are folded in. **Reviewed by pyrmts @ `857dfad` (2026-09-22): "faithful — §3/§4/§5 are exactly the intended shape."** Both open questions are answered and two corrections applied below — **A:** two pyramids (path-index + age), not one; **B:** under per-location scoping `bucket` is the *dataset* scope, not a dim. Next step: draft the two `Pyramid` configs (§3.3) and ping pyrmts to check them against the engine (the two-config split + the hot-shard sort).
 
 Supersedes the deferred age-index item in [`union-of-roots.md`](./union-of-roots.md) (phase 7) and resolves it: cw's "age-index redesign" *became* pyrmts.
 
@@ -48,20 +48,33 @@ The user's demo was the motivating case for this option. Fixed-K grouping ("ever
 - **Read-path gotcha (exponential-only):** an archive's **key moves as it compacts** (the key encodes `first-scan-label + block-size`; a scan starts in a size-1 archive, then merges into size-2, size-4, …). The manifest + `resolveScan` / `seriesAcrossGroups` always route to the *current* archive (self-correcting), **but any embed must resolve `(dataset, scan/path)` through the manifest per read — never cache or hard-code an archive URL.** Cache the query, not the resolved key. `seriesAcrossGroups` re-lists each read (`list_multiscans → filter tile → per-group seriesFor`), so it is automatically current.
 - Reassuring corollary: **dropping individuals after `seal` loses nothing** — `extract_scan` reconstructs any single day's tree from its current archive, so "show the tree as of day X" survives compaction.
 
-### 3.2 The disk-tree mapping: union path-index → `Pyramid` **(pyrmts to review)**
+### 3.2 The disk-tree mapping: union path-index → `Pyramid` **(resolved with pyrmts)**
 
 Our served artifact is a **snapshot** path-index keyed `(path)` with no event-time axis (no created-date `binCol` at the path grain). pyrmts's contract for this is explicit: a **constant `binCol`** (a `dt=0`-style column, as its unit tests construct shards) — consolidation keys on `(binCol, *dims)`, so a constant binCol reduces the logical key to `(*dims)` = `(path)` cleanly. **Precondition satisfied:** the binCol is scan-invariant per key (trivially, it's constant), so a key's `(tier, period)` placement is stable across scans and shards align 1:1.
 
-- **dims:** `path` (+ `bucket` if we scope per location — see below). Per-depth structure stays what the path-index already carries (`depth`, `usr`).
+- **dims:** `path` only. Per-location scoping (below) makes `bucket` the **dataset** scope, **not a dim** (pyrmts **Correction B** — this spec originally had it inverted; bucket-as-dim is what a single *union* dataset would need to keep colliding paths distinct across buckets). Per-depth structure stays what the path-index already carries (`depth`, `usr`).
 - **metrics / monoids:** `b` (bytes, sum), `o` (objects, sum), `c2/c3/c4` (class bytes, sum), `wts`/`wb` (created-weighted, sum) — all additive, so the existing coarse-tier floors (`COARSE_EXPS`) map to pyramid tiers.
-- **tier ladder:** the path-index's coarse tiers (E = 16/20/24 by subtree-byte floor) are a *value*-thresholded ladder, not a *bin*-coarsening ladder — that's the mapping to pin with pyrmts (a tier per floor? or the floor stays a disk-tree-side filter over one pyrmts tier?). **Open question #1.**
+- **tier ladder — resolved: the floors are NOT pyramid tiers; they are a read filter.** A pyrmts tier is a monoid rollup along the bin axis (tier k+1's rows are *combines* of tier k's — cascade / consolidate / canonicalize all rely on that invariant). A byte-floor (E = 16/20/24) is a value-threshold *subset* of the same rows with no combine, so "a tier per floor" would be a category error that makes cascade do the wrong thing. And with a constant `binCol` the path-index pyramid has **exactly one time tier** — there is nothing to ladder. So: **one tier, floors as a read filter**, which pyrmts already makes cheap the idiomatic way: `ColumnFilter` supports `{ col: 'b', range: { min: 2**E, max: Infinity } }` and `fetchShardData` prunes row groups on min/max stats. **Write the hot shard sorted by `b` DESC** (the writer takes a `sort` override) so a floor read becomes a prefix of row groups — no per-floor files, no duplication (this replaces today's `path-index-coarse<E>.parquet` tiers). **Caveat:** MS archives are *path*-sorted (interval contiguity), so floor-pruning does **not** apply to them — but they serve history, not the hot treemap. Hence: **keep the newest scan's individual shard hot — never `drop` the latest**; the read path prefers it for the current treemap (floor-pruned), while MS + diff-index serve history; "tree as of day X" = `extract_scan` (full) then filter, fine for an occasional historical read.
 
 **Dataset scoping — one union dataset vs. one per location. Open question #2, and the federated-scans lever.** Today the ingestion builds **one** union path-index (three buckets grouped as the Map's top cells). pyrmts's guidance is "per-location dataset = its own dyadic ladder." Two shapes:
 
 - **(a) one dataset for the union** — matches today's single index; simplest; one MS ladder + one diff-index. But couples the three buckets' scan cadences and makes "add a bucket / a new cloud location" a re-consolidation.
 - **(b) one dataset per bucket/location** (`ctbk`, `crashes`, `jc-taxes`) — each with its own MS ladder + diff-index; the union Map reads across datasets via the manifest. This is exactly the [federated-scans](./federated-scans.md) north-star (each location consolidates independently; the union reader routes via the manifest) and lets a new location join without touching the others. Cost: the union view composes N dataset reads.
 
-Leaning **(b)** — it is the federated shape and pyrmts's stated intent — pending pyrmts's review of the per-location scoping.
+**Resolved: (b) per-location** (pyrmts agrees). Three refinements from the review:
+
+- The fan-out is **smaller than feared.** A path lives in exactly one bucket, so a per-path over-time read hits **one** dataset — no fan-out at all. Only two *union* reads fan out, and both compose trivially because bucket key-spaces are disjoint: the union root line = **sum** of N bucket roots (additive metrics, N small reads), and the union diff = **concat** of N `diffOverSpan` results (no merge). Since the Map's top cells *are* the buckets, per-dataset results map onto the widget directly.
+- If bucket scan cadences ever differ, "day X" is a **different position per dataset** — resolve labels per dataset via each `index.json` at read time; **never assume aligned positions across datasets.**
+- `bucket` is the dataset scope, not a dim (Correction B above).
+
+### 3.3 Correction A — two pyramids, not one
+
+The path-index and the age index have **different `binCol`s**, so they are **two `Pyramid` configs / two datasets** (per location), not one config serving both:
+
+- **The path-index pyramid** — constant `binCol` (the degenerate-time case): one tier, floors-as-filter (§3.2), hot shard sorted `b` DESC; the **MS store + diff-index run over it**. This is what serves the treemap, the over-time line and the diff-treemap.
+- **The age pyramid** — `binCol` = created-date, a *real* time-bin ladder (like cw's 1h → 8d dense ladder): here tiers genuinely *are* bin-coarsening rollups, so it is standard pyrmts. This is what serves the age chart.
+
+`§5`'s age bullet and `§6` item 3 refer to the age pyramid specifically.
 
 ## 4. Ingest wiring (ours — `daily-ingest.yml`)
 
@@ -70,20 +83,20 @@ After the existing `dt-cloud path-index` build + upload, two **idempotent** post
 1. **MS seal:** `multiscan seal <config>` (`scheme: exponential`) → consolidates the new scan into the dyadic ladder; then sync the routing manifest → D1 **mirroring the row set**.
 2. **Diff-index update:** `pyrmts-engine diffindex update -D <dataset> -k <tile-key> -R <scans-root> -o <index-root> <config>` → appends every not-yet-indexed scan in order (one adjacency changeset + the composed power-of-2 nodes). Layout: `<index-root>/diffidx/<dataset>/index.json` (ordered scan labels) + `L{level}/{i}.parquet` (standard changeset rows: key cols + `{c}__a` / `{c}__b`). Nodes are **append-only / immutable**, so the R2 sync is plain object puts.
 
-Both run per dataset (per §3.2 (b), once per bucket). The existing generation dir (`listing/<date>/index/<gen>/`) keeps serving the *current* subtree/map read until the pyrmts read path replaces it; individuals are only `drop`ped after digest-verify (Phase 2c verify-then-drop).
+Both run **per dataset** — and per §3.3 there are two datasets per location (path-index + age), so per bucket that is two configs × two stages. **Tile-key stability:** `diffindex update -k <tile-key>` with a constant bin means **one nominal period label — pick it once and keep it stable across scans**; it is part of the tile key that *both* the MS store and the diff-index key on, so changing it later orphans history. The existing generation dir (`listing/<date>/index/<gen>/`) keeps serving the *current* subtree/map read until the pyrmts read path replaces it; individuals are only `drop`ped after digest-verify (Phase 2c verify-then-drop), and **the latest scan is always exempt from `drop`** (it stays the hot, floor-pruned shard — §3.2).
 
 ## 5. Serve wiring (ours — `site/functions`, the base; inherited by cw/gcs)
 
 - **Over-time line** (`/api/series`): `pyrmts-cfw` + `MultiScanD1Index` for the D1-backed manifest; `resolveScan` / `readMultiScan` for routing; `seriesAcrossGroups` for a per-path line across archives. Per-read manifest resolution (never a cached archive URL — §3.1). Footer-pruned per-path reads stay O(pruned).
 - **Diff-treemap** (`/api/diff`): `diffOverSpan(scans, schema, a, b, loadNode)` from `pyrmts` — `scans = parseDiffIndexManifest(index.json bytes)`; `loadNode(level, i)` = our R2 fetch of `L{level}/{i}.parquet` → `readChangesetNode(bytes)`. Returns changeset rows (the same shape `diffTables` gives), sorted `(*dims, binCol)`; reversed pairs (a after b) are handled (before/after swapped). **This read is NOT per-key prunable** — a changeset is cross-key; it prunes by *span* (only the jump nodes), which is the whole win. Do **not** try to footer-prune it per path the way the over-time read does.
 - **"Tree as of day X"** (subtree/map for a historical scan): `extract_scan` from the current archive once individuals are dropped.
-- The age chart (currently hidden on r2) un-hides once the pyramid serves the created-date tiers.
+- The age chart (currently hidden on r2) un-hides once the **age pyramid** (its own config, §3.3) serves the created-date tiers.
 
 ## 6. What this retires (in order, each behind a working replacement)
 
 1. the over-time index (`_lib/overTime.ts`, `overtime.py`, `api/series.ts` additions) → MS store reads,
 2. the persisted diff-index backend (`/api/compare` parquet) → `diffOverSpan`,
-3. `write_age_pyramid` / `age-pyramid-<bin>.parquet` → the pyramid's created-date tiers,
+3. `write_age_pyramid` / `age-pyramid-<bin>.parquet` → the **age pyramid**'s created-date tiers (a separate config from the path-index pyramid, §3.3),
 4. eventually the per-generation full path-index tiers → `extract_scan` + the MS store (storage collapses by the §1 factors).
 
 ## 7. Phases
@@ -91,7 +104,7 @@ Both run per dataset (per §3.2 (b), once per bucket). The existing generation d
 1. **Pin the mapping with pyrmts** (this spec's §3.2 + open questions #1/#2). No code.
 2. **Pyramid config + ingester** for the r2 datasets (per bucket); wire `multiscan seal` + `diffindex update` into `daily-ingest.yml` (idempotent stages), R2 puts + mirrored D1 manifest. Individuals kept (no `drop`) until the read path is proven.
 3. **Serve path in `site/functions`**: over-time via `pyrmts-cfw` manifest routing; diff via `diffOverSpan`. Behind a flag / parallel endpoint until byte-equivalent to today's answers.
-4. **Cut over + retire** per §6; enable `drop: true` after verify-then-drop; un-hide the age chart.
+4. **Cut over + retire** per §6; enable `drop: true` after verify-then-drop **with the latest scan exempt** (it stays the hot, floor-pruned shard — §3.2); un-hide the age chart once the age pyramid serves.
 
 ## 8. Coordination
 
