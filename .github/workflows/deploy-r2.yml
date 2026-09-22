@@ -57,7 +57,7 @@ jobs:
       - name: dt_cloud tests
         run: |
           cd cloud
-          uv sync
+          uv sync --group test
           uv run pytest tests/ -q
 
   deploy:
