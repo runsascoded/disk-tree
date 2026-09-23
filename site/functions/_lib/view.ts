@@ -222,7 +222,13 @@ export async function readRootAgg(env: Env, o: { date: string; path: string; len
   }
   const ol = lens ? await ownerLensFor(env, date, lens, o.by) : null
   const rows = await rootRows(lens ? 'user' : 'path', lens)
-  if (rows == null) return null
+  // No tier at all → null. No rows for an *unlensed* path (its `path`-tier read
+  // came back empty) → the path isn't in this scan, so null (a gap on the
+  // over-time chart — e.g. a bucket's scans before it joined the scan set),
+  // distinct from an owner/class slice that filters an existing path to zero (a
+  // real 0, kept — those rows are non-empty). A lens reads a pre-filtered `user`
+  // tier where empty can't tell "absent" from "owns nothing", so it's unchanged.
+  if (rows == null || (!lens && rows.length === 0)) return null
   const mine = newAgg()
   for (const r of rows) if (ownerOk(r.usr, owner)) merge(mine, classRow(r, o.classes))
   if (!ol) return { b: mine.b, o: mine.o }

@@ -28,3 +28,7 @@ One-line change: when a path's tier read returns empty rows for an **unlensed** 
 ## Sequence
 
 Land 1 + 2 on `cloud`, tell me, and I'll branch `cw-s3-next` off the updated `dt/cloud` and re-apply only the deployment delta (`job/`, `iac/aws`, Dockerfile, the digest commit, cw specs) — no chart conflicts for me to resolve blind. The cw-s3.oa.dev Pages cutover + `cw-s3-legacy` tag I'll do with Ryan at the keyboard (I can't CIC the rebased branch from here — wrangler needs his Cloudflare OAuth).
+
+## Landed (disk-tree, 2026-09-23)
+
+Both commits ported onto `cloud` as one adapted CP. `04a0a56` and the `series.ts` / `series.test.ts` / `SizeOverTime.tsx` parts of `d830571` applied clean; `TimeSeries.tsx` needed one merge (cloud's tooltip iterates `hoverPoints`, cw's `tipRows` — kept cloud's loop with `(formatTipX ?? formatX)(hoverX)`). `1ece90a` skipped as cw-only. Verified: packages/react tsc + 94 tests, site tsc + 128 tests.

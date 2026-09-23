@@ -4,12 +4,13 @@ import { TimeSeries } from '@disk-tree/react'
 import type { Annotation, Series as TsSeries } from '@disk-tree/react'
 import { DEFAULT_PALETTE } from '@rdub/treemap'
 import { useQuery } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { boolParam, useUrlState } from 'use-prms'
 import { shortName } from './UserChip'
 import { useUnits } from './units'
 import { Skeleton } from './Busy'
-import { stackSeries, youngestGenesis } from './series'
+import { pickAnnotations, stackSeries, youngestGenesis } from './series'
+import { DAY, fmtScan } from './scan'
 import type { Band } from './series'
 import { stringParam } from 'use-prms'
 
@@ -37,6 +38,11 @@ const unitTicks = (min: number, max: number, base: number, count = 4): number[] 
   for (let v = Math.ceil(min / step) * step; v <= max + step / 100; v += step) out.push(v)
   return out
 }
+
+// Default prominence-suppression radius for the local-extrema callouts, in days
+// (≈6 scans at the 12-hourly cadence): peaks/dips within this of a more
+// prominent one collapse to it.
+const DEFAULT_RADIUS_DAYS = 3
 
 type YFrom = 'data' | 'zero'
 type Layout = 'stacked' | 'lines'
@@ -100,6 +106,11 @@ export const dateOfX = (x: number) => {
   return iso.slice(11, 16) === '00:00' ? iso.slice(0, 10) : `${iso.slice(0, 10)}T${iso.slice(11, 13)}${iso.slice(14, 16)}`
 }
 const fmtX = (x: number) => new Date(x).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })
+// The tooltip's x: the scan's canonical label (`fmtScan`) — a sub-daily scan
+// shows its local 12-hour time with a bare a/p (`9/23 8:01a`), exactly like the
+// scan dropdown/header; a date-only scan stays a bare date. Distinguishes the
+// two scans of a day, which `fmtX`'s date-only axis label can't.
+const fmtXTip = (x: number) => fmtScan(dateOfX(x))
 // A scan's instant: `YYYY-MM-DD` = UTC midnight, `YYYY-MM-DDTHHMM` = that
 // UTC time. Two scans a day must not share an x (the bands key by x, and a
 // shared x drew the total as a vertical step against the band).
@@ -139,6 +150,15 @@ export function SizeOverTime({ scans, prefix, user, pool, onPickDate, onBrush, w
   const [xrP, setXrP] = useUrlState('xr', stringParam())
   const xRange: XRange = xrP === '1w' || xrP === '1m' ? xrP : 'all'
   const setXRange = (r: XRange) => setXrP(r === 'all' ? undefined : r)
+  // Local-peak/dip callouts (specs/obs-axis-indexing.md): on by default, radius
+  // is the prominence-suppression distance in days (`?ex=0` off; `?exr=<days>`).
+  const [exP, setExP] = useUrlState('ex', stringParam())
+  const extrema = exP !== '0'
+  const setExtrema = (on: boolean) => setExP(on ? undefined : '0')
+  const [exrP, setExrP] = useUrlState('exr', stringParam())
+  const radiusDays = exrP && !Number.isNaN(+exrP) ? +exrP : DEFAULT_RADIUS_DAYS
+  const setRadiusDays = (d: number) => setExrP(d === DEFAULT_RADIUS_DAYS ? undefined : String(d))
+  const [gearOpen, setGearOpen] = useState(false)
 
   // The store root, unscoped: one trace per root (specs/root-geneses.md §2).
   const split = !prefix && !user && !pool && !paths?.length && !filterLabel
@@ -196,24 +216,17 @@ export function SizeOverTime({ scans, prefix, user, pool, onPickDate, onBrush, w
   // instead of drawing an empty axis.
   const allZero = series.length === 1 && series[0].points.every(p => p.y === 0)
 
-  // Callouts at the points a reader looks for first: the ends of the series
-  // and its extremes. Coinciding roles (first is also max) share one label.
-  // With roots they annotate the total.
+  // Callouts at the points a reader looks for first: the ends of the series,
+  // its extremes, and — when a range is brushed — that range's own endpoints
+  // (the size at the start/end of the selection). Coinciding roles (first is
+  // also max; window-end is also last) share one label. With roots they
+  // annotate the total. Picking is a pure helper (`pickAnnotations`, tested).
   const annotations = useMemo((): Annotation[] => {
     const pts = roots.length ? total : series.length === 1 ? series[0].points : []
-    if (pts.length < 2) return []
-    let lo = pts[0]
-    let hi = pts[0]
-    for (const p of pts) {
-      if (p.y < lo.y) lo = p
-      if (p.y > hi.y) hi = p
-    }
-    const picks = new Map<Pt, boolean>() // point → below?
-    picks.set(hi, false)
-    picks.set(lo, true)
-    for (const p of [pts[0], pts[pts.length - 1]]) if (!picks.has(p)) picks.set(p, p.y < (lo.y + hi.y) / 2)
-    return [...picks].map(([p, below]) => ({ x: p.x, y: p.y, label: fmtBytes(p.y), below }))
-  }, [series, fmtBytes])
+    const winX = win ? [xOfScan(win[0]), xOfScan(win[1])] as [number, number] : undefined
+    const radius = extrema ? radiusDays * DAY : undefined
+    return pickAnnotations(pts, winX, radius).map(c => ({ x: c.x, y: c.y, label: fmtBytes(c.y), below: c.below }))
+  }, [series, total, roots, win, extrema, radiusDays, fmtBytes])
 
   const yTickValues = useMemo(() => {
     const ys = series.flatMap(s => s.points.map(p => p.y))
@@ -251,7 +264,33 @@ export function SizeOverTime({ scans, prefix, user, pool, onPickDate, onBrush, w
         <XRangeToggle v={xRange} set={setXRange} />
         <YFromToggle v={yFrom} set={setYFrom} />
         {roots.length > 0 && <LayoutToggle v={layout} set={setLayout} />}
+        <Explain text="Annotation options">
+          <button
+            type="button"
+            className={`gear${gearOpen ? ' on' : ''}`}
+            aria-label="annotation options"
+            aria-expanded={gearOpen}
+            onClick={() => setGearOpen(o => !o)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', font: 'inherit', color: 'inherit', opacity: gearOpen ? 1 : 0.55, padding: '0 2px' }}
+          >⚙</button>
+        </Explain>
       </h2>
+      {gearOpen && (
+        <div className="over-time-config" style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', margin: '0 0 6px', fontSize: '0.85em', opacity: 0.92 }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={extrema} onChange={e => setExtrema(e.target.checked)} />
+            mark local peaks &amp; dips
+          </label>
+          <label
+            title="Prominence-suppression radius, in days: nearby peaks/dips collapse to the more prominent one"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 8, opacity: extrema ? 1 : 0.4 }}
+          >
+            radius
+            <input type="range" min={0.5} max={30} step={0.5} value={radiusDays} disabled={!extrema} onChange={e => setRadiusDays(+e.target.value)} />
+            <b style={{ minWidth: 30, textAlign: 'right' }}>{radiusDays}</b>
+          </label>
+        </div>
+      )}
       {seriesQ.isError && <p className="sub"><i>series unavailable</i></p>}
       {allZero ? (
         <p className="loading">
@@ -267,6 +306,7 @@ export function SizeOverTime({ scans, prefix, user, pool, onPickDate, onBrush, w
           getY0={stacked ? p => p.y0 ?? 0 : undefined}
           formatY={fmtBytes}
           formatX={fmtX}
+          formatTipX={fmtXTip}
           yTickValues={yTickValues}
           yFrom={yFrom}
           yLabel="stored bytes"

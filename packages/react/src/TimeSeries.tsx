@@ -52,6 +52,10 @@ export interface TimeSeriesProps<T> {
   getY0?: (p: T) => number
   /** Format an X tick (default: `new Date(x).toLocaleDateString()`). */
   formatX?: (x: number) => string
+  /** Format the X value in the hover tooltip; defaults to `formatX`. Lets the
+   *  tooltip show finer granularity (e.g. an intra-day scan's time) than the
+   *  axis ticks, which stay coarse. */
+  formatTipX?: (x: number) => string
   /** Format a Y tick / tooltip value. */
   formatY?: (y: number) => string
   /** `linear` (default) or `log`. */
@@ -122,6 +126,7 @@ export function TimeSeries<T>({
   getY,
   getY0,
   formatX = x => new Date(x).toLocaleDateString(),
+  formatTipX,
   formatY = y => y.toLocaleString('en-US'),
   yScale = 'linear',
   yFrom = 'zero',
@@ -503,7 +508,7 @@ export function TimeSeries<T>({
             whiteSpace: 'nowrap',
           }}
         >
-          <div style={{ opacity: 0.7, marginBottom: 2 }}>{formatX(hoverX)}</div>
+          <div style={{ opacity: 0.7, marginBottom: 2 }}>{(formatTipX ?? formatX)(hoverX)}</div>
           {hoverPoints.map((p, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ display: 'inline-block', width: 8, height: 8, background: p.color, borderRadius: 2 }} />
