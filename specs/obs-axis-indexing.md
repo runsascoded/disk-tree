@@ -85,12 +85,20 @@ archival compaction). Refinements:
    durable SCD-2 interval substrate (Phase 2 reuses it), since the churn is so
    low (measured 1.0016 intervals/path over 15 real scans) that intervals cost
    ≈ one tier for the whole history. Shipped shape:
-   - **Producer** `dt_cloud.overtime.write_over_time_index` (DuckDB, no pyrmts
-     hot-path dep): rolls each scan's `path-index` to `(depth, path)` totals
-     (owner slices summed), synthesizes a depth-0 fleet root per scan, and
-     SCD-2-encodes each path's `(b, o)` stream into pyrmts' `__scan_lo/__scan_hi`
-     layout, sorted `(depth, path, __scan_lo)`. A run breaks on value change or
-     a scan-index gap (absence ≠ `b=0`). CLI `over-time-write`.
+   - **Producer** `dt_cloud.overtime.write_over_time_index`: the SCD-2 interval
+     consolidation is **pyrmts' generic kernel** (`pyrmts_engine.multiscan_duckdb
+     .consolidate_parquet_duckdb` — vectorized gaps-and-islands over
+     `read_parquet`, out-of-core; the primitives live in pyrmts, not cw). cw
+     supplies only glue: roll each scan's `path-index` to `(depth, path)` totals
+     (owner slices summed) + a depth-0 fleet-root row, keyed as
+     `Pyramid(binCol='depth', dims=[path], metrics=count(b,o))` → exactly
+     `(depth, path, b, o, __scan_lo, __scan_hi)`, sorted `(depth, path,
+     __scan_lo)`. A `con` with a gcs secret reads `gs://` shards directly
+     (out-of-core, no download). pyrmts pinned as the optional `[overtime]` extra
+     (kept out of the git-less daily-scan image). CLI `over-time-write`.
+     *(An earlier cw hand-rolled DuckDB producer OOM'd materializing the full
+     82-scan grid — pyrmts' out-of-core kernel is the fleet-scale path; both
+     produce byte-identical intervals.)*
    - **Storage**: a cross-scan **singleton** — D1 variant `over-time` under the
      *latest* scan it was built for (reader takes the max-date pointer); the
      ordered scan list rides an `over-time.scans.json` sidecar (the D1-footer
@@ -103,10 +111,29 @@ archival compaction). Refinements:
      existing per-scan reads. So `series.json` is already effectively retired
      (the endpoint computes it) and the win is pure read-cost collapse:
      N point-reads across N generations → one contiguous read + cached sidecar.
-2. **Diff-index** (changeset half — SCD-2 adjacent-scan deltas, produced by the
-   DuckDB producer). `/api/diff` reads the intervals crossing the window
-   (O(changes)) instead of joining two full `path-index`es. dTM gets faster +
-   sparse.
+     cw does the **footer-pruned** row fetch (`readPoint`, only the `(depth,path)`
+     row groups — pyrmts' whole-file `readMultiScan` won't fit a fleet index in a
+     128 MB isolate); the interval→line expansion is pyrmts' **`seriesFor`** (dist
+     pin `7cf5d54`), fed a key-filtered *partial* `MultiScan` (that key's rows +
+     the group's full `scans` list — the scans list is the load-bearing part).
+     **Capped-K groups (the shipped shape, not the monolith):** the index is
+     sealed K=16-scan MS groups (pyrmts `multiscan consolidate --group-size`,
+     manifest → `pyramid_multiscans` via `sync_d1`); the reader routes with
+     `MultiScanD1Index`/`resolveScan` and stitches a line with
+     `seriesAcrossGroups` (per-group pruned `load`); the unsealed ≤K tip is the
+     per-scan fallback. Seal-at-K (immutable, drop-after-digest-verify), policy
+     cw-side.
+2. **Diff-index** (changeset half — SCD-2 adjacent-scan deltas). `/api/diff`
+   reads the intervals crossing the window (O(changes)) instead of joining two
+   full `path-index`es. dTM gets faster + sparse. Served by pyrmts'
+   `diffScans`/`diffTables` + `diffAcrossGroups` over the same MS groups.
+   **Prune asymmetry (don't design the diff reader around the over-time prune):**
+   over-time is per-key so its `load` prunes by *both* key and scan-span (one
+   `(depth,path)`'s rows); a diff/changeset is inherently **cross-key** (which
+   paths appeared/vanished/moved across the span), so `diffAcrossGroups` prunes
+   only by **scan-span** (groups/intervals crossing the window) and must read
+   *all* keys with a boundary in that span — not one key's rows. So the diff
+   reader needs a span-pruned (not key-pruned) `load`.
 3. **Dyadic hierarchy / consolidation integration** — bound far-apart diffs at
    O(log d); wire pyrmts' consolidation CLI for archival (drop old per-scan
    copies once digest-verified).

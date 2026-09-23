@@ -1,81 +1,63 @@
 // The cross-scan over-time index reader (specs/obs-axis-indexing.md Phase 1):
-// one contiguous `(depth, path)` read of the SCD-2 interval singleton, expanded
-// into a `(b, o)` point per scan the index spans — replacing `/api/series`'s
-// one point read per scan generation. A singleton over the *observation* axis,
-// pointed to in D1 as variant `over-time` under the latest scan it was built
-// for; the ordered scan list rides in an `over-time.scans.json` sidecar (the
-// D1-footer read path rebuilds row-group stats but not KV metadata).
+// a path's size-over-time line stitched across sealed capped-K multi-scan
+// groups, replacing `/api/series`'s one point read per scan generation.
+//
+// Routing + expansion are pyrmts primitives; cw supplies only the range IO.
+// `MultiScanD1Index.listMultiScans('over-time')` reads the group manifest
+// (`pyramid_multiscans`); `seriesAcrossGroups` orders the groups by scan span
+// and, per group, calls cw's `load` — a *footer-pruned* `readPoint` of just the
+// queried `(depth,path)` row groups, returned as a key-filtered partial
+// `MultiScan` (that key's interval rows + the group's full `scans` list, which
+// is the load-bearing part). So a line is ⌈N/K⌉ pruned reads, not one giant
+// file; the unsealed ≤K-scan tip is served by `/api/series`'s per-scan fallback.
 import type { Env } from './auth.js'
-import { indexDir, indexKey, makeStore, num, openIndex, readPoint, str } from './index.js'
+import { openIndex, readPoint } from './index.js'
+import { type Dim, type Metric, type MultiScan, type MultiScanIndexEntry, type Pyramid, seriesAcrossGroups } from 'pyrmts'
+import { MultiScanD1Index } from 'pyrmts-cfw'
 
 const COLS = ['depth', 'path', 'b', 'o', '__scan_lo', '__scan_hi']
 
-/** One SCD-2 interval row: `(b, o)` held over member scans `[lo, hi]`. */
-export interface Interval { b: number; o: number; lo: number; hi: number }
-
-/** Expand interval rows against the ordered scan list into `date → {b,o}` —
- * each interval paints its constant value onto scans `[lo, hi]`. A path absent
- * from a scan simply has no interval covering it, so that date gets no point. */
-export function expandIntervals(rows: Interval[], scans: string[]): Map<string, { b: number; o: number }> {
-  const out = new Map<string, { b: number; o: number }>()
-  for (const r of rows) {
-    for (let i = r.lo; i <= r.hi; i++) {
-      const date = scans[i]
-      if (date !== undefined) out.set(date, { b: r.b, o: r.o })
-    }
-  }
-  return out
+// cw's over-time shape as a pyrmts logical schema: key `(depth, path)`, state
+// `(b, o)` (mirrors `over_time_pyramid()` in the producer).
+type Schema = Pick<Pyramid, 'binCol' | 'dims' | 'metrics'>
+const SCHEMA: Schema = {
+  binCol: 'depth',
+  dims: [{ name: 'path', type: 'string' } as Dim],
+  metrics: [{ name: 'b', monoid: 'count' } as Metric, { name: 'o', monoid: 'count' } as Metric],
 }
 
-/** The latest scan date carrying an `over-time` pointer (the singleton is
- * rebuilt+re-synced under the newest scan each run); null when none synced. */
-export async function latestOverTimeDate(env: Env): Promise<string | null> {
-  if (!env.DB) return null
-  const r = await env.DB.prepare("SELECT date FROM index_schema WHERE variant = 'over-time' ORDER BY date DESC LIMIT 1").first<{ date: string }>()
-  return r?.date ?? null
-}
-
-const scansCache = new Map<string, Promise<string[]>>()
-
-/** The ordered scan list from the sidecar beside the index (cached per dir). */
-async function overTimeScans(env: Env, dir: string): Promise<string[]> {
-  let p = scansCache.get(dir)
-  if (!p) {
-    p = (async () => {
-      const key = indexKey(dir, 'over-time').replace(/over-time\.parquet$/, 'over-time.scans.json')
-      const { bytes } = await makeStore(env).get(key)
-      return JSON.parse(new TextDecoder().decode(bytes)) as string[]
-    })()
-    scansCache.set(dir, p)
-  }
-  try {
-    return await p
-  } catch (e) {
-    scansCache.delete(dir)
-    throw e
-  }
-}
-
-/** A path's `date → {b,o}` line from the over-time index, or null when the
- * index isn't synced or doesn't hold the path (caller falls back to per-scan
- * reads). One contiguous point read + a cached sidecar fetch. */
+/** A path's `scan → {b,o}` line from the over-time group manifest, or null when
+ * no groups are synced or the path is absent everywhere (caller falls back to
+ * per-scan reads). Each group is a footer-pruned point read; absent (monoid-
+ * identity `0/0`) scans are dropped so the chart keeps gap semantics. */
 export async function readOverTime(env: Env, path: string): Promise<Map<string, { b: number; o: number }> | null> {
-  const date = await latestOverTimeDate(env)
-  if (!date) return null
-  const dir = await indexDir(env, date, 'over-time')
-  if (!dir) return null
-  const depth = path === '' ? 0 : path.split('/').length
-  let raw: Record<string, unknown>[]
+  if (!env.DB) return null
+  let entries: MultiScanIndexEntry[]
   try {
-    raw = await readPoint(await openIndex(env, date, 'over-time'), depth, path, COLS)
-  } catch (e) {
-    if (/not synced/.test((e as Error).message)) return null
-    throw e
+    entries = await new MultiScanD1Index(env.DB).listMultiScans('over-time')
+  } catch {
+    return null // manifest table absent (not migrated) → fallback
   }
-  if (!raw.length) return null
-  const scans = await overTimeScans(env, dir)
-  const rows: Interval[] = raw
-    .filter(r => str(r.path) === path)
-    .map(r => ({ b: num(r.b), o: num(r.o), lo: num(r.__scan_lo), hi: num(r.__scan_hi) }))
-  return expandIntervals(rows, scans)
+  if (!entries.length) return null
+  const depth = path === '' ? 0 : path.split('/').length
+  // load(archiveKey): footer-pruned fetch of one group's rows for this key, as a
+  // partial MultiScan. The group's dir/date is its archive key (how the producer
+  // synced each group's footer); its scans list comes from the manifest entry.
+  const byKey = new Map(entries.map(e => [e.key, e]))
+  const load = async (archiveKey: string): Promise<MultiScan> => {
+    const entry = byKey.get(archiveKey)
+    if (!entry) return { rows: [], scans: [], encoder: 'interval' }
+    const rows = await readPoint(await openIndex(env, archiveKey, 'over-time'), depth, path, COLS)
+    return { rows: rows as MultiScan['rows'], scans: entry.scans, encoder: 'interval' }
+  }
+  const pts = await seriesAcrossGroups(entries, SCHEMA, { depth, path }, load)
+  const out = new Map<string, { b: number; o: number }>()
+  for (const p of pts) {
+    const b = num(p.state.b)
+    const o = num(p.state.o)
+    if (b !== 0 || o !== 0) out.set(p.scan, { b, o })
+  }
+  return out.size ? out : null
 }
+
+const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number) ?? 0)

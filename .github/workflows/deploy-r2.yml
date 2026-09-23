@@ -58,7 +58,7 @@ jobs:
       - name: dt_cloud tests
         run: |
           cd cloud
-          uv sync --group test
+          uv sync --group test --extra overtime   # `dt_cloud.overtime` imports pyrmts
           uv run pytest tests/ -q
 
   deploy:

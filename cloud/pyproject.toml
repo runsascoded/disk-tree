@@ -23,6 +23,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The over-time index producer (`dt_cloud.overtime`) consolidates via pyrmts'
+# generic multiscan kernel. Optional — kept out of the base deps so the daily
+# scan image (git-less python:slim, tarball deps) is unaffected; installed only
+# where the over-time build runs (`pip install ./cloud[overtime]`). Bump the SHA
+# to update. `pyrmts.overtime` imports are lazy (inside the CLI command), so the
+# base CLI works without this extra.
+overtime = [
+    "pyrmts @ git+https://github.com/runsascoded/pyrmts@71cbfd5#subdirectory=python/pyrmts",
+    "pyrmts-engine[duckdb] @ git+https://github.com/runsascoded/pyrmts@71cbfd5#subdirectory=python/pyrmts_engine",
+]
 wandb = ["wandb>=0.19"]
 s3 = ["boto3>=1.34"]  # CoreWeave S3 (CAIOS) mark & sweep executor
 sheets = ["gspread>=6.0"]  # `sheet-push` → Google Sheets (ADC auth)

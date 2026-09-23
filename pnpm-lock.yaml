@@ -115,11 +115,11 @@ importers:
         specifier: ^1.27.1
         version: 1.30.0
       pyrmts:
-        specifier: github:runsascoded/pyrmts#320dca972aadecd4a6091e64e9bac084787e74ec&path:/js/packages/pyrmts
-        version: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts(react@19.2.8)
+        specifier: github:runsascoded/pyrmts#ad35ff808beb8bbbe8d4fb7dddb894de4421bb62&path:/js/packages/pyrmts
+        version: https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts(react@19.2.8)
       pyrmts-cfw:
-        specifier: github:runsascoded/pyrmts#320dca972aadecd4a6091e64e9bac084787e74ec&path:/js/packages/pyrmts-cfw
-        version: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts-cfw(react@19.2.8)
+        specifier: github:runsascoded/pyrmts#ad35ff808beb8bbbe8d4fb7dddb894de4421bb62&path:/js/packages/pyrmts-cfw
+        version: https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts-cfw(react@19.2.8)
       react:
         specifier: ^19.1.0
         version: 19.2.8
@@ -2420,6 +2420,10 @@ packages:
   hyparquet@1.30.0:
     resolution: {integrity: sha512-HlvW+Luuo2RtvTzDnTJN4F2rXxKQMcmAVNnT1khytf1MR/vDS6ALeYyWwbU1X9rrOLLIG0fjRa0Y5q3XxvOXdA==}
 
+  hyparquet@https://codeload.github.com/runsascoded/hyparquet/tar.gz/0fc22700f612f32c8a6ded303bfc8d4adcc57753:
+    resolution: {tarball: https://codeload.github.com/runsascoded/hyparquet/tar.gz/0fc22700f612f32c8a6ded303bfc8d4adcc57753}
+    version: 1.31.1-dist.d999e10
+
   iconv-lite@0.6.3:
     resolution: {integrity: sha512-4fCk79wshMdzMp2rH06qWrJE4iolqLhCUH+OiuIgU++RB0+94NlDL81atO7GX55uUKueo0txHNtvEyI6D7WdMw==}
     engines: {node: '>=0.10.0'}
@@ -2937,12 +2941,12 @@ packages:
     engines: {node: '>=22.12.0'}
     hasBin: true
 
-  pyrmts-cfw@https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts-cfw:
-    resolution: {path: /js/packages/pyrmts-cfw, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec}
+  pyrmts-cfw@https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts-cfw:
+    resolution: {path: /js/packages/pyrmts-cfw, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62}
     version: 0.0.0
 
-  pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts:
-    resolution: {path: /js/packages/pyrmts, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec}
+  pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts:
+    resolution: {path: /js/packages/pyrmts, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62}
     version: 0.0.0
     peerDependencies:
       react: '>=18'
@@ -5683,6 +5687,8 @@ snapshots:
 
   hyparquet@1.30.0: {}
 
+  hyparquet@https://codeload.github.com/runsascoded/hyparquet/tar.gz/0fc22700f612f32c8a6ded303bfc8d4adcc57753: {}
+
   iconv-lite@0.6.3:
     dependencies:
       safer-buffer: 2.1.2
@@ -6434,15 +6440,15 @@ snapshots:
       - utf-8-validate
       - yauzl
 
-  pyrmts-cfw@https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts-cfw(react@19.2.8):
+  pyrmts-cfw@https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts-cfw(react@19.2.8):
     dependencies:
-      pyrmts: https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts(react@19.2.8)
+      pyrmts: https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts(react@19.2.8)
     transitivePeerDependencies:
       - react
 
-  pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/320dca972aadecd4a6091e64e9bac084787e74ec#path:/js/packages/pyrmts(react@19.2.8):
+  pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts(react@19.2.8):
     dependencies:
-      hyparquet: 1.30.0
+      hyparquet: https://codeload.github.com/runsascoded/hyparquet/tar.gz/0fc22700f612f32c8a6ded303bfc8d4adcc57753
       yaml: 2.9.1
     optionalDependencies:
       react: 19.2.8

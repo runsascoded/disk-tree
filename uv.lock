@@ -568,6 +568,9 @@ gcs = [
 mem = [
     { name = "memray" },
 ]
+notify = [
+    { name = "thrds" },
+]
 r2 = [
     { name = "boto3" },
     { name = "fsspec" },
@@ -617,11 +620,12 @@ requires-dist = [
     { name = "s3fs", marker = "extra == 'r2'", specifier = ">=2024.10" },
     { name = "s3fs", marker = "extra == 's3'", specifier = ">=2024.10" },
     { name = "sqlalchemy" },
+    { name = "thrds", marker = "extra == 'notify'" },
     { name = "tqdm" },
     { name = "utz" },
     { name = "waitress", marker = "extra == 'app'" },
 ]
-provides-extras = ["app", "dev", "mem", "gcs", "s3", "r2", "bulk"]
+provides-extras = ["app", "dev", "mem", "notify", "gcs", "s3", "r2", "bulk"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]
@@ -660,6 +664,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c6/5f/87e43af2e4a0135f9675449563e7c2f9b6f1fe6a2d1691c96b091f3904dd/duckdb-1.4.3-cp314-cp314-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1b35491db98ccd11d151165497c084a9d29d3dc42fc80abea2715a6c861ca43d", size = 20497138, upload-time = "2025-12-09T10:59:01.241Z" },
     { url = "https://files.pythonhosted.org/packages/94/41/abec537cc7c519121a2a83b9a6f180af8915fabb433777dc147744513e74/duckdb-1.4.3-cp314-cp314-win_amd64.whl", hash = "sha256:23b12854032c1a58d0452e2b212afa908d4ce64171862f3792ba9a596ba7c765", size = 12836056, upload-time = "2025-12-09T10:59:03.388Z" },
     { url = "https://files.pythonhosted.org/packages/b1/5a/8af5b96ce5622b6168854f479ce846cf7fb589813dcc7d8724233c37ded3/duckdb-1.4.3-cp314-cp314-win_arm64.whl", hash = "sha256:90f241f25cffe7241bf9f376754a5845c74775e00e1c5731119dc88cd71e0cb2", size = 13527759, upload-time = "2025-12-09T10:59:05.496Z" },
+]
+
+[[package]]
+name = "emoji"
+version = "2.16.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/34/01/a25a9c13e2f8945d06b219e08e88a5dd8a504ad1a79f872f25d6814f498c/emoji-2.16.0.tar.gz", hash = "sha256:ff9e9b1c48389ef78ed1787e7693c555e84e6bb9bac16be1fd65e1616dbf80c8", size = 617905, upload-time = "2026-09-16T19:47:57.051Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fd/8a/75e3177f374877b19dd3112820b071836ad1100f9f58424630b4783519bc/emoji-2.16.0-py3-none-any.whl", hash = "sha256:c4230d80640def9071599ff56b1b5950fe13a2a94c0da98c5deab12431b24330", size = 610912, upload-time = "2026-09-16T19:47:55.507Z" },
 ]
 
 [[package]]
@@ -2542,6 +2555,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/97/8c/774b53a1256fe2649e708b634334d5ce68568d178e55cf3099265c639051/textual-6.9.0.tar.gz", hash = "sha256:49201129a21f65cc16003ce3855cd941a4de7d58eac9489d0e390ba501d712b6", size = 1582278, upload-time = "2025-12-14T17:15:43.03Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/3c/76b607e07d5d63d32d4c4e2803f392913e8e07d5a489fa46f5c25e554ea9/textual-6.9.0-py3-none-any.whl", hash = "sha256:5ded2824fcfc7311b09ac440abb6fe248b3c1431d0403dc0d096795c4f18303c", size = 714791, upload-time = "2025-12-14T17:15:41.287Z" },
+]
+
+[[package]]
+name = "thrds"
+version = "0.5.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "emoji" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e8/2c/f8e177206aff2e4e6f1b1628d4903a458786febf6b5f0dbeffdb00ac4105/thrds-0.5.0.tar.gz", hash = "sha256:fbaa078b721ebe62c456f8d103998e93f4dae37e02281f73b26a8509039d93b0", size = 195831, upload-time = "2026-08-12T02:11:27.416Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9b/e5/92b6f0b62fe145bfc194f12e23d65d956313f373227a5caa69516951b4a4/thrds-0.5.0-py3-none-any.whl", hash = "sha256:9fff5fea566ec60373f3854e84571e76663e18096e691e68addd290954f66f8c", size = 67747, upload-time = "2026-08-12T02:11:26.239Z" },
 ]
 
 [[package]]
