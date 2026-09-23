@@ -14,6 +14,7 @@ name: r2.rbw.sh
 on:
   push:
     branches: [cloud, dev]
+    paths-ignore: ['specs/**']   # spec-only commits don't need a test run + redeploy
   pull_request:
     branches: [cloud]
 
