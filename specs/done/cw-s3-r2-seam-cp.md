@@ -1,5 +1,7 @@
 # CP manifest: cw-s3 → `cloud` — store seam + `publish-r2` (2026-09-23)
 
+**Landed on `cloud` (2026-09-23):** `1edb394` → `79ce59f` (`storeTarget` + `v1/files`/`todo` on the seam; `storeCreds`/`storeReady` + the readiness guards were already here; `cw-l2/` and `cw-sweep/` dropped from the allow-lists — a cw deploy sets `STORE_PREFIXES`), `a602991` → `c7da7f6` (`publish-r2`, with the served-subset layout parameterized: `-s`/`$SNAPSHOTS_SUBDIR` for the snapshots subdir, `-l`/`$LAYER2_PREFIX` as a `{scan}` template defaulting to the base's `listing/{scan}/index/`; cw passes `-s cw -l 'cw-l2/{scan}/'`). `541de55` skipped: `cloud/uv.lock` here already pins pyarrow 22. The IaC notes below stay open for the `cfn` extraction. CP cursor: cw-s3 `aa0e97b`.
+
 From cw-s3 (`~/c/oa/marin-gcs-usage/wt/cw-s3`, branch `cw-s3`, HEAD `aa0e97b`). Two base-worthy commits to land on `cloud` (adapted), plus IaC notes for the `cfn` extraction. Context: cw-s3 `specs/r2-serving-migration.md` (`635461e`) — cw is adopting the base's S3-over-R2 `STORE_*` serving; these generalize the base's own seam so that when cw-s3 rebases (`cw-s3-next` off `cloud`) its seam port collapses to the cw-only delta. Same flow as the chart CP (`d830571` → your `3150d99`): land here first, then cw rebases onto it.
 
 ## Land on `cloud`
