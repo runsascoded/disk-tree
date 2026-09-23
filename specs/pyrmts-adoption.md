@@ -106,6 +106,25 @@ In order, all independent and composable:
 5. **Arrow-native listing** (or polars; benchmark both vs pandas): filter with `pyarrow.compute`, take only `path` + compare cols to lists, align in a dict — removes the per-op pandas fixed costs and object-string churn.
 6. **Measure 16K-row RGs vs 64K** (`migrate-row-groups` exists): footer grows, bytes/listing shrink 4×.
 
+### 5.2 Bake-off on the r2 demo: `walkDiff` (pyrmts `b6a0fe6`) vs `buildDiff` (2026-09-23)
+
+pyrmts shipped `walkDiff` + `SnapshotReader` (TS, over any `Storage`; dist `b1f862f`) as the deployable twin of their Python harness. Measured here on the demo's real pair (2026-09-21 → 2026-09-22, root view, 1280×800), `walkDiff` locally over `serve-range.mjs`, `buildDiff` as prod `/api/diff` (`Server-Timing`):
+
+| engine | rows | expansions | GETs (cold) | dependent rounds | server/CPU ms (cold → warm) |
+|---|---|---|---|---|---|
+| `buildDiff` (prod, D1 stats + R2) | 204 | 49 | (D1: spans + rgjson, then group fetches) | — | 700 → 266 (`rootagg` 407 → 127, `walk` 123 → 0) |
+| `walkDiff` (local, 0 ms RTT) | 2,774 | 216 | 2 footer + 2 data | 1 | 44 → 29 |
+| `walkDiff` (local, 30 ms RTT) | 2,774 | 216 | 2 footer + 2 data | 1 | wall 147 → 101 (warm = `metadataCache` hit, no footer GETs) |
+
+What the numbers say — and don't:
+
+- **At the demo's scale the engine is moot.** Each daily path-index is **7,118 rows in ONE row group (~220 KiB)**, so any walk is "read both files, diff in memory": one dependent round, ~30 ms CPU. `buildDiff`'s 266–700 ms is not the walk (`walk` = 123 ms cold, 0 warm) but its *indirection* — the D1 row-group-stats queries and `rootagg` — which is pure overhead when the whole tier is one group. The cheap win here is orthogonal to engines: for a single-group tier, skip D1 and read the file.
+- **Not the same output.** `walkDiff` emits every changed row above the 4 px render floor (13.7 MB here); `buildDiff` returns the treemap's *row list* (`top=500`, `minArea`, `(other)` folds). So 2,774 vs 204 rows is shape, not correctness. A byte-equivalence check needs the fold applied to `walkDiff`'s rows first.
+- **The real bake-off target is cw's index, not ours.** pyrmts already measured it locally (10 M rows / side: walk rows == materialized view, 98 expansions / 48 GETs / 13 dependent rounds at the fleet root). Over a network that is where level-synchronous rounds matter; here there is one round.
+- **Adoption constraint at cw scale:** `SnapshotReader` locates row groups by bisection over the **in-memory parquet footer**. Our base deliberately does *not* parse that footer on the edge — cw's floor-free tier has ~27k groups and its thrift footer exceeds the Worker's memory (`_lib/index.ts`) — which is exactly why the row-group stats live in D1 / the `.groups.json` manifest blob. So "adopt `walkDiff`" in the base means **an adapter that feeds `SnapshotReader` our D1 / manifest row-group stats** (the `IndexHandle` seam), not a wholesale swap; the pyrmts hot/full shard split at 64K-row groups would also shrink cw's footer to ~160 groups, at which point in-memory bisection is fine again.
+
+Verdict: no engine change for the demo now; keep `buildDiff`. Revisit when (a) the path-index moves onto pyrmts shards (§3.2) and (b) cw wants a shared engine — then plug `walkDiff` in through the row-group-stats seam and re-run this table on cw's pair over the network.
+
 ## 6. What this retires (in order, each behind a working replacement)
 
 1. the over-time index (`_lib/overTime.ts`, `overtime.py`, `api/series.ts` additions) → MS store reads,
