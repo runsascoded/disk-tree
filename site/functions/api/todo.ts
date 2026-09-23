@@ -9,12 +9,12 @@
  * `prefix` is the gs:// dir form, ready to hand straight to `dt-cloud mark`.
  */
 import { S3Store } from '@rdub/file-tree/stores/s3'
+import { storeCreds, storeReady, storeTarget } from '../_lib/index.js'
 import { snapshotsPrefix } from '../_lib/shared.js'
 import { type Ctx, type Env, json, requireViewer } from '../_lib/auth.js'
 import { keepSets, todoItems } from '../_lib/todo.js'
 import { buildView } from '../_lib/view.js'
 
-const BUCKET = 'oa-gcs-usage-dvx'
 const DATE_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{4})?$/
 const DEFAULT_LIMIT = 100
 const DEFAULT_MIN_FRAC = 0.0005 // ignore dust; overridable via ?min_frac=
@@ -37,8 +37,7 @@ async function latestScan(store: ReturnType<typeof S3Store>, prefix: string): Pr
 export const onRequest = async (ctx: Ctx): Promise<Response> => {
   const { request, env } = ctx as { request: Request; env: Env }
   if (!env.DB) return json({ error: 'todo backend not configured (DB)' }, 503)
-  const { GCS_HMAC_KEY_ID, GCS_HMAC_SECRET } = env
-  if (!GCS_HMAC_KEY_ID || !GCS_HMAC_SECRET) return json({ error: 'data proxy not configured (HMAC)' }, 503)
+  if (!storeReady(env)) return json({ error: 'data proxy not configured (store creds)' }, 503)
   const id = await requireViewer(ctx)
   if (id instanceof Response) return id
 
@@ -46,14 +45,7 @@ export const onRequest = async (ctx: Ctx): Promise<Response> => {
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || DEFAULT_LIMIT, 1), 1000)
   const minFrac = Number(url.searchParams.get('min_frac')) || DEFAULT_MIN_FRAC
 
-  const store = S3Store({
-    endpoint: 'https://storage.googleapis.com',
-    bucket: BUCKET,
-    region: 'us-east1',
-    prefixes: ['snapshots/'],
-    accessKeyId: GCS_HMAC_KEY_ID,
-    secretAccessKey: GCS_HMAC_SECRET,
-  })
+  const store = S3Store({ ...storeTarget(env), prefixes: ['snapshots/'], ...storeCreds(env) })
 
   const scan = await latestScan(store, snapshotsPrefix(ctx.env))
   if (!scan) return json({ error: 'no published scan' }, 404)

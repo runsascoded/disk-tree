@@ -13,9 +13,8 @@
 // because public/data/ is no longer shipped (see the build).
 import { S3Store } from '@rdub/file-tree/stores/s3'
 import { type Env, requireViewer } from '../_lib/auth.js'
-import { storeCreds, storeReady } from '../_lib/index.js'
+import { storeCreds, storeReady, storeTarget } from '../_lib/index.js'
 
-const BUCKET = 'oa-gcs-usage-dvx'
 // Scan ids are `YYYY-MM-DD`, optionally sub-daily as `YYYY-MM-DDTHHMM` (no
 // colon: it keeps the id safe as an object-key path segment). GCS publishes one
 // scan a day so its ids stay date-only; CoreWeave runs ad hoc, several a day.
@@ -32,10 +31,10 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
   const rel = new URL(ctx.request.url).pathname.replace(/^\/data\//, '')
   const gated = await requireViewer(ctx)
   if (gated instanceof Response) return gated
+  // The store seam (`_lib/index.ts`): GCS by default, any S3-compatible
+  // store (R2) once `STORE_*` is set — same data, same keys.
   const store = S3Store({
-    endpoint: ctx.env.STORE_ENDPOINT ?? 'https://storage.googleapis.com', // GCS XML API is S3-compatible
-    bucket: ctx.env.STORE_BUCKET ?? BUCKET,
-    region: ctx.env.STORE_REGION ?? 'us-east1', // bucket location; GCS validates the SigV4 credential-scope region
+    ...storeTarget(ctx.env),
     prefixes: ['snapshots/'], // allow-list: only the published snapshots
     ...storeCreds(ctx.env),
   })

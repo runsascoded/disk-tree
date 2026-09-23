@@ -124,17 +124,22 @@ export const storeReady = (env: Env): boolean => {
   return !!(accessKeyId && secretAccessKey)
 }
 
+/** Where the index store lives: `STORE_ENDPOINT`/`STORE_BUCKET`/`STORE_REGION`
+ *  point any S3-compatible store (R2: the account's S3 endpoint + `auto`);
+ *  unset = the GCS defaults. One place, so every proxy resolves the same store. */
+export const storeTarget = (env: Env) => ({
+  endpoint: env.STORE_ENDPOINT ?? 'https://storage.googleapis.com',
+  bucket: env.STORE_BUCKET ?? BUCKET,
+  region: env.STORE_REGION ?? 'us-east1',
+})
+
 export function makeStore(env: Env) {
-  const { accessKeyId, secretAccessKey } = storeCreds(env)
   return S3Store({
-    endpoint: env.STORE_ENDPOINT ?? 'https://storage.googleapis.com',
-    bucket: env.STORE_BUCKET ?? BUCKET,
-    region: env.STORE_REGION ?? 'us-east1',
+    ...storeTarget(env),
     prefixes: env.STORE_PREFIXES
       ? env.STORE_PREFIXES.split(',').map(s => s.trim()).filter(Boolean)
-      : ['listing/', 'snapshots/', 'cw-l2/'],
-    accessKeyId,
-    secretAccessKey,
+      : ['listing/', 'snapshots/'],
+    ...storeCreds(env),
   })
 }
 

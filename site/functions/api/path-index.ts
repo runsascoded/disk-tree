@@ -21,9 +21,8 @@
 // a pointer to Range requests instead.
 import { S3Store } from '@rdub/file-tree/stores/s3'
 import { type Env, requireViewer } from '../_lib/auth.js'
-import { indexDir, storeCreds, storeReady } from '../_lib/index.js'
+import { indexDir, storeCreds, storeReady, storeTarget } from '../_lib/index.js'
 
-const BUCKET = 'oa-gcs-usage-dvx'
 const MAX_RANGE = 64 * 1024 * 1024 // 64MB per request — plenty for parquet pages
 
 export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Response> => {
@@ -42,13 +41,7 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
   const gated = await requireViewer(ctx)
   if (gated instanceof Response) return gated
 
-  const store = S3Store({
-    endpoint: env.STORE_ENDPOINT ?? 'https://storage.googleapis.com',
-    bucket: env.STORE_BUCKET ?? BUCKET,
-    region: env.STORE_REGION ?? 'us-east1',
-    prefixes: ['listing/'],
-    ...storeCreds(env),
-  })
+  const store = S3Store({ ...storeTarget(env), prefixes: ['listing/'], ...storeCreds(env) })
   // The file lives under the generation dir D1 points at (a run never
   // overwrites the file being served; specs/view-serving.md).
   const dir = await indexDir(env, date)

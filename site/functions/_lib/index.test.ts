@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blobKey, groupMatches } from './index'
+import { blobKey, groupMatches, storeCreds, storeReady, storeTarget } from './index'
 
 // The blob handle's in-memory span selection must be the predicate
 // `selectSpans` sends D1 (index.ts), NULL semantics included.
@@ -35,5 +35,25 @@ describe('blobKey', () => {
   it('sits beside the tier parquet', () => {
     expect(blobKey('listing/2026-09-07/index/20260907T070112Z', 'coarse24-user')).toBe('listing/2026-09-07/index/20260907T070112Z/path-index-coarse24-by-user.groups.json')
     expect(blobKey('listing/2026-07-30', 'path')).toBe('listing/2026-07-30/path-index.groups.json')
+  })
+})
+
+// The store seam: unset `STORE_*` is byte-for-byte the GCS deploy; setting it
+// points every proxy at an S3-compatible store (R2) — specs/r2-serving-migration.md.
+describe('store seam', () => {
+  const gcs = { GCS_HMAC_KEY_ID: 'gk', GCS_HMAC_SECRET: 'gs' } as never
+  const r2 = { ...(gcs as object), STORE_ENDPOINT: 'https://acct.r2.cloudflarestorage.com', STORE_BUCKET: 'idx', STORE_REGION: 'auto', STORE_ACCESS_KEY_ID: 'rk', STORE_SECRET_ACCESS_KEY: 'rs' } as never
+  it('defaults to GCS + the HMAC pair', () => {
+    expect(storeTarget(gcs)).toEqual({ endpoint: 'https://storage.googleapis.com', bucket: 'oa-gcs-usage-dvx', region: 'us-east1' })
+    expect(storeCreds(gcs)).toEqual({ accessKeyId: 'gk', secretAccessKey: 'gs' })
+    expect(storeReady(gcs)).toBe(true)
+  })
+  it('STORE_* overrides target and creds together', () => {
+    expect(storeTarget(r2)).toEqual({ endpoint: 'https://acct.r2.cloudflarestorage.com', bucket: 'idx', region: 'auto' })
+    expect(storeCreds(r2)).toEqual({ accessKeyId: 'rk', secretAccessKey: 'rs' })
+  })
+  it('is not ready without a full credential pair', () => {
+    expect(storeReady({} as never)).toBe(false)
+    expect(storeReady({ STORE_ACCESS_KEY_ID: 'rk' } as never)).toBe(false)
   })
 })

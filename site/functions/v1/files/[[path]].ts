@@ -12,27 +12,20 @@
 // audience). No per-user authz.
 import { createHandlers } from '@rdub/file-tree/server'
 import { S3Store } from '@rdub/file-tree/stores/s3'
+import type { Env } from '../../_lib/auth.js'
+import { storeCreds, storeReady, storeTarget } from '../../_lib/index.js'
 
-interface Env {
-  GCS_HMAC_KEY_ID: string
-  GCS_HMAC_SECRET: string
-}
-
-const BUCKET = 'oa-gcs-usage-dvx'
 const BASE = '/v1/files'
 
 export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Response> => {
-  const { GCS_HMAC_KEY_ID, GCS_HMAC_SECRET } = ctx.env
-  if (!GCS_HMAC_KEY_ID || !GCS_HMAC_SECRET) {
-    return new Response('scan-browser proxy not configured (missing GCS HMAC creds)', { status: 503 })
+  if (!storeReady(ctx.env)) {
+    return new Response('scan-browser proxy not configured (missing store creds)', { status: 503 })
   }
+  // The store seam (`_lib/index.ts`): GCS by default, R2 once `STORE_*` is set.
   const store = S3Store({
-    endpoint: 'https://storage.googleapis.com', // GCS XML API is S3-compatible
-    bucket: BUCKET,
-    region: 'us-east1', // bucket location; GCS validates the SigV4 credential-scope region
-    prefixes: ['listing/', 'snapshots/', 'sweep/', 'cw-sweep/'], // allow-list: scan outputs + sweep plans/logs + purge run records
-    accessKeyId: GCS_HMAC_KEY_ID,
-    secretAccessKey: GCS_HMAC_SECRET,
+    ...storeTarget(ctx.env),
+    prefixes: ['listing/', 'snapshots/', 'sweep/'], // allow-list: scan outputs + sweep plans/logs + purge run records
+    ...storeCreds(ctx.env),
   })
   // same-origin (behind CF Access) → no CORS needed
   const handlers = createHandlers(store, { basePath: BASE, corsOrigin: null })
