@@ -765,13 +765,14 @@ def bucket_sources(specs: tuple[str, ...], default_bucket: str) -> list[tuple[st
 
 
 @main.command("index-write")
+@option("-A", "--age-only", is_flag=True, help="Only the age pyramid — skip the path-index + coarse recompute (a ladder-only backfill; sync with `index-sync -A`, other variants keep their pointer)")
 @option("-b", "--bucket", default=None, help="Bucket a bare (no `<bucket>=`) layer-2 argument describes (default $CW_BUCKET)")
 @option("-m", "--mem", default="8GB", help="DuckDB memory limit")
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-coarse<E>.parquet")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
 @argument("sources", nargs=-1, required=True)
-def index_write(bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
+def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
     """Write the scan's index tiers from its layer-2 parquet(s) — SOURCES are
     `<bucket>=<l2.parquet>` pairs, one per bucket of the scan (a bare path is
     `-b`'s bucket): the floor-free `path-index.parquet` (dir rows,
@@ -781,8 +782,11 @@ def index_write(bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_d
     from .index import write_index
     from .sweep import CW_BUCKET
 
-    s = write_index(bucket_sources(sources, bucket or CW_BUCKET), out_dir, mem=mem, threads=threads, tmp_dir=tmp_dir)
-    err(f"index-write: {s['rows']:,} rows over {s['buckets']}; floors {s['floors']}; kept {s['paths']}")
+    s = write_index(bucket_sources(sources, bucket or CW_BUCKET), out_dir, mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only)
+    if age_only:
+        err(f"index-write: age pyramid only — floor {s['pyramid']['floor']}, {len(s['pyramid']['bins'])} tiers over {s['buckets']}")
+    else:
+        err(f"index-write: {s['rows']:,} rows over {s['buckets']}; floors {s['floors']}; kept {s['paths']}")
     print(json.dumps(s))
 
 
@@ -829,6 +833,7 @@ def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None,
 
 
 @main.command("index-sync")
+@option("-A", "--age-only", is_flag=True, help="Only the age-pyramid variants (a ladder-only backfill; the other variants keep their pointer)")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
 @option("-C", "--coarse-only", is_flag=True, help="Only the coarse tiers (a backfill; the floor-free variants keep their pointer)")
 @option("-d", "--dir", "listing_dir", default=None, help="Local/mounted dir holding the parquets (default: <bucket>/<key>)")
@@ -839,6 +844,7 @@ def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None,
 @option("-v", "--variant", "variants", multiple=True, type=Choice(list(INDEX_VARIANTS)), help="Only sync these variants (default: all)")
 @argument("date")
 def index_sync(
+    age_only: bool,
     bucket: str,
     coarse_only: bool,
     listing_dir: str | None,
@@ -864,6 +870,8 @@ def index_sync(
         todo = tuple(v for v in todo if v.startswith("coarse"))
     if floor_free_only:
         todo = tuple(v for v in todo if not v.startswith("coarse"))
+    if age_only:
+        todo = tuple(v for v in todo if v.startswith("age-pyramid"))
     for variant in todo:
         n = sync_d1(date, f"{base}/{INDEX_VARIANTS[variant]}", variant=variant, gen=gen, key=key, remote=not local)
         err(f"index-sync: {date} [{variant}] gen {gen} @ {key} — {n} row groups ({'local' if local else 'remote'})")

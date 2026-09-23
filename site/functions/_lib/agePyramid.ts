@@ -12,13 +12,18 @@
 import { planQuery, type Pyramid, type QueryPlan, type StorageBackend, type Tier } from 'pyrmts'
 
 /** Finest → coarsest; must match `AGE_PYRAMID_BINS` in `cloud/src/dt_cloud/index.py`.
- * `shards` are unused here (we store a complete file per bin) but the type
- * requires an ascending ladder. (`1h` is available in the producer but not
- * produced for CW — add it here too if ever enabled.) */
+ * A dense, all-fixed-width ladder (powers-of-2 in days, ~2× steps) so tier
+ * selection lands close to any requested bin. `shards` are unused here (we store
+ * a complete file per bin) but the type requires an ascending ladder ≥ `bin`. */
 export const AGE_TIERS: Tier[] = [
-  { name: '1d', bin: '1d', shards: ['1mo'] },
-  { name: '1mo', bin: '1mo', shards: ['1y'] },
-  { name: '1y', bin: '1y', shards: ['1y'] },
+  { name: '1h', bin: '1h', shards: ['8d'] },
+  { name: '3h', bin: '3h', shards: ['8d'] },
+  { name: '6h', bin: '6h', shards: ['8d'] },
+  { name: '12h', bin: '12h', shards: ['8d'] },
+  { name: '1d', bin: '1d', shards: ['8d'] },
+  { name: '2d', bin: '2d', shards: ['8d'] },
+  { name: '4d', bin: '4d', shards: ['8d'] },
+  { name: '8d', bin: '8d', shards: ['8d'] },
 ]
 
 // planQuery reads only tiers/limits/metrics; storage is never touched for a

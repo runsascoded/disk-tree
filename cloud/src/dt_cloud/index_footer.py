@@ -374,7 +374,7 @@ for _e in COARSE_EXPS:
 # Standalone indexes, own base names; the footer's (depth, path, b) stats prune
 # them as usual, `usr` absent (u_min/u_max NULL). Keep in sync with
 # `AGE_PYRAMID_VARIANTS` in dt_cloud.index.
-for _b in ("1d", "1mo", "1y"):
+for _b in ("1h", "3h", "6h", "12h", "1d", "2d", "4d", "8d"):
     INDEX_VARIANTS[f"age-pyramid-{_b}"] = f"age-pyramid-{_b}.parquet"
 # The cross-scan over-time index (specs/obs-axis-indexing.md Phase 1): a single
 # SCD-2 interval table over the *observation* axis, not per-scan. Its (depth,

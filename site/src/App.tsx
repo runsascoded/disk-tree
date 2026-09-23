@@ -517,10 +517,14 @@ function AppContent() {
   // pyramid (`/api/age-pyramid`, Phase B): the server picks the bin for the
   // budget and returns `{dt (epoch-ms), b, o}`; the chart still buckets to
   // day/week/month client-side, so we map `dt` back to an epoch-day `AgeRow`.
+  // Bins to request from the pyramid: ~viewport-responsive (≈2 served atoms per
+  // px of the chart, which is ~canW wide), so a phone fetches far fewer than a
+  // desktop. The FE then re-buckets to the chosen day/week/month granularity.
+  const ageBudget = Math.max(64, Math.min(1024, Math.round(canW / 2)))
   const ageQ = useQuery({
-    queryKey: ['age', store.key, asof, drillPath],
+    queryKey: ['age', store.key, asof, drillPath, ageBudget],
     queryFn: () =>
-      fetch(`/api/age-pyramid?date=${asof}&path=${encodeURIComponent(drillPath)}&bin_budget=512`, { credentials: 'include' })
+      fetch(`/api/age-pyramid?date=${asof}&path=${encodeURIComponent(drillPath)}&bin_budget=${ageBudget}`, { credentials: 'include' })
         .then(r => { if (!r.ok) throw new Error(`age ${r.status}`); return r.json() as Promise<{ records: { dt: number; b: number; o: number }[] }> }),
     enabled: !!asof,
     staleTime: Infinity,
@@ -528,6 +532,20 @@ function AppContent() {
   const age: AgeRow[] = useMemo(
     () => (ageQ.data?.records ?? []).map(r => ({ d: Math.floor(r.dt / 86400_000), b: r.b, o: r.o })),
     [ageQ.data],
+  )
+  // Same path, at the diff window's "before" scan — powers AgeChart's diff mode
+  // (per-vintage grew/shrank). Only fetched when a diff window exists.
+  const ageBaseQ = useQuery({
+    queryKey: ['age', store.key, diffPrev, drillPath, ageBudget],
+    queryFn: () =>
+      fetch(`/api/age-pyramid?date=${diffPrev}&path=${encodeURIComponent(drillPath)}&bin_budget=${ageBudget}`, { credentials: 'include' })
+        .then(r => { if (!r.ok) throw new Error(`age ${r.status}`); return r.json() as Promise<{ records: { dt: number; b: number; o: number }[] }> }),
+    enabled: !!diffPrev,
+    staleTime: Infinity,
+  })
+  const ageBase: AgeRow[] = useMemo(
+    () => (ageBaseQ.data?.records ?? []).map(r => ({ d: Math.floor(r.dt / 86400_000), b: r.b, o: r.o })),
+    [ageBaseQ.data],
   )
   const drillTo = (segs: string[]) =>
     navigate({ pathname: segs.length ? `${storeBase}/${segs.join('/')}` : store.path, search, hash })
@@ -1296,7 +1314,7 @@ function AppContent() {
         </h2>
         {ageQ.isPending && !!asof && <Skeleton height={220} label="loading ages…" />}
         {age.length > 0 && (
-          <AgeChart rows={age} catOrder={catOrder} mode={ageMode} onMode={m => setAgeModeP(m)} modes={ageModes} userIdx={userIdx} readRange={ageReadRange} />
+          <AgeChart rows={age} baseRows={diffPrev ? ageBase : undefined} diffLabels={diffPrev && asof ? { from: fmtScan(diffPrev), to: fmtScan(asof) } : undefined} catOrder={catOrder} mode={ageMode} onMode={m => setAgeModeP(m)} modes={ageModes} userIdx={userIdx} readRange={ageReadRange} />
         )}
       </section>
       )}

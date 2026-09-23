@@ -35,8 +35,14 @@ const bucketLabel = (b: number, gran: Granularity): string =>
 /** Stacked bars of bytes by created date (month/week/day), split per color mode.
  *  `readRange` null means the read axis is unavailable for this scan (no access
  *  window, or age strata published before they carried `a`). */
-export function AgeChart({ rows, catOrder, mode, onMode, modes = AGE_MODES, userIdx, readRange }: {
+export function AgeChart({ rows, baseRows, diffLabels, catOrder, mode, onMode, modes = AGE_MODES, userIdx, readRange }: {
   rows: AgeRow[]
+  /** The diff window's "before" scan, same path — enables the diff toggle. When
+   *  present the chart can show per-vintage growth/shrink (created-date bucket
+   *  gained bytes = new writes; lost bytes = deletions), which tells natural TTL
+   *  expiry (old vintages shrink) from manual deletes (recent vintages shrink). */
+  baseRows?: AgeRow[]
+  diffLabels?: { from: string; to: string }
   catOrder: string[]
   /** Axes to offer (caller drops the ones this scan can't color by — never a dead button). */
   modes?: ColorMode[]
@@ -58,6 +64,34 @@ export function AgeChart({ rows, catOrder, mode, onMode, modes = AGE_MODES, user
     return (['day', 'week', 'month'] as Granularity[]).find(g => count(g) <= MAX) ?? 'month'
   })
   const [hover, setHover] = useState<{ b: number; x: number; y: number } | null>(null)
+  const [diffOn, setDiffOn] = useState(false)
+
+  // Per-vintage delta between the diff window's two scans, at the current path:
+  // a created-date bucket's bytes can only grow (new objects written near that
+  // date) or shrink (objects of that vintage deleted), so `to − from` reads as
+  // net writes (green, recent buckets) vs. net deletions (red, any vintage).
+  const diff = useMemo(() => {
+    if (!baseRows?.length) return null
+    const acc = (rs: AgeRow[]) => {
+      const m = new Map<number, number>()
+      for (const r of rs) {
+        if (!Number.isFinite(r.d)) continue
+        const bk = bucketOf(r.d, gran)
+        m.set(bk, (m.get(bk) ?? 0) + r.b)
+      }
+      return m
+    }
+    const from = acc(baseRows), to = acc(rows)
+    const keys = [...new Set([...from.keys(), ...to.keys()])].sort((a, b) => a - b)
+    const rowsD = keys.map(bk => {
+      const f = from.get(bk) ?? 0, t = to.get(bk) ?? 0
+      return { bk, from: f, to: t, delta: t - f }
+    })
+    let up = 0, down = 0
+    for (const d of rowsD) { if (d.delta > 0) up = Math.max(up, d.delta); else down = Math.max(down, -d.delta) }
+    return { rowsD, up, down }
+  }, [baseRows, rows, gran])
+  const showDiff = diffOn && !!diff
 
   const { buckets, byBucket, colorOf, labelOf, segOrder, legend } = useMemo(() => {
     const slotMap = new Map(catOrder.slice(0, 8).map((k, i) => [k, SLOTS[i]]))
@@ -113,14 +147,27 @@ export function AgeChart({ rows, catOrder, mode, onMode, modes = AGE_MODES, user
 
   const W = 900
   const H = 220
-  const bw = W / Math.max(buckets.length, 1)
+  // Bars: the created-date buckets (snapshot) or the union of both scans' (diff).
+  const bars: number[] = showDiff ? diff!.rowsD.map(d => d.bk) : buckets
+  const bw = W / Math.max(bars.length, 1)
   const gap = bw > 4 ? 1 : bw > 1.5 ? 0.4 : 0
-  const tickEvery = Math.ceil(buckets.length / 12)
+  const tickEvery = Math.ceil(bars.length / 12)
+  // Diff geometry: a zero line placed so both the biggest gain and biggest loss
+  // fit; grows up, shrinks down (all-negative → line near the top, and vice versa).
+  const dspan = diff ? Math.max(diff.up + diff.down, 1) : 1
+  const zeroY = diff ? (diff.up / dspan) * H : H
+  const diffByBk = showDiff ? new Map(diff!.rowsD.map(d => [d.bk, d])) : null
 
   return (
     <div className="agechart">
       <div className="legend">
-        {mode === 'date' ? (
+        {showDiff ? (
+          <>
+            <span className="li"><span className="sw" style={{ background: 'var(--grew)' }} />grew</span>
+            <span className="li"><span className="sw" style={{ background: 'var(--shrank)' }} />shrank</span>
+            {diffLabels && <span className="li lbl">{diffLabels.from} → {diffLabels.to}</span>}
+          </>
+        ) : mode === 'date' ? (
           <span className="li gradli">
             older
             <span className="gradbar" style={{ background: dateGradientCss() }} />
@@ -146,7 +193,13 @@ export function AgeChart({ rows, catOrder, mode, onMode, modes = AGE_MODES, user
           ))
         )}
         <span className="ctl">
-          {onMode && (
+          {diff && (
+            <span className="gran" role="radiogroup" aria-label="Snapshot or diff">
+              <button role="radio" aria-checked={!showDiff} className={!showDiff ? 'on' : ''} onClick={() => setDiffOn(false)}>snapshot</button>
+              <button role="radio" aria-checked={showDiff} className={showDiff ? 'on' : ''} onClick={() => setDiffOn(true)}>diff</button>
+            </span>
+          )}
+          {onMode && !showDiff && (
             <span className="gran" role="radiogroup" aria-label="Color by">
               <span className="lbl">color by</span>
               {modes.map(m => (
@@ -165,15 +218,24 @@ export function AgeChart({ rows, catOrder, mode, onMode, modes = AGE_MODES, user
           </span>
         </span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H + 24}`} preserveAspectRatio="none" role="img" aria-label={`Bytes by created ${gran}`}>
-        {buckets.map((bk, i) => {
-          const parts = byBucket.get(bk)!
-          let y = H
-          const segs = [...parts.entries()].sort(segOrder).map(([k, b]) => {
-            const h = (b / maxB) * H
-            y -= h
-            return <rect key={k} x={i * bw + gap} y={y} width={Math.max(bw - 2 * gap, 0.8)} height={Math.max(h - gap, 0)} fill={mode === 'date' ? dateBarColor(i, buckets.length) : colorOf(k)} rx={bw > 4 ? 1.5 : 0} />
-          })
+      <svg viewBox={`0 0 ${W} ${H + 24}`} preserveAspectRatio="none" role="img" aria-label={showDiff ? `Bytes changed by created ${gran}` : `Bytes by created ${gran}`}>
+        {showDiff && <line x1={0} y1={zeroY} x2={W} y2={zeroY} className="zeroline" />}
+        {bars.map((bk, i) => {
+          let body
+          if (showDiff) {
+            const d = diffByBk!.get(bk)!
+            const mag = (Math.abs(d.delta) / dspan) * H
+            const y = d.delta >= 0 ? zeroY - mag : zeroY
+            body = <rect x={i * bw + gap} y={y} width={Math.max(bw - 2 * gap, 0.8)} height={Math.max(mag, 0)} fill={d.delta >= 0 ? 'var(--grew)' : 'var(--shrank)'} rx={bw > 4 ? 1.5 : 0} />
+          } else {
+            const parts = byBucket.get(bk)!
+            let y = H
+            body = [...parts.entries()].sort(segOrder).map(([k, b]) => {
+              const h = (b / maxB) * H
+              y -= h
+              return <rect key={k} x={i * bw + gap} y={y} width={Math.max(bw - 2 * gap, 0.8)} height={Math.max(h - gap, 0)} fill={mode === 'date' ? dateBarColor(i, bars.length) : colorOf(k)} rx={bw > 4 ? 1.5 : 0} />
+            })
+          }
           return (
             <g
               key={bk}
@@ -181,7 +243,7 @@ export function AgeChart({ rows, catOrder, mode, onMode, modes = AGE_MODES, user
               onMouseLeave={() => setHover(null)}
             >
               <rect x={i * bw} y={0} width={bw} height={H} fill="transparent" />
-              {segs}
+              {body}
               {(i % tickEvery === 0) && (
                 <text x={i * bw + bw / 2} y={H + 16} textAnchor="middle" className="tick">{bucketLabel(bk, gran)}</text>
               )}
@@ -195,13 +257,23 @@ export function AgeChart({ rows, catOrder, mode, onMode, modes = AGE_MODES, user
           <div className="path">
             {gran === 'week' ? `wk of ${bucketLabel(hover.b, gran)}` : bucketLabel(hover.b, gran)}
           </div>
-          <div className="nums">
-            {[...(byBucket.get(hover.b) ?? new Map<string, number>())]
-              .sort(mode === 'read' ? (a, b) => b[1] - a[1] : segOrder)
-              .slice(0, 5)
-              .map(([k, b]) => `${labelOf(k)} ${fmtBytes(b)}`)
-              .join(' · ')}
-          </div>
+          {showDiff ? (() => {
+            const d = diffByBk!.get(hover.b)!
+            return (
+              <div className="nums">
+                {`was ${fmtBytes(d.from)} · now ${fmtBytes(d.to)} · `}
+                <span className={d.delta >= 0 ? 'grew' : 'shrank'}>{`${d.delta >= 0 ? '+' : '−'}${fmtBytes(Math.abs(d.delta))}`}</span>
+              </div>
+            )
+          })() : (
+            <div className="nums">
+              {[...(byBucket.get(hover.b) ?? new Map<string, number>())]
+                .sort(mode === 'read' ? (a, b) => b[1] - a[1] : segOrder)
+                .slice(0, 5)
+                .map(([k, b]) => `${labelOf(k)} ${fmtBytes(b)}`)
+                .join(' · ')}
+            </div>
+          )}
         </div>
       )}
     </div>
