@@ -13,7 +13,7 @@
 import { createHandlers } from '@rdub/file-tree/server'
 import { S3Store } from '@rdub/file-tree/stores/s3'
 import type { Env } from '../../_lib/auth.js'
-import { storeCreds, storeReady, storeTarget } from '../../_lib/index.js'
+import { storeCreds, storePrefixes, storeReady, storeTarget } from '../../_lib/index.js'
 
 const BASE = '/v1/files'
 
@@ -24,7 +24,7 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
   // The store seam (`_lib/index.ts`): GCS by default, R2 once `STORE_*` is set.
   const store = S3Store({
     ...storeTarget(ctx.env),
-    prefixes: ['listing/', 'snapshots/', 'sweep/'], // allow-list: scan outputs + sweep plans/logs + purge run records
+    prefixes: storePrefixes(ctx.env, ['listing/', 'snapshots/', 'sweep/']), // allow-list: scan outputs + sweep plans/logs + purge run records; `STORE_PREFIXES` overrides
     ...storeCreds(ctx.env),
   })
   // same-origin (behind CF Access) → no CORS needed

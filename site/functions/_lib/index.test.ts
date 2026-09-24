@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blobKey, groupMatches, storeCreds, storeReady, storeTarget } from './index'
+import { blobKey, groupMatches, storeCreds, storePrefixes, storeReady, storeTarget } from './index'
 
 // The blob handle's in-memory span selection must be the predicate
 // `selectSpans` sends D1 (index.ts), NULL semantics included.
@@ -55,5 +55,11 @@ describe('store seam', () => {
   it('is not ready without a full credential pair', () => {
     expect(storeReady({} as never)).toBe(false)
     expect(storeReady({ STORE_ACCESS_KEY_ID: 'rk' } as never)).toBe(false)
+  })
+  it('STORE_PREFIXES replaces each proxy\'s default allow-list; unset keeps it', () => {
+    expect(storePrefixes(gcs, ['listing/', 'snapshots/'])).toEqual(['listing/', 'snapshots/'])
+    expect(storePrefixes(gcs, ['listing/'])).toEqual(['listing/'])
+    const cw = { ...(gcs as object), STORE_PREFIXES: 'listing/, snapshots/,sweep/,cw-sweep/,cw-l2/,' } as never
+    expect(storePrefixes(cw, ['listing/'])).toEqual(['listing/', 'snapshots/', 'sweep/', 'cw-sweep/', 'cw-l2/'])
   })
 })

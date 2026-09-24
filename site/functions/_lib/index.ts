@@ -133,12 +133,20 @@ export const storeTarget = (env: Env) => ({
   region: env.STORE_REGION ?? 'us-east1',
 })
 
+/** The store's read allow-list: `STORE_PREFIXES` (comma-separated) replaces
+ *  `defaults` when set, so a deployment whose artifacts live under other
+ *  prefixes (cw: `cw-l2/` tiers, `cw-sweep/` records) names them once in
+ *  `[vars]`. Every proxy passes its own defaults, so unset keeps today's
+ *  per-endpoint lists. */
+export const storePrefixes = (env: Env, defaults: string[]): string[] =>
+  env.STORE_PREFIXES
+    ? env.STORE_PREFIXES.split(',').map(s => s.trim()).filter(Boolean)
+    : defaults
+
 export function makeStore(env: Env) {
   return S3Store({
     ...storeTarget(env),
-    prefixes: env.STORE_PREFIXES
-      ? env.STORE_PREFIXES.split(',').map(s => s.trim()).filter(Boolean)
-      : ['listing/', 'snapshots/'],
+    prefixes: storePrefixes(env, ['listing/', 'snapshots/']),
     ...storeCreds(env),
   })
 }
