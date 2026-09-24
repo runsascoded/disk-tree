@@ -206,6 +206,22 @@ export const TABLES: TableSpec[] = [
     orderBy: 'run_id DESC, bytes DESC',
   },
   {
+    name: 'admin_emails',
+    pk: 'email',
+    desc: 'Admin allowlist: non-staff emails that may mark sweep and dispatch deletes (`admin` scope on top of viewing). Takes effect on the next request.',
+    columns: [
+      { name: 'email', type: 'text', required: true },
+      { name: 'note', type: 'text', editable: true },
+      { name: 'who', type: 'text', server: 'who' },
+      { name: 'ts', type: 'int', server: 'now' },
+    ],
+    readScope: 'admin',
+    writeScope: 'admin',
+    orderBy: 'email',
+    normalize: (col, v) => (col === 'email' ? v.trim().toLowerCase() : v),
+    validate: (col, v) => (col === 'email' && !EMAIL_RE.test(v) ? 'not an email address' : null),
+  },
+  {
     name: 'admin_edits',
     pk: 'id',
     desc: 'Append-only history of every admin table edit.',

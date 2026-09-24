@@ -16,7 +16,7 @@
  * Only a real SSO identity may manage its own token — a grant minting another
  * grant would be privilege escalation, so grant-authenticated callers are 403.
  */
-import { type Ctx, GCS_SCOPE, gateFor, identify, json } from '../_lib/auth.js'
+import { baseScope, type Ctx, gateFor, identify, json } from '../_lib/auth.js'
 
 const TOKEN_NAME = 'CLI / agent token'
 
@@ -50,7 +50,7 @@ export const onRequest = async (ctx: Ctx): Promise<Response> => {
     if (prior?.grant_id) await gate.revoke(prior.grant_id)
     const { grant, token } = await gate.mint({
       email,
-      scopes: [GCS_SCOPE],
+      scopes: [baseScope(env)],   // this deployment's viewer scope (`gcs` | `cw`), nothing more
       name: TOKEN_NAME,
       createdBy: email,
       expiresAt: null,   // non-expiring; ends on rotate or DELETE

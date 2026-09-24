@@ -41,10 +41,17 @@ ACCESS_TEAM_DOMAIN = "https://openathena-ai-pages.cloudflareaccess.com"
 # AUD tag of the "CoreWeave usage (cw-s3.oa.dev)" Access app (`4c463052`),
 # verified against `Cf-Access-Jwt-Assertion` for the admin sweep gate.
 ACCESS_AUD = "1de65a9ffe270d860911b786720fefe00123e79e71ca038c311479e468dc8378"
-# Domain whose SSO identities are staff (admin/sweep scope). CoreWeave viewers
-# (coreweave.com) can see the dashboard but are not staff; the sweep-dispatch
-# admin gate is the site/migrations/cw/0003 allowlist on top of this.
+# Domain whose sign-in identities are staff (admin/sweep scope). CoreWeave
+# viewers (coreweave.com) can see the dashboard but are not staff; the
+# sweep-dispatch admin gate is the site/migrations/cw/0004 `admin_emails`
+# allowlist on top of this (`ADMIN_EMAILS` says the table exists here).
 STAFF_DOMAIN = "openathena.ai"
+ADMIN_EMAILS = "1"
+# The in-app viewer policy that replaces the Access policy's email-domain
+# include once the host is off Zero Trust (specs/oidc-cutover-cw.md): these
+# domains get the `cw` scope with no `allowed_emails` row. Inert behind the
+# edge (edge identities are already authorized).
+VIEWER_DOMAINS = "coreweave.com"
 
 # Global cache tier for the index reader's JSON (`functions/_lib/edgeCache.ts`:
 # colo cache → KV; gcs binds `CACHE_KV`). Optional — the code runs without it
@@ -56,6 +63,10 @@ STAFF_DOMAIN = "openathena.ai"
 #   id = "<namespace id>"
 
 # Secrets (set with `wrangler pages secret put <NAME> --project-name oa-cw-s3-usage`):
+#   SESSION_SECRET   — HMAC key for session cookies + IP hashing (the app
+#     session model, specs/oidc-cutover-cw.md; absent = no gate, edge only)
+#   GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET — the "cw-s3.oa.dev" OAuth Web client
+#   RESEND_API_KEY / MAIL_FROM — emailed-code sign-in (noreply@oa.dev)
 #   GCS_HMAC_KEY_ID / GCS_HMAC_SECRET — read-only GCS proxy creds (data + /files)
 #   GCP_SA_KEY — JSON key for `gcs-usage-dispatch@oa-internal-450019` (Batch
 #     submit/cancel for /api/sweep/*; `batch.jobsEditor` + actAs `gcs-usage-job`)

@@ -97,8 +97,8 @@ importers:
         specifier: ^0.27.20
         version: 0.27.20(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@open-athena/auth':
-        specifier: github:Open-Athena/auth#a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30
-        version: https://codeload.github.com/Open-Athena/auth/tar.gz/a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)
+        specifier: github:Open-Athena/auth#e254545e10177bf59d089e034bcb8a78f527638f
+        version: https://codeload.github.com/Open-Athena/auth/tar.gz/e254545e10177bf59d089e034bcb8a78f527638f(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)
       '@rdub/file-tree':
         specifier: https://github.com/runsascoded/file-tree#b64278c27d45479fe09507dabc0e16dd0a4b8b87
         version: https://codeload.github.com/runsascoded/file-tree/tar.gz/b64278c27d45479fe09507dabc0e16dd0a4b8b87(@disk-tree/react@packages+react)(@rdub/treemap@packages+treemap)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@6.30.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.4.1(react@19.2.8))(wa-sqlite@1.0.0)(yaml@2.9.1)
@@ -1145,9 +1145,9 @@ packages:
       react:
         optional: true
 
-  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30':
-    resolution: {tarball: https://codeload.github.com/Open-Athena/auth/tar.gz/a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30}
-    version: 0.1.0-dist.0ac175c
+  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/e254545e10177bf59d089e034bcb8a78f527638f':
+    resolution: {tarball: https://codeload.github.com/Open-Athena/auth/tar.gz/e254545e10177bf59d089e034bcb8a78f527638f}
+    version: 0.1.0-dist.a142c96
     peerDependencies:
       '@cloudflare/workers-types': '*'
       '@tanstack/react-query': ^5.0.0
@@ -2945,6 +2945,15 @@ packages:
     resolution: {path: /js/packages/pyrmts-cfw, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62}
     version: 0.0.0
 
+  pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/01cb9739acd3c91f705f32b3c20f14da3f465396#path:/js/packages/pyrmts:
+    resolution: {path: /js/packages/pyrmts, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/01cb9739acd3c91f705f32b3c20f14da3f465396}
+    version: 0.0.0
+    peerDependencies:
+      react: '>=18'
+    peerDependenciesMeta:
+      react:
+        optional: true
+
   pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts:
     resolution: {path: /js/packages/pyrmts, tarball: https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62}
     version: 0.0.0
@@ -4417,7 +4426,7 @@ snapshots:
       '@tanstack/react-query': 5.101.4(react@19.2.8)
       react: 19.2.8
 
-  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/a846f7cdb5e3c7c7cda0ba4523b0e17dc14eea30(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)':
+  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/e254545e10177bf59d089e034bcb8a78f527638f(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)':
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260906.1
       '@tanstack/react-query': 5.101.4(react@19.2.8)
@@ -6442,9 +6451,16 @@ snapshots:
 
   pyrmts-cfw@https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts-cfw(react@19.2.8):
     dependencies:
-      pyrmts: https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts(react@19.2.8)
+      pyrmts: https://codeload.github.com/runsascoded/pyrmts/tar.gz/01cb9739acd3c91f705f32b3c20f14da3f465396#path:/js/packages/pyrmts(react@19.2.8)
     transitivePeerDependencies:
       - react
+
+  pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/01cb9739acd3c91f705f32b3c20f14da3f465396#path:/js/packages/pyrmts(react@19.2.8):
+    dependencies:
+      hyparquet: https://codeload.github.com/runsascoded/hyparquet/tar.gz/0fc22700f612f32c8a6ded303bfc8d4adcc57753
+      yaml: 2.9.1
+    optionalDependencies:
+      react: 19.2.8
 
   pyrmts@https://codeload.github.com/runsascoded/pyrmts/tar.gz/ad35ff808beb8bbbe8d4fb7dddb894de4421bb62#path:/js/packages/pyrmts(react@19.2.8):
     dependencies:
