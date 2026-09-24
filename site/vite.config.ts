@@ -2,6 +2,11 @@ import { existsSync, readFileSync } from 'node:fs'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
+// Ports: `devPort` in package.json (vite), `PORT` env overrides (a second dev
+// stack, or when another worktree already holds 3263); wrangler pages dev (the
+// Functions) is always the next port up — `./dev` derives it the same way.
+const PORT = Number(process.env.PORT ?? JSON.parse(readFileSync('package.json', 'utf8')).devPort)
+const WRANGLER = `http://localhost:${PORT + 1}`
 
 // dev only: serve a locally-generated `tmp/series.json` (from `dt-cloud series
 // -r http://localhost:3254/data -o tmp/series.json`) at /data/series.json, so
@@ -20,25 +25,33 @@ const devSeriesIndex = {
 }
 
 // Deployment default for the client's whoami source (src/auth.ts): this host
-// sits behind a CF Access edge gate, so identity comes from the edge unless the
-// environment says otherwise (`VITE_AUTH_MODE=app` for the app-session model).
+// still sits behind a CF Access edge gate, so identity comes from the edge
+// unless the environment says otherwise (`VITE_AUTH_MODE=app` for the
+// app-session model — what the cutover deploy flips the default to,
+// specs/oidc-cutover-cw.md).
 const AUTH_MODE = process.env.VITE_AUTH_MODE ?? 'edge'
 
 export default defineConfig({
   define: { 'import.meta.env.VITE_AUTH_MODE': JSON.stringify(AUTH_MODE) },
   plugins: [react(), devSeriesIndex],
   server: {
-    port: 3253,
+    port: PORT,
     host: true,
     allowedHosts: true,
     // dev only: forward the Pages Functions (snapshot data + scan-browser API)
-    // to the local `wrangler pages dev` (run it on :3264 with GCS HMAC creds in
-    // .dev.vars). Both /data and /v1/files now read live from the bucket.
+    // to the local `wrangler pages dev` (the next port up, with GCS HMAC creds
+    // in .dev.vars). Both /data and /v1/files now read live from the bucket.
     proxy: {
-      '/data': 'http://localhost:3264',
-      '/v1/files': 'http://localhost:3264',
+      '/data': WRANGLER,
+      '/v1/files': WRANGLER,
       // Mark & sweep console: plans/marks/sweep/whoami Functions (D1 + Batch).
-      '/api': 'http://localhost:3264',
+      '/api': WRANGLER,
+      // Sign-in Functions (`/auth/google*`, `/auth/email/*`). Keep the
+      // browser's Host header (Vite's string-target default rewrites it to the
+      // wrangler port): the OIDC callback + emailed links derive their origin
+      // from it, so they resolve to `http://localhost:<PORT>/…` — the URI that
+      // must be registered on the Google client for local sign-in to work.
+      '/auth': { target: WRANGLER, changeOrigin: false },
     },
   },
   // The workspace-linked `@rdub/file-tree` calls `useLocation` etc. — force a

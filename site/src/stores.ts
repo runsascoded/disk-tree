@@ -44,6 +44,10 @@ export interface Store {
   buckets: string[]
   /** The sibling deployment the site menu links to (each store is its own host). */
   peer?: { label: string; href: string }
+  /** The login wall's copy — who may sign in here and how. Each deployment's
+   *  own: gcs.oa.dev admits allow-listed non-OA accounts, PINs and share links;
+   *  cw-s3.oa.dev is OA + CoreWeave staff. */
+  wall: { restrict: string; signIn: string; how?: string }
   /** How the store's root reads in copy: the scope word for "all of it"
    *  (`all buckets` for the six-bucket fleet, `the whole bucket` for one). */
   rootLabel: string
@@ -71,6 +75,11 @@ const REGISTRY: Store[] = [
     peer: { label: 'GCS usage', href: 'https://gcs.oa.dev/' },
     rootLabel: 'all buckets',
     objectsNote: 'CoreWeave objects are written once by the training jobs and never rewritten in place, so created is the object’s only time.',
+    wall: {
+      restrict: 'Access is limited to Open Athena and CoreWeave staff.',
+      signIn: 'Sign in with Open Athena',
+      how: 'Use Google with your Open Athena or CoreWeave account, or have a one-time code emailed to it (no Google account needed). Invited guests can also use a personal share link.',
+    },
   },
   {
     key: 'r2',
@@ -88,6 +97,9 @@ const REGISTRY: Store[] = [
     buckets: ['ctbk', 'crashes', 'jc-taxes'],
     rootLabel: 'all buckets',
     objectsNote: 'Public R2 buckets scanned daily by disk-tree; created is each object’s upload time.',
+    // A public deploy never shows the wall (`AUTH_MODE === 'public'`); copy
+    // kept for the type, and for a gated build of the same store.
+    wall: { restrict: 'This store is public.', signIn: 'Sign in' },
   },
 ]
 

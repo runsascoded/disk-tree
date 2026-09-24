@@ -705,7 +705,90 @@ h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
       &:hover { filter: brightness(1.08); }
       &:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
     }
-    .signin-how { color: var(--ink-3); font-size: 13px; margin: 18px 0 0; line-height: 1.5; }
+    // <SignInPanel>: Google button (`.signin`, primary), then an emailed-code
+    // form and request-access for the non-Google tail. Left-aligned inputs,
+    // full-width controls, an "or" divider between the affordances.
+    .signin-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      text-align: left;
+      .signin { display: block; text-align: center; }
+      // The panel emits an empty <div class="signin-or">; draw the rule with a
+      // gradient and the "or" label as ::before, masked by the card background.
+      .signin-or {
+        text-align: center;
+        line-height: 1;
+        margin: 2px 0;
+        background: linear-gradient(var(--line), var(--line)) center / 100% 1px no-repeat;
+        &::before {
+          content: 'or';
+          display: inline-block;
+          padding: 0 10px;
+          background: var(--panel);
+          color: var(--ink-3);
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+      }
+      label { color: var(--ink-3); font-size: 13px; display: block; margin-bottom: 4px; }
+      input, textarea {
+        width: 100%;
+        box-sizing: border-box;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        color: var(--ink);
+        border-radius: 8px;
+        padding: 9px 12px;
+        font: inherit;
+        font-size: 14px;
+        &:focus-visible { outline: 2px solid var(--s1); outline-offset: 1px; }
+      }
+      textarea { resize: vertical; min-height: 64px; }
+      button {
+        background: var(--surface);
+        border: 1px solid var(--line);
+        color: var(--ink);
+        font-weight: 600;
+        font-size: 14px;
+        padding: 9px 16px;
+        border-radius: 8px;
+        cursor: pointer;
+        &:hover { border-color: var(--ink-3); }
+        &:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+      }
+    }
+    .signin-how { color: var(--ink-3); font-size: 13px; margin: 14px 0 0; line-height: 1.5; }
+    // A failed sign-in (`/signin?error=`) explains itself above the buttons.
+    .signin-error {
+      color: #d33;
+      font-size: 13px;
+      line-height: 1.45;
+      text-align: left;
+      margin: 0 0 14px;
+      padding: 8px 10px;
+      border: 1px solid color-mix(in srgb, #d33 40%, transparent);
+      border-radius: 8px;
+      background: color-mix(in srgb, #d33 8%, transparent);
+    }
+    // Request-access form + the how-to prose, folded behind a disclosure: the
+    // two sign-in affordances are the wall; this is the tail for everyone else.
+    .signin-more {
+      margin-top: 16px;
+      text-align: left;
+      summary {
+        cursor: pointer;
+        color: var(--ink-3);
+        font-size: 13px;
+        text-align: center;
+        list-style: none;
+        &::-webkit-details-marker { display: none; }
+        &::before { content: '▸ '; }
+        &:hover { color: var(--ink); }
+      }
+      &[open] summary { margin-bottom: 12px; &::before { content: '▾ '; } }
+    }
   }
 }
 

@@ -9,10 +9,12 @@
 #
 # (`pnpm dev` alone runs only vite → blank treemap, since /data isn't served.)
 set -euo pipefail
-# Ports: `devPort` in package.json (vite) and the next one (wrangler).
-PORT=$(node -p "require('./package.json').devPort")
-WPORT=$((PORT + 1))
 cd "$(dirname "$0")"
+# Ports: `devPort` in package.json (vite) and the next one (wrangler). `PORT=…`
+# overrides (vite.config.ts reads the same env, so its proxy follows).
+PORT=${PORT:-$(node -p "require('./package.json').devPort")}
+export PORT
+WPORT=$((PORT + 1))
 
 if [ "${1:-}" = "--refresh" ] || [ "${1:-}" = "--staging" ]; then
   ./refresh-db

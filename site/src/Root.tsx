@@ -4,7 +4,7 @@ import { HelpCard, HelpProvider } from './Help'
 import { AdminDbPage } from './AdminDbPage'
 import { AdminPage } from './AdminPage'
 import App from './App'
-import { AuthGate } from './AuthGate'
+import { AuthGate, SignInPage } from './AuthGate'
 import { FilesPage } from './FilesPage'
 import { MarksPage } from './MarksPage'
 import { AssignmentsPage } from './AssignmentsPage'
@@ -29,6 +29,8 @@ export default function Root() {
       {STORES.map(s => (
         <Route key={s.key} path={`${s.path.replace(/\/$/, '')}/og`} element={<OgPage store={s} />} />
       ))}
+      {/* The wall as a page (ungated): where the inline "sign in" links go. */}
+      <Route path="/signin" element={<SignInPage />} />
       <Route path="/admin" element={<AuthGate><AdminPage /></AuthGate>} />
       <Route path="/admin/db" element={<AuthGate><AdminDbPage /></AuthGate>} />
       <Route path="/admin/db/:table" element={<AuthGate><AdminDbPage /></AuthGate>} />
