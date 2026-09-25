@@ -2278,11 +2278,17 @@ def _staged_uris(data):
 
 @app.route('/api/staged')
 def api_staged():
-    """Open plans (staged sets) with their URIs, plus the recent runs feed."""
+    """Open plans (staged sets) with their URIs — each sized from its freshest
+    covering scan (`bytes`/`objects`, what a dispatch would report) — plus the
+    recent runs feed."""
     from sqlalchemy import select
     from disk_tree.sqla import DeletionRun, Plan
     from disk_tree.staged import items
-    from disk_tree.staged_backend import session
+    from disk_tree.staged_backend import session, size_fn
+
+    def item(uri: str) -> dict:
+        nbytes, nobjs = size_fn(uri)
+        return {'uri': uri, 'bytes': nbytes, 'objects': nobjs}
 
     s = session()
     plans = list(s.scalars(select(Plan).where(Plan.state == 'open').order_by(Plan.id)))
@@ -2291,7 +2297,7 @@ def api_staged():
         'plans': [
             {
                 'id': p.id, 'name': p.name, 'state': p.state, 'created_by': p.created_by,
-                'created_ts': _staged_epoch(p.created_ts), 'items': [it.uri for it in items(s, p)],
+                'created_ts': _staged_epoch(p.created_ts), 'items': [item(it.uri) for it in items(s, p)],
             }
             for p in plans
         ],
@@ -2340,13 +2346,21 @@ def api_unstage():
 @app.route('/api/dispatch', methods=['POST'])
 def api_dispatch():
     """Dispatch a plan. The local server deletes inline (`for_real`, default
-    true); pass `for_real=false` for a dry report."""
+    true); pass `for_real=false` for a dry report. `uris` (optional) dispatches
+    just those staged items — they leave the plan, which stays open while
+    anything remains staged (spec `staged-page-ux.md` §2)."""
+    from sqlalchemy import select
     from disk_tree.staged import dispatch, items, plan_by_ref
     from disk_tree.staged_backend import delete_fn, session, size_fn
 
     data = request.get_json(silent=True) or {}
     ref = data.get('plan')
     for_real = bool(data.get('for_real', True))
+    uris = None
+    if 'uris' in data:
+        uris = _staged_uris(data)
+        if uris is None:
+            return jsonify({'error': '`uris` must be a non-empty array of strings'}), 400
     s = session()
     plan = plan_by_ref(s, ref)
     if plan is None:
@@ -2356,13 +2370,25 @@ def api_dispatch():
     its = items(s, plan)
     if not its:
         return jsonify({'error': f'plan {plan.id} has no staged items'}), 400
-    run = dispatch(s, plan, _staged_who(), for_real=for_real, delete_fn=delete_fn, size_fn=size_fn)
+    try:
+        run = dispatch(s, plan, _staged_who(), for_real=for_real, delete_fn=delete_fn, size_fn=size_fn, uris=uris)
+    except KeyError as e:
+        return jsonify({'error': str(e.args[0])}), 400
     s.commit()
     if for_real:
         # Deleted objects — drop cached scan slices so the next read is fresh.
         _cache.clear()
+    # A dry run deletes nothing, so its scope lives on the bands: `bytes`/`objects`
+    # are what the run covered (dry or real); `deleted_*` what it actually removed.
+    from sqlalchemy import func
+    from disk_tree.sqla import DeletionBand
+    tot_bytes, tot_objs = s.execute(
+        select(func.coalesce(func.sum(DeletionBand.bytes), 0), func.coalesce(func.sum(DeletionBand.objects), 0))
+        .where(DeletionBand.run_id == run.run_id)
+    ).one()
     return jsonify({
-        'run_id': run.run_id, 'plan_id': plan.id, 'mode': run.mode, 'items': len(its),
+        'run_id': run.run_id, 'plan_id': plan.id, 'mode': run.mode, 'items': len(uris) if uris else len(its),
+        'bytes': tot_bytes, 'objects': tot_objs,
         'deleted_bytes': run.deleted_bytes, 'deleted_objects': run.deleted_objects,
         'state': 'done' if for_real else 'dry',
     })

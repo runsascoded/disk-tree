@@ -163,3 +163,15 @@ tr.root {
   .num { text-align: right; }
   tr.dim td { opacity: 0.55; }
 }
+
+// The staged queue (StagedPage): a fixed layout so one long path can't push the
+// action column off a phone screen — the path column takes what's left and
+// wraps; the full URI is in the row's tooltip.
+.staged-table {
+  table-layout: fixed;
+  width: 100%;
+  .col-size { width: 5.5rem; white-space: nowrap; }
+  .col-actions { width: 9.5rem; white-space: nowrap; text-align: right; padding-right: 0; }
+  td .staged-path { white-space: normal; overflow-wrap: anywhere; cursor: copy; } // the global `code` is nowrap
+}
+.staged-base { font-size: 0.8rem; }

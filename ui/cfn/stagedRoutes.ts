@@ -54,13 +54,16 @@ function uris(b: Record<string, unknown>): string[] | Response {
   return list as string[]
 }
 
-/** `GET /api/staged` — open plans (with their staged URIs) + the recent runs feed. */
+/** `GET /api/staged` — open plans (with their staged URIs) + the recent runs feed.
+ *  Each item carries `bytes`/`objects` where the server can size it; the edge
+ *  has no scan index to size against, so it reports `null` (the Flask peer
+ *  fills them from the freshest covering scan). */
 export async function getStaged(env: Env): Promise<Response> {
   if (isOpen(env) || !env.DB) return error(OPEN_MSG, 501)
   const db = env.DB
   const plans = await listOpenPlans(db)
   const withItems = await Promise.all(
-    plans.map(async p => ({ ...p, items: (await planItems(db, p.id)).map(i => i.uri) })),
+    plans.map(async p => ({ ...p, items: (await planItems(db, p.id)).map(i => ({ uri: i.uri, bytes: null, objects: null })) })),
   )
   return json({ plans: withItems, runs: await listRuns(db) }, { maxAge: 0 })
 }

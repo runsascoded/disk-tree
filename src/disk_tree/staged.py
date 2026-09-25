@@ -131,11 +131,17 @@ def dispatch(
     delete_fn: DeleteFn,
     size_fn: SizeFn,
     undo_state: str = "none",
+    uris: Iterable[str] | None = None,
 ) -> DeletionRun:
     """Execute ``plan``: size each item (``size_fn``) and, when ``for_real``,
     delete it (``delete_fn``). Records a :class:`DeletionRun` + one
     :class:`DeletionBand` per item; a real dispatch closes the plan. ``dry`` (the
-    default) deletes nothing and leaves the plan open."""
+    default) deletes nothing and leaves the plan open.
+
+    ``uris`` restricts the run to those staged items (one-at-a-time deletes
+    from the Staged page): a real subset run removes them from the plan and
+    closes it only once nothing is left staged. A URI not staged in ``plan``
+    raises ``KeyError`` — nothing runs."""
     started = _now()
     # a plan takes many dry runs + one real, so the second-resolution timestamp
     # alone collides; a random suffix keeps run_ids unique
@@ -144,8 +150,19 @@ def dispatch(
         run_id=run_id, plan_id=plan.id, mode="real" if for_real else "dry",
         actor=actor, started_ts=started, undo_state=undo_state if for_real else "none",
     )
+    staged_items = items(session, plan)
+    subset = uris is not None
+    if subset:
+        by_uri = {it.uri: it for it in staged_items}
+        want = sorted({_canonical(u) for u in uris})
+        unknown = [u for u in want if u not in by_uri]
+        if unknown:
+            raise KeyError(f"not staged in plan {plan.id}: {', '.join(unknown)}")
+        targets = [by_uri[u] for u in want]
+    else:
+        targets = staged_items
     session.add(run)
-    for item in items(session, plan):
+    for item in targets:
         nbytes, nobjs = size_fn(item.uri)
         deleted = 0
         if for_real:
@@ -153,9 +170,11 @@ def dispatch(
             deleted = 1
             run.deleted_bytes += nbytes
             run.deleted_objects += nobjs
+            if subset:
+                session.delete(item)
         session.add(DeletionBand(run_id=run_id, uri=item.uri, bytes=nbytes, objects=nobjs, deleted=deleted))
     run.finished_ts = _now()
-    if for_real:
+    if for_real and (not subset or len(targets) == len(staged_items)):
         plan.state = "closed"
         plan.closed_ts = run.finished_ts
     session.flush()

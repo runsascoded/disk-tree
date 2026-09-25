@@ -79,6 +79,51 @@ def test_dispatch_real_deletes_records_and_closes_plan(session):
     assert all(b.deleted == 1 for b in bands)
 
 
+def test_dispatch_subset_deletes_only_those_and_closes_once_empty(session):
+    plan, _ = staged.stage(session, [A, B, C], "ryan")
+    deleted: list[str] = []
+    run = staged.dispatch(
+        session, plan, "ryan", for_real=True, uris=[B],
+        delete_fn=lambda u: deleted.append(u), size_fn=lambda u: (100, 2),
+    )
+    assert deleted == [B]                        # only the subset
+    assert (run.deleted_bytes, run.deleted_objects) == (100, 2)
+    assert _uris(session, plan) == [A, C]        # B left the plan…
+    assert plan.state == "open"                  # …which stays open while items remain
+    bands = session.scalars(select(DeletionBand).where(DeletionBand.run_id == run.run_id)).all()
+    assert [(b.uri, b.deleted) for b in bands] == [(B, 1)]
+
+    run2 = staged.dispatch(
+        session, plan, "ryan", for_real=True, uris=[C, A],
+        delete_fn=lambda u: deleted.append(u), size_fn=lambda u: (100, 2),
+    )
+    assert deleted == [B, A, C]                  # URI order within the subset
+    assert (_uris(session, plan), plan.state) == ([], "closed")
+    assert run2.run_id != run.run_id
+
+
+def test_dispatch_subset_dry_leaves_items_staged(session):
+    plan, _ = staged.stage(session, [A, B], "ryan")
+    run = staged.dispatch(
+        session, plan, "ryan", for_real=False, uris=[A],
+        delete_fn=lambda u: (_ for _ in ()).throw(AssertionError(u)), size_fn=lambda u: (7, 1),
+    )
+    assert (run.mode, _uris(session, plan), plan.state) == ("dry", [A, B], "open")
+    bands = session.scalars(select(DeletionBand).where(DeletionBand.run_id == run.run_id)).all()
+    assert [(b.uri, b.bytes, b.deleted) for b in bands] == [(A, 7, 0)]
+
+
+def test_dispatch_subset_rejects_an_unstaged_uri_before_running(session):
+    plan, _ = staged.stage(session, [A], "ryan")
+    deleted: list[str] = []
+    with pytest.raises(KeyError, match="not staged in plan 1: s3://bucket/b"):
+        staged.dispatch(
+            session, plan, "ryan", for_real=True, uris=[A, B],
+            delete_fn=lambda u: deleted.append(u), size_fn=lambda u: (1, 1),
+        )
+    assert (deleted, _uris(session, plan), plan.state) == ([], [A], "open")
+
+
 def test_undo_run_restores_deleted_bands_and_sets_full(session):
     plan, _ = staged.stage(session, [A, B], "ryan")
     run = staged.dispatch(session, plan, "ryan", for_real=True, delete_fn=lambda u: None, size_fn=lambda u: (100, 3))

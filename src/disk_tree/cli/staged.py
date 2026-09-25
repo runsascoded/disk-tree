@@ -98,8 +98,9 @@ def staged_cmd(as_json: bool):
 @option("-j", "--json", "as_json", is_flag=True, help="Emit JSON")
 @option("-o", "--once", is_flag=True, help="--serve: drain the enqueued runs once and exit")
 @option("-s", "--serve", is_flag=True, help="Drain edge-enqueued runs from D1 and execute them (the CP4 drainer)")
+@option("-u", "--uri", "uris", multiple=True, help="Dispatch only these staged URIs (repeatable); the plan stays open while items remain")
 @argument("plan_ref", required=False)
-def dispatch_cmd(config_path: str | None, for_real: bool, interval: int, as_json: bool, once: bool, serve: bool, plan_ref: str | None):
+def dispatch_cmd(config_path: str | None, for_real: bool, interval: int, as_json: bool, once: bool, serve: bool, uris: tuple[str, ...], plan_ref: str | None):
     """Dispatch a plan (PLAN_REF = id or name; default the open `Staged` plan):
     delete its staged URIs, or (default) report what would be deleted.
 
@@ -119,8 +120,13 @@ def dispatch_cmd(config_path: str | None, for_real: bool, interval: int, as_json
     n = len(items(session, plan))
     if n == 0:
         raise SystemExit(f"dispatch: plan {plan.id} has no staged items")
+    if uris:
+        n = len(uris)
     err(f"dispatch: plan {plan.id} ({plan.name}) — {n} item(s), mode={'real' if for_real else 'dry'}")
-    run = dispatch(session, plan, _who(), for_real=for_real, delete_fn=_delete_fn, size_fn=_size_fn)
+    try:
+        run = dispatch(session, plan, _who(), for_real=for_real, delete_fn=_delete_fn, size_fn=_size_fn, uris=list(uris) or None)
+    except KeyError as e:
+        raise SystemExit(f"dispatch: {e.args[0]}")
     session.commit()
     # dry runs record sizes on the bands but delete nothing, so report the band totals
     from sqlalchemy import func, select

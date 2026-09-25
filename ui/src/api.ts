@@ -155,6 +155,11 @@ export async function deletePath(path: string): Promise<DeleteResult> {
 
 // ---- staged delete (spec `specs/staged-delete.md`) ------------------------
 
+/** One staged URI. `bytes`/`objects` come from the freshest covering scan on
+ *  the Flask peer (what a dispatch reports); the edge has no index to size
+ *  against and sends `null`. */
+export type StagedItem = { uri: string; bytes: number | null; objects: number | null }
+
 /** A staged set (open plan) with its URIs, as `GET /api/staged` returns it. */
 export type StagedPlan = {
   id: number
@@ -162,7 +167,7 @@ export type StagedPlan = {
   state: 'open' | 'closed'
   created_by: string
   created_ts: number
-  items: string[]
+  items: StagedItem[]
 }
 
 /** A recorded run. `finished_ts == null` = enqueued, awaiting the executor. */
@@ -205,9 +210,29 @@ export const stageUris = (uris: string[], note?: string): Promise<{ plan_id: num
 export const unstageUris = (uris: string[]): Promise<{ removed: number }> =>
   postJson('/api/plans/unstage', { uris }, 'Failed to unstage')
 
-/** Dispatch a plan (default the open `Staged`): admin only; enqueues + closes it. */
-export const dispatchPlan = (plan?: string): Promise<{ run_id: string; plan_id: number; items: number; state: string }> =>
-  postJson('/api/dispatch', plan ? { plan } : {}, 'Failed to dispatch')
+export type DispatchResult = {
+  run_id: string
+  plan_id: number
+  mode: string
+  items: number
+  /** Scope of the run (dry or real), from its bands — the Flask peer only. */
+  bytes?: number
+  objects?: number
+  deleted_bytes?: number
+  deleted_objects?: number
+  state: 'done' | 'dry' | 'enqueued'
+}
+
+/** Dispatch a plan (default the open `Staged`): admin only. The edge enqueues +
+ *  closes it; the Flask peer deletes inline. `uris` dispatches just those staged
+ *  items (they leave the plan, which stays open while anything remains);
+ *  `forReal: false` is a dry run (report only) — both Flask-only. */
+export const dispatchPlan = (opts: { plan?: string; uris?: string[]; forReal?: boolean } = {}): Promise<DispatchResult> =>
+  postJson('/api/dispatch', {
+    ...(opts.plan ? { plan: opts.plan } : {}),
+    ...(opts.uris ? { uris: opts.uris } : {}),
+    ...(opts.forReal === false ? { for_real: false } : {}),
+  }, 'Failed to dispatch')
 
 export async function revealPath(path: string): Promise<void> {
   const res = await fetch('/api/reveal', {

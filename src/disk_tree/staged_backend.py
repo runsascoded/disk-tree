@@ -47,21 +47,40 @@ def session() -> "Session":
 
 
 def size_fn(uri: str) -> tuple[int, int]:
-    """``(bytes, objects)`` for ``uri`` from its freshest covering scan; ``(0, 0)``
-    if none is known (the executor still deletes — sizing is for the report)."""
-    from sqlalchemy import select
-    from sqlalchemy.orm import Session
+    """``(bytes, objects)`` for ``uri`` from the freshest scan covering it: a
+    scan *of* ``uri`` answers from its denormalized root stats, otherwise the
+    nearest ancestor's scan is opened at the one row (`objects` counts the item
+    itself plus its descendants). ``(0, 0)`` if no scan covers it — the
+    executor still deletes; sizing is for the report and the Staged page."""
+    import sqlite3
 
+    from disk_tree import config
     from disk_tree.backends import canonical
-    from disk_tree.sqla import Scan
+    from disk_tree.registry import freshest_scan_covering
 
-    with Session(_engine()) as s:
-        scan = s.scalars(
-            select(Scan).where(Scan.path == canonical(uri)).order_by(Scan.time.desc())
-        ).first()
-        if scan is None or scan.size is None:
-            return 0, 0
-        return scan.size, (scan.n_desc or 0) + 1
+    uri = canonical(uri)
+    con = sqlite3.connect(config.SQLITE_PATH)
+    con.row_factory = sqlite3.Row
+    try:
+        scan = freshest_scan_covering(con, uri)
+    finally:
+        con.close()
+    if scan is None:
+        return 0, 0
+    if scan["path"] == uri:
+        return scan["size"] or 0, (scan["n_desc"] or 0) + 1
+    from disk_tree.diff import resolve_chunk_for_path
+    from disk_tree.storage import get_backend
+
+    rel = uri[len(scan["path"].rstrip("/") + "/"):]
+    blob, rebased = resolve_chunk_for_path(scan["blob"], rel)
+    depth = rebased.count("/") + 1
+    df = get_backend().load(blob, min_depth=depth, max_depth=depth, path_prefix=rebased)
+    row = df[df["path"] == rebased]
+    if row.empty:
+        return 0, 0
+    r = row.iloc[0]
+    return int(r["size"]), int(r["n_desc"] or 0) + 1
 
 
 def delete_fn(uri: str) -> None:

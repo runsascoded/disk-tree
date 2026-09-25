@@ -145,8 +145,8 @@ describe('staged routes (real gate)', () => {
 
     const listed = await read(await getStaged(env))
     expect(listed.status).toBe(200)
-    const { plans, runs } = listed.body as { plans: { id: number; state: string; items: string[]; created_by: string }[]; runs: unknown[] }
-    expect(plans.map(p => [p.id, p.state, p.items])).toEqual([[1, 'open', [A, B]]])
+    const { plans, runs } = listed.body as { plans: { id: number; state: string; items: { uri: string; bytes: null; objects: null }[]; created_by: string }[]; runs: unknown[] }
+    expect(plans.map(p => [p.id, p.state, p.items])).toEqual([[1, 'open', [{ uri: A, bytes: null, objects: null }, { uri: B, bytes: null, objects: null }]]])
     expect(plans[0].created_by).toBe('viewer')
     expect(runs).toEqual([])
   })
@@ -162,8 +162,8 @@ describe('staged routes (real gate)', () => {
     const cookie = await viewerCookie(env)
     await postStage(env, request(cookie, { uris: [A, B] }))
     expect(await read(await postUnstage(env, request(cookie, { uris: [A] })))).toEqual({ status: 200, body: { removed: 1 } })
-    const listed = (await read(await getStaged(env))).body as { plans: { items: string[] }[] }
-    expect(listed.plans.map(p => p.items)).toEqual([[B]])
+    const listed = (await read(await getStaged(env))).body as { plans: { items: { uri: string }[] }[] }
+    expect(listed.plans.map(p => p.items.map(i => i.uri))).toEqual([[B]])
   })
 
   it('forbids `view` from dispatching, admits `admin`', async () => {
