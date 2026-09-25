@@ -102,7 +102,10 @@ def index(
         err("--sudo forces a fresh scan (-C)")
         no_cache_read = True
     if measure_memory:
-        from utz.mem import Tracker
+        try:
+            from utz.mem import Tracker
+        except ImportError as e:  # utz.mem needs memray (the `mem` dependency group)
+            raise SystemExit(f"--measure-memory needs the `mem` dependency group (`uv sync --group mem`): {e}")
         mem = Tracker()
         ctx = mem
     else:

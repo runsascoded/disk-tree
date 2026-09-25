@@ -26,3 +26,10 @@ Proposal: `POST /api/dispatch` accepts an optional `uris: [...]` subset → dele
 ## 4. Dry-run affordance
 
 The CLI's `dispatch` is dry by default; the UI's is not. A `preview` (dry dispatch: `for_real: false`) showing per-item bytes/objects before the confirm would match the CLI.
+
+## Landed (2026-09-25, `cloud` `3938f3d`)
+
+1. Paths show relative to the plan's shared dir (`under …/Downloads/`; `commonDir` backs off to a segment boundary and never swallows an item), middle-elided past 48 chars (`elideMiddle`, head + extension-bearing tail), full URI in a tooltip (hover / long-press, `enterTouchDelay=0`) and copied on click; `table-layout: fixed` with the path column taking the remainder and wrapping (the global `code` is `nowrap`; overridden for `.staged-path`), so size + actions stay on-screen at 390px. Helpers in `ui/src/staged.ts`, specs in `staged.test.ts`.
+2. `POST /api/dispatch {uris}` dispatches a subset: `staged.dispatch(…, uris=…)` deletes just those, removes them from the plan, closes it only once nothing remains; an unstaged URI → 400 before anything runs. Per-row `delete → confirm` on the page, Flask peer only (`caps.static === false`); the edge keeps whole-plan enqueue. CLI: `disk-tree dispatch -u URI…`.
+3. `GET /api/staged` items are `{uri, bytes, objects}` (edge: `null`s). `size_fn` now uses the freshest *covering* scan (was: only a scan of the exact URI, so a plan staged from a parent's scan sized as all zeros — your 18 items would have). Size column + plan total in the header and on the dispatch confirm. The `reclaim`-based "measure" stays optional/unbuilt.
+4. `preview` runs a dry dispatch; the API reports the run's band totals (`bytes`/`objects`) so the alert says what a dispatch would free.
