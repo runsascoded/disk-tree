@@ -487,6 +487,10 @@ def write_path_index(
     meta = {
         "asof": asof,
         "generated": dt.date.today().isoformat(),
+        # When this scan was published, as data (the site used to splice the
+        # store object's mtime in, which stops being the publish time once the
+        # served copy lives in R2 — specs/r2-serving-migration.md step 6).
+        "published": dt.datetime.now(dt.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
         "total_bytes": total_b,
         "total_objects": total_o,
         "class_bytes": {int(c): int(b) for c, b in classes},

@@ -43,6 +43,21 @@ def test_should_copy_matrix():
     assert P.should_copy(P.Obj(key="k", size=10, md5=None), P.Dest(size=10, md5=MD5_HEX)) is False
 
 
+def test_stamp_published_sets_the_sites_timestamp_shape_once():
+    from datetime import datetime, timedelta, timezone
+
+    updated = datetime(2026, 9, 14, 12, 31, 56, 358_000, tzinfo=timezone.utc)
+    meta = {"asof": "2026-09-14", "generated": "2026-09-14", "total_bytes": 1, "total_objects": 2, "class_bytes": {}}
+    stamped = P.stamp_published(meta, updated)
+    assert stamped == {**meta, "published": "2026-09-14T12:31:56.358Z"}
+    assert meta == {"asof": "2026-09-14", "generated": "2026-09-14", "total_bytes": 1, "total_objects": 2, "class_bytes": {}}
+    # idempotent: a meta the job (or an earlier pass) already stamped is left alone
+    assert P.stamp_published(stamped, updated + timedelta(days=1)) is None
+    # any zone normalizes to UTC `Z`
+    east = datetime(2026, 9, 25, 9, 16, 24, 450_000, tzinfo=timezone(timedelta(hours=-4)))
+    assert P.iso_z(east) == "2026-09-25T13:16:24.450Z"
+
+
 def test_report_summary_lines():
     r = P.Report(copied=["a", "b"], skipped=["c"], bytes=1_234_567)
     assert r.summary("2026-09-23T1201", dry_run=True) == "publish-r2 2026-09-23T1201: would copy 2 (1,234,567 B), skipped 1 up to date"

@@ -2890,3 +2890,22 @@ def publish_r2(src_bucket: str | None, layer2: str | None, dry_run: bool, prefix
         dry_run=dry_run,
         workers=workers,
     )
+
+
+@main.command("stamp-published")
+@option("-b", "--bucket", "src_bucket", default=None, help="Source GCS scan store (default $DATA_BUCKET)")
+@option("-n", "--dry-run", is_flag=True, help="Report the metas that would be stamped; write nothing")
+@option("-s", "--subdir", default="cw", help="Snapshots subdir of this store (default cw)")
+def stamp_published(src_bucket: str | None, dry_run: bool, subdir: str) -> None:
+    """Back-stamp `published` into every scan's meta.json that lacks it.
+
+    One-time, idempotent: the job now writes `published` into meta.json (the
+    site used to splice the store object's mtime in, which becomes the R2
+    *copy* time once the served copy lives there — specs/r2-serving-migration.md
+    step 6); scans from before that get it from their GCS object's `updated`,
+    the original publish time. Re-publish afterwards (`publish-r2`): only the
+    rewritten metas copy.
+    """
+    from . import publish as pub
+
+    pub.stamp_metas(src_bucket or pub.DATA_BUCKET, f"snapshots/{subdir}/", dry_run=dry_run)

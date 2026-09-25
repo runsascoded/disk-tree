@@ -79,10 +79,19 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
     // Splice its lastModified into meta.json so the UI can show the real
     // publish time; sizes move enough over 24h that "which 8/17?" matters.
     if (key.endsWith('/meta.json')) {
+      const meta = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+      // Newer scans carry `published` as data (the job stamps it; older metas
+      // were back-stamped by `dt-cloud stamp-published`). Only a meta without
+      // it falls back to the object's mtime — which is the *copy* time, not the
+      // publish time, once the served copy lives in R2.
+      if (typeof meta.published === 'string') {
+        return new Response(bytes, {
+          headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': CACHE },
+        })
+      }
       const dir = key.slice(0, key.lastIndexOf('/') + 1)
       const published = (await store.list(dir)).entries.find(e => e.key === key)?.lastModified
       if (published) {
-        const meta = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
         return new Response(JSON.stringify({ ...meta, published }), {
           headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': CACHE },
         })

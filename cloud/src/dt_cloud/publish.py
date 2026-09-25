@@ -29,14 +29,18 @@ R2 is reached through its S3-compatible API; creds come from the env:
 from __future__ import annotations
 
 import base64
+import json
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from datetime import timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from mypy_boto3_s3.client import S3Client
 
 err = partial(print, file=sys.stderr)
@@ -228,3 +232,59 @@ def publish(
             report.bytes += obj.size
     err(report.summary(scan, dry_run=False))
     return report
+
+
+# ---------------------------------------------------------------------------
+# `published` as data (specs/r2-serving-migration.md step 6)
+# ---------------------------------------------------------------------------
+# The site used to splice the store object's mtime into meta.json as
+# `published`. Once the served copy lives in R2 that mtime is the *copy* time,
+# so the job now writes `published` into meta.json itself, and the scans from
+# before that get it back-stamped here from their GCS object's `updated` — the
+# original publish time — before they are (re-)published.
+
+PUBLISHED_KEY = "published"
+
+
+def iso_z(t: "datetime") -> str:
+    """The site's timestamp shape: UTC, milliseconds, `Z`."""
+    return t.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def stamp_published(meta: dict[str, Any], updated: "datetime") -> dict[str, Any] | None:
+    """`meta` with `published` set from `updated`, or None when it already has
+    one (the job wrote it, or an earlier pass did) — the idempotent core."""
+    if isinstance(meta.get(PUBLISHED_KEY), str):
+        return None
+    out = dict(meta)
+    out[PUBLISHED_KEY] = iso_z(updated)
+    return out
+
+
+def stamp_metas(src_bucket: str, prefix: str, *, dry_run: bool = False) -> list[str]:
+    """Back-stamp every `<prefix><scan>/meta.json` under `src_bucket` that lacks
+    `published`, from the object's `updated` time, rewriting it in place (same
+    compact JSON shape the producers write). Returns the keys stamped (or, on
+    a dry run, those that would be)."""
+    from google.cloud import storage
+
+    client = storage.Client()
+    bucket = client.bucket(src_bucket)
+    done: list[str] = []
+    for blob in client.list_blobs(src_bucket, prefix=prefix):
+        if not blob.name.endswith("/meta.json"):
+            continue
+        meta = json.loads(blob.download_as_bytes())
+        stamped = stamp_published(meta, blob.updated)
+        if stamped is None:
+            continue
+        done.append(blob.name)
+        if dry_run:
+            err(f"  would stamp {blob.name} published={stamped[PUBLISHED_KEY]}")
+            continue
+        bucket.blob(blob.name).upload_from_string(
+            json.dumps(stamped, separators=(",", ":")), content_type="application/json",
+        )
+        err(f"  stamped {blob.name} published={stamped[PUBLISHED_KEY]}")
+    err(f"stamp-published {src_bucket}/{prefix}: {'would stamp' if dry_run else 'stamped'} {len(done)}")
+    return done
