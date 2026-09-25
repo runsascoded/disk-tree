@@ -98,11 +98,10 @@ _static_candidates = [
 # under sys._MEIPASS. We add-data the UI as `disk_tree/static` (see the spec).
 if getattr(_sys, 'frozen', False) and hasattr(_sys, '_MEIPASS'):
     _static_candidates.insert(0, join(_sys._MEIPASS, 'disk_tree', 'static'))
-STATIC_DIR = None
-for candidate in _static_candidates:
-    if exists(join(candidate, 'index.html')):
-        STATIC_DIR = abspath(candidate)
-        break
+# Several may exist in a dev checkout (a stale packaged `static/` from the last
+# wheel build beside a fresh `ui/dist`): serve whichever `index.html` is newest.
+_static_found = [c for c in _static_candidates if exists(join(c, 'index.html'))]
+STATIC_DIR = abspath(max(_static_found, key=lambda c: os.path.getmtime(join(c, 'index.html')))) if _static_found else None
 
 # Track in-progress scans: {job_id: {path, status, started, output, error}}
 running_scans: dict[str, dict] = {}

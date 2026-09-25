@@ -13,12 +13,23 @@ from disk_tree.storage.base import BLOB_ROW_GROUP_SIZE
 
 @cli.command('migrate')
 def migrate():
-    """Run database migrations (add columns, backfill stats)."""
+    """Run database migrations: add every column the models have that the DB
+    lacks (any table), then backfill `scan` stats from the parquet blobs."""
     import sqlite3
+    from sqlalchemy import create_engine
+    from disk_tree.sqla.migrate import add_missing_columns
 
     if not isfile(DB_PATH):
         err(f"Database not found: {DB_PATH}")
         return
+
+    # Generic schema catch-up (also runs on every server/CLI DB init): the
+    # explicit `scan` list below predates it and stays for the backfill.
+    added = add_missing_columns(create_engine(f"sqlite:///{DB_PATH}"))
+    for table, col in added:
+        err(f"Added column: {table}.{col}")
+    if not added:
+        err("Schema up to date (no missing columns)")
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row

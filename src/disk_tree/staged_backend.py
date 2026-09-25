@@ -23,18 +23,19 @@ _ENGINE: "Engine | None" = None
 
 def _engine() -> "Engine":
     """A process-wide engine over the current ``config.SQLITE_PATH`` (rebuilt if
-    the root changes, e.g. a library switch). The deletion tables auto-create."""
+    the root changes, e.g. a library switch). The deletion tables auto-create,
+    and columns the models gained since the DB was made are added."""
     global _ENGINE
     from sqlalchemy import create_engine
 
     from . import config
     from .sqla import Plan  # noqa: F401  (registers every model on `Base.metadata`)
-    from .sqla.base import Base
+    from .sqla.migrate import add_missing_columns
 
     url = f"sqlite:///{config.SQLITE_PATH}"
     if _ENGINE is None or str(_ENGINE.url) != url:
         _ENGINE = create_engine(url)
-        Base.metadata.create_all(_ENGINE)
+        add_missing_columns(_ENGINE)  # create_all + the schema catch-up pass
     return _ENGINE
 
 
