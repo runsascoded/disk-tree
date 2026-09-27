@@ -145,8 +145,8 @@ describe('staged routes (real gate)', () => {
 
     const listed = await read(await getStaged(env))
     expect(listed.status).toBe(200)
-    const { plans, runs } = listed.body as { plans: { id: number; state: string; items: { uri: string; bytes: null; objects: null }[]; created_by: string }[]; runs: unknown[] }
-    expect(plans.map(p => [p.id, p.state, p.items])).toEqual([[1, 'open', [{ uri: A, bytes: null, objects: null }, { uri: B, bytes: null, objects: null }]]])
+    const { plans, runs } = listed.body as { plans: { id: number; state: string; items: { uri: string; bytes: null; objects: null; kind: null }[]; created_by: string }[]; runs: unknown[] }
+    expect(plans.map(p => [p.id, p.state, p.items])).toEqual([[1, 'open', [{ uri: A, bytes: null, objects: null, kind: null }, { uri: B, bytes: null, objects: null, kind: null }]]])
     expect(plans[0].created_by).toBe('viewer')
     expect(runs).toEqual([])
   })

@@ -158,7 +158,9 @@ export async function deletePath(path: string): Promise<DeleteResult> {
 /** One staged URI. `bytes`/`objects` come from the freshest covering scan on
  *  the Flask peer (what a dispatch reports); the edge has no index to size
  *  against and sends `null`. */
-export type StagedItem = { uri: string; bytes: number | null; objects: number | null }
+/** A staged URI, sized from its freshest covering scan (`null`s on the edge,
+ *  which has no scans to size from — and no `kind`). */
+export type StagedItem = { uri: string; bytes: number | null; objects: number | null; kind: 'file' | 'dir' | null }
 
 /** A staged set (open plan) with its URIs, as `GET /api/staged` returns it. */
 export type StagedPlan = {

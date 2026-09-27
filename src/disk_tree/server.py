@@ -2279,16 +2279,15 @@ def _staged_uris(data):
 @app.route('/api/staged')
 def api_staged():
     """Open plans (staged sets) with their URIs — each sized from its freshest
-    covering scan (`bytes`/`objects`, what a dispatch would report) — plus the
-    recent runs feed."""
+    covering scan (`bytes`/`objects`, what a dispatch would report, plus its
+    `kind`) — plus the recent runs feed."""
     from sqlalchemy import select
     from disk_tree.sqla import DeletionRun, Plan
     from disk_tree.staged import items
-    from disk_tree.staged_backend import session, size_fn
+    from disk_tree.staged_backend import describe, session
 
     def item(uri: str) -> dict:
-        nbytes, nobjs = size_fn(uri)
-        return {'uri': uri, 'bytes': nbytes, 'objects': nobjs}
+        return {'uri': uri, **describe(uri)}
 
     s = session()
     plans = list(s.scalars(select(Plan).where(Plan.state == 'open').order_by(Plan.id)))

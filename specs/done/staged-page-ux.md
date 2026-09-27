@@ -33,3 +33,12 @@ The CLI's `dispatch` is dry by default; the UI's is not. A `preview` (dry dispat
 2. `POST /api/dispatch {uris}` dispatches a subset: `staged.dispatch(…, uris=…)` deletes just those, removes them from the plan, closes it only once nothing remains; an unstaged URI → 400 before anything runs. Per-row `delete → confirm` on the page, Flask peer only (`caps.static === false`); the edge keeps whole-plan enqueue. CLI: `disk-tree dispatch -u URI…`.
 3. `GET /api/staged` items are `{uri, bytes, objects}` (edge: `null`s). `size_fn` now uses the freshest *covering* scan (was: only a scan of the exact URI, so a plan staged from a parent's scan sized as all zeros — your 18 items would have). Size column + plan total in the header and on the dispatch confirm. The `reclaim`-based "measure" stays optional/unbuilt.
 4. `preview` runs a dry dispatch; the API reports the run's band totals (`bytes`/`objects`) so the alert says what a dispatch would free.
+
+## Landed (2026-09-25, follow-up): multi-select, details links, Finder reveal
+
+Ryan (from the 21-item queue): "i want kbd/modifier/mouse multi-select (like we have in other tables …)" and "can i click these files to see details and/or open them in Finder?"
+
+- Each plan's table is a `useRowSelection` table (the scan-details primitive from use-kbd): click / ⇧-click range / ⌘-click toggle, row and header checkboxes, `j`/`k` + arrows, ⇧ extends, ⌘A, Esc. The keyboard layer registers once (first plan; use-kbd bindings are page-global), other plans get the mouse layer. The selection's count + total sits in the plan header (no layout shift on select) with `delete selected` (→ `confirm — delete N (size)`, Flask peer only: `dispatch {uris}`), `unstage selected`, `clear`.
+- A row's path links to its details page (`uriToPath`: a dir → its listing + treemap, a file → the hex/text preview); the copy-on-click moved to a copy glyph after the path (full URI still in the tooltip).
+- `GET /api/staged` items carry `kind` (`file` | `dir` | `null` — `staged_backend.describe` reads it from the covering scan's row; a scan root counts as a dir; the edge has no scans → `null`). The row's kind icon is the Finder-reveal button for local paths when the server can (`caps.reveal`, `POST /api/reveal`), like the scan-details icon column. `describe` also clamps a file to one object regardless of its scan's `n_desc` convention.
+- Styles: `.scan-details-table, .staged-table` share the `.sel`/`.cur` rules + `user-select: none`; the two new narrow columns keep the 390px layout intact (verified: table right edge == container).

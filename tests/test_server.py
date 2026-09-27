@@ -1226,8 +1226,8 @@ class TestCapabilities:
 
 
 class TestStagedApi:
-    """`/api/staged` sizes each item; `/api/dispatch` takes a `uris` subset
-    (spec `staged-page-ux.md` §2–3)."""
+    """`/api/staged` sizes each item (and reports its `kind`); `/api/dispatch`
+    takes a `uris` subset (spec `staged-page-ux.md` §2–3)."""
 
     def test_sizes_items_and_dispatches_a_subset(self, test_client, tmp_path):
         from disk_tree.backends import canonical
@@ -1243,8 +1243,8 @@ class TestStagedApi:
         # no scan covers tmp_path yet: items size as (0, 0)
         plan = client.get('/api/staged').get_json()['plans'][0]
         assert [(plan['state'], plan['items'])] == [('open', [
-            {'uri': ca, 'bytes': 0, 'objects': 0},
-            {'uri': cb, 'bytes': 0, 'objects': 0},
+            {'uri': ca, 'bytes': 0, 'objects': 0, 'kind': None},
+            {'uri': cb, 'bytes': 0, 'objects': 0, 'kind': None},
         ])]
 
         # a scan of the parent covers both: each item is sized from its row
@@ -1261,8 +1261,8 @@ class TestStagedApi:
         conn.close()
         plan = client.get('/api/staged').get_json()['plans'][0]
         assert plan['items'] == [
-            {'uri': ca, 'bytes': 10, 'objects': 1},
-            {'uri': cb, 'bytes': 20, 'objects': 1},
+            {'uri': ca, 'bytes': 10, 'objects': 1, 'kind': 'file'},
+            {'uri': cb, 'bytes': 20, 'objects': 1, 'kind': 'file'},
         ]
 
         bad = client.post('/api/dispatch', json={'uris': [str(tmp_path / 'nope')]})

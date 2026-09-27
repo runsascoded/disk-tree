@@ -63,7 +63,7 @@ export async function getStaged(env: Env): Promise<Response> {
   const db = env.DB
   const plans = await listOpenPlans(db)
   const withItems = await Promise.all(
-    plans.map(async p => ({ ...p, items: (await planItems(db, p.id)).map(i => ({ uri: i.uri, bytes: null, objects: null })) })),
+    plans.map(async p => ({ ...p, items: (await planItems(db, p.id)).map(i => ({ uri: i.uri, bytes: null, objects: null, kind: null })) })),
   )
   return json({ plans: withItems, runs: await listRuns(db) }, { maxAge: 0 })
 }

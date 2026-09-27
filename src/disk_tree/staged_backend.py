@@ -46,18 +46,20 @@ def session() -> "Session":
     return Session(_engine())
 
 
-def size_fn(uri: str) -> tuple[int, int]:
-    """``(bytes, objects)`` for ``uri`` from the freshest scan covering it: a
-    scan *of* ``uri`` answers from its denormalized root stats, otherwise the
-    nearest ancestor's scan is opened at the one row (`objects` counts the item
-    itself plus its descendants). ``(0, 0)`` if no scan covers it — the
-    executor still deletes; sizing is for the report and the Staged page."""
+def describe(uri: str) -> dict:
+    """``{bytes, objects, kind}`` for ``uri`` from the freshest scan covering
+    it: a scan *of* ``uri`` answers from its denormalized root stats (a scan
+    root is a directory), otherwise the nearest ancestor's scan is opened at
+    the one row (``objects`` counts the item itself plus its descendants).
+    ``{0, 0, None}`` if no scan covers it — the executor still deletes; this is
+    for the report and the Staged page."""
     import sqlite3
 
     from disk_tree import config
     from disk_tree.backends import canonical
     from disk_tree.registry import freshest_scan_covering
 
+    none = {"bytes": 0, "objects": 0, "kind": None}
     uri = canonical(uri)
     con = sqlite3.connect(config.SQLITE_PATH)
     con.row_factory = sqlite3.Row
@@ -66,9 +68,9 @@ def size_fn(uri: str) -> tuple[int, int]:
     finally:
         con.close()
     if scan is None:
-        return 0, 0
+        return none
     if scan["path"] == uri:
-        return scan["size"] or 0, (scan["n_desc"] or 0) + 1
+        return {"bytes": scan["size"] or 0, "objects": (scan["n_desc"] or 0) + 1, "kind": "dir"}
     from disk_tree.diff import resolve_chunk_for_path
     from disk_tree.storage import get_backend
 
@@ -78,9 +80,20 @@ def size_fn(uri: str) -> tuple[int, int]:
     df = get_backend().load(blob, min_depth=depth, max_depth=depth, path_prefix=rebased)
     row = df[df["path"] == rebased]
     if row.empty:
-        return 0, 0
+        return none
     r = row.iloc[0]
-    return int(r["size"]), int(r["n_desc"] or 0) + 1
+    kind = str(r["kind"])
+    # a file is one object whatever its `n_desc` says (0 or 1, by scan source —
+    # see memory `n_desc-semantics-vary-by-scan-source`)
+    objects = 1 if kind == "file" else int(r["n_desc"] or 0) + 1
+    return {"bytes": int(r["size"]), "objects": objects, "kind": kind}
+
+
+def size_fn(uri: str) -> tuple[int, int]:
+    """``(bytes, objects)`` for ``uri`` (see :func:`describe`) — the engine's
+    ``SizeFn``."""
+    d = describe(uri)
+    return d["bytes"], d["objects"]
 
 
 def delete_fn(uri: str) -> None:
