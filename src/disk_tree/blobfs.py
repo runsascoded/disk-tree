@@ -154,16 +154,36 @@ def size(path: str) -> int:
     return getsize(path) if not is_url(path) else int(_info(path)['size'])
 
 
+def stat(path: str) -> tuple[float, int] | None:
+    """``(mtime, size)`` in one round-trip (one `stat` / one HEAD), or `None`
+    when the path doesn't exist — a cache key for an immutable-unless-rewritten
+    blob (`shallow.py`)."""
+    if not is_url(path):
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            return None
+        return st.st_mtime, st.st_size
+    try:
+        info = _info(path)
+    except FileNotFoundError:
+        return None
+    return _info_mtime(info), int(info['size'])
+
+
+def _info_mtime(info: dict) -> float:
+    v = info.get('mtime') or info.get('LastModified') or info.get('created')
+    if isinstance(v, datetime):
+        return v.timestamp()
+    return float(v) if v is not None else 0.0
+
+
 def mtime(path: str) -> float:
     """Modification time as an epoch float — `getmtime` locally; whatever the
     remote driver reports (`mtime` / `LastModified` / `created`, float or datetime)."""
     if not is_url(path):
         return getmtime(path)
-    info = _info(path)
-    v = info.get('mtime') or info.get('LastModified') or info.get('created')
-    if isinstance(v, datetime):
-        return v.timestamp()
-    return float(v) if v is not None else 0.0
+    return _info_mtime(_info(path))
 
 
 def read_schema(path: str):
@@ -203,6 +223,39 @@ def write_table(table: pa.Table, path: str, row_group_size: int | None = None) -
     _ensure_parent(fs, p)
     pq.write_table(table, p, filesystem=fs, **kw)
     _known.add(path)
+
+
+def row_group_sizes(path: str) -> list[int]:
+    """Rows per row group, from the footer only (local or URL)."""
+    import pyarrow.parquet as pq
+    if not is_url(path):
+        md = pq.read_metadata(path)
+    else:
+        fs, p = fs_for(path)
+        md = pq.ParquetFile(p, filesystem=fs).metadata
+    return [md.row_group(i).num_rows for i in range(md.num_row_groups)]
+
+
+def rewrite_row_groups(path: str, rows: int) -> None:
+    """Rewrite a parquet file in place into ≤``rows``-row groups, streaming
+    (one batch resident at a time, so a 130 MiB remote chunk never lands in
+    memory whole) via a `.rg.tmp` sibling moved into place at the end."""
+    import pyarrow.parquet as pq
+    tmp = path + '.rg.tmp'
+    if not is_url(path):
+        src = pq.ParquetFile(path)
+        with pq.ParquetWriter(tmp, src.schema_arrow) as w:
+            for batch in src.iter_batches(batch_size=rows):
+                w.write_batch(batch, row_group_size=rows)
+        os.replace(tmp, path)
+        return
+    fs, p = fs_for(path)
+    src = pq.ParquetFile(p, filesystem=fs)
+    with pq.ParquetWriter(p + '.rg.tmp', src.schema_arrow, filesystem=fs) as w:
+        for batch in src.iter_batches(batch_size=rows):
+            w.write_batch(batch, row_group_size=rows)
+    fs.mv(p + '.rg.tmp', p)
+    fs.invalidate_cache()
 
 
 def write_parquet(df: pd.DataFrame, path: str, row_group_size: int) -> None:
@@ -250,10 +303,17 @@ def put(local_path: str, path: str) -> None:
     _known.add(path)
 
 
+#: Parquet files beside a blob that annotate it (`sidecar.py`, `extents.py`,
+#: `shallow.py`) — not scans, so never listed as blobs; kept/moved with it.
+SIDECAR_SUFFIXES = ('.vocab.parquet', '.reclaim.parquet', '.shallow.parquet')
+
+
 def list_parquets(d: str) -> list[str]:
-    """Basenames of the `*.parquet` blobs in a scans dir."""
+    """Basenames of the `*.parquet` blobs in a scans dir (sidecars excluded)."""
     if not is_url(d):
         from glob import glob
-        return sorted(os.path.basename(p) for p in glob(_local_join(d, '*.parquet')))
-    fs, p = fs_for(d)
-    return sorted(x.rsplit('/', 1)[-1] for x in fs.glob(f"{p.rstrip('/')}/*.parquet"))
+        names = (os.path.basename(p) for p in glob(_local_join(d, '*.parquet')))
+    else:
+        fs, p = fs_for(d)
+        names = (x.rsplit('/', 1)[-1] for x in fs.glob(f"{p.rstrip('/')}/*.parquet"))
+    return sorted(n for n in names if not n.endswith(SIDECAR_SUFFIXES))

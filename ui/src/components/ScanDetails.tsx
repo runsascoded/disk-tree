@@ -13,6 +13,8 @@ import type { FilterResult, HistogramChild, Row, ScanJob, ScanProgress, Collapse
 import { VoronoiTreemap } from '@rdub/treemap/voronoi'
 import { VizBoundary } from './VizBoundary'
 import { useCapabilities } from '../hooks/useCapabilities'
+import { useNarrow } from '../hooks/useNarrow'
+import { elideMiddle } from '../staged'
 import { useDeleteMethod } from '../hooks/useDeleteMethod'
 import { useScanProgress } from '../hooks/useScanProgress'
 import { useRecentPaths } from '../hooks/useRecentPaths'
@@ -272,6 +274,18 @@ function ChildScanStatus({ row, scanStatus, parentScanTime }: { row: Row; scanSt
   return <span style={{ opacity: 0.4 }}>-</span>
 }
 
+/** A row's name; at phone width middle-elided (the extension survives) with
+ *  the full name on hover / long-press. */
+function PathName({ name, narrow }: { name: string; narrow: boolean }) {
+  const shown = narrow ? elideMiddle(name, 26, 9) : name
+  if (shown === name) return <code>{name}</code>
+  return (
+    <Tooltip title={name} placement="top" arrow enterTouchDelay={0} leaveTouchDelay={3000}>
+      <code>{shown}</code>
+    </Tooltip>
+  )
+}
+
 function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, scanningPaths, scanStatus, scanTime, onRescan, isScanning, sorts, onSort, onDelete, deletingPaths, sel, collapsedRows, tableRef }: {
   root: Row
   /** The root row's Path cell — the location's basename (`gbfs`), not `.`. */
@@ -311,9 +325,13 @@ function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, 
   const prefix = childLinkPrefix(uri)
   const allSelected = children.length > 0 && children.every(r => sel.isSelected(r))
   const someSelected = children.some(r => sel.isSelected(r))
+  // Phone width: the name is what matters — Modified/Children/Desc/Scanned
+  // hide (`.col-wide`) and names middle-elide with the full name in a tooltip.
+  const ownRef = useRef<HTMLTableElement | null>(null)
+  const narrow = useNarrow(tableRef ?? ownRef)
 
   return (
-    <table className="scan-details-table" ref={tableRef}>
+    <table className={`scan-details-table${narrow ? ' narrow' : ''}`} ref={tableRef ?? ownRef}>
       <thead>
         <tr>
           <th className="col-checkbox">
@@ -328,10 +346,10 @@ function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, 
           <SortableHeader className="col-icon" label="" sortKey="kind" sorts={sorts} onSort={onSort} tooltip="Sort by type (file/folder)" />
           <SortableHeader className="col-path" label="Path" sortKey="path" sorts={sorts} onSort={onSort} />
           <SortableHeader className="col-numeric" label="Size" sortKey="size" sorts={sorts} onSort={onSort} tooltip="Total size including all nested files and directories" />
-          <SortableHeader className="col-numeric" label="Modified" sortKey="mtime" sorts={sorts} onSort={onSort} tooltip="Most recent modification time of any file in this directory tree" />
-          <SortableHeader className="col-numeric" label="Children" sortKey="n_children" sorts={sorts} onSort={onSort} tooltip="Number of direct children (files and subdirectories)" />
-          <SortableHeader className="col-numeric" label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
-          <SortableHeader className="col-numeric" label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
+          <SortableHeader className="col-numeric col-wide" label="Modified" sortKey="mtime" sorts={sorts} onSort={onSort} tooltip="Most recent modification time of any file in this directory tree" />
+          <SortableHeader className="col-numeric col-wide" label="Children" sortKey="n_children" sorts={sorts} onSort={onSort} tooltip="Number of direct children (files and subdirectories)" />
+          <SortableHeader className="col-numeric col-wide" label="Desc." sortKey="n_desc" sorts={sorts} onSort={onSort} tooltip="Total number of descendants (all nested files and directories)" />
+          <SortableHeader className="col-numeric col-wide" label="Scanned" sortKey="scanned" sorts={sorts} onSort={onSort} tooltip="When this directory was last scanned" />
           <th className="col-action"></th>
           {canAct && <th className="col-action"></th>}
         </tr>
@@ -342,10 +360,10 @@ function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, 
           <td className="col-icon">{root.kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
           <td className="col-path"><code>{rootLabel}</code></td>
           <td className="col-numeric">{formatSize(root.size)}</td>
-          <td className="col-numeric">{timeAgo(root.mtime)}</td>
-          <td className="col-numeric">{root.n_children?.toLocaleString()}</td>
-          <td className="col-numeric">{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
-          <td className="col-numeric">
+          <td className="col-numeric col-wide">{timeAgo(root.mtime)}</td>
+          <td className="col-numeric col-wide">{root.n_children?.toLocaleString()}</td>
+          <td className="col-numeric col-wide">{root.n_desc && root.n_desc > 1 ? root.n_desc.toLocaleString() : null}</td>
+          <td className="col-numeric col-wide">
             {scanStatus === 'full' && scanTime ? (
               <span>{scanTimeAgo(scanTime)}</span>
             ) : scanStatus === 'partial' ? (
@@ -420,10 +438,10 @@ function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, 
                 </Link>
               </td>
               <td className="col-numeric">{formatSize(collapsedRow.size)}</td>
-              <td className="col-numeric">{timeAgo(collapsedRow.mtime)}</td>
-              <td className="col-numeric">{collapsedRow.n_children?.toLocaleString()}</td>
-              <td className="col-numeric">{collapsedRow.n_desc && collapsedRow.n_desc > 1 ? collapsedRow.n_desc.toLocaleString() : null}</td>
-              <td className="col-numeric">{scanStatus === 'full' && scanTime ? scanTimeAgo(scanTime) : null}</td>
+              <td className="col-numeric col-wide">{timeAgo(collapsedRow.mtime)}</td>
+              <td className="col-numeric col-wide">{collapsedRow.n_children?.toLocaleString()}</td>
+              <td className="col-numeric col-wide">{collapsedRow.n_desc && collapsedRow.n_desc > 1 ? collapsedRow.n_desc.toLocaleString() : null}</td>
+              <td className="col-numeric col-wide">{scanStatus === 'full' && scanTime ? scanTimeAgo(scanTime) : null}</td>
               <td className="col-action">
                 {caps?.scan && (
                   <Tooltip title="Rescan this directory">
@@ -500,7 +518,7 @@ function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, 
               </td>
               <td className="col-path">
                 <Link to={`${prefix}/${collapsedPrefix ? collapsedPrefix + '/' : ''}${row.path}`} onClick={e => e.stopPropagation()}>
-                  <code>{row.path}</code>
+                  <PathName name={row.path} narrow={narrow} />
                 </Link>
                 {row.expand_preview && row.expand_preview.split('/').map((segment, idx, arr) => {
                   const pathToSegment = `${row.path}/${arr.slice(0, idx + 1).join('/')}`
@@ -515,10 +533,10 @@ function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, 
                 })}
               </td>
               <td className="col-numeric">{formatSize(row.size)}</td>
-              <td className="col-numeric">{timeAgo(row.mtime)}</td>
-              <td className="col-numeric">{row.n_children ? row.n_children.toLocaleString() : null}</td>
-              <td className="col-numeric">{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
-              <td className="col-numeric">
+              <td className="col-numeric col-wide">{timeAgo(row.mtime)}</td>
+              <td className="col-numeric col-wide">{row.n_children ? row.n_children.toLocaleString() : null}</td>
+              <td className="col-numeric col-wide">{row.n_desc && row.n_desc > 1 ? row.n_desc.toLocaleString() : null}</td>
+              <td className="col-numeric col-wide">
                 <ChildScanStatus row={row} scanStatus={scanStatus} parentScanTime={scanTime} />
               </td>
               <td className="col-action" onClick={e => e.stopPropagation()}>

@@ -111,13 +111,19 @@ disk-tree diff-index A B | PATH… | -a   # Persisted full diff of a scan pair (
                           # path's previous scan automatically (`-D` to skip); `-f` rebuilds,
                           # `-g` GCs indexes whose scans are gone (`-n` previews)
 
-disk-tree migrate-row-groups  # Rewrite scan blobs to ≤64K-row parquet row groups (a directory listing
-                          # decodes every overlapping row group: ~4 ms vs ~40 ms at 1M rows)
+disk-tree migrate-row-groups [DIR|URL]  # Rewrite scan blobs to ≤64K-row parquet row groups, in place,
+                          # streaming (a directory listing decodes every overlapping row group: ~4 ms vs
+                          # ~40 ms at 1M rows; over R2 a `depth ≤ 2` view fetches ~2 MiB vs ~38 MiB).
+                          # Default: the write dir; `r2://bucket/prefix` rewrites remote blobs where they are
 
 disk-tree filter URI QUERY  # Recursive filter, true re-aggregation: sizes of everything matching QUERY
                             # (`/…/` regex or substring); outermost matches only — never double-counts
                             # Slash-free queries match path segments (basenames); queries with `/` match
                             # full paths. Uses the vocab sidecar automatically when fresh (-B forces brute)
+
+disk-tree shallow URI     # Build the shallow sidecar (`<blob-stem>.shallow.parquet`: every chunk's depth-1
+  -s ID | -a              # rows beside a chunked scan's root) for scans saved before `index` wrote it —
+                          # `/api/scan` at the root then never opens a chunk blob (spec `scan-page-r2-latency.md`)
 
 disk-tree vocab URI       # Build the vocab sidecar (`<blob>.vocab.parquet`) for the scan covering URI:
                           # sorted segment names + name→row-group block index. Accelerates segment-local
@@ -309,7 +315,7 @@ Default paths (override with `DISK_TREE_ROOT`):
 
 **Blob storage is a search path, not a single directory.** The DB stays on the boot disk (small, always mounted); blobs may live anywhere on `config.scan_read_dirs()`, since `Scan.blob` holds a basename. Creating `<volume>/disk-tree/scans` on an external volume opts it in — no config needed — and it becomes the *write* target while mounted; unplugging simply drops it out of the search path. `DISK_TREE_SCAN_DIRS` (colon-separated, priority order) overrides discovery, and an explicit `DISK_TREE_ROOT` disables it entirely so tests and alternate profiles stay self-contained. A candidate under an unmounted `/Volumes/<name>` is never written to — that would silently create the directory on the boot disk.
 
-A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — the remote-target story for a boot disk too full to hold scan output (spec `remote-scan-targets.md`). `index --to <url>` (or `DISK_TREE_REMOTE_SCAN_TARGET` + `-R`) writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam); the vocab/reclaim sidecars, `--extents`, and `migrate*` are local-only and skip remote blobs.
+A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — the remote-target story for a boot disk too full to hold scan output (spec `remote-scan-targets.md`). `index --to <url>` (or `DISK_TREE_REMOTE_SCAN_TARGET` + `-R`) writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam); the vocab/reclaim sidecars, `--extents`, and `migrate*` are local-only and skip remote blobs. The shallow sidecar (`<root-stem>.shallow.parquet`, each chunk's top level, written by every hybrid save) follows the blob anywhere, and scan blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
 
 **Cross-account credentials** — a `buckets.yml` entry (or `defaults`) may carry a `profile:` naming an AWS credential profile (`blobfs.bucket_profile`), so a source and a target in *different* accounts each authenticate with their own key inside one `index --to` run. It threads to every S3/R2 seam: the `s3fs` blob IO (`_s3fs(endpoint, profile)`), the `aws`-CLI lister (`S3Backend(profile=…)`), and the `boto3` bulk lister (`S3BulkLister(profile=…)`, `bulk-list -f`). No profile → ambient credentials (env / default profile), the single-account default. Cross-account needs per-bucket endpoints too, so leave `DISK_TREE_R2_ENDPOINT_URL` unset (it globally overrides all per-bucket endpoints).
 

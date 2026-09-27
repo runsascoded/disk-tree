@@ -809,30 +809,34 @@ def get_scan():
 
     children = [row_to_dict(row) for _, row in direct_children_df.iterrows()]
 
-    # Load items from child scans for treemap completeness
-    # For directories with child_scan_id, load their direct children (depth-1 items)
-    # This ensures we show the top-level breakdown of each chunked directory
+    # Each chunked direct child's own direct children (its chunk's depth-1
+    # rows, depth 2 here) so the treemap shows every chunk's top level. From
+    # the root blob's shallow sidecar when it has one, else a filtered +
+    # projected read of the chunk, cached per process — never the whole chunk
+    # blob (spec `scan-page-r2-latency.md`).
     if 'child_scan_id' in df.columns:
+        from disk_tree.shallow import chunk_top_rows
+        root_blob_path = resolve_blob(effective_blob)
+        top_cols = [c for c in df.columns if c not in ('rel_path', 'rel_parent')]
         child_scan_dfs = []
         for _, row in direct_children_df.iterrows():
             child_scan = row.get('child_scan_id')
-            if pd.notna(child_scan) and blobfs.exists(resolve_blob(child_scan)):
-                try:
-                    child_df = blobfs.read_parquet(resolve_blob(child_scan))
-                    # Only load direct children (depth=1) from child scans
-                    # These become depth=2 in the parent context
-                    child_df = child_df[child_df['depth'] == 1]
-                    if len(child_df) > 0:
-                        # Prefix paths with parent directory name
-                        parent_path = row['path'] if not use_rel_path else row.get('rel_path', row['path'])
-                        child_df = child_df.copy()
-                        child_df['path'] = parent_path + '/' + child_df['path']
-                        child_df['parent'] = parent_path  # All become children of this dir
-                        # Adjust depth: depth-1 in child becomes depth-2 in parent
-                        child_df['depth'] = 2
-                        child_scan_dfs.append(child_df)
-                except Exception as e:
-                    print(f"Error loading child scan {child_scan}: {e}")
+            if pd.isna(child_scan):
+                continue
+            try:
+                child_df = chunk_top_rows(root_blob_path, child_scan, resolve_blob, top_cols)
+            except Exception as e:
+                print(f"Error loading child scan {child_scan}: {e}")
+                continue
+            if child_df is None or len(child_df) == 0:
+                continue
+            # Prefix paths with the parent directory name; all become its children
+            parent_path = row['path'] if not use_rel_path else row.get('rel_path', row['path'])
+            child_df = child_df.copy()
+            child_df['path'] = parent_path + '/' + child_df['path']
+            child_df['parent'] = parent_path
+            child_df['depth'] = 2
+            child_scan_dfs.append(child_df)
         if child_scan_dfs:
             children_df = pd.concat([children_df] + child_scan_dfs, ignore_index=True)
 

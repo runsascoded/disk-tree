@@ -98,6 +98,11 @@ tr.root {
   tbody tr.cur:not(.sel) { background: rgba(25, 118, 210, 0.08); }
 }
 
+// Phone width (`useNarrow` sets `.narrow` when the table's container is under
+// 600px): Modified / Children / Desc / Scanned hide so the name column keeps
+// the width — on a phone the name is the column that matters.
+.scan-details-table.narrow .col-wide { display: none; }
+
 // Breadcrumbs
 .breadcrumbs {
   display: inline;
@@ -171,6 +176,8 @@ tr.root {
 .staged-table {
   table-layout: fixed;
   width: 100%;
+  .col-check { width: 1.4rem; padding: 0 0 0 4px; }
+  .col-icon { width: 1.2rem; padding: 0; text-align: center; }
   .col-size { width: 5.5rem; white-space: nowrap; }
   .col-actions { width: 9.5rem; white-space: nowrap; text-align: right; padding-right: 0; }
   td .staged-path { white-space: normal; overflow-wrap: anywhere; } // the global `code` is nowrap
@@ -184,6 +191,4 @@ tr.root {
   td.col-icon .staged-btn { margin: 0; font-size: 1em; opacity: 0.8; }
 }
 .staged-base { font-size: 0.8rem; }
-  .col-check { width: 1.4rem; padding: 0 0 0 4px; }
-  .col-icon { width: 1.2rem; padding: 0; text-align: center; }
 .staged-selected { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 0.85rem; margin-left: 8px; }
