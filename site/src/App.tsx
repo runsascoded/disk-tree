@@ -1324,7 +1324,7 @@ function AppContent() {
       {store.lifecycle && (
         <LifecycleFold
           store={store} asof={asof} prevScan={prevScan}
-          note={<>Intended state is tracked in <code>{store.lifecycle}</code> (<code>dt-cloud lifecycle diff|push</code>).</>}
+          note={<>Intended state is tracked in <code>{store.lifecycle.tracked}</code> (<code>dt-cloud lifecycle diff|push</code>).</>}
         />
       )}
 

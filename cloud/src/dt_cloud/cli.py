@@ -1075,22 +1075,55 @@ def warm_cache(date: str | None, jobs: int, dry_run: bool, root: str | None, tok
 @main.group()
 def lifecycle() -> None:
     """Bucket lifecycle rules as a tracked file: `pull` (live → JSON), `diff`
-    (file vs live), `push` (file → bucket, whole-config PUT + read-back
-    verification), `gc-rule` (print the bucket-wide noncurrent-version GC rule
-    to add to the file). Creds: the CAIOS keys from the env (see `sweep`)."""
+    (file vs live), `push` (file → bucket, whole-config write + read-back
+    verification), `gc-rule` (print the S3 bucket-wide noncurrent-version GC
+    rule to add to a file). `gs://<bucket>` reads GCS (ADC: the job SA, or
+    your gcloud application-default login); a bare name is S3 / CAIOS with the
+    keys from the env (see `sweep`). Several `-b` → one JSON map keyed by
+    bucket, the per-scan snapshot shape."""
+
+
+def _lifecycle_clients(buckets: tuple[str, ...]):
+    """The S3 and/or GCS client the given bucket URIs need (`None` for a cloud
+    none of them name), so one `pull` can snapshot a mixed set."""
+    from .lifecycle import is_gcs
+
+    gcs = s3 = None
+    if any(is_gcs(b) for b in buckets):
+        from google.cloud import storage
+
+        gcs = storage.Client()
+    if any(not is_gcs(b) for b in buckets):
+        from .sweep import s3_client
+
+        s3 = s3_client()
+    return s3, gcs
+
+
+_LC_BUCKET = option("-b", "--bucket", "buckets", multiple=True, help="`gs://<bucket>` (GCS) or a bare S3 bucket name; repeatable (default $CW_BUCKET)")
+
+
+def _lc_buckets(buckets: tuple[str, ...]) -> tuple[str, ...]:
+    if buckets:
+        return buckets
+    from .sweep import CW_BUCKET
+
+    return (CW_BUCKET,)
 
 
 @lifecycle.command("pull")
-@option("-b", "--bucket", "buckets", multiple=True, help="Bucket (repeatable; default $CW_BUCKET). One → the bare `Rules[]`; several → `{<bucket>: Rules[]}` in this order")
+@_LC_BUCKET
 @option("-o", "--out", type=Path, help="Write here instead of stdout")
 def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
-    from .lifecycle import dump, dump_map, pull
-    from .sweep import CW_BUCKET, s3_client
+    """One bucket → the bare rule list; several → `{<bucket>: rules}` in this order."""
+    from .lifecycle import dump, dump_map, pull_any, pull_many
 
-    buckets = buckets or (CW_BUCKET,)
-    client = s3_client()
-    by_bucket = {b: pull(client, b) for b in buckets}
-    text = dump(by_bucket[buckets[0]]) if len(buckets) == 1 else dump_map(by_bucket)
+    buckets = _lc_buckets(buckets)
+    s3, gcs = _lifecycle_clients(buckets)
+    if len(buckets) == 1:
+        text = dump(pull_any(buckets[0], s3=s3, gcs=gcs), bucket=buckets[0])
+    else:
+        text = dump_map(pull_many(list(buckets), s3=s3, gcs=gcs))
     if out is None:
         sys.stdout.write(text)
     else:
@@ -1099,39 +1132,40 @@ def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
 
 
 @lifecycle.command("diff")
-@option("-b", "--bucket", default=lambda: os.environ.get("CW_BUCKET", "marin-us-east-02a"), help="Bucket (default $CW_BUCKET)")
+@_LC_BUCKET
 @argument("path", type=Path)
-def lifecycle_diff(bucket: str, path: Path) -> None:
-    """Exit 1 when PATH (intended) differs from the live rules."""
-    from .lifecycle import diff, load, pull
-    from .sweep import s3_client
+def lifecycle_diff(buckets: tuple[str, ...], path: Path) -> None:
+    """Exit 1 when PATH (intended) differs from the live rules of the one -b bucket."""
+    from .lifecycle import diff_any, load, pull_any
 
-    d = diff(load(str(path)), pull(s3_client(), bucket))
+    (bucket,) = _lc_buckets(buckets)
+    s3, gcs = _lifecycle_clients((bucket,))
+    d = diff_any(bucket, load(str(path)), pull_any(bucket, s3=s3, gcs=gcs))
     print(json.dumps(d))
     if any(d.values()):
         sys.exit(1)
 
 
 @lifecycle.command("push")
-@option("-b", "--bucket", default=lambda: os.environ.get("CW_BUCKET", "marin-us-east-02a"), help="Bucket (default $CW_BUCKET)")
+@_LC_BUCKET
 @option("-n", "--dry-run", is_flag=True, help="Print the diff that would be applied; touch nothing")
 @argument("path", type=Path)
-def lifecycle_push(bucket: str, dry_run: bool, path: Path) -> None:
-    """Replace the bucket's lifecycle configuration with PATH (read back + verified)."""
-    from .lifecycle import diff, load, pull, push
-    from .sweep import s3_client
+def lifecycle_push(buckets: tuple[str, ...], dry_run: bool, path: Path) -> None:
+    """Replace the one -b bucket's lifecycle configuration with PATH (read back + verified)."""
+    from .lifecycle import diff_any, load, pull_any, push_any
 
-    client = s3_client()
+    (bucket,) = _lc_buckets(buckets)
+    s3, gcs = _lifecycle_clients((bucket,))
     intended = load(str(path))
-    base = pull(client, bucket)
-    d = diff(intended, base)
+    base = pull_any(bucket, s3=s3, gcs=gcs)
+    d = diff_any(bucket, intended, base)
     if not any(d.values()):
         err(f"lifecycle: {bucket} already matches {path}")
         return
     err(f"lifecycle: {'would apply' if dry_run else 'applying'} to {bucket}: {json.dumps(d)}")
     if dry_run:
         return
-    live = push(client, bucket, intended, base=base)  # refuses if live moved since the diff
+    live = push_any(bucket, intended, base=base, s3=s3, gcs=gcs)  # refuses if live moved since the diff
     err(f"lifecycle: {bucket} now has {len(live)} rule(s), verified")
 
 

@@ -1803,9 +1803,13 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
 // column, the cursor / selected row tints, and the bulk bar docked below.
 // Lifecycle table: group rows by bucket — the bucket cell shows once per group,
 // with a divider above each new bucket so the (many) per-TTL rules read as a set.
+// A fleet store (`lifecycle.grouped`) folds a rule shared across buckets into
+// one row with a buckets column instead.
 .lifecycle-tbl {
   td.bucket { color: var(--ink-2); white-space: nowrap; }
   tr.bucket-start > td { border-top: 1px solid var(--rule, rgba(128, 128, 128, 0.28)); }
+  td.buckets { color: var(--ink-2); white-space: nowrap; }
+  code.clip { display: inline-block; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 }
 
 .worklist.selectable {
