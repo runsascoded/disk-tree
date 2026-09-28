@@ -5,7 +5,7 @@
 // the app needs scopes + the admin flag, which are decided server-side — staff
 // domain, viewer domains, the `admin_emails` / `allowed_emails` rows). Signed
 // out = 401, which the package hook reads as "nobody"; the body still says so
-// for the plain-fetch callers (`planMarks.ts`).
+// for the plain-fetch callers (`StagedPage.tsx`).
 import { type Ctx, type Env as AuthEnv, identify, json } from "../_lib/auth.js"
 
 export const onRequestGet = async (ctx: Ctx & { env: AuthEnv }): Promise<Response> => {

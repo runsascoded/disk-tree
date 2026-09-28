@@ -2,18 +2,17 @@
  * scans' index tiers at one shared byte floor (`_lib/view.ts` `buildDiff`).
  *
  *   GET /api/diff?from=<scan>&to=<scan>&path=<P>&w=<px>&h=<px>[&minArea=<px²>][&top=<n>]
- *                 [&lens=user:<id>][&o=claimed|unclaimed][&k=<⊆ksu>][&q=<name filter>][&summary=1][&depth=<levels>]
+ *                 [&lens=user:<id>][&o=claimed|unclaimed][&q=<name filter>][&summary=1][&depth=<levels>]
  *
  * `summary=1` answers with the totals only (both sides' scoped root reads,
  * no walk — `rows` empty): the section's headline, seconds before the rows.
  *
  * Same scope axes as `/api/subtree`; the response is the treemap's row list
  * (`{ rows, total_a, total_b, objects_a, objects_b, expansions, truncated }`),
- * immutable per (from, to, path, budget, scope) plus the ledger head when
- * `k` is set, and edge-cached accordingly.
+ * immutable per (from, to, path, budget, scope) plus the ledger head under a
+ * user lens, and edge-cached accordingly.
  */
 import { type Env, requireViewer } from '../_lib/auth.js'
-import { parseMarkAxes } from '../_lib/markAxes.js'
 import { storeReady, type Lens } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { classKey, parseClasses, parseOwner, parseQuery } from '../_lib/scope.js'
@@ -50,7 +49,6 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   }
   const rawOwner = url.searchParams.get('o')
   const owner = parseOwner(rawOwner)
-  const states = parseMarkAxes(url.searchParams.get('k'))
   const classes = parseClasses(url.searchParams.get('cl'))
   const qRaw = url.searchParams.get('q') ?? ''
   const query = parseQuery(qRaw) ?? undefined
@@ -58,23 +56,22 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   const gated = await st.time('auth', requireViewer(ctx as never))
   if (gated instanceof Response) return gated
 
-  const head = (states || lens) && ctx.env.DB ? await st.time('pre', ledgerHead(ctx.env)) : 0
+  const head = lens && ctx.env.DB ? await st.time('pre', ledgerHead(ctx.env)) : 0
   const cacheKey = cacheKeyFor('diff',
     `${from}/${to}/${encodeURIComponent(path)}?w=${w}&h=${h}&a=${minArea}&t=${atten}&n=${top}&l=${lensRaw ?? ''}` +
-      `&o=${rawOwner ?? ''}&cl=${classKey(classes)}&k=${states ? [...states].sort().join(',') : ''}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}&s=${summary ? 1 : 0}&D=${depth ?? ''}`,
+      `&o=${rawOwner ?? ''}&cl=${classKey(classes)}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}&s=${summary ? 1 : 0}&D=${depth ?? ''}`,
   )
   const hit = await st.time('match', cacheMatch(ctx.env, cacheKey))
   if (hit) return hit
 
   try {
-    const diff = await buildDiff(ctx.env, { from, to, path, w, h, minArea, atten, top, lens, owner, states, query, classes, summary, depth, trace: st.trace })
+    const diff = await buildDiff(ctx.env, { from, to, path, w, h, minArea, atten, top, lens, owner, query, classes, summary, depth, trace: st.trace })
     const body = JSON.stringify({
       prev: from,
       curr: to,
       path,
       ...(lensRaw ? { lens: lensRaw } : {}),
       ...(owner ? { owner } : {}),
-      ...(states ? { states: [...states].sort() } : {}),
       ...(query ? { q: qRaw } : {}),
       ...diff,
       threshold: Math.round(diff.threshold),

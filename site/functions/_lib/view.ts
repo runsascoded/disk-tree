@@ -18,12 +18,11 @@
  * (or a scan without coarse tiers) reads the floor-free tier.
  */
 import type { Env } from './auth.js'
-import { type MarkAxis, markScope, type MarkScope } from './markAxes.js'
 import { type IndexHandle, type Lens, openIndex, readAsks, readRects, readRows, type Rect, type Row, type Trace, withTrace } from './index.js'
 import { ownerLens, type OwnerLens } from './owners.js'
 import { type ClassScope, classRow, nameFilter, type NamePred, ownerOk, type OwnerScope } from './scope.js'
 import { filterThreshold, looseThreshold, matchRoots, pickTier, rebasedThreshold, rootRects } from './filter.js'
-import { markClaims, markTotals } from './totals.js'
+import { ownerClaims } from './ownerTotals.js'
 import { shared } from './shared.js'
 import { extrasFor } from './extras.js'
 
@@ -69,8 +68,6 @@ export interface ViewOpts {
    * one depth-band read that the client shows while the full tree loads, and
    * the full tree then fills in under tiles that don't move. */
   maxDepth?: number
-  /** `k=` ⊆ keep/sweep/unmarked: bytes under an allowed state, per node. */
-  states?: ReadonlySet<MarkAxis>
   /** `q=`: name filter over the read rows' paths (see `scope.ts`). */
   query?: NamePred
   /** With `query`: the fast first paint — the forest read from the coarsest
@@ -255,7 +252,7 @@ async function assignerMap(env: Env): Promise<Map<string, string>> {
   }, 10_000)
 }
 async function ownerLensFor(env: Env, date: string, lens: Lens, by?: string): Promise<OwnerLens | null> {
-  let claims = await markClaims(env, date)
+  let claims = await ownerClaims(env, date)
   if (by) {
     const emap = await assignerMap(env)
     claims = claims.filter(c => c.who != null && (emap.get(c.who.toLowerCase()) ?? c.who) === by)
@@ -298,10 +295,9 @@ interface Read {
   partial?: boolean
   /** The claims fold behind a user lens (null: no lens, or no claims). */
   ownerLens: OwnerLens | null
-  /** A path's scoped share of its total (owner pool / lens and mark axis
-   * applied). `all` = the subtree total (null under a lens where the path's
-   * cover isn't U's); `mine` = the rows the sort's lens/pool kept (null =
-   * unread, lens only). */
+  /** A path's scoped share of its total (owner pool / lens applied). `all` =
+   * the subtree total (null under a lens where the path's cover isn't U's);
+   * `mine` = the rows the sort's lens/pool kept (null = unread, lens only). */
   scoped: (p: string, all: Agg | null, mine: Agg | null) => Agg
 }
 
@@ -311,11 +307,6 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
   const sort = lens ? 'user' : 'path'
   const readRoot = (idx: IndexHandle) =>
     path === '' ? readRows(idx, 1, 1, '', '￿', undefined, lens) : readRows(idx, dP, dP, path, path, undefined, lens)
-  // The mark axis needs the ledger folded against this scan (cached per
-  // (scan, head) by the totals machinery); per node it scales the aggregate
-  // to its allowed-state share. Rows are read by TOTAL bytes at the scoped
-  // threshold, so the read is a superset of what the scope keeps.
-  const fs: MarkScope | null = o.states ? markScope((await markTotals(env, date)).marks, o.states, lens?.key) : null
   // A user lens applies the ownership ledger: claims repaint attribution, so
   // U's bytes under a path can include other people's slices (a band U
   // claimed) or lose U's own (a band someone else claimed). Where the former
@@ -332,18 +323,10 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
   const regions: { path: string; depth: number }[] = rootTotal
     ? [{ path, depth: dP }]
     : [...allRegions].sort((a, b) => b.all - a.all).slice(0, REGION_READS)
-  // Owner pools filter rows (they are owner slices); the state share is then
-  // computed on the node's total and applied to the pool's share — assumes
-  // states are spread like ownership inside a node. Under a lens the state
-  // fold already works in U's bytes (per-band `us`), so its share is taken
-  // of U's lens bytes.
-  const scoped = (p: string, all: Agg | null, mine: Agg | null): Agg => {
-    const base = ol ? lensAgg(ol, lens!.key, p, all, mine) : mine!
-    if (!fs) return base
-    const denom = lens ? base : all!
-    const share = denom.b > 0 ? fs.value(p, denom.b) / denom.b : 0
-    return scale(base, share)
-  }
+  // Owner pools filter rows (they are owner slices); a user lens folds the
+  // claims on top of U's rows (`lensAgg`).
+  const scoped = (p: string, all: Agg | null, mine: Agg | null): Agg =>
+    ol ? lensAgg(ol, lens!.key, p, all, mine) : mine!
 
   // Root aggregate P.b (and P's own us for the response root) from the
   // coarsest tier that has P at all — the same numbers in every tier. The
@@ -434,7 +417,7 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
       if (from.a != null) into.a = into.a == null ? from.a : Math.max(into.a, from.a)
       for (const key of ['cb', 'ub'] as const) for (const [k, v] of Object.entries(from[key])) into[key][k] = (into[key][k] ?? 0) + v
     }
-    // Scoped aggregates per path from a row set (class + owner pool + states).
+    // Scoped aggregates per path from a row set (class + owner pool).
     const aggregate = (rs: Row[]): { all: Map<string, Agg>; mine: Map<string, Agg>; depth: Map<string, number> } => {
       const all = new Map<string, Agg>(); const mine = new Map<string, Agg>(); const depth = new Map<string, number>()
       for (const r0 of rs) {
@@ -544,7 +527,7 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
   // two aggregate objects per path for all ~240k rows a root read returns
   // and keeps ~1k of them — 2 s of CPU per view on the edge (Workers Logs,
   // 2026-09-15) against ~0.8 s for the decode itself.
-  const plain = !ol && !fs && !owner && !classes && !regionRects.length && !query
+  const plain = !ol && !owner && !classes && !regionRects.length && !query
   if (plain) {
     const tot = new Map<string, number>()
     for (const r of rows) tot.set(r.path, (tot.get(r.path) ?? 0) + r.b)
@@ -605,7 +588,7 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
     // region can sit below the threshold; the by-path read would have held
     // any path whose total clears it. One it didn't is under the fold.
     if (ol && !all && ol.needsTotal(p) && !ol.isClaim(p)) continue
-    aggs.set(p, fs || ol ? scoped(p, ol ? (ol.needsTotal(p) ? all : null) : all, mine) : mine!)
+    aggs.set(p, ol ? scoped(p, ol.needsTotal(p) ? all : null, mine) : mine!)
   }
   // Unread regions know their object counts from the manifest; an unread
   // ancestor's count is the sum of the regions under it (its own attributed

@@ -35,21 +35,14 @@ describe('bucketCut — the run\'s -b cut from a plan\'s buckets', () => {
 
 describe('sweepScript — the Batch container\'s bash', () => {
   const jobId = 'gcs-sweep-dry-20260928-1200z'
-  it('ledger-sourced (no plan): unchanged — `manifest -S` then execute', () => {
-    expect(sweepScript({ mode: 'dry', jobId, buckets: [E1] })).toBe([
+  it('dry, one bucket: `manifest --plan <run>/plan.json` then execute', () => {
+    expect(sweepScript({ mode: 'dry', jobId, buckets: [E1], plan: planJsonPath(jobId) })).toBe([
       'set -euo pipefail',
-      `dt-cloud sweep manifest -d "$SWEEP_DATE" -S -b ${E1} -o "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
+      `dt-cloud sweep manifest -d "$SWEEP_DATE" --plan "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}/plan.json" -b ${E1} -o "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
       `dt-cloud sweep execute -b ${E1} "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
     ].join('\n'))
   })
-  it('ledger-sourced, uncut, real', () => {
-    expect(sweepScript({ mode: 'real', jobId, buckets: [] })).toBe([
-      'set -euo pipefail',
-      `dt-cloud sweep manifest -d "$SWEEP_DATE" -S  -o "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
-      `dt-cloud sweep execute  --for-real "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
-    ].join('\n'))
-  })
-  it('plan-sourced: `--plan <run>/plan.json` replaces -S, the cut is the plan\'s buckets', () => {
+  it('real, the cut is the plan\'s buckets', () => {
     expect(sweepScript({ mode: 'real', jobId, buckets: [W4, E1], plan: planJsonPath(jobId) })).toBe([
       'set -euo pipefail',
       `dt-cloud sweep manifest -d "$SWEEP_DATE" --plan "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}/plan.json" -b ${W4} -b ${E1} -o "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,

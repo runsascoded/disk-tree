@@ -1,5 +1,5 @@
-// POST /api/sweep/dispatch — launch a sweep run on GCP Batch from the /sweep
-// console (specs/cw-sweep.md). Admin only.
+// POST /api/plan-sweep/dispatch — launch a plan-first deletion run on GCP
+// Batch from /staged (specs/staged-delete.md). Admin only.
 //
 // Body: { plan_id, mode: 'dry' | 'real', date: <scan id> }. Snapshots the plan's
 // items into plan.json (in the run dir on GCS), submits a Batch job running the
@@ -78,11 +78,12 @@ export const onRequestPost = async (ctx: Ctx & { env: Env }): Promise<Response> 
     return json({ error: `batch submit failed (${status})`, status, detail }, 500)
   }
 
-  const head = (await db.prepare("SELECT coalesce(max(id), 0) AS h FROM mark_log").first<{ h: number }>())?.h ?? 0
+  // `head` / `exec_head` were the marks ledger's position; a plan-first run
+  // reads no ledger, so both are 0.
   await db.prepare(`
     INSERT INTO deletion_runs (run_id, plan_id, manifest, scan, head, exec_head, actor, mode, started_ts, log_dir)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(jobId, planId, runGs, date, head, head, gated.email, mode, Math.floor(Date.now() / 1000), runGs).run()
+    VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
+  `).bind(jobId, planId, runGs, date, gated.email, mode, Math.floor(Date.now() / 1000), runGs).run()
 
   return json({ job_id: jobId, plan_id: planId, mode, date, run: runGs, by: gated.email })
 }
