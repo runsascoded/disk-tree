@@ -16,29 +16,50 @@ if [ "${1:-}" = "--status" ]; then exec ./cf-status; fi
 # the deployed commit (and the branch that contains it) belong on GitHub too —
 # otherwise agents reading the repo infer from stale source (bit us 8/27+8/28).
 # `-P`/`--no-push` keeps a deploy local (rare: experiments off the main branch).
+#
+# `-d`/`--dev`: a PREVIEW deploy — `--branch dev` → https://dev.<project>.pages.dev
+# (the Access app covers `*.<project>.pages.dev`, so it is gated like prod). Same
+# D1 + vars as production unless `[env.preview]` in wrangler.toml overrides them
+# (Pages: overriding ANY of vars/d1/kv there means restating ALL of them), and
+# its own preview-scoped secrets (`wrangler pages secret put <NAME> --project-name
+# <project> --env preview`; the GCS HMAC pair is already there). The dev stack for
+# real-prod numbers on unmerged work; moves the local `<short>-dev` pointer, never
+# the prod one, and does not push (an unmerged branch is not the public face).
 push=true
-for a in "$@"; do case "$a" in -P|--no-push) push=false ;; esac; done
+mode=prod
+for a in "$@"; do case "$a" in -P|--no-push) push=false ;; -d|--dev) mode=dev ;; esac; done
+if [ "$mode" = dev ]; then push=false; fi
 
 # Auth via the repo's direnv CLOUDFLARE_API_TOKEN, which has Pages write on the
 # OA account (as well as Access + oa.dev DNS edit). We deliberately do NOT fall
 # back to `wrangler login` OAuth: that session tends to drift to a personal
 # account and then fails with auth error 10000 against the OA account.
 pnpm build
+branch=main; [ "$mode" = dev ] && branch=dev
 CLOUDFLARE_ACCOUNT_ID=74981a43be0de7712369306c7b19133d \
-  npx wrangler pages deploy dist --project-name "$PROJECT" --branch main
+  npx wrangler pages deploy dist --project-name "$PROJECT" --branch "$branch"
 
-# On a successful production deploy, advance the local `prod` pointer to exactly
-# what we shipped (HEAD). Kept in sync by deploy itself, so it can't drift the
-# way a hand-updated branch would; `cf-status` stays the authority (it reads
-# CF's own deployment metadata) and this is the git-native convenience for
-# `git log prod..HEAD` / offline diffing. (A preview/staging deploy would move a
-# `dev` pointer the same way, once we add that path.)
+# On a successful deploy, advance the local `<short>-prod` (or, for `--dev`,
+# `<short>-dev`) pointer to exactly what we shipped (HEAD). Kept in sync by deploy itself, so
+# it can't drift the way a hand-updated branch would; `cf-status` stays the
+# authority (it reads CF's own deployment metadata) and this is the git-native
+# convenience for `git log <short>-prod..HEAD` / offline diffing.
+# One pointer per Pages project: `<short>-prod` / `<short>-dev`, where `<short>`
+# is the project name minus the account prefix and the `-usage` suffix
+# (`oa-cw-s3-usage` → `cw-s3-prod`, `oa-gcs-usage` → `gcs-prod`). Branches are
+# shared across worktrees and pushed to the same GitHub repo, so a single `prod`
+# name would have each deployment's deploy clobber the other's (it did,
+# 2026-09-28). No exceptions: a deployment that used the bare `prod` renames
+# its pointer once (`git branch -m prod <short>-prod`).
 sha=$(git rev-parse HEAD)
-git branch -f prod "$sha"
-echo "moved local prod → ${sha:0:9}"
+short=${PROJECT#oa-}; short=${short%-usage}
+ptr="$short-prod"; [ "$mode" = dev ] && ptr="$short-dev"
+git branch -f "$ptr" "$sha"
+echo "moved local $ptr → ${sha:0:9}"
+[ "$mode" = dev ] && echo "preview: https://dev.$PROJECT.pages.dev"
 if $push; then
   branch=$(git rev-parse --abbrev-ref HEAD)
   git push o "$branch" || echo "WARN: push of $branch to o failed (deploy itself succeeded)" >&2
-  git push -f o prod
-  echo "pushed $branch + prod → o (GitHub)"
+  git push -f o "$ptr"
+  echo "pushed $branch + $ptr → o (GitHub)"
 fi
