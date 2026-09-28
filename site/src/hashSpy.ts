@@ -47,9 +47,16 @@ export function sectionInView(ids: readonly string[], offset: number): string {
   const h = window.innerHeight
   const maxY = document.documentElement.scrollHeight - h
   const near = offset + Math.min(h / 3, 150)
-  const slide = h - near // the stretch of scroll over which the line descends
-  const progress = maxY > 0 ? clamp01((window.scrollY - (maxY - slide)) / slide) : 1
-  const yRef = near + slide * progress
+  // The line stays fixed at `near` (just under the header) for the whole page —
+  // so the named section is whatever sits at the top of the viewport. ONLY over
+  // a short window at the very bottom — where the page-end stops the last
+  // sections from ever reaching `near` — does it slide down to the viewport
+  // bottom, giving each a turn. Confining that slide to `descend` px (not a
+  // whole viewport) is what keeps a short page, or a scroll well above the
+  // bottom, from mis-naming a section two below the one actually in view.
+  const descend = Math.min(h - near, maxY, 280)
+  const progress = maxY > 0 ? clamp01((window.scrollY - (maxY - descend)) / descend) : 0
+  const yRef = near + (h - near) * progress
   let cur = ''
   for (const id of ids) {
     const el = document.getElementById(id)
