@@ -212,8 +212,14 @@ def test_gc_d1_deletes_only_generations_no_pointer_names(monkeypatch):
     from dt_cloud.index_footer import gc_d1
 
     con = sqlite3.connect(":memory:")
-    ddl = (Path(__file__).parents[2] / "site/migrations/gcs/0020_index_generations.sql").read_text()
-    con.executescript("CREATE TABLE index_schema (date TEXT, variant TEXT, version INTEGER, schema_json TEXT, floor_bytes INTEGER, PRIMARY KEY (date, variant));")
+    # The schema from the gcs lineage, whichever shape it has: one squashed
+    # `0001_init.sql` (creates every table itself), or the migration that
+    # introduced `index_row_groups` on top of an earlier `index_schema`.
+    mig = Path(__file__).parents[2] / "site/migrations/gcs"
+    (ddl_path,) = [f for f in sorted(mig.glob("*.sql")) if "CREATE TABLE index_row_groups" in f.read_text()]
+    ddl = ddl_path.read_text()
+    if "CREATE TABLE index_schema" not in ddl:
+        con.executescript("CREATE TABLE index_schema (date TEXT, variant TEXT, version INTEGER, schema_json TEXT, floor_bytes INTEGER, PRIMARY KEY (date, variant));")
     con.executescript(ddl)
     row = "(?, ?, ?, ?, 1, 1, 'a', 'b', 1, NULL, NULL, 0, 1, '[]')"
     con.executemany(f"INSERT INTO index_row_groups VALUES {row}", [
