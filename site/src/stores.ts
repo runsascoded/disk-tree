@@ -27,6 +27,12 @@ export interface Store {
    *  it follows `sweep`: gcs's actions WAL (`/api/actions`) or cw's plan-first
    *  marks (`/api/plan-marks`, adapted in `marks.ts`). Off = the plain map. */
   marks: boolean
+  /** The opt-in trash model: any full viewer proposes deletions by staging
+   *  prefixes into a shared open plan (`POST /api/plans/stage`, the children
+   *  table's trash gesture); an admin approves and dispatches. Off = the
+   *  table's actions are the store's mark controls. Mirrors the Functions'
+   *  `STAGING` var (the `stage_batches` table exists there). */
+  staging: boolean
   /** Who may mark: `admin` — marking is a staff decision, everyone else
    *  proposes deletions by staging (the actions-ledger store, where guests and
    *  less-trusted collaborators browse); `viewer` — any full viewer marks (the
@@ -74,6 +80,7 @@ const REGISTRY: Store[] = [
     prices: false,
     marks: true,
     marking: 'viewer',
+    staging: false,
     owners: false,
     sweep: 'plan',
     lifecycle: 'job/cw-lifecycle.json',
@@ -99,6 +106,7 @@ const REGISTRY: Store[] = [
     prices: true,
     marks: true,
     marking: 'admin',
+    staging: true,
     owners: true,
     sweep: 'owner',
     buckets: ['marin-us-central2', 'marin-us-central1', 'marin-us-east1', 'marin-us-east5', 'marin-us-west4', 'marin-eu-west4'],
@@ -123,6 +131,7 @@ const REGISTRY: Store[] = [
     prices: false,
     marks: false,
     marking: 'viewer',
+    staging: false,
     owners: false,
     sweep: 'plan',
     buckets: ['ctbk', 'crashes', 'jc-taxes'],

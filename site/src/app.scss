@@ -1748,6 +1748,14 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
       display: grid; grid-template-columns: 14px 14px 14px auto; align-items: center; gap: 4px;
       .dot-gap { width: 14px; height: 14px; }
       .tail { display: inline-flex; align-items: center; gap: 4px; margin-left: 2px; }
+      // The staging store's trash gesture (one per row): a muted red glyph,
+      // red at rest (a grey emoji was near-invisible in dark mode).
+      button.trash {
+        border: none; background: transparent; cursor: pointer; padding: 2px 4px;
+        display: inline-flex; align-items: center; border-radius: 4px; line-height: 1;
+        font-size: 14px; color: color-mix(in oklab, #e5484d 72%, var(--ink-3));
+        &:hover { color: #f2555a; background: color-mix(in oklab, #d33 16%, transparent); }
+      }
       button.dot {
         width: 14px; height: 14px; padding: 0; border-radius: 50%; cursor: pointer;
         background: transparent; border: 2px solid var(--act, var(--ink-3)); color: var(--act, var(--ink-3));
@@ -1814,6 +1822,21 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
   b { color: var(--ink); }
   .acts { display: inline-flex; align-items: center; gap: 6px; margin-left: 8px; }
   .lbl { color: var(--ink-2); text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.03em; margin-right: 2px; }
+  // The staging store's multi-select: one memo + one trash for the gesture.
+  input.memo {
+    font: inherit; font-size: 12px; width: 15ch; max-width: 40vw; padding: 2px 7px; border-radius: 4px;
+    background: var(--panel); color: var(--ink); border: 1px solid var(--line);
+    &::placeholder { color: var(--ink-3); }
+    &:focus { outline: none; border-color: color-mix(in oklab, var(--s1) 55%, var(--line)); }
+  }
+  button.trash {
+    font: inherit; font-size: 12px; cursor: pointer; padding: 2px 8px; border-radius: 4px;
+    display: inline-flex; align-items: center; gap: 5px;
+    background: color-mix(in oklab, #d33 14%, var(--panel)); color: var(--ink);
+    border: 1px solid color-mix(in oklab, #d33 40%, var(--line));
+    &:hover { background: color-mix(in oklab, #d33 24%, var(--panel)); }
+    svg { color: #f2555a; }
+  }
   button.dot {
     width: 14px; height: 14px; padding: 0; border-radius: 50%; cursor: pointer;
     background: transparent; border: 2px solid var(--act, var(--ink-3)); color: var(--ink-3); font-size: 11px; line-height: 1;

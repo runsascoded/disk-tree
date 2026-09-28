@@ -6,16 +6,32 @@
 import type { D1Database } from "@cloudflare/workers-types"
 import { CW_BUCKET, CW_BUCKETS } from "./cwBatch.js"
 
-// A plan prefix stored as `s3://<bucket>/<path>/` (matching the marks convention);
+// A plan prefix stored as `<scheme><bucket>/<path>/` (matching the marks
+// convention — `s3://` on the CoreWeave deployment, `gs://` on gcs.oa.dev);
 // normalized to a relative key prefix only at snapshot time.
 const PREFIX_RE = /^(?!\/)(?![.]{1,2}\/)[^\\]+\/$/
+const SCHEME_RE = /^[a-z0-9]+:\/\//
 
-/** The bucket a raw prefix names — `s3://<b>/…` or `<b>/…` for a scanned
+/** The deployment's prefix convention: the URI scheme its stored prefixes
+ * carry and the buckets its scan covers (first = primary). From `[vars]`
+ * (`STORE_SCHEME`, `STORE_BUCKETS`); unset = the CoreWeave deployment's, so
+ * an unconfigured store is unchanged. */
+export interface PrefixShape {
+  scheme: string
+  buckets: readonly string[]
+}
+export const CW_SHAPE: PrefixShape = { scheme: 's3://', buckets: CW_BUCKETS }
+export function prefixShape(env: { STORE_SCHEME?: string; STORE_BUCKETS?: string }): PrefixShape {
+  const buckets = env.STORE_BUCKETS ? env.STORE_BUCKETS.split(',').map(s => s.trim()).filter(Boolean) : null
+  return { scheme: env.STORE_SCHEME ?? CW_SHAPE.scheme, buckets: buckets?.length ? buckets : CW_SHAPE.buckets }
+}
+
+/** The bucket a raw prefix names — `<scheme><b>/…` or `<b>/…` for a scanned
  * bucket — else the primary. The treemap's paths start with the bucket, so
  * a mark or plan item under `hero-checkpoints/…` must not canonicalize under
  * the primary (specs/cw-multi-bucket.md §4). */
 export function bucketOf(raw: string, buckets: readonly string[] = CW_BUCKETS): string {
-  const s = raw.trim().replace(/^s3:\/\//, "").replace(/^\/+/, "")
+  const s = raw.trim().replace(SCHEME_RE, "").replace(/^\/+/, "")
   return buckets.find(b => s === b || s.startsWith(`${b}/`)) ?? buckets[0]
 }
 
@@ -29,21 +45,64 @@ export interface PlanRow {
   closed_ts: number | null
 }
 
-/** `s3://bucket/a/b/` or `/a/b` or `a/b` -> `a/b/` (relative, trailing slash). */
+/** `s3://bucket/a/b/` (any scheme) or `/a/b` or `a/b` -> `a/b/` (relative, trailing slash). */
 export function relPrefix(raw: string, bucket: string = CW_BUCKET): string {
-  let s = raw.trim().replace(/^s3:\/\//, "")
+  let s = raw.trim().replace(SCHEME_RE, "")
   if (s.startsWith(`${bucket}/`)) s = s.slice(bucket.length + 1)
   s = s.replace(/^\/+/, "")
   if (!s.endsWith("/")) s += "/"
   return s
 }
 
-/** Canonical stored form of a plan-item prefix: `s3://<bucket>/<path>/`, the
- * bucket resolved from the raw (`bucketOf`) unless given. */
-export function canonicalPrefix(raw: string, bucket: string = bucketOf(raw)): string | null {
+/** Canonical stored form of a plan-item prefix: `<scheme><bucket>/<path>/`
+ * in the deployment's shape, the bucket resolved from the raw (`bucketOf`
+ * over the shape's buckets) unless given. */
+export function canonicalPrefix(raw: string, shape: PrefixShape = CW_SHAPE, bucket: string = bucketOf(raw, shape.buckets)): string | null {
   const rel = relPrefix(raw, bucket)
   if (!PREFIX_RE.test(rel)) return null
-  return `s3://${bucket}/${rel}`
+  return `${shape.scheme}${bucket}/${rel}`
+}
+
+/** Stage prefixes for deletion — the opt-in trash model's proposal step
+ * (`STAGING` deployments): append them to a shared open plan, creating one
+ * ("Staged") if none is open. Any full viewer may stage; an admin approves +
+ * dispatches later. One `stage_batches` row per gesture carries the memo
+ * (a fact about the action), and every prefix in the call points at it — the
+ * 1:many an admin reads back as "trashed together by X: <memo>". A re-staged
+ * prefix keeps its first batch (`INSERT OR IGNORE`). Returns the plan + batch
+ * ids and what canonicalized, or an error for a malformed prefix. */
+export async function stageItems(
+  db: D1Database,
+  rawPrefixes: string[],
+  who: string,
+  note: string | null = null,
+  shape: PrefixShape = CW_SHAPE,
+): Promise<{ plan_id: number; batch_id: number; staged: string[] } | { error: string }> {
+  const prefixes: string[] = []
+  for (const r of rawPrefixes) {
+    const c = canonicalPrefix(r, shape)
+    if (!c) return { error: `bad prefix ${JSON.stringify(r)}` }
+    prefixes.push(c)
+  }
+  if (!prefixes.length) return { error: 'prefixes required' }
+  const ts = Math.floor(Date.now() / 1000)
+  let plan = await db.prepare("SELECT id FROM plans WHERE state = 'open' ORDER BY created_ts DESC LIMIT 1").first<{ id: number }>()
+  if (!plan) {
+    plan = (await db.prepare(
+      "INSERT INTO plans (name, note, state, created_by, created_ts) VALUES ('Staged', NULL, 'open', ?, ?) RETURNING id",
+    ).bind(who, ts).first<{ id: number }>())!
+    await audit(db, 'plans', String(plan.id), 'insert', who, null, { name: 'Staged', auto: true })
+  }
+  const batch = (await db.prepare(
+    'INSERT INTO stage_batches (plan_id, note, created_by, created_ts) VALUES (?, ?, ?, ?) RETURNING id',
+  ).bind(plan.id, note, who, ts).first<{ id: number }>())!
+  for (const p of prefixes) {
+    await db.prepare(
+      'INSERT OR IGNORE INTO plan_items (plan_id, prefix, batch_id, added_by, added_ts) VALUES (?, ?, ?, ?, ?)',
+    ).bind(plan.id, p, batch.id, who, ts).run()
+  }
+  await audit(db, 'plan_items', String(plan.id), 'insert', who, null, { staged: prefixes, batch_id: batch.id, note })
+  return { plan_id: plan.id, batch_id: batch.id, staged: prefixes }
 }
 
 /** A plan whose items name more than one bucket: the executor runs against one

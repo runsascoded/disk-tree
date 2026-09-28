@@ -64,6 +64,15 @@ export interface Env {
   STORE_REGION?: string
   /** Comma-separated allowed key prefixes; unset = the GCS default set. */
   STORE_PREFIXES?: string
+  /** The plans / marks prefix convention (`_lib/plans.ts`): the URI scheme
+   *  stored prefixes carry (`s3://`, `gs://`) and the comma-separated buckets
+   *  the scan covers, first = primary. Unset = the CoreWeave deployment's. */
+  STORE_SCHEME?: string
+  STORE_BUCKETS?: string
+  /** Set where viewers stage deletions into a shared open plan
+   *  (`POST /api/plans/stage`, `stage_batches` in this D1); mirrors the
+   *  client's `Store.staging`. Unset = admins curate plans directly. */
+  STAGING?: string
   STORE_ACCESS_KEY_ID?: string
   STORE_SECRET_ACCESS_KEY?: string
   /** Global second cache tier behind the colo cache (`_lib/edgeCache.ts`). */

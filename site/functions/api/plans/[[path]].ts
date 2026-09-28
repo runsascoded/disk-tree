@@ -6,12 +6,15 @@
 //   PATCH  /api/plans/:id          { state: 'closed' }                     admin
 //   POST   /api/plans/:id/items    { prefixes: [...], note? }              admin
 //   DELETE /api/plans/:id/items    { prefixes: [...] }                     admin
+//   POST   /api/plans/stage        { prefixes: [...], note? } -> { plan_id } stager (`STAGING` deployments)
 //
-// Reads are open to any authenticated viewer; writes require admin. Items are
-// editable only while the plan is `open`.
+// Reads are open to any authenticated viewer; curating a plan's items and
+// closing plans require admin; staging (the opt-in trash proposal) needs the
+// full base scope. Items are editable only while the plan is `open`. Prefixes
+// canonicalize in the deployment's shape (`STORE_SCHEME` / `STORE_BUCKETS`).
 import type { D1Database } from "@cloudflare/workers-types"
-import { type Ctx, type Env as AuthEnv, json, requireAdmin, requireViewer } from "../../_lib/auth.js"
-import { audit, canonicalPrefix, type PlanRow } from "../../_lib/plans.js"
+import { type Ctx, type Env as AuthEnv, json, requireAdmin, requireStager, requireViewer } from "../../_lib/auth.js"
+import { audit, canonicalPrefix, type PlanRow, type PrefixShape, prefixShape, stageItems } from "../../_lib/plans.js"
 
 type Env = AuthEnv & { DB?: D1Database }
 
@@ -31,10 +34,19 @@ async function listPlans(db: D1Database): Promise<Response> {
   return json({ plans: results })
 }
 
-async function getPlan(db: D1Database, id: number): Promise<Response> {
+async function getPlan(db: D1Database, id: number, staging: boolean): Promise<Response> {
   const plan = await db.prepare("SELECT * FROM plans WHERE id = ?").bind(id).first<PlanRow>()
   if (!plan) return json({ error: "no such plan" }, 404)
-  const items = await db.prepare("SELECT prefix, note, added_by, added_ts FROM plan_items WHERE plan_id = ? ORDER BY prefix").bind(id).all()
+  // On a staging deployment the memo lives on the item's stage batch (one
+  // gesture, one note) — join it back so a staged item carries the reason it
+  // was trashed. Elsewhere `stage_batches` doesn't exist.
+  const items = staging
+    ? await db.prepare(
+      `SELECT i.prefix, COALESCE(i.note, b.note) AS note, i.added_by, i.added_ts, i.batch_id
+       FROM plan_items i LEFT JOIN stage_batches b ON b.id = i.batch_id
+       WHERE i.plan_id = ? ORDER BY i.prefix`,
+    ).bind(id).all()
+    : await db.prepare("SELECT prefix, note, added_by, added_ts FROM plan_items WHERE plan_id = ? ORDER BY prefix").bind(id).all()
   const runs = await db.prepare("SELECT * FROM deletion_runs WHERE plan_id = ? ORDER BY started_ts DESC").bind(id).all()
   return json({ plan, items: items.results, runs: runs.results })
 }
@@ -61,7 +73,7 @@ async function closePlan(db: D1Database, who: string, id: number, body: Record<s
 }
 
 async function editItems(
-  db: D1Database, who: string, id: number, add: boolean, body: Record<string, unknown>,
+  db: D1Database, who: string, id: number, add: boolean, body: Record<string, unknown>, shape: PrefixShape,
 ): Promise<Response> {
   const plan = await db.prepare("SELECT * FROM plans WHERE id = ?").bind(id).first<PlanRow>()
   if (!plan) return json({ error: "no such plan" }, 404)
@@ -70,7 +82,7 @@ async function editItems(
   if (!raw.length) return json({ error: "prefixes required" }, 400)
   const prefixes: string[] = []
   for (const r of raw) {
-    const c = typeof r === "string" ? canonicalPrefix(r) : null
+    const c = typeof r === "string" ? canonicalPrefix(r, shape) : null
     if (!c) return json({ error: `bad prefix ${JSON.stringify(r)}` }, 400)
     prefixes.push(c)
   }
@@ -95,6 +107,8 @@ async function editItems(
 export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
   if (!ctx.env.DB) return json({ error: "plans store not configured (no D1 binding)" }, 503)
   const db = ctx.env.DB
+  const shape = prefixShape(ctx.env)
+  const staging = !!ctx.env.STAGING
   const segs = new URL(ctx.request.url).pathname.replace(/^\/api\/plans\/?/, "").split("/").filter(Boolean)
   const method = ctx.request.method
 
@@ -111,6 +125,21 @@ export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
     return json({ error: "method not allowed" }, 405)
   }
 
+  // /api/plans/stage — the opt-in trash proposal, on deployments that stage.
+  if (segs.length === 1 && segs[0] === "stage" && method === "POST") {
+    if (!staging) return json({ error: "this deployment does not stage; admins curate plans directly" }, 404)
+    // The full base scope: a read-only guest link can't propose.
+    const gated = await requireStager(ctx)
+    if (gated instanceof Response) return gated
+    const body = await readBody(ctx.request)
+    const prefixes = Array.isArray(body.prefixes)
+      ? (body.prefixes as unknown[]).filter((x): x is string => typeof x === "string")
+      : []
+    const note = typeof body.note === "string" ? body.note : null
+    const res = await stageItems(db, prefixes, gated.email ?? gated.name ?? "guest", note, shape)
+    return "error" in res ? json(res, 400) : json(res, 201)
+  }
+
   const id = Number(segs[0])
   if (!Number.isInteger(id) || id <= 0) return json({ error: "bad plan id" }, 400)
 
@@ -118,7 +147,7 @@ export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
   if (segs.length === 1) {
     if (method === "GET") {
       const gated = await requireViewer(ctx)
-      return gated instanceof Response ? gated : getPlan(db, id)
+      return gated instanceof Response ? gated : getPlan(db, id, staging)
     }
     if (method === "PATCH") {
       const gated = await requireAdmin(ctx)
@@ -130,7 +159,7 @@ export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
   // /api/plans/:id/items
   if (segs.length === 2 && segs[1] === "items" && (method === "POST" || method === "DELETE")) {
     const gated = await requireAdmin(ctx)
-    return gated instanceof Response ? gated : editItems(db, (gated.email ?? gated.name ?? 'guest'), id, method === "POST", await readBody(ctx.request))
+    return gated instanceof Response ? gated : editItems(db, (gated.email ?? gated.name ?? 'guest'), id, method === "POST", await readBody(ctx.request), shape)
   }
 
   return json({ error: "not found" }, 404)

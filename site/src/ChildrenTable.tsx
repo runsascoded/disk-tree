@@ -2,7 +2,8 @@ import { Explain } from './Help'
 import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { intParam, useUrlState } from 'use-prms'
-import { useCanMark } from './auth'
+import { useCanMark, useCanStage } from './auth'
+import { FaRegTrashCan } from 'react-icons/fa6'
 import { dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonthShort } from './colors'
 import type { UserIndexEntry } from './colors'
 import { ACTION_COLORS, KEEP_TIP, KLC_TIP, SWEEP_TIP, clearTip } from './MarkControls'
@@ -17,6 +18,7 @@ import { elideMid } from './CopyName'
 import { AssignSelect } from './AssignSelect'
 import { OwnerFactChip } from './OwnerFactChip'
 import { useRowSelection, useRowSelectionKeys } from './rowSelection'
+import { useStage } from './plans'
 import type { TreeNode } from './types'
 import { fmtN } from './types'
 import { useUnits } from './units'
@@ -62,6 +64,17 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
   const PAGE = PAGE_SIZES.includes(nP) ? nP : 20
   const showActions = !!markIdx && canMark
   const mark = (uri: string, action: MarkAction | null) => put.mutate({ prefix: uri + '/', action })
+  // A staging store (`Store.staging`): full viewers — not read-only guest
+  // links — select + trash (stage for deletion; an admin approves later), and
+  // the mark dots give way to the trash gesture; owner-assign stays with the
+  // markers. Elsewhere the table's actions ARE the mark controls.
+  const staging = DEFAULT_STORE.staging
+  const canStage = useCanStage()
+  const stage = useStage()
+  const showSel = staging ? canStage : showActions
+  const trash = (uri: string) => stage.mutate({ prefixes: [uri + '/'] })
+  // One memo for the whole multi-select gesture (stored on the stage batch).
+  const [memo, setMemo] = useState('')
 
   const kids = useMemo(() => {
     let ks = (node.c ?? []).slice()
@@ -145,6 +158,7 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
   }, [selCount, clearSel])
   const selUris = [...sel.selected]
   const bulkMark = (action: MarkAction | null) => { if (selUris.length) post.mutate(selUris.map(u => ({ pattern: u + '/', keep: action })), { onSuccess: () => sel.clear() }) }
+  const trashSel = () => { if (selUris.length) stage.mutate({ prefixes: selUris.map(u => u + '/'), note: memo }, { onSuccess: () => { sel.clear(); setMemo('') } }) }
   const selBytes = kids.filter(k => sel.selected.has(uriOfKid(k))).reduce((s, k) => s + k.b, 0)
   // Everything a row derives from the tree and the ledger — owner shares, the
   // resolved mark and claim, the state bar's subtree walk, the last-ckpt
@@ -168,10 +182,19 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
       ? <section className="children-tbl"><p className="tab-note">No prefix under this view is {[...states].join(' / ')}.</p></section>
       : null
   }
-  const selBar = showActions && sel.selected.size > 0 && (
+  const selBar = showSel && sel.selected.size > 0 && (
     <span className="sel-bar">
       <b>{sel.selected.size}</b> selected · {fmtBytes(selBytes)}
       <span className="acts">
+        {staging ? (<>
+          <Tooltip content="Optional: one note for this deletion — why these prefixes go. Stored with the batch, visible to the admin who dispatches.">
+            <input className="memo" value={memo} onChange={e => setMemo(e.target.value)} placeholder="note (optional)" aria-label="deletion note" />
+          </Tooltip>
+          <Tooltip content={<>Stage every selected prefix for deletion — an admin approves and dispatches from <b>/sweep</b></>}>
+            <button type="button" className="trash" onClick={trashSel} aria-label="trash selected"><FaRegTrashCan /> trash {sel.selected.size}</button>
+          </Tooltip>
+          {showActions && DEFAULT_STORE.owners && <AssignSelect prefix={selUris.map(u => u + '/')} label={`assign ${sel.selected.size}…`} />}
+        </>) : (<>
         <span className="lbl">mark all</span>
         {(['keep', 'sweep', 'keep_last_ckpt'] as MarkAction[]).map(a => (
           <Explain text={<>Mark every selected prefix <b>{ACTION_LABELS[a]}</b> (one batched save)</>} key={a}>
@@ -182,6 +205,7 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
           <button type="button" className="dot clear" onClick={() => bulkMark(null)} aria-label="clear marks">×</button>
         </Explain>
         {DEFAULT_STORE.owners && <AssignSelect prefix={selUris.map(u => u + '/')} label={`assign ${sel.selected.size}…`} />}
+        </>)}
         <button type="button" className="quiet" onClick={sel.clear}>deselect</button>
       </span>
     </span>
@@ -238,7 +262,7 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
       <table className="worklist selectable">
         <thead>
           <tr>
-            {showActions && <th className="col-sel"><input type="checkbox" title="select / deselect this page (⇧x)" checked={sel.pageAll} onChange={sel.togglePage} /></th>}
+            {showSel && <th className="col-sel"><input type="checkbox" title="select / deselect this page (⇧x)" checked={sel.pageAll} onChange={sel.togglePage} /></th>}
             {th('n', 'name', false)}
             {th('b', 'bytes')}
             <th className="num">share</th>
@@ -265,14 +289,14 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
             {hasRead && th('a', 'read', false)}
             {hasOwners && <th>owner(s)</th>}
             {markIdx && <th>marks</th>}
-            {showActions && <th>actions</th>}
+            {showSel && <th>actions</th>}
           </tr>
         </thead>
         <tbody>
           {rowData.map(({ k, synthetic, kidSegs, uri, shares, cl, mk, totals, ckpt, si }) => {
             return (
-              <tr key={k.n} ref={si >= 0 ? sel.rowRef(si) : undefined} {...(si >= 0 && showActions ? sel.rowProps(si) : {})}>
-                {showActions && <td className="col-sel">{!synthetic && <input type="checkbox" checked={sel.isSelected(k)} onChange={() => sel.toggle(si)} />}</td>}
+              <tr key={k.n} ref={si >= 0 ? sel.rowRef(si) : undefined} {...(si >= 0 && showSel ? sel.rowProps(si) : {})}>
+                {showSel && <td className="col-sel">{!synthetic && <input type="checkbox" checked={sel.isSelected(k)} onChange={() => sel.toggle(si)} />}</td>}
                 <td className="prefix">
                   <Tooltip content={<code className="elide-full">{uri}</code>}>
                     {synthetic || !k.c?.length ? (
@@ -305,9 +329,16 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
                 </td>
                 )}
                 {markIdx && <td className="state">{stateBar(k, totals)}</td>}
-                {showActions && (
+                {showSel && (
                   <td className="actions">
-                    {synthetic ? null : (
+                    {synthetic ? null : staging ? (
+                      <>
+                        <Tooltip content="Stage this prefix for deletion — an admin approves and dispatches">
+                          <button type="button" className="trash" onClick={() => trash(uri)} aria-label="trash"><FaRegTrashCan /></button>
+                        </Tooltip>
+                        {showActions && DEFAULT_STORE.owners && <AssignSelect prefix={uri + '/'} assigned={cl?.who ?? null} compact />}
+                      </>
+                    ) : (
                       <>
                         {dot(uri, 'keep', mk?.mark?.action === 'keep' ? (mk.own ? 'own' : 'inh') : null, KEEP_TIP)}
                         {dot(uri, 'sweep', mk?.mark?.action === 'sweep' ? (mk.own ? 'own' : 'inh') : null, SWEEP_TIP)}
@@ -334,12 +365,12 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
           {/* Totals of the LISTED rows — under a scoping lens (to-do) this is
               the lens total, not the parent node's. */}
           <tr className="total-row">
-            {showActions && <td />}
+            {showSel && <td />}
             <td>total{kids.length !== (node.c ?? []).length ? ` (${kids.length} shown)` : ''}</td>
             <td className="num">{fmtBytes(kids.reduce((s, k) => s + k.b, 0))}</td>
             <td className="num">{node.b ? ((100 * kids.reduce((s, k) => s + k.b, 0)) / node.b).toFixed(1) : 0}%</td>
             <td className="num">{kids.reduce((s, k) => s + k.o, 0).toLocaleString('en-US')}</td>
-            <td colSpan={2 + (hasRead ? 1 : 0) + (hasOwners ? 1 : 0) + (markIdx ? 1 : 0) + (showActions ? 2 : 0)} />
+            <td colSpan={2 + (hasRead ? 1 : 0) + (hasOwners ? 1 : 0) + (markIdx ? 1 : 0) + (showSel ? 2 : 0)} />
           </tr>
         </tfoot>
       </table>
@@ -349,7 +380,7 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
           rendered when the table is actionable — its height is reserved even
           with nothing selected, so selecting/deselecting doesn't jump the rest
           of the page either. */}
-      {showActions && <div className="sel-bar-dock">{selBar}</div>}
+      {showSel && <div className="sel-bar-dock">{selBar}</div>}
     </section>
   )
 }

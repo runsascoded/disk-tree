@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bucketOf, canonicalPrefix, planBucket, PlanSpansBuckets, relPrefix } from './plans'
+import { bucketOf, canonicalPrefix, planBucket, PlanSpansBuckets, prefixShape, relPrefix } from './plans'
 
 const P = 'marin-us-east-02a'
 const H = 'hero-checkpoints'
@@ -51,5 +51,23 @@ describe('planBucket', () => {
     expect(err).toBeInstanceOf(PlanSpansBuckets)
     expect((err as PlanSpansBuckets).buckets).toEqual([P, H])
     expect((err as Error).message).toBe(`plan spans buckets: ${P}, ${H}`)
+  })
+})
+
+describe('prefixShape — the deployment\'s scheme + bucket set from [vars]', () => {
+  const GCS = prefixShape({ STORE_SCHEME: 'gs://', STORE_BUCKETS: 'marin-us-central2, marin-us-east5,marin-eu-west4' })
+  it('unset = the CoreWeave shape', () => {
+    expect(prefixShape({})).toEqual({ scheme: 's3://', buckets: [P, H] })
+    expect(prefixShape({ STORE_BUCKETS: ' , ' })).toEqual({ scheme: 's3://', buckets: [P, H] })
+  })
+  it('gcs: `gs://marin-<bucket>/<path>/`, the bucket read off the raw over the store\'s set', () => {
+    expect(GCS).toEqual({ scheme: 'gs://', buckets: ['marin-us-central2', 'marin-us-east5', 'marin-eu-west4'] })
+    expect(canonicalPrefix('gs://marin-us-east5/checkpoints/run/', GCS)).toBe('gs://marin-us-east5/checkpoints/run/')
+    expect(canonicalPrefix('gs://marin-us-east5/checkpoints/run', GCS)).toBe('gs://marin-us-east5/checkpoints/run/')
+    expect(canonicalPrefix('marin-eu-west4/x/', GCS)).toBe('gs://marin-eu-west4/x/')
+    expect(bucketOf('gs://marin-eu-west4/x/', GCS.buckets)).toBe('marin-eu-west4')
+  })
+  it('an unknown bucket canonicalizes under the primary, as on cw', () => {
+    expect(canonicalPrefix('gs://other/x/', GCS)).toBe('gs://marin-us-central2/other/x/')
   })
 })
