@@ -211,9 +211,45 @@ header .hrow {
 .tb-select {
   background: var(--panel); color: var(--ink);
   border: 1px solid var(--line); border-radius: 6px;
-  font: inherit; font-size: 12.5px; font-weight: 600; padding: 2px 4px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
   max-width: 16ch;
+  // Own the arrow so the right padding is a known constant (native arrows vary
+  // by platform) — that's what lets FitSelect fit the box to the selected label.
+  appearance: none; -webkit-appearance: none;
+  padding: 2px 17px 2px 6px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  background-size: 8px 5px;
   &.scan { font-variant-numeric: tabular-nums; }
+}
+
+// The deepest breadcrumb taps open this path card (PathPopover, portaled to
+// <body>): the full prefix + a copy button. Tap-only, so it never rides in on a
+// fresh page load the way a hover tip did.
+.tb-path button.here.path-pop-btn {
+  cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 3px;
+  &:hover { text-decoration-color: var(--ink); }
+}
+.path-pop {
+  z-index: 10001;
+  display: flex; align-items: center; gap: 8px;
+  max-width: min(92vw, 560px);
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 9px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  .full { word-break: break-all; }
+  .path-copy {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 22px; padding: 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--ink-2); cursor: pointer; font-size: 12px;
+    &:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 9%, transparent); }
+    .copied { color: var(--keep, #6cc070); font-weight: 700; }
+  }
 }
 
 // The scan picker: a filterable listbox (ARIA combobox) standing in for a
