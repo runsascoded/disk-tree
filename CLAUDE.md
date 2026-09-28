@@ -2,6 +2,48 @@
 
 Disk/cloud space usage analyzer with caching, CLI, and web UI.
 
+## This worktree: `m3` — the laptop disk-cleanup deployment
+
+This worktree (`~/c/disky/wt/m3`, branch `m3`) is **this Mac as a deployment**: the disk-cleanup loop below runs *on this branch's own code*, so a missing CLI feature or UX tweak is made right here and committed on `m3`; upstream (`cloud`, the root worktree) decides what to take and how (`[base]`-prefixed commits, cherry-picked up — `specs/one-clone-layout.md`). It replaced the old `~/.disk` workspace (a source-less dir that had turned into a tight loop of asks against upstream). The cleanup loop's own state is `log.md` (tracked, this branch only) and `tmp/`.
+
+The global `~/.claude/CLAUDE.md` conventions still apply (git usage, `tmp/` scratch, commit style, etc.).
+
+## The tool
+
+`disk-tree` is this worktree's own build: `direnv` activates `.venv` here (`uv sync` after a merge from `cloud`), so `disk-tree` is on `PATH` in this dir; from elsewhere it's `~/c/disky/wt/m3/.venv/bin/disk-tree`. Its index is **global and cwd-independent** — DB + parquet blobs + duckdb under `~/.config/disk-tree/`, plus any external-volume search-path entry. So a scan run here lands in the same always-ready index every disk-tree session reads. Full command reference: the rest of this file.
+
+## The cleanup loop
+
+1. **Scan** — `disk-tree index /Users/ryan` (add `-C` to force fresh; `-q` to drop the progress bar). A full `~` scan is ~7M files / a few minutes and writes a blob (see crisis mode re: where). The faster native `getattrlistbulk` walker (`DISK_TREE_WALKER=<dt-walker>`, ~1.6–2.7× gfind) currently lives on the tool's `tauri-native-app` branch — plain gfind until it merges.
+2. **Find the weight** — `disk-tree du /Users/ryan -d1` (heaviest children per level, no re-walk; `-d` depth, `-n` top-N, `-a` files too). Descend into the fat nodes.
+3. **Find the *real* win** — `disk-tree overcount PATH` (apparent vs `exclusive` = bytes only this subtree holds, i.e. what a delete actually frees) and `disk-tree reclaim PATH…` (true freed bytes for a keep-set, via extent intersection). macOS-only.
+4. **Audit repos** — `disk-tree repos ROOT` before deleting code dirs: `recoverable` = clean tree + all branches pushed to a remote; `DELETABLE` also needs zero untracked. `-r` filters to recoverable, `-m` a size floor.
+5. **Delete, with confirmation** (see Safety) — then re-scan the touched paths to confirm the space actually came back.
+
+## The reflink caveat — reported size ≠ freed bytes
+
+`disk-tree`'s sizes are **per-path block counts**. APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount — so a subtree's reported size is an **upper bound** on what deleting it frees. The big one: **uv's default macOS link mode is `clone`, so `.venv`s share extents with `~/.cache/uv`** — deleting a venv frees far less than its size (measured: 35 dormant `.venv`s reported 16.9 GiB → freed 9 GiB). **Always check `reclaim`/`overcount` before trusting a size as reclaimable**, and don't thrash active venvs to reclaim bytes that clone-dedup already shares. For a whole-volume overcount, `apparent_total − df_used` is exact (only for a scan covering the entire volume).
+
+## Safety (destructive ops)
+
+- **Confirm before every destructive op** — delete, `rm`, empty-trash, cache-clear. Show the target and the *measured* freed bytes (`reclaim`/`overcount`, not the apparent size) first.
+- **Look before you delete** — inspect the target; never delete something you haven't examined. Prefer pruning/moving a cache over a hard delete.
+- **Pair each cache-clean with its refill cost** — a cache you clear that repopulates on next use (browser, build, uv, pnpm) buys little; prefer genuinely dormant data. Chrome needs per-profile care (logins/Superhuman live in App Support, not Caches).
+- No `sudo` deletes. Prefer `disk-tree delete` (updates the index) or Trash over unrecoverable `rm`.
+
+## Crisis mode — near-full boot disk, external not always attached
+
+The point of a cleanup session is the disk is often already tight, and **x6 (the external SSD) isn't always mounted** — so avoid writing scan bytes to the boot disk during a crunch:
+
+- **A mounted external volume auto-opts-in** as the scan write target once it has a `<volume>/disk-tree/scans` dir; unplugging just drops it from the search path (reads still resolve any local blob first).
+- **R2 recipe (working end-to-end as of 2026-09-09, commit `5c32460`):** for a scan, set `AWS_PROFILE=cf` and `DISK_TREE_R2_ENDPOINT_URL=https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com`, then `disk-tree index --to r2://disk-tree/scans /Users/ryan`. To *read* a remote blob back (`du`, `scans chunks`, …) both env vars must be set **and** `DISK_TREE_SCAN_DIRS=r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans` (the URL to reach it, plus the local dir so discovery isn't dropped). The three bugs the first real run hit (multipart `InvalidPart`, crash on an unmounted cached blob, diff step failing a persisted scan) are all fixed; the `tmp/dt-r2.py` wrapper is obsolete. **Memory caveat:** the post-scan diff-index build over ~6.5M rows is memory-heavy — on a near-full boot disk under load the OS OOM-killer can kill it (the scan blob + DB row are already committed by then, so the scan survives; only the diff is lost). Pass `-D` to skip the diff on a tight machine.
+- **No external? Stream to cloud.** `disk-tree index /path --to r2://disk-tree/…` (or `capture PATH -t r2://disk-tree/…` for the bounded-memory, zero-local-disk split pipeline) writes the blob straight to the **dedicated private R2 `disk-tree` bucket** and reads it back through the same search path. Listing metadata is small; a laptop capture never has to touch the near-full boot disk.
+- The store itself is a cleanup target: `~/.config/disk-tree/` holds the blobs + a ~0.8 GB `scans.duckdb` — `disk-tree scans -g` GCs old scans, `disk-tree scans move` relocates blobs off-boot.
+
+## Cleanup log
+
+Keep `log.md` as the running record — each pass: date, what was scanned (free space before/after), what was deleted, and the **measured** bytes freed. It makes cleanup auditable and repeatable, and feeds the next pass (what refilled, what stayed gone).
+
 ## Project Vision
 
 Track disk space usage across:
