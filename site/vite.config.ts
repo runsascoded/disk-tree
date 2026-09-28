@@ -24,15 +24,35 @@ const devSeriesIndex = {
   },
 }
 
-// Deployment default for the client's whoami source (src/auth.ts): this host
-// still sits behind a CF Access edge gate, so identity comes from the edge
-// unless the environment says otherwise (`VITE_AUTH_MODE=app` for the
-// app-session model — what the cutover deploy flips the default to,
-// specs/oidc-cutover-cw.md).
-const AUTH_MODE = process.env.VITE_AUTH_MODE ?? 'edge'
+// Deployment as configuration: the store this build serves (`src/stores.ts`
+// registry key) and the client's whoami source (`src/auth.ts`: `edge` behind a
+// CF Access gate, `app` for the app-session model, `public` for an open
+// deploy) come from the same file wrangler reads — `STORE` / `AUTH_MODE` under
+// `[vars]` in wrangler.toml — so a deployment branch declares itself in one
+// place. `VITE_STORE` / `VITE_AUTH_MODE` in the environment still override (a
+// CI build of another store, e.g. deploy-r2.yml). Neither set → the registry's
+// first store, `edge`.
+function wranglerVars(): Record<string, string> {
+  if (!existsSync('wrangler.toml')) return {}
+  const vars: Record<string, string> = {}
+  let inVars = false
+  for (const raw of readFileSync('wrangler.toml', 'utf8').split('\n')) {
+    const line = raw.replace(/#.*$/, '').trim()
+    if (line.startsWith('[')) { inVars = line === '[vars]'; continue }
+    const m = inVars ? /^([A-Z_][A-Z0-9_]*)\s*=\s*"([^"]*)"$/.exec(line) : null
+    if (m) vars[m[1]] = m[2]
+  }
+  return vars
+}
+const VARS = wranglerVars()
+const STORE = process.env.VITE_STORE ?? VARS.STORE ?? ''
+const AUTH_MODE = process.env.VITE_AUTH_MODE ?? VARS.AUTH_MODE ?? 'edge'
 
 export default defineConfig({
-  define: { 'import.meta.env.VITE_AUTH_MODE': JSON.stringify(AUTH_MODE) },
+  define: {
+    'import.meta.env.VITE_STORE': JSON.stringify(STORE),
+    'import.meta.env.VITE_AUTH_MODE': JSON.stringify(AUTH_MODE),
+  },
   plugins: [react(), devSeriesIndex],
   server: {
     port: PORT,
