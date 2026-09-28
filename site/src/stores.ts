@@ -12,6 +12,23 @@
 // Baking the JSONs into `public/` was the other option; it was rejected because
 // publishing a scan would then require a site redeploy, which is exactly the
 // staleness the data Function was introduced to fix.
+import type { RuleShape } from './lifecycle'
+
+/** The lifecycle fold's per-store shape (`LifecycleFold.tsx`). */
+export interface LifecycleConfig {
+  /** The tracked intended-state path the fold's note points at (`dt-cloud lifecycle diff|push`). */
+  tracked: string
+  /** The rule shape the scan job snapshots — picks the `lifecycle.ts` adapter:
+   *  `s3` rules carry an `ID`, `gcs` rules are anonymous `{action, condition}`. */
+  rules: RuleShape
+  /** Fold rows a rule holds for across buckets into one (`groupRows`) — a
+   *  fleet whose buckets share their rules shows each rule once with a
+   *  buckets column. Off = one row per bucket, a bucket column grouping them. */
+  grouped?: boolean
+  /** The first scan with a snapshot; earlier scans skip the fetch (they'd only 404). */
+  recordedFrom?: string
+}
+
 export interface Store {
   key: string
   label: string    // store selector button
@@ -45,10 +62,10 @@ export interface Store {
   /** Which sweep console `/sweep` mounts: gcs's owner-slice bands (`owner`)
    *  or cw's plan-first plans (`plan`). */
   sweep: 'owner' | 'plan'
-  /** Set when the scan job snapshots the bucket's lifecycle rules
-   *  (`<base>/<scan>/lifecycle.json`): the tracked intended-state path the
-   *  home-page fold points at. Unset = no fold. */
-  lifecycle?: string
+  /** Set when the scan job snapshots the buckets' lifecycle rules
+   *  (`<base>/<scan>/lifecycle.json`): the home-page fold, and how this
+   *  store's snapshots read. Unset = no fold. */
+  lifecycle?: LifecycleConfig
   /** The buckets the scan covers, the first the primary (the quota / sweep
    *  default; what a bare `lifecycle.json` `Rules[]` from before the
    *  multi-bucket scan belongs to). */
@@ -83,7 +100,7 @@ const REGISTRY: Store[] = [
     staging: false,
     owners: false,
     sweep: 'plan',
-    lifecycle: 'job/cw-lifecycle.json',
+    lifecycle: { tracked: 'job/cw-lifecycle.json', rules: 's3', recordedFrom: '2026-09-17' },
     buckets: ['marin-us-east-02a', 'hero-checkpoints'],
     peer: { label: 'GCS usage', href: 'https://gcs.oa.dev/' },
     rootLabel: 'all buckets',
@@ -109,6 +126,7 @@ const REGISTRY: Store[] = [
     staging: true,
     owners: true,
     sweep: 'owner',
+    lifecycle: { tracked: 'job/lifecycle/', rules: 'gcs', grouped: true },
     buckets: ['marin-us-central2', 'marin-us-central1', 'marin-us-east1', 'marin-us-east5', 'marin-us-west4', 'marin-eu-west4'],
     peer: { label: 'CoreWeave usage', href: 'https://cw-s3.oa.dev/' },
     rootLabel: 'all buckets',

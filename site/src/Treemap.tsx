@@ -5,7 +5,9 @@ import { stringParam, useUrlState } from 'use-prms'
 import { DustHatch, Treemap as DtTreemap } from '@disk-tree/react'
 import type { CellCtx, CellStyle, OutlineGroups } from '@disk-tree/react'
 import { Avatar } from './Avatar'
-import { CopyName } from './CopyName'
+import { CopyName, copyText } from './CopyName'
+import { FaRegCopy } from 'react-icons/fa6'
+import { pathCrumbs, pathUri } from './pathCrumbs'
 import { canonId, UserChip, ghHandle, shortName } from './UserChip'
 import { dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonth, inkFor, slotColor, userColor } from './colors'
 import type { UserIndexEntry } from './colors'
@@ -33,24 +35,33 @@ const LI_METRIC_CHIPS: [LiMetric, string, string][] = [
   ['c', '$', 'Show each legend row’s estimated storage cost ($/mo, list price)'],
 ]
 
-/** The `gs://…` path shown at the top of a pinned tooltip, with a copy-to-
- * clipboard button (eject the prefix to the CLI) and an "open ↗" that drills the
- * map to / focuses this prefix (also a shareable `?path=` URL). Its own component
- * so the copy state has somewhere to live (renderTooltip is a plain function). */
-function PathBar({ uri, onOpen }: { uri: string; onOpen?: () => void }) {
+/** The path atop a docked/pinned tooltip, as drillable per-segment crumbs: each
+ * ancestor segment drills the map to that level (the deepest — the cell itself,
+ * or a folded `(other)` — is inert, bold). A copy icon ejects the whole prefix
+ * to the CLI (via `copyText`, which also works off the tailnet dev server's
+ * insecure origin). Its own component so the copy state has somewhere to live
+ * (renderTooltip is a plain function). */
+function PathBar({ path, scheme, onDrill }: { path: TreeNode[]; scheme: string; onDrill?: (p: TreeNode[]) => void }) {
   const [copied, setCopied] = useState(false)
-  const slash = uri.lastIndexOf('/') + 1
+  const crumbs = pathCrumbs(path.slice(1).map(n => n.n))
+  const uri = pathUri(scheme, crumbs.map(c => c.name))
   return (
-    <div className="path">
-      <span className="dirname">{uri.slice(0, slash)}</span>
-      <span className="basename">{uri.slice(slash)}</span>
-      <span className="path-acts" onClick={e => e.stopPropagation()}>
-        <button
-          type="button" className="path-copy" title="Copy path to clipboard"
-          onClick={() => navigator.clipboard?.writeText(uri).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) })}
-        >{copied ? 'copied ✓' : 'copy'}</button>
-        {onOpen && <button type="button" className="path-open" title="Focus this prefix (drill in / shareable ?path= link)" onClick={onOpen}>open ↗</button>}
+    <div className="path" onClick={e => e.stopPropagation()}>
+      <span className="crumbs">
+        <span className="dirname">{scheme}</span>
+        {crumbs.map(({ name, segs, drillable, last }, i) => (
+          <span key={i}>
+            {i > 0 && <span className="sep">/</span>}
+            {onDrill && drillable
+              ? <button type="button" className="seg" onClick={() => onDrill(path.slice(0, segs.length + 1))}>{name}</button>
+              : <span className={'seg' + (last ? ' basename' : '')}>{name}</span>}
+          </span>
+        ))}
       </span>
+      <button
+        type="button" className="path-copy" title={copied ? 'copied ✓' : 'Copy path to clipboard'} aria-label="Copy path to clipboard"
+        onClick={() => copyText(uri).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) })}
+      >{copied ? <span className="copied">✓</span> : <FaRegCopy aria-hidden />}</button>
     </div>
   )
 }
@@ -726,7 +737,7 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
     )
     return (
       <>
-        <PathBar uri={uri} onOpen={n.n.startsWith('(') ? undefined : () => onPathChange?.(path)} />
+        <PathBar path={path} scheme={scheme} onDrill={onPathChange} />
         <div className="nums">
           {fmtBytes(n.b)} · {fmtN(n.o)} objects · {((100 * n.b) / root.b).toFixed(2)}% of total
           {n.d != null && <> · mean created {epochDaysToMonth(n.d)}</>}

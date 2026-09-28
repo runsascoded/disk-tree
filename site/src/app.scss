@@ -210,9 +210,45 @@ header .hrow {
 .tb-select {
   background: var(--panel); color: var(--ink);
   border: 1px solid var(--line); border-radius: 6px;
-  font: inherit; font-size: 12.5px; font-weight: 600; padding: 2px 4px; cursor: pointer;
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
   max-width: 16ch;
+  // Own the arrow so the right padding is a known constant (native arrows vary
+  // by platform) — that's what lets FitSelect fit the box to the selected label.
+  appearance: none; -webkit-appearance: none;
+  padding: 2px 17px 2px 6px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23999' stroke-width='1.4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  background-size: 8px 5px;
   &.scan { font-variant-numeric: tabular-nums; }
+}
+
+// The deepest breadcrumb taps open this path card (PathPopover, portaled to
+// <body>): the full prefix + a copy button. Tap-only, so it never rides in on a
+// fresh page load the way a hover tip did.
+.tb-path button.here.path-pop-btn {
+  cursor: pointer;
+  text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 3px;
+  &:hover { text-decoration-color: var(--ink); }
+}
+.path-pop {
+  z-index: 10001;
+  display: flex; align-items: center; gap: 8px;
+  max-width: min(92vw, 560px);
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 7px 9px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+  .full { word-break: break-all; }
+  .path-copy {
+    flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 22px; padding: 0;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 5px;
+    color: var(--ink-2); cursor: pointer; font-size: 12px;
+    &:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 9%, transparent); }
+    .copied { color: var(--keep, #6cc070); font-weight: 700; }
+  }
 }
 
 // The scan picker: a filterable listbox (ARIA combobox) standing in for a
@@ -1085,15 +1121,32 @@ h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
   max-width: min(560px, 90vw) !important;
   box-shadow: 0 4px 14px rgb(0 0 0 / 0.18) !important;
   .path {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    .dirname { color: var(--ink-2); word-break: break-all; font-size: 11.5px; }
-    .basename { display: block; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .path-acts {
-      display: inline-flex; gap: 6px; margin-top: 4px;
-      font-family: system-ui, sans-serif;
-      button { font: inherit; font-size: 11px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); cursor: pointer; }
-      button:hover { background: color-mix(in oklab, var(--ink) 9%, transparent); }
-      .path-copy { min-width: 3.6em; }
+    font-size: 11.5px;
+    word-break: break-all;
+    // The path is drillable per-segment crumbs on one flowing line: the scheme
+    // + ancestors dim (underlined = tap to drill up), the basename bold/bright.
+    .crumbs { flex: 1 1 auto; min-width: 0; }
+    .dirname { color: var(--ink-2); }
+    button.seg {
+      background: none; border: none; padding: 0; font: inherit; cursor: pointer;
+      color: var(--ink-2);
+      text-decoration: underline; text-decoration-color: var(--ink-3); text-underline-offset: 2px;
+      &:hover { color: var(--ink); text-decoration-color: var(--ink); }
+    }
+    span.seg { color: var(--ink-2); }
+    .seg.basename { font-weight: 650; color: var(--ink); text-decoration: none; cursor: default; }
+    .sep { color: var(--ink-3); padding: 0 1px; }
+    .path-copy {
+      flex: none; display: inline-flex; align-items: center; justify-content: center;
+      width: 22px; height: 20px; padding: 0;
+      background: var(--surface); border: 1px solid var(--line); border-radius: 4px;
+      color: var(--ink-2); cursor: pointer; font-size: 12px;
+      &:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 9%, transparent); }
+      .copied { color: var(--keep, #6cc070); font-weight: 700; }
     }
   }
   .nums { color: var(--ink-2); font-variant-numeric: tabular-nums; margin-top: 2px; }
@@ -1617,7 +1670,6 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
 // hovering into it to mark is a supported gesture, not only click-to-pin.
 .dt-treemap-tip:not(.pinned):not(:hover) .mark-controls { display: none; }
 .dt-treemap-tip.pinned .tt-pin-hint, .dt-treemap-tip:hover .tt-pin-hint { display: none; }
-.dt-treemap-tip:not(.pinned):not(:hover) .path-acts { display: none; }
 .dt-treemap-tip.pinned .mark-controls,
 .dt-treemap-tip:hover .mark-controls {
   margin-top: 8px;
@@ -1781,9 +1833,13 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
 // column, the cursor / selected row tints, and the bulk bar docked below.
 // Lifecycle table: group rows by bucket — the bucket cell shows once per group,
 // with a divider above each new bucket so the (many) per-TTL rules read as a set.
+// A fleet store (`lifecycle.grouped`) folds a rule shared across buckets into
+// one row with a buckets column instead.
 .lifecycle-tbl {
   td.bucket { color: var(--ink-2); white-space: nowrap; }
   tr.bucket-start > td { border-top: 1px solid var(--rule, rgba(128, 128, 128, 0.28)); }
+  td.buckets { color: var(--ink-2); white-space: nowrap; }
+  code.clip { display: inline-block; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 }
 
 .worklist.selectable {
