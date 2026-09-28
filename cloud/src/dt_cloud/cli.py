@@ -1444,13 +1444,14 @@ def _rule_attr(aidx, attributions: tuple[str, ...], idmap, root: str):
 @option("-S", "--approved-from-site", is_flag=True, help="Load approved bands from the site's sweep_approvals table (the /sweep console's sign-offs)")
 @option("-b", "--bucket", "only_buckets", multiple=True, help="Only these buckets (default: all six)")
 @option("-d", "--date", required=True, help="Scan date whose listing to plan from (pinned)")
-@option("-o", "--out", default=None, help="Output dir (default gs://oa-gcs-usage-dvx/sweep/<date>-h<head>)")
+@option("-o", "--out", default=None, help="Output dir (default gs://oa-gcs-usage-dvx/sweep/<date>-h<head>, or <date>-p<plan_id> under --plan)")
+@option("-p", "--plan", "plan_path", default=None, help="A dispatched plan.json (path or gs:// URL): its items are the delete set — the marks ledger is not consulted, its `keep` list carves out, and the buckets are the plan's (∩ -b)")
 @option("-r", "--root", default="gs://oa-gcs-usage-dvx", help="Listing root (gs:// or local mount)")
 @option("-R", "--no-residue-check", is_flag=True, help="Skip the per-dir rule check (pre-2026-09-10 behavior: a sweeper-majority dir deletes whole, other users' and unattributed data inside it included)")
 @option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
 @option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
 @option("-X", "--no-attr-check", is_flag=True, help="Skip the per-dir sweeper-vs-owner gate on approved bands (default ON: approval deletes only the sweeper's own slice)")
-def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], approved_from_site: bool, only_buckets: tuple[str, ...], date: str, out: str | None, root: str, no_residue_check: bool, token: str | None, url: str | None, no_attr_check: bool) -> None:
+def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], approved_from_site: bool, only_buckets: tuple[str, ...], date: str, out: str | None, plan_path: str | None, root: str, no_residue_check: bool, token: str | None, url: str | None, no_attr_check: bool) -> None:
     """Object-level sweep manifest under the vote model + policy (b): stream
     the pinned listing, classify every directory (specs/sweep-executor.md,
     specs/vote-model.md), and write per-bucket parquets of the ELIGIBLE keys
@@ -1458,56 +1459,99 @@ def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], app
     Co-located residue — dirs inside an approved band that pass the majority
     gate but are ruled to another user or to nobody — is deferred and listed
     in ``residue/<bucket>.parquet`` (specs/sweep-coowned-residue.md).
-    Pure read + artifact write — deletes nothing."""
+    With ``--plan`` (the opt-in staged model, specs/staged-delete.md) the
+    delete set is the plan's items instead: every key under a staged prefix
+    is eligible unless the plan's own ``keep`` carves it out, and no ledger,
+    approval or attribution gate applies. Pure read + artifact write —
+    deletes nothing."""
     import fsspec
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    from .identity import load_identities
-    from .mark import creds, get_json
-    from .sweep_plan import (
-        CATEGORIES, VoteResolver, bands_for_bucket, classify_dir, ever_kept_prefixes, load_keeps, owners_resolver,
-    )
+    from .sweep_plan import CATEGORIES
 
-    base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
-    actions = get_json(base, tok, "/api/actions")
-    rows = load_keeps(actions)
-    head = max((r.action_id for r in rows), default=0)
-    vr = VoteResolver(rows)
-    own = owners_resolver(actions)
-    idmap = load_identities()
-    ever = ever_kept_prefixes(rows)
-    attr_exempt: frozenset[str] = frozenset()
-    if approved_from_site:
-        site_rows = get_json(base, tok, "/api/db/sweep_approvals")["rows"]
-        approved = tuple(sorted(set(approved) | {r["prefix"] for r in site_rows}))
-        attr_exempt = frozenset(r["prefix"] for r in site_rows if r.get("mode") == "full")
-        err(f"approved-from-site: {len(site_rows)} band(s) from sweep_approvals"
-            + (f" ({len(attr_exempt)} in full mode — attr gate skipped)" if attr_exempt else ""))
-    out = out or f"gs://oa-gcs-usage-dvx/sweep/{date}-h{head}"
-    err(f"sweep manifest: scan {date} @ head {head} → {out}"
-        + (f" · {len(approved)} approved band(s)" if approved else ""))
-    attr = None
-    if approved and not no_attr_check:
-        from .attr_index import AttrIndex
-        from .index_footer import index_dir
-        aidx = AttrIndex(f"{root}/{index_dir(date)}/path-index.parquet")
-        attr = aidx.lookup
-        err("attr gate ON: approved-band dirs must be majority-attributed to their sweeper")
     rule_attr = None
-    if attr is not None and not no_residue_check:
-        rule_attr = _rule_attr(aidx, attributions or DEFAULT_ATTRIBUTIONS, idmap, root)
-        err("residue check ON: an eligible dir must also be ruled to its sweeper (others' / unruled dirs defer)")
+    if plan_path is not None:
+        from .staged_plan import load_plan
+
+        if attributions or approved or approved_from_site:
+            raise SystemExit("--plan is the whole delete set: -a/-A/-S do not apply")
+        sp = load_plan(plan_path)
+        head = 0
+        buckets = [b for b in sp.buckets if not only_buckets or b in only_buckets]
+        if not buckets:
+            raise SystemExit(f"no plan bucket among -b {', '.join(only_buckets)} (plan {sp.plan_id} names {', '.join(sp.buckets)})")
+        out = out or f"gs://oa-gcs-usage-dvx/sweep/{date}-p{sp.plan_id}"
+        err(f"sweep manifest: scan {date} from plan {sp.plan_id} ({sp.name!r}) → {out}"
+            + f" · {sum(len(sp.sweep[b]) for b in buckets)} staged prefix(es) on {', '.join(buckets)}")
+
+        def classify(bucket: str, dn: str) -> tuple[str, str | None, tuple[str, ...]]:
+            return sp.classify(bucket, dn), None, ()
+
+        def bands_of(bucket: str) -> tuple[str, ...] | None:
+            return sp.sweep[bucket]
+
+        # The staged prefixes stand in for approved bands: `sweep execute`
+        # lists one segment below each and accounts per band, so every
+        # `deletion_bands` row is one staged item.
+        summary: dict = {
+            "date": date, "head": head, "policy": "plan", "plan_id": sp.plan_id, "plan_name": sp.name,
+            "approved": [a for b in buckets for a in sp.bands(b)],
+            "keep": [f"gs://{b}/{rel}" for b, rels in sp.keep.items() for rel in rels],
+            "approved_full": [], "buckets": {},
+        }
+    else:
+        from .identity import load_identities
+        from .mark import creds, get_json
+        from .sweep_plan import (
+            VoteResolver, bands_for_bucket, classify_dir, ever_kept_prefixes, load_keeps, owners_resolver,
+        )
+
+        base, tok = creds(token, url)
+        if not tok:
+            raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
+        actions = get_json(base, tok, "/api/actions")
+        rows = load_keeps(actions)
+        head = max((r.action_id for r in rows), default=0)
+        vr = VoteResolver(rows)
+        own = owners_resolver(actions)
+        idmap = load_identities()
+        ever = ever_kept_prefixes(rows)
+        attr_exempt: frozenset[str] = frozenset()
+        if approved_from_site:
+            site_rows = get_json(base, tok, "/api/db/sweep_approvals")["rows"]
+            approved = tuple(sorted(set(approved) | {r["prefix"] for r in site_rows}))
+            attr_exempt = frozenset(r["prefix"] for r in site_rows if r.get("mode") == "full")
+            err(f"approved-from-site: {len(site_rows)} band(s) from sweep_approvals"
+                + (f" ({len(attr_exempt)} in full mode — attr gate skipped)" if attr_exempt else ""))
+        out = out or f"gs://oa-gcs-usage-dvx/sweep/{date}-h{head}"
+        err(f"sweep manifest: scan {date} @ head {head} → {out}"
+            + (f" · {len(approved)} approved band(s)" if approved else ""))
+        attr = None
+        if approved and not no_attr_check:
+            from .attr_index import AttrIndex
+            from .index_footer import index_dir
+            aidx = AttrIndex(f"{root}/{index_dir(date)}/path-index.parquet")
+            attr = aidx.lookup
+            err("attr gate ON: approved-band dirs must be majority-attributed to their sweeper")
+        if attr is not None and not no_residue_check:
+            rule_attr = _rule_attr(aidx, attributions or DEFAULT_ATTRIBUTIONS, idmap, root)
+            err("residue check ON: an eligible dir must also be ruled to its sweeper (others' / unruled dirs defer)")
+
+        def classify(bucket: str, dn: str) -> tuple[str, str | None, tuple[str, ...]]:
+            return classify_dir(bucket, dn, vr, own, idmap, ever, approved, attr, attr_exempt, rule_attr)
+
+        def bands_of(bucket: str) -> tuple[str, ...] | None:
+            return bands_for_bucket(bucket, approved) if approved else None
+
+        buckets = list(only_buckets) or [
+            "marin-us-east1", "marin-us-east5", "marin-us-central1",
+            "marin-us-central2", "marin-eu-west4", "marin-us-west4",
+        ]
+        summary = {"date": date, "head": head, "policy": "b:approved-bands" if approved else "b:sweeper-owns", "approved": list(approved), "approved_full": sorted(attr_exempt), "buckets": {}}
     RESIDUE = ("deferred_residue", "deferred_unattr")
 
     fs, rootpath = fsspec.core.url_to_fs(root)
-    buckets = list(only_buckets) or [
-        "marin-us-east1", "marin-us-east5", "marin-us-central1",
-        "marin-us-central2", "marin-eu-west4", "marin-us-west4",
-    ]
-    summary: dict = {"date": date, "head": head, "policy": "b:approved-bands" if approved else "b:sweeper-owns", "approved": list(approved), "approved_full": sorted(attr_exempt), "buckets": {}}
     schema = pa.schema([
         ("name", pa.string()), ("size_bytes", pa.int64()),
         ("storage_class_id", pa.int8()), ("created", pa.timestamp("us", tz="UTC")),
@@ -1519,7 +1563,7 @@ def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], app
             raise SystemExit(f"no listing shards for {bucket} under {root}/listing/{date}/")
         cache: dict[str, tuple[str, str | None, tuple[str, ...]]] = {}
         cats = {c: [0, 0] for c in CATEGORIES}  # bytes, objects
-        bands = bands_for_bucket(bucket, approved) if approved else None
+        bands = bands_of(bucket)
         if bands is not None and not bands:
             err(f"  {bucket}: no approved band on this bucket — skipped")
             summary["buckets"][bucket] = {"objects": 0, "dirs": 0, "skipped": "no approved band"}
@@ -1527,6 +1571,7 @@ def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], app
         writer = None
         out_path = f"{out}/manifest/{bucket}.parquet"
         ofs, opath = fsspec.core.url_to_fs(out_path)
+        ofs.makedirs(opath.rsplit("/", 1)[0], exist_ok=True)
         residue: dict[str, list[int]] = {}  # dir -> [bytes, objects] for the two residue categories
         n = 0
         for shard in shards:
@@ -1551,7 +1596,7 @@ def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], app
                 dirs = df["name"].str.rpartition("/")[0]
                 for dn in dirs.unique():
                     if dn not in cache:
-                        cache[dn] = classify_dir(bucket, dn, vr, own, idmap, ever, approved, attr, attr_exempt, rule_attr)
+                        cache[dn] = classify(bucket, dn)
                 cat = dirs.map(lambda dn: cache[dn][0])
                 sizes = df["size_bytes"]
                 for c, g in sizes.groupby(cat):
@@ -1627,40 +1672,50 @@ def sweep_execute(only_buckets: tuple[str, ...], drift: str, delete_workers: int
     eligible dir, generation-matched deletes of manifest∩live keys whose
     timeCreated is unchanged. Every manifest dir is re-classified at the
     CURRENT ledger head first — newer keeps/unmarks drop dirs (ledger drift).
+    A plan built with `sweep manifest --plan` is the whole intent: no ledger
+    is read and nothing is re-classified.
     `--for-real` additionally requires ≥7d soft delete on every bucket."""
-    from .identity import load_identities
-    from .mark import creds, get_json
-    from .sweep_plan import (
-        VoteResolver, classify_dir, ever_kept_prefixes, load_keeps, owners_resolver,
-    )
+    import fsspec
+
     from .sweep_exec import DELETE_ATTEMPTS, execute_plan
 
     DELETE_ATTEMPTS_NOTE = f"{DELETE_ATTEMPTS} attempts"
-    base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
-    actions = get_json(base, tok, "/api/actions")
-    rows = load_keeps(actions)
-    vr = VoteResolver(rows)
-    own = owners_resolver(actions)
-    idmap = load_identities()
-    ever = ever_kept_prefixes(rows)
-    head = max((r.action_id for r in rows), default=0)
-    err(f"execute {'FOR REAL' if for_real else '(dry-run)'} @ current head {head}")
+    with fsspec.open(f"{plan_dir}/plan-summary.json") as fh:
+        plan_summary = json.load(fh)
+    if plan_summary.get("plan_id") is not None:
+        head = int(plan_summary["head"])
+        reclassify = None
+        err(f"execute {'FOR REAL' if for_real else '(dry-run)'} plan {plan_summary['plan_id']} ({plan_summary.get('plan_name')!r})")
+    else:
+        from .identity import load_identities
+        from .mark import creds, get_json
+        from .sweep_plan import (
+            VoteResolver, classify_dir, ever_kept_prefixes, load_keeps, owners_resolver,
+        )
 
-    def reclassify(bucket: str, dn: str, approved: tuple[str, ...]) -> str:
-        return classify_dir(bucket, dn, vr, own, idmap, ever, approved)[0]
+        base, tok = creds(token, url)
+        if not tok:
+            raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
+        actions = get_json(base, tok, "/api/actions")
+        rows = load_keeps(actions)
+        vr = VoteResolver(rows)
+        own = owners_resolver(actions)
+        idmap = load_identities()
+        ever = ever_kept_prefixes(rows)
+        head = max((r.action_id for r in rows), default=0)
+        err(f"execute {'FOR REAL' if for_real else '(dry-run)'} @ current head {head}")
+
+        def reclassify(bucket: str, dn: str, approved: tuple[str, ...]) -> str:
+            return classify_dir(bucket, dn, vr, own, idmap, ever, approved)[0]
 
     started = int(dt.datetime.now(dt.timezone.utc).timestamp())
     actor = os.environ.get("USER", "?")
     if not no_record:
         # The run's D1 row goes in now (finished NULL) so /sweep lists it while
         # the re-list runs — hours, on the big bands; completed at the end.
-        import fsspec
         from .sweep_exec import record_run_start
         try:
-            with fsspec.open(f"{plan_dir}/plan-summary.json") as fh:
-                run_id = record_run_start(json.load(fh), plan_dir, exec_head=head, actor=actor, started_ts=started, for_real=for_real, buckets=only_buckets)
+            run_id = record_run_start(plan_summary, plan_dir, exec_head=head, actor=actor, started_ts=started, for_real=for_real, buckets=only_buckets)
             err(f"recorded deletion run {run_id} (in progress)")
         except Exception as e:  # recording must never block the run
             err(f"WARN: deletion-run start record failed: {e}")

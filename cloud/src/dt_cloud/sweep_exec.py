@@ -806,7 +806,20 @@ def record_undo(run_id: str, summary: dict, deleted_objects: int) -> str:
 
 
 def run_id_for(plan: dict, started_ts: int) -> str:
-    return f"{plan['date']}-h{plan['head']}/{dt.datetime.fromtimestamp(started_ts, dt.timezone.utc):%Y%m%dT%H%M%SZ}"
+    """`<date>-h<head>/<stamp>` for a ledger-built plan; a staged plan
+    (`sweep manifest --plan`, `plan_id` in the summary) has no ledger head, so
+    `<date>-p<plan_id>/<stamp>`."""
+    stamp = f"{dt.datetime.fromtimestamp(started_ts, dt.timezone.utc):%Y%m%dT%H%M%SZ}"
+    if plan.get("plan_id") is not None:
+        return f"{plan['date']}-p{plan['plan_id']}/{stamp}"
+    return f"{plan['date']}-h{plan['head']}/{stamp}"
+
+
+def _plan_id_sql(plan: dict) -> str:
+    """The run's `deletion_runs.plan_id` (migration 0025): the staged plan it
+    ran, NULL for a ledger-built one."""
+    pid = plan.get("plan_id")
+    return "NULL" if pid is None else str(int(pid))
 
 
 def record_run_start(plan: dict, plan_dir: str, exec_head: int, actor: str, started_ts: int, for_real: bool, buckets: tuple[str, ...] = ()) -> str:
@@ -820,10 +833,10 @@ def record_run_start(plan: dict, plan_dir: str, exec_head: int, actor: str, star
     _d1_query(
         "INSERT INTO deletion_runs (run_id, plan, scan, head, exec_head, actor, mode, started_ts, finished_ts, "
         "deleted_bytes, deleted_objects, skipped_gone, skipped_overwritten, drift_dirs, ledger_drift_dirs, "
-        "undo_deadline, log_dir, buckets) VALUES ("
+        "undo_deadline, log_dir, buckets, plan_id) VALUES ("
         f"{_q(run_id)}, {_q(plan_dir)}, {_q(plan['date'])}, {plan['head']}, {exec_head}, {_q(actor)}, "
         f"{_q('real' if for_real else 'dry')}, {started_ts}, NULL, 0, 0, 0, 0, 0, 0, NULL, {_q(plan_dir)}, "
-        f"{_q(','.join(sorted(buckets))) if buckets else 'NULL'})",
+        f"{_q(','.join(sorted(buckets))) if buckets else 'NULL'}, {_plan_id_sql(plan)})",
         acct, tok,
     )
     return run_id
@@ -866,11 +879,11 @@ def record_run(
     _d1_query(
         "INSERT INTO deletion_runs (run_id, plan, scan, head, exec_head, actor, mode, started_ts, finished_ts, "
         "deleted_bytes, deleted_objects, skipped_gone, skipped_overwritten, drift_dirs, ledger_drift_dirs, "
-        "undo_deadline, log_dir) VALUES ("
+        "undo_deadline, log_dir, plan_id) VALUES ("
         f"{_q(run_id)}, {_q(summary['plan'])}, {_q(plan['date'])}, {plan['head']}, {exec_head}, {_q(actor)}, "
         f"{_q(mode)}, {started_ts}, {finished_ts}, {tot['deleted_bytes']}, {tot['deleted_objects']}, "
         f"{tot['skipped_gone']}, {tot['skipped_overwritten']}, {tot['drift_dirs']}, {tot['ledger_drift_dirs']}, "
-        f"{undo}, {_q(summary['plan'])}) "
+        f"{undo}, {_q(summary['plan'])}, {_plan_id_sql(plan)}) "
         "ON CONFLICT (run_id) DO UPDATE SET finished_ts = excluded.finished_ts, deleted_bytes = excluded.deleted_bytes, "
         "deleted_objects = excluded.deleted_objects, skipped_gone = excluded.skipped_gone, "
         "skipped_overwritten = excluded.skipped_overwritten, drift_dirs = excluded.drift_dirs, "
