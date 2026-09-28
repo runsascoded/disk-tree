@@ -101,10 +101,16 @@ def run_checks(
     max_ms: int = 25000,
     today: dt.date | None = None,
     get: Getter | None = None,
+    subdir: str = "",
 ) -> tuple[str | None, list[Check]]:
     """Fetch + evaluate. Returns (resolved_date, checks). ``get`` is injected in
-    tests; in production it defaults to a token-bound urllib fetch."""
+    tests; in production it defaults to a token-bound urllib fetch. ``subdir``
+    is the store's snapshot subdir under ``/data/`` (the site's
+    ``SNAPSHOTS_SUBDIR``: ``cw`` for the CoreWeave deployment, empty for the
+    default store) — without it the bare ``/data/scans.json`` is the root
+    listing, empty on a store that only publishes under a subdir."""
     base = base.rstrip("/")
+    sub = f"{subdir.strip('/')}/" if subdir.strip("/") else ""
     today = today or dt.datetime.now(dt.timezone.utc).date()
     if get is None:
         def get(url: str, rng: str | None = None) -> tuple[int, bytes]:
@@ -133,7 +139,7 @@ def run_checks(
     checks: list[Check] = []
 
     # 1. Freshness (also resolves the scan when --date is omitted).
-    s_status, scans = get_json("/data/scans.json")
+    s_status, scans = get_json(f"/data/{sub}scans.json")
     scans = scans if isinstance(scans, list) else []
     checks.append(check_freshness(scans, max_age_days, today))
     if date is None:
@@ -151,7 +157,7 @@ def run_checks(
     checks.append(check_status("subtree", st_status, (200,)))
 
     # 4. the published scan meta.
-    m_status, _ = get(f"{base}/data/{date}/meta.json", None)
+    m_status, _ = get(f"{base}/data/{sub}{date}/meta.json", None)
     checks.append(check_status("data/meta.json", m_status, (200,)))
 
     return date, checks

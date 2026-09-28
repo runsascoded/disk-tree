@@ -145,3 +145,31 @@ def test_run_checks_transport_failure_persists_after_retry():
     assert [(c.name, c.ok, c.detail) for c in checks if c.name == "subtree"] == [
         ("subtree", False, "HTTP 0 (want 200)"),
     ]
+
+
+def test_run_checks_subdir_scopes_the_data_routes():
+    """A store that publishes under `/data/<subdir>/` (the CoreWeave deployment's
+    `SNAPSHOTS_SUBDIR=cw`): scans.json and meta.json come from the subdir; the
+    API routes are unchanged."""
+    routes = {
+        "/data/cw/scans.json": (200, json.dumps(["2026-08-31"]).encode()),
+        "/api/marks/totals?date=2026-08-31": (200, json.dumps({"computed": {"index": "d1", "ms": 10}, "users": {"a": {}}}).encode()),
+        "/api/subtree?date=2026-08-31&w=128&h=128": (200, b"{}"),
+        "/data/cw/2026-08-31/meta.json": (200, b"{}"),
+    }
+    seen: list[str] = []
+
+    def get(url: str, rng: str | None) -> tuple[int, bytes]:
+        path = url.replace("https://cw-s3.oa.dev", "")
+        seen.append(path)
+        return routes.get(path, (404, b""))
+
+    date, checks = run_checks("https://cw-s3.oa.dev", "tok", None, today=TODAY, get=get, subdir="cw/")
+    assert date == "2026-08-31"
+    assert [c.ok for c in checks] == [True, True, True, True]
+    assert seen == [
+        "/data/cw/scans.json",
+        "/api/marks/totals?date=2026-08-31",
+        "/api/subtree?date=2026-08-31&w=128&h=128",
+        "/data/cw/2026-08-31/meta.json",
+    ]

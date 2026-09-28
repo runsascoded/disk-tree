@@ -723,9 +723,10 @@ def todo(
 @option("-f", "--max-age-days", default=2, type=int, help="Freshness: latest scan must be within this many days")
 @option("-j", "--json", "as_json", is_flag=True, help="Emit machine-readable JSON to stdout")
 @option("-m", "--max-ms", default=25000, type=int, help="marks/totals compute budget (ms) before it's flagged")
+@option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ (default: $SNAPSHOTS_SUBDIR; `cw` for the CoreWeave deployment, empty for the default store)")
 @option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
 @option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
-def healthcheck(date: str | None, max_age_days: int, as_json: bool, max_ms: int, token: str | None, url: str | None) -> None:
+def healthcheck(date: str | None, max_age_days: int, as_json: bool, max_ms: int, subdir: str | None, token: str | None, url: str | None) -> None:
     """Live-site health: is the latest scan actually *servable* end-to-end?
 
     Catches failures where the data pipeline succeeds but the site can't serve
@@ -741,7 +742,8 @@ def healthcheck(date: str | None, max_age_days: int, as_json: bool, max_ms: int,
     base, tok = creds(token, url)
     if not tok:
         raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN")
-    resolved, checks = run_checks(base, tok, date, max_age_days=max_age_days, max_ms=max_ms)
+    sub = subdir if subdir is not None else os.environ.get("SNAPSHOTS_SUBDIR", "")
+    resolved, checks = run_checks(base, tok, date, max_age_days=max_age_days, max_ms=max_ms, subdir=sub)
     err(f"healthcheck {base} @ {resolved or '?'}")
     for c in checks:
         err(f"  {'✓' if c.ok else '✗'} {c.name:<16} {c.detail}")
