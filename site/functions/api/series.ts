@@ -22,6 +22,7 @@ import { readRootAgg, readRootRows } from '../_lib/view.js'
 import { readOverTime } from '../_lib/overTime.js'
 import { parsePaths } from '../_lib/filter.js'
 import { metaRoots, rootPoints, type RootRow } from '../_lib/series.js'
+import { cacheKeyFor, cacheMatch, cacheStore } from '../_lib/edgeCache.js'
 
 // The default store's snapshot dirs (`snapshots/<date>/`; other stores live in
 // a named subdir that DATE_RE keeps out), and the scan-id shape they're named by.
@@ -61,7 +62,7 @@ async function metaPoint(env: Ctx['env'], date: string): Promise<{ date: string;
   return m && typeof m.total_bytes === 'number' ? { date, b: m.total_bytes, o: m.total_objects ?? 0 } : null
 }
 
-export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
+export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> => {
   const { env, request } = ctx
   if (!env.DB) return json({ error: 'index backend not configured (DB)' }, 503)
   if (!storeReady(env)) return json({ error: 'index reader not configured' }, 503)
@@ -104,9 +105,14 @@ export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
   // fall through to the per-scan read. null = index absent → all per-scan.
   const simple = !split && !paths.length && !lens && !owner && !classes
   const ot = simple ? await readOverTime(env, path) : null
-  const cacheKey = new Request(`https://series.cache/${encodeURIComponent(path)}?P=${encodeURIComponent(paths.join(','))}&l=${lensRaw ?? ''}&o=${owner ?? ''}&cl=${classKey(classes)}&s=${split ?? ''}&d=${dates.join(',')}&x=${extra.join(',')}&head=${head}`)
-  const cache = (caches as unknown as { default: Cache }).default
-  const hit = await cache.match(cacheKey)
+  // Two-tier cache (colo + KV, `_lib/edgeCache.ts`), keyed by every input
+  // including the scan list and the ledger head, so an entry is immutable and
+  // a new scan is a new key. This used to `cache.put` a `private` response
+  // straight into the Workers Cache API, which refuses those (413) — so every
+  // chart load re-read one point per scan (≈8 rounds of D1 + range reads for
+  // a 94-scan history, 5–20 s) while the diff beside it was a cache hit.
+  const cacheKey = cacheKeyFor('series', `${encodeURIComponent(path)}?P=${encodeURIComponent(paths.join(','))}&l=${lensRaw ?? ''}&o=${owner ?? ''}&cl=${classKey(classes)}&s=${split ?? ''}&d=${dates.join(',')}&x=${extra.join(',')}&head=${head}`)
+  const hit = await cacheMatch(env, cacheKey)
   if (hit) return hit
 
   const points: { date: string; b: number; o: number }[] = []
@@ -164,7 +170,6 @@ export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
     for (const g of got) if (g) points.push(g)
   }
   points.sort((a, b) => a.date.localeCompare(b.date))
-  const res = json({ path, ...(paths.length ? { paths } : {}), ...(lensRaw ? { lens: lensRaw } : {}), ...(owner ? { owner } : {}), points, ...(split ? { roots: rootPoints(rootsByDate) } : {}) }, 200, { 'cache-control': 'private, max-age=300' })
-  await cache.put(cacheKey, res.clone())
-  return res
+  const body = JSON.stringify({ path, ...(paths.length ? { paths } : {}), ...(lensRaw ? { lens: lensRaw } : {}), ...(owner ? { owner } : {}), points, ...(split ? { roots: rootPoints(rootsByDate) } : {}) })
+  return cacheStore(env, cacheKey, body, {}, ctx.waitUntil?.bind(ctx))
 }
