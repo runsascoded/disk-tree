@@ -126,7 +126,7 @@ const REGISTRY: Store[] = [
     staging: true,
     owners: true,
     sweep: 'owner',
-    lifecycle: { tracked: 'job/lifecycle/', rules: 'gcs', grouped: true },
+    lifecycle: { tracked: 'job/lifecycle/', rules: 'gcs', grouped: true, recordedFrom: '2026-09-16' },
     buckets: ['marin-us-central2', 'marin-us-central1', 'marin-us-east1', 'marin-us-east5', 'marin-us-west4', 'marin-eu-west4'],
     peer: { label: 'CoreWeave usage', href: 'https://cw-s3.oa.dev/' },
     rootLabel: 'all buckets',
