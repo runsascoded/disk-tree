@@ -31,9 +31,9 @@ const devSeriesIndex = {
 }
 
 // Deployment as configuration: the store this build serves (`src/stores.ts`
-// registry key) and the client's whoami source (`src/auth.ts`: `edge` behind a
-// CF Access gate, `app` for the app-session model, `public` for an open
-// deploy) come from the same file wrangler reads — `STORE` / `AUTH_MODE` under
+// registry key) and the client's auth mode (`src/auth.ts`: `app` for the
+// app-session model, `public` for an open deploy) come from the same file
+// wrangler reads — `STORE` / `AUTH_MODE` under
 // `[vars]` in wrangler.toml — so a deployment branch declares itself in one
 // place. A Pages environment's overrides (`[env.<name>.vars]`, e.g. the
 // `preview` block the dev stack deploys with) apply on top when
@@ -41,7 +41,7 @@ const devSeriesIndex = {
 // so a preview build carries the preview's mode, not production's.
 // `VITE_STORE` / `VITE_AUTH_MODE` in the environment still override (a CI
 // build of another store, e.g. deploy-r2.yml). Neither set → the registry's
-// first store, `edge`.
+// first store, `app`.
 function wranglerVars(env = process.env.CLOUDFLARE_ENV): Record<string, string> {
   if (!existsSync('wrangler.toml')) return {}
   const vars: Record<string, string> = {}
@@ -57,7 +57,7 @@ function wranglerVars(env = process.env.CLOUDFLARE_ENV): Record<string, string> 
 }
 const VARS = wranglerVars()
 const STORE = process.env.VITE_STORE ?? VARS.STORE ?? ''
-const AUTH_MODE = process.env.VITE_AUTH_MODE ?? VARS.AUTH_MODE ?? 'edge'
+const AUTH_MODE = process.env.VITE_AUTH_MODE ?? VARS.AUTH_MODE ?? 'app'
 
 export default defineConfig({
   define: {

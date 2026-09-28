@@ -1,19 +1,14 @@
 /**
- * One gate for the whole site (`@open-athena/auth`, Tier 2).
+ * One gate for the whole site (`@open-athena/auth`).
  *
- * Identity sources, in the order `requireScope` tries them:
- *
- *  1. `Cf-Access-Jwt-Assertion` header — only on a deployment that still sits
- *     behind a CF Access edge gate (`ACCESS_AUD` set; `_lib/cfAccess.ts`
- *     verifies it). gcs.oa.dev has none since 2026-09-24 and cw-s3.oa.dev
- *     follows (specs/oidc-cutover-cw.md): sessions are minted by our own
- *     Google OIDC client (`/auth/google`, or its in-page button at
- *     `/auth/google/onetap`) or an emailed code (`/auth/email/*`).
- *  2. The app session cookie / `Authorization: Bearer` / `?key=` — the
- *     `@open-athena/auth` gate, backed by D1. This is what makes named share
- *     links ("anyone with the link can view") possible: minted links redeem
- *     for a session that re-joins its grant row every request, so revocation
- *     is instant.
+ * The identity is the app session cookie / `Authorization: Bearer` / `?key=`
+ * — the `@open-athena/auth` gate, backed by D1. Sessions are minted by the
+ * deployment's own Google OIDC client (`/auth/google`, or its in-page button
+ * at `/auth/google/onetap`) or an emailed code (`/auth/email/*`); named share
+ * links ("anyone with the link can view") redeem for a session that re-joins
+ * its grant row every request, so revocation is instant. (The Cloudflare
+ * Access edge JWT was a second source until every deployment cut over to
+ * this model — gcs.oa.dev 2026-09-24, cw-s3.oa.dev 2026-09-28.)
  *
  * Scopes: staff (`STAFF_DOMAIN`) get everything; a viewer domain
  * (`VIEWER_DOMAINS`, e.g. coreweave.com on cw-s3) or a D1 `allowed_emails`
@@ -24,14 +19,10 @@
 import { type Auth, createGate, type Gate, hasScope } from '@open-athena/auth'
 import { d1AuditSink, d1GrantStore, d1RequestStore } from '@open-athena/auth/d1'
 import type { D1Database } from '@cloudflare/workers-types'
-import { verifyAccessJwt } from './cfAccess.js'
 
 export interface Env {
   DB?: D1Database
   SESSION_SECRET?: string
-  ACCESS_TEAM_DOMAIN?: string
-  /** AUD tag of the Access app whose edge JWTs we accept; unset = no edge. */
-  ACCESS_AUD?: string
   /** OIDC (our own Google client) — the ZT-free sign-in path. Set as Pages
    *  secrets; see specs/oidc-cutover-cw.md. Absent → `/auth/google` 503s. */
   GOOGLE_CLIENT_ID?: string
@@ -45,7 +36,7 @@ export interface Env {
    *  `allowed_emails` row — what the Access policy's email-domain include did
    *  (cw-s3: `coreweave.com`). Unset = allowlist only. */
   VIEWER_DOMAINS?: string
-  /** Set where the `admin_emails` table exists (cw-s3, migrations/cw/0004):
+  /** Set where the `admin_emails` table exists (cw-s3, `migrations/cw/0001_init.sql`):
    *  its rows get `admin` on top of the base scope. Unset (gcs) = staff only. */
   ADMIN_EMAILS?: string
   /** Local dev only (`.dev.vars`): email the localhost dev identity acts as.
@@ -77,12 +68,6 @@ export interface Env {
   STORE_SECRET_ACCESS_KEY?: string
   /** Global second cache tier behind the colo cache (`_lib/edgeCache.ts`). */
   CACHE_KV?: KVNamespace
-  /** Deployment seam (specs/denovo-factor.md): set when the WHOLE host sits
-   *  behind a CF Access edge gate. Every request then carries an edge JWT for
-   *  an already-authorized viewer, so edge identities get the base scope
-   *  without a policy check; staff and `admin_emails` rows get `admin`. Unset:
-   *  no edge; the app gate authorizes everything. */
-  EDGE_TRUSTED?: string
   /** The scope every viewer of this deployment needs (`gcs` | `cw`). */
   BASE_SCOPE?: string
   /** Public/no-gate deploys (r2.rbw.sh, per-project embeds): grant the base
@@ -107,8 +92,6 @@ export const GCS_SCOPE = 'gcs'
 export const CW_SCOPE = 'cw'
 export const ADMIN_SCOPE = 'admin'
 export const REQUESTS_SCOPE = 'requests'
-
-export const TEAM_DOMAIN = 'https://openathena-ai-pages.cloudflareaccess.com'
 
 /** The deployment's base scope: what `requireViewer` asks for. */
 export const baseScope = (env: Env): string => env.BASE_SCOPE ?? GCS_SCOPE
@@ -137,7 +120,7 @@ async function adminRow(env: Env, email: string): Promise<boolean> {
  * `admin` for an `admin_emails` row. Email sessions re-derive scopes here on
  * every request, so removing a row de-authorizes existing sessions on their
  * next request. If the DB isn't bound (local dev), non-staff fall back to
- * allowed — the CF Access edge gate is the enforcement in that configuration.
+ * allowed — local dev has no gate to enforce.
  */
 export const scopesFor = (env: Env) => async (raw: string): Promise<string[] | null> => {
   const email = raw.toLowerCase()
@@ -169,37 +152,15 @@ export interface Identity {
   scopes: string[]
   /** `admin` scope, as a flag — what the plan-first sweep console keys on. */
   admin: boolean
-  via: 'edge' | 'session' | 'grant' | 'public'
+  via: 'session' | 'grant' | 'public'
 }
 const withAdmin = (id: Omit<Identity, 'admin'>): Identity => ({ ...id, admin: id.scopes.includes(ADMIN_SCOPE) || id.scopes.includes('*') })
 
 /** Staff (by domain) or an `admin_emails` row (the deployment's own admin
- *  list, `site/migrations/cw/0004_admin.sql`, where `ADMIN_EMAILS` says it exists). */
+ *  list, `admin_emails` in `site/migrations/cw/0001_init.sql`, where `ADMIN_EMAILS` says it exists). */
 export async function isAdmin(env: Env, email: string): Promise<boolean> {
   if (email.toLowerCase().endsWith(`@${staffDomain(env)}`)) return true
   return adminRow(env, email.toLowerCase())
-}
-
-async function edgeIdentity(req: Request, env: Env): Promise<Identity | null> {
-  // Only a deployment behind an Access edge (ACCESS_AUD set) trusts the header.
-  if (!env.ACCESS_AUD) return null
-  const jwt = req.headers.get('Cf-Access-Jwt-Assertion')
-  if (!jwt) return null
-  const teamDomain = env.ACCESS_TEAM_DOMAIN ?? TEAM_DOMAIN
-  for (const aud of [env.ACCESS_AUD]) {
-    const email = await verifyAccessJwt(jwt, teamDomain, aud)
-    if (email) {
-      if (env.EDGE_TRUSTED) {
-        // The edge already authorized this viewer; the app only ranks them.
-        const admin = await isAdmin(env, email)
-        return withAdmin({ email, name: null, scopes: admin ? [baseScope(env), ADMIN_SCOPE] : [baseScope(env)], via: 'edge' })
-      }
-      const scopes = await scopesFor(env)(email)
-      if (!scopes) return null
-      return withAdmin({ email, name: null, scopes, via: 'edge' })
-    }
-  }
-  return null
 }
 
 function authIdentity(auth: Auth): Identity {
@@ -208,11 +169,11 @@ function authIdentity(auth: Auth): Identity {
 }
 
 /** All app scopes — granted to the local-dev identity so `/data` etc. work
- *  without a CF Access edge or a minted session. */
+ *  without a minted session. */
 const DEV_SCOPES = [GCS_SCOPE, CW_SCOPE, ADMIN_SCOPE, REQUESTS_SCOPE]
 
 export async function identify(ctx: Ctx): Promise<Identity | null> {
-  // Local dev has no CF Access edge and no minted session, so `wrangler pages
+  // Local dev has no minted session, so `wrangler pages
   // dev` requests would 401 — leaving the client `DEV_IDENTITY` stub (which
   // only fakes the *client's* whoami) disagreeing with the server. Treat any
   // request whose host is localhost as a full-scope dev user so the two agree.
@@ -222,8 +183,6 @@ export async function identify(ctx: Ctx): Promise<Identity | null> {
   if (host === 'localhost' || host === '127.0.0.1') {
     return withAdmin({ email: ctx.env.DEV_EMAIL ?? 'dev@example.test', name: null, scopes: DEV_SCOPES, via: 'session' })
   }
-  const edge = await edgeIdentity(ctx.request, ctx.env)
-  if (edge) return edge
   const gate = gateFor(ctx.env)
   if (!gate) return null
   const auth = await gate.authenticate(ctx.request)
