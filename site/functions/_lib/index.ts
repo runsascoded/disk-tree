@@ -133,6 +133,12 @@ export const storeTarget = (env: Env) => ({
   region: env.STORE_REGION ?? 'us-east1',
 })
 
+/** The URI scheme a store's endpoint speaks, for copy that names the store
+ *  (`gs://` for GCS's S3-compatible API, `r2://` for an R2 account endpoint,
+ *  `s3://` for anything else). */
+export const storeScheme = (endpoint: string): 'gs' | 'r2' | 's3' =>
+  /storage\.googleapis\.com/.test(endpoint) ? 'gs' : /\.r2\.cloudflarestorage\.com/.test(endpoint) ? 'r2' : 's3'
+
 /** The store's read allow-list: `STORE_PREFIXES` (comma-separated) replaces
  *  `defaults` when set, so a deployment whose artifacts live under other
  *  prefixes (cw: `cw-l2/` tiers, `cw-sweep/` records) names them once in

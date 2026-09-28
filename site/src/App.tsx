@@ -33,7 +33,7 @@ import { SiteNav, topbarH } from './SiteNav'
 import type { MenuEntry } from './SiteNav'
 import { DAY, encodeScan, fmtScan, nearestScan, scanTime, useScan } from './scan'
 import { SizeOverTime } from './SizeOverTime'
-import { STORES, storeForPath } from './stores'
+import { DEFAULT_STORE, STORES, storeForPath } from './stores'
 import { useDocTitle } from './title'
 import { TypedPrefixModal } from './TypedPrefix'
 import type { AgeRow, ColorMode, Meta, Pricing, Rules, TreeNode } from './types'
@@ -878,7 +878,7 @@ function AppContent() {
         <SiteNav />
         <p className="err">
           404 — <code>/{drillPath}</code> is not a bucket or page here.{' '}
-          <Link to="/">home</Link> · <Link to="/sweep">sweep console</Link> · <Link to="/users">users</Link>
+          <Link to="/">home</Link> · <Link to="/sweep">sweep console</Link>{DEFAULT_STORE.owners && <> · <Link to="/users">users</Link></>}
         </p>
       </main>
     )

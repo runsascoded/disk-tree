@@ -4,6 +4,7 @@ import { HttpStore } from '@rdub/file-tree/stores/http'
 import { makeParquetViewer, type ParquetCellRenderer } from '@rdub/file-tree/renderers/parquet'
 import type { ElideCtx } from '@rdub/file-tree/renderers/table'
 import { useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { SiteNav } from './SiteNav'
 import { SiteKbd } from './SiteKbd'
 import { useDocTitle } from './title'
@@ -13,9 +14,20 @@ import { CLASS_NAMES, fmtN } from './types'
 import { useUnits } from './units'
 
 // Same-origin proxy (CF Pages Function, app session required) → the raw scan
-// bucket. `prefixes` in the function allow-lists listing/ + snapshots/.
+// store. Which store, and which prefixes the function allow-lists, is the
+// deployment's config (`STORE_*` in wrangler.toml) — `/api/store` reports it.
 const store = HttpStore('/v1/files')
-const BUCKET_URI = 'gs://oa-gcs-usage-dvx'
+interface StoreInfo { uri: string; prefixes: string[] }
+const useStoreInfo = () =>
+  useQuery<StoreInfo>({
+    queryKey: ['store'],
+    queryFn: async () => {
+      const r = await fetch('/api/store')
+      if (!r.ok) throw new Error(`store: ${r.status}`)
+      return r.json()
+    },
+    staleTime: Infinity,
+  })
 
 // The parquet viewer with file-tree's `elide` strategy for wide cells (the
 // sweep logs' `name`/`dir` columns are long GCS paths): the column still clips
@@ -99,11 +111,12 @@ export function FilesPage() {
   useDocTitle(seg || undefined, 'Files')
   const { fmtBytes } = useUnits()
   const parquetViewer = useMemo(() => makeParquetViewer({ ...viewerOpts, renderCell: makeRenderCell(fmtBytes) }), [fmtBytes])
+  const { data: info } = useStoreInfo()
   return (
     <main className="files-page" style={{ padding: '1rem', '--pad-t': '1rem', '--pad-x': '1rem', maxWidth: 1100, margin: '0 auto' } as React.CSSProperties}>
       <SiteNav />
       <p className="sub" style={{ margin: '0 0 0.6em' }}>
-        Raw scan store — <code>{BUCKET_URI}</code> (<code>listing/</code> + <code>snapshots/</code>), access-gated.
+        Raw scan store{info ? <> — <code>{info.uri}</code> ({info.prefixes.map((p, i) => <span key={p}>{i ? ' + ' : ''}<code>{p}</code></span>)})</> : null}, access-gated.
       </p>
       <FileTree
         store={store}

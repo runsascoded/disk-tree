@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { blobKey, groupMatches, storeCreds, storePrefixes, storeReady, storeTarget } from './index'
+import { blobKey, groupMatches, storeCreds, storePrefixes, storeReady, storeScheme, storeTarget } from './index'
 
 // The blob handle's in-memory span selection must be the predicate
 // `selectSpans` sends D1 (index.ts), NULL semantics included.
@@ -51,6 +51,11 @@ describe('store seam', () => {
   it('STORE_* overrides target and creds together', () => {
     expect(storeTarget(r2)).toEqual({ endpoint: 'https://acct.r2.cloudflarestorage.com', bucket: 'idx', region: 'auto' })
     expect(storeCreds(r2)).toEqual({ accessKeyId: 'rk', secretAccessKey: 'rs' })
+  })
+  it('names the store by its endpoint family', () => {
+    expect(storeScheme('https://storage.googleapis.com')).toBe('gs')
+    expect(storeScheme('https://acct.r2.cloudflarestorage.com')).toBe('r2')
+    expect(storeScheme('https://s3.us-east-1.amazonaws.com')).toBe('s3')
   })
   it('is not ready without a full credential pair', () => {
     expect(storeReady({} as never)).toBe(false)
