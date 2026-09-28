@@ -20,10 +20,10 @@ import { MdMenu } from 'react-icons/md'
 import { Link, useLocation } from 'react-router-dom'
 import { AboutModal } from './About'
 import { Avatar } from './Avatar'
-import { AUTH_MODE, signInUrl, useCanMark, useIdent, useSignOut } from './auth'
+import { AUTH_MODE, signInUrl, useCanAssign, useIdent, useSignOut } from './auth'
 import { IDENTITIES } from './identities.gen'
 import { REPO_URL } from './SiteKbd'
-import { useMyUser, useUserEmails } from './sweep'
+import { useMyUser, useUserEmails } from './owners'
 import TokenModal from './TokenModal'
 import { UserCard, ghHandle, shortName } from './UserChip'
 import { useUnits } from './units'
@@ -34,7 +34,7 @@ import { Tooltip } from './Tooltip'
 // folded into a ☰ menu (far left), the page's own scope/controls across the
 // middle, and the signed-in identity as an avatar menu (far right — units,
 // token, sign-out live in it). On the home page the middle IS the page scope
-// (scan, diff window, color axis, mark/owner axes, name filter), so every
+// (scan, diff window, color axis, owner axis, name filter), so every
 // section below reads against a visible statement of what it's scoped to,
 // and the bar looks the same parked at the top as it does stuck mid-page.
 //
@@ -154,7 +154,7 @@ function useMenu(placement: 'bottom-start' | 'bottom-end') {
 
 function NavMenu({ extra }: { extra?: MenuEntry[] }) {
   const { pathname } = useLocation()
-  const canMark = useCanMark()
+  const canAssign = useCanAssign()
   const [aboutOpen, setAboutOpen] = useState(false)
   const m = useMenu('bottom-start')
   const here = (to: string) => (to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(to + '/'))
@@ -175,10 +175,8 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
             <div className="menu-pop" ref={m.refs.setFloating} style={m.floatingStyles} {...m.getFloatingProps()}>
               {link('/', 'Map')}
               {link('/files', 'Scans')}
-              {canMark && DEFAULT_STORE.owners && link('/users', 'Users')}
-              {canMark && DEFAULT_STORE.owners && link('/marks', 'Marks')}
-              {canMark && DEFAULT_STORE.owners && link('/assignments', 'Assignments')}
-              {canMark && link('/sweep', 'Sweep')}
+              {canAssign && DEFAULT_STORE.owners && link('/users', 'Users')}
+              {canAssign && DEFAULT_STORE.owners && link('/assignments', 'Assignments')}
               {DEFAULT_STORE.staging && link('/staged', 'Staged')}
               <hr />
               <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setAboutOpen(true) }}>About — the data, axes &amp; colors</button>
@@ -198,12 +196,12 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
 
 function UserMenu() {
   const ident = useIdent()
-  const canMark = useCanMark()
+  const canAssign = useCanAssign()
   const signOut = useSignOut()
-  // The ledger pages + the email → user map exist only on a marks store.
-  const marksOn = canMark && DEFAULT_STORE.owners
-  const myUser = useMyUser(ident?.email, marksOn)
-  const emails = useUserEmails(marksOn)
+  // The email → user map exists only on an attribution store.
+  const ownersOn = !!ident && DEFAULT_STORE.owners
+  const myUser = useMyUser(ident?.email, ownersOn)
+  const emails = useUserEmails(ownersOn)
   const [tokenOpen, setTokenOpen] = useState(false)
   const { units, suffixB, toggleUnits, toggleSuffixB } = useUnits()
   const m = useMenu('bottom-end')
@@ -241,7 +239,7 @@ function UserMenu() {
                   trailing B: <b>{suffixB ? 'on' : 'off'}</b> <span className="dim">({units === 'iec' ? 'Ti' : 'T'}{suffixB ? 'B' : ''})</span>
                 </button>
               </Explain>
-              {canMark && (
+              {canAssign && (
                 <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setTokenOpen(true) }}>
                   agent / CLI token…
                 </button>

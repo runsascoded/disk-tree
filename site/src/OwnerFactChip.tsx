@@ -1,15 +1,18 @@
 import { Avatar } from './Avatar'
-import { fmtMarkDate } from './MarkControls'
 import { Tooltip } from './Tooltip'
 import type { Provenance } from './types'
 import { SOURCE_LABELS } from './types'
 import { UserChip, ghHandle, shortName } from './UserChip'
 
+/** Short date for a ledger timestamp, e.g. "Aug 24, 2026". */
+export const fmtDate = (ts: number): string =>
+  new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+
 /**
  * One ownership fact, with where it came from (specs/assignment-provenance.md
  * § Surfaces): the owner's chip plus a provenance mark — the assigner's
  * avatar for an assignment, a source glyph for a pipeline signal — and one
- * tooltip. Used wherever an owner is shown: the mark panel, the children
+ * tooltip. Used wherever an owner is shown: the owner panel, the children
  * table, the treemap tooltip.
  */
 export function OwnerFactChip({ who, size = 15, assigned, inferred }: {
@@ -25,7 +28,7 @@ export function OwnerFactChip({ who, size = 15, assigned, inferred }: {
     return (
       <Tooltip content={
         <span className="prov-tip">
-          <div>assigned by <Avatar github={ghHandle(assigned.by)} name={shortName(assigned.by)} size={13} /> <b>{shortName(assigned.by)}</b> · {fmtMarkDate(assigned.ts)}</div>
+          <div>assigned by <Avatar github={ghHandle(assigned.by)} name={shortName(assigned.by)} size={13} /> <b>{shortName(assigned.by)}</b> · {fmtDate(assigned.ts)}</div>
           {assigned.memo && <div className="memo">“{assigned.memo}”</div>}
         </span>
       }>

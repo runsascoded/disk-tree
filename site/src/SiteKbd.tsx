@@ -15,8 +15,7 @@ const CW_URL = 'https://cw-s3.oa.dev/'
 const PAGES: [string, string][] = [
   ['/', 'Map (home)'],
   ['/files', 'Browse scans'],
-  ['/users', 'Users — mark status by owner'],
-  ['/marks', 'Recent marks'],
+  ['/users', 'Users — storage by owner'],
 ]
 
 // Every distinct attribution user in the registry (aliases collapse onto `u`).

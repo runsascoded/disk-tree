@@ -78,8 +78,8 @@ export const onRequestPost = async (ctx: Ctx & { env: Env }): Promise<Response> 
     return json({ error: `batch submit failed (${status})`, status, detail }, 500)
   }
 
-  // `head` / `exec_head` were the marks ledger's position; a plan-first run
-  // reads no ledger, so both are 0.
+  // `head` / `exec_head` recorded a ledger position a plan-first run doesn't
+  // have (it reads no ledger), so both are 0.
   await db.prepare(`
     INSERT INTO deletion_runs (run_id, plan_id, manifest, scan, head, exec_head, actor, mode, started_ts, log_dir)
     VALUES (?, ?, ?, ?, 0, 0, ?, ?, ?, ?)

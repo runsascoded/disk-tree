@@ -203,8 +203,8 @@ export function planBuckets(prefixes: string[], buckets: readonly string[] = CW_
 /** The plan.json a multi-bucket dispatch drops in the run dir for
  * `dt-cloud sweep manifest --plan`: the plan's items in canonical form
  * (`<scheme><bucket>/<path>/`, the executor groups them by bucket itself) and
- * the buckets they name (the run's `-b` cut). No `keep`: the opt-in model has
- * no protective marks, so nothing is read from the marks ledger. */
+ * the buckets they name (the run's `-b` cut). The plan is the whole intent:
+ * nothing carves out. */
 export interface PlanBucketsSnapshot {
   plan_id: number
   name: string
