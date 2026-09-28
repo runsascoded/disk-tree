@@ -1,6 +1,6 @@
 # Dynamic Open Graph cards (per-path treemap unfurls)
 
-Status: **feature landed** (2026-09-19); one **open operational blocker** (R2 write token, §5).
+Status: **feature landed** (2026-09-19); the R2-write blocker is **resolved** (2026-09-20, §5) — rescans write again and the full HCCS `crashes` corpus is now the demo's crashes dataset.
 
 Make every shareable disk-tree link unfurl with a treemap of *that* path, so pasting `https://r2.rbw.sh/r2/ctbk` (or a drilled `…/r2/ctbk/avail-v3`) into Slack/Twitter/Discord shows the bucket's actual space breakdown, not one static card. Applies to the public serverless demo (`disk-tree-demo` → r2.rbw.sh); the gated `disk-tree` project inherits the same code.
 
@@ -41,11 +41,17 @@ Any drilled path renders on demand at the edge, reusing the live widget's layout
 - **Workers can't compile wasm from bytes at runtime** (`CompileError: Wasm code generation disallowed by embedder`). `initWasm(fetch(url))` fails; the wasm must be imported as a build-time-compiled module. Vendored at `ui/cfn/vendor/resvg.wasm` + `cfn/wasm.d.ts` + `import wasm from '…/resvg.wasm'`. Node (tests/CI) *can* compile from bytes.
 - **Fonts**: resvg wants ttf/otf (not woff2), served as static assets (`ui/public/_fonts/Inter-{400,600}.ttf`, fetched at runtime — that's allowed, unlike wasm). Static Inter TTFs come from the Google Fonts css2 API with an old User-Agent.
 
-## 5. OPEN — R2 write token is read-only (blocks tier-A refresh + the whole rescan)
+## 5. RESOLVED — R2 write token + cross-account credential split (2026-09-20)
 
-`rescan-demo.yml` has failed **every run since ~2026-09-09**: `PermissionError: Access Denied` on `PutObject` to `disk-tree-demo`. The R2 credential (CI secrets `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`, and the local `.envrc` keys) is **read-only**; `wrangler r2 object put` also 403s (the `CLOUDFLARE_API_TOKEN` has Pages-deploy scope, not R2-object write). Consequences: demo scans are stale ("10d ago"), and the tier-A OG daily refresh can't upload.
+`rescan-demo.yml` had failed **every run since ~2026-09-09**: `PermissionError: Access Denied` on `PutObject` to `disk-tree-demo` — the single R2 credential was read-only. Fixed by a least-privilege, **cross-account** credential design (CLAUDE.md "Cross-account credentials", `blobfs.py`):
 
-**Fix (account-side, RAC `0dcad…`):** rotate the R2 API token to include **Object Read & Write** on `disk-tree-demo`; update the repo secrets + `.envrc`. Code is correct — nothing to change. The **bundled seed cards** and **tier-B edge renders** need no R2 write and work regardless. Memory: `rescan-demo-r2-write-denied`.
+- **`disk-tree-demo RW`** (RAC, Object R&W, `disk-tree-demo` only) → profile `rac-rw`, writes the demo bucket. This is the actual unblock.
+- **`hccs …RO`** (HCCS, Object Read) → profile `hccs-ro`, reads the public source buckets `crashes` + `ctbk`, which have **moved to the HCCS account**.
+- **`disk-tree-demo RO`** (RAC, Object Read) → profile `rac-ro`, reads the one remaining RAC source `jc-taxes`. *(Pending: the `R2_RO_*` keypair on hand authenticates but grants nothing — roll that token's S3 creds. jc-taxes stays stale until then; it is the only bucket affected.)*
+
+`buckets.yml` maps each bucket → `endpoint_url` + `profile`, so one `index --to` run authenticates a HCCS source and the RAC target with different keys (`_s3fs(endpoint, profile)`, `S3Backend(profile=…)`). **`DISK_TREE_R2_ENDPOINT_URL` must stay unset** — it globally overrides the per-bucket endpoints and collapses the split.
+
+CI secrets: `R2_RW_*`, `R2_HCCS_RO_*` (added 2026-09-20); the workflow writes an `AWS_SHARED_CREDENTIALS_FILE` with the two profiles + an inline `buckets.yml`. Verified 2026-09-20: `r2://crashes` (7,966 objects, 72.4 GiB) scanned from HCCS → published to `disk-tree-demo` on RAC → live at r2.rbw.sh (listed, drillable, `/og/r2/crashes` edge-renders). Memory: `rescan-demo-r2-write-denied` (resolved).
 
 ## 6. Also landed alongside (README / site OG)
 
@@ -59,4 +65,5 @@ Any drilled path renders on demand at the edge, reusing the live widget's layout
 ## 8. Possible follow-ups
 
 - Tier B **write-through to R2** via the Function's R2 binding (bindings can write even with a read-only *API* token), so a cold sub-path render is cached durably rather than only at the CF edge — reduces repeat cold renders and survives isolate churn.
-- Whether the demo's `nj-crashes` (5.3 G on RAC) should mirror the larger HCCS `r2://crashes` corpus. Scanning that bucket needs HCCS read+**list** creds (R2 public-object-read ≠ publicly-listable over the S3 API). Not required for anything above.
+- **`nj-crashes` retirement.** The demo now carries both the old RAC `nj-crashes` (5.0 G, stale) and the new HCCS `crashes` (72.4 G). `nj-crashes` is dropped from the rescan loop; its stale scan can be deleted from `disk-tree-demo/scans/` once confirmed (a `delete`, so left for an explicit go).
+- **jc-taxes RO.** Rejoin it to the rescan loop once the `rac-ro` token has a working keypair (§5).
