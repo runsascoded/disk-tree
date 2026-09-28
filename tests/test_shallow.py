@@ -220,3 +220,26 @@ def test_api_scan_serves_chunk_tops_from_the_sidecar(client, monkeypatch):
     calls.clear()
     assert _scan_rows(c, '/test') == rows
     assert [c for c in calls if c[0] == chunk_path] == []
+
+
+def test_chunk_map_reads_only_pointer_row_groups(tmp_path, monkeypatch):
+    """`_chunk_map` pushes `child_scan_id IS NOT NULL` down: an all-null row
+    group is pruned from its footer stats, and a chunk whose column is Arrow
+    type `null` (no stats at all) is answered from the schema alone — reading
+    a 1.4M-row chunk's `path` column to find zero pointers cost ~16 s over R2."""
+    import pyarrow as pa
+    from disk_tree import diff
+    n = 3 * BLOB_ROW_GROUP_SIZE
+    ids = [None] * n
+    ids[1] = 'c.parquet'
+    root = str(tmp_path / 'root.parquet')
+    blobfs.write_table(pa.table({'path': [f'p{i:06d}' for i in range(n)], 'child_scan_id': pa.array(ids, pa.string())}), root, BLOB_ROW_GROUP_SIZE)
+    chunk = str(tmp_path / 'chunk.parquet')
+    blobfs.write_table(pa.table({'path': ['a', 'b'], 'child_scan_id': pa.nulls(2)}), chunk, BLOB_ROW_GROUP_SIZE)
+    reads: list[int] = []
+    real = blobfs.read_table
+    monkeypatch.setattr(blobfs, 'read_table', lambda *a, **kw: reads.append(real(*a, **kw).num_rows) or real(*a, **kw))
+    diff._chunk_map_cached.cache_clear()
+    assert diff._chunk_map(root) == {'p000001': 'c.parquet'}
+    assert diff._chunk_map(chunk) is None
+    assert reads == [1]

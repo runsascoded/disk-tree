@@ -194,12 +194,12 @@ def read_schema(path: str):
     return pq.read_schema(p, filesystem=fs)
 
 
-def read_table(path: str, columns: list[str] | None = None) -> pa.Table:
+def read_table(path: str, columns: list[str] | None = None, filters=None) -> pa.Table:
     import pyarrow.parquet as pq
     if not is_url(path):
-        return pq.read_table(path, columns=columns)
+        return pq.read_table(path, columns=columns, filters=filters)
     fs, p = fs_for(path)
-    return pq.read_table(p, columns=columns, filesystem=fs)
+    return pq.read_table(p, columns=columns, filters=filters, filesystem=fs)
 
 
 def read_parquet(path: str, filters=None, columns: list[str] | None = None) -> pd.DataFrame:
