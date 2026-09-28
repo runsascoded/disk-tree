@@ -31,7 +31,7 @@ import { MarkHistory } from './MarkHistory'
 import { MultiSelect } from './MultiSelect'
 import { SiteNav, topbarH } from './SiteNav'
 import type { MenuEntry } from './SiteNav'
-import { DAY, encodeScan, fmtScan, nearestScan, scanTime, useScan } from './scan'
+import { DAY, encodeScan, fmtScan, nearestScan, noScansYet, scanTime, useScan } from './scan'
 import { SizeOverTime } from './SizeOverTime'
 import { DEFAULT_STORE, STORES, storeForPath } from './stores'
 import { useDocTitle } from './title'
@@ -1170,6 +1170,15 @@ function AppContent() {
           {rootErr.message.startsWith('409') ? 'no per-user index for this scan — pick a newer scan, or clear the user'
             : rootErr.message.startsWith('413') ? 'this view is too wide for the index — drill in, or narrow the scope'
             : `view failed: ${rootErr.message}`}
+        </p>
+      ) : noScansYet(scansQ) ? (
+        // The list answered and is empty: no snapshot has index rows in D1,
+        // so no view will ever load — a skeleton here would spin forever.
+        // In dev this is the first-run state of `./dev --local-db` on an
+        // unseeded local D1; say how to seed it.
+        <p className="loading">
+          No scans indexed yet — the scan list names only snapshots whose index rows are in D1 (<code>index_schema</code>), and there are none.
+          {import.meta.env.DEV && <>{' '}Running <code>site/dev --local-db</code> on an empty local D1? Seed it from a prod export with <code>site/dev --refresh</code>.</>}
         </p>
       ) : (
         // First paint only — before even the depth-1 tree has landed (later
