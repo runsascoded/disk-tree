@@ -3,7 +3,7 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Report whether the local HEAD is deployed to the `oa-gcs-usage` CF Pages project.
+"""Report whether the local HEAD is deployed to this checkout's CF Pages project (`name` in wrangler.toml).
 
 Reads `CLOUDFLARE_API_TOKEN` from the environment (the repo `.envrc` token has
 Pages read). Compares the newest successful deployment's commit to `HEAD` and

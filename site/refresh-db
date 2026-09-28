@@ -14,7 +14,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-DB=oa-gcs-usage-auth
+# This deployment's D1, from the same file wrangler binds it from.
+DB=$(sed -n 's/^database_name = "\(.*\)"$/\1/p' wrangler.toml | head -1)
+[ -n "$DB" ] || { echo "refresh-db: no database_name = ... in wrangler.toml" >&2; exit 1; }
 dump=tmp/prod-auth.sql
 mkdir -p tmp
 
