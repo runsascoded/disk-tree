@@ -122,6 +122,39 @@ export function planBucket(prefixes: string[]): { bucket: string; sweep: string[
   return { bucket, sweep: prefixes.map(p => relPrefix(p, bucket)) }
 }
 
+/** A plan's canonical items grouped by bucket: bucket -> the items relative
+ * to it, buckets and items sorted. The gcs executor takes several `-b`, so a
+ * plan there MAY span buckets — this is `planBucket` without the refusal
+ * (cw keeps `planBucket`: one bucket per run). */
+export function planBuckets(prefixes: string[], buckets: readonly string[] = CW_BUCKETS): Record<string, string[]> {
+  const by: Record<string, string[]> = {}
+  for (const p of prefixes) {
+    const b = bucketOf(p, buckets)
+    ;(by[b] ??= []).push(relPrefix(p, b))
+  }
+  return Object.fromEntries(Object.keys(by).sort().map(b => [b, [...new Set(by[b])].sort()]))
+}
+
+/** The plan.json a multi-bucket dispatch drops in the run dir for
+ * `dt-cloud sweep manifest --plan`: the plan's items in canonical form
+ * (`<scheme><bucket>/<path>/`, the executor groups them by bucket itself) and
+ * the buckets they name (the run's `-b` cut). No `keep`: the opt-in model has
+ * no protective marks, so nothing is read from the marks ledger. */
+export interface PlanBucketsSnapshot {
+  plan_id: number
+  name: string
+  sweep: string[]
+  buckets: string[]
+}
+
+export async function snapshotPlanBuckets(db: D1Database, planId: number, shape: PrefixShape = CW_SHAPE): Promise<PlanBucketsSnapshot | null> {
+  const plan = await db.prepare("SELECT id, name FROM plans WHERE id = ?").bind(planId).first<{ id: number; name: string }>()
+  if (!plan) return null
+  const items = await db.prepare("SELECT prefix FROM plan_items WHERE plan_id = ? ORDER BY prefix").bind(planId).all<{ prefix: string }>()
+  const sweep = items.results.map(r => r.prefix)
+  return { plan_id: planId, name: plan.name, sweep, buckets: Object.keys(planBuckets(sweep, shape.buckets)) }
+}
+
 export async function audit(
   db: D1Database,
   tbl: string,
