@@ -15,9 +15,11 @@ export interface Callout { x: number; y: number; below: boolean }
  * scores high (you must descend into the trough between them to reach the taller
  * one), where a literal 2-D disk would mislabel steep slopes. `r` (x-units) is a
  * non-max-suppression radius: of two peaks within `r`, only the more prominent
- * survives (valleys likewise; a peak never suppresses a valley). Endpoints and
+ * survives (valleys likewise; a peak never suppresses a valley). `minProm`
+ * (y-units) is a prominence floor: a wobble smaller than it is not an extremum
+ * worth a callout — callers pass a fraction of the trace's range. Endpoints and
  * global extremes are the caller's job. O(n·peaks), fine at ~hundreds of scans. */
-export function prominentExtrema(pts: Pt[], r: number): { maxes: Pt[]; mins: Pt[] } {
+export function prominentExtrema(pts: Pt[], r: number, minProm = 0): { maxes: Pt[]; mins: Pt[] } {
   // Peaks of `sign*y`: sign=1 finds maxima, sign=-1 finds minima.
   const peaks = (sign: number): Pt[] => {
     const v = (i: number) => sign * pts[i].y
@@ -29,7 +31,8 @@ export function prominentExtrema(pts: Pt[], r: number): { maxes: Pt[]; mins: Pt[
       for (let j = i - 1; j >= 0 && v(j) <= v(i); j--) left = Math.min(left, v(j))
       let right = v(i)
       for (let j = i + 1; j < pts.length && v(j) <= v(i); j++) right = Math.min(right, v(j))
-      cand.push({ i, prom: v(i) - Math.max(left, right) })
+      const prom = v(i) - Math.max(left, right)
+      if (prom >= minProm) cand.push({ i, prom })
     }
     cand.sort((a, b) => b.prom - a.prom)
     const kept: number[] = []
@@ -46,13 +49,14 @@ export function prominentExtrema(pts: Pt[], r: number): { maxes: Pt[]; mins: Pt[
  * last, its global min & max, and — when a range is selected (`winX` = the
  * window edges' x's) — the point nearest each edge, so a selection reads the
  * size at its own start and end. When `radius` > 0, prominent interior
- * peaks/valleys at that suppression radius (`prominentExtrema`) are added too.
+ * peaks/valleys at that suppression radius (`prominentExtrema`) are added too,
+ * those with prominence ≥ `minPromFrac` × the series' range (0 = every one).
  * Points coinciding in a role (first is also max; a window edge lands on the
  * min; a prominent peak is the global max) collapse to one callout, keeping the
  * earliest-assigned role's placement. `below` puts the label under the point
  * (lows) rather than above it (highs). Ordered by first assignment (max, min,
  * first, last, window edges, then prominent peaks, valleys) for a stable render. */
-export function pickAnnotations(pts: Pt[], winX?: readonly [number, number], radius?: number): Callout[] {
+export function pickAnnotations(pts: Pt[], winX?: readonly [number, number], radius?: number, minPromFrac = 0): Callout[] {
   if (pts.length < 2) return []
   let lo = pts[0]
   let hi = pts[0]
@@ -73,7 +77,7 @@ export function pickAnnotations(pts: Pt[], winX?: readonly [number, number], rad
     }
   }
   if (radius && radius > 0) {
-    const { maxes, mins } = prominentExtrema(pts, radius)
+    const { maxes, mins } = prominentExtrema(pts, radius, minPromFrac * (hi.y - lo.y))
     for (const p of maxes) if (!picks.has(p)) picks.set(p, false)
     for (const p of mins) if (!picks.has(p)) picks.set(p, true)
   }
@@ -111,4 +115,56 @@ export function stackSeries(traces: Trace[]): { key: string; points: Band[] }[] 
     }
     return { key: t.key, points }
   })
+}
+
+/** Each trace relative to its own first point: `delta` = bytes gained since
+ * then (signed), `pct` = that as a fraction of the start (a root that began at
+ * 0 reads 0 throughout — there is no "percent of nothing"). Puts roots of very
+ * different sizes on one comparable axis: the question is "what moved", not
+ * "how big". */
+export function relativeSeries(traces: Trace[], mode: 'delta' | 'pct'): Trace[] {
+  return traces.map(t => {
+    const pts = [...t.points].sort((a, b) => a.x - b.x)
+    const ref = pts[0]?.y ?? 0
+    return {
+      key: t.key,
+      points: pts.map(p => ({ x: p.x, y: mode === 'delta' ? p.y - ref : ref === 0 ? 0 : (p.y - ref) / ref })),
+    }
+  })
+}
+
+export interface BandCallout extends Callout { y0: number; h: number }
+
+/** Callouts inside a stacked band, of the band's own height (the root's size,
+ * not the stack's running sum): the same roles as `pickAnnotations` applied to
+ * the height series, each placed at the band's `[y0, y]` at that x, `h` the
+ * height to label. */
+export function bandCallouts(band: Band[], radius?: number, minPromFrac = 0): BandCallout[] {
+  const at = new Map(band.map(b => [b.x, b]))
+  const heights = band.map(b => ({ x: b.x, y: b.y - b.y0 }))
+  return pickAnnotations(heights, undefined, radius, minPromFrac).map(c => {
+    const b = at.get(c.x)!
+    return { x: c.x, y: b.y, y0: b.y0, h: c.y, below: c.below }
+  })
+}
+
+/** Nice y-ticks aligned to a display unit: a base-10-nice byte value (1e15) is
+ * an ugly binary label (909 TiB), so nice-tick in the unit's own base (1024 for
+ * IEC → 1024/2048/3072 TiB; 1000 for SI → round TB/PB). `min` > 0 = a fitted
+ * axis; `min` < 0 = a signed axis (Δ traces): ticks cover [min, max] at one
+ * unit-nice step either side of 0. */
+export function unitTicks(min: number, max: number, base: number, count = 4): number[] {
+  const big = Math.max(Math.abs(min), Math.abs(max))
+  if (big <= 0) return [0]
+  const span = Math.max(max - min, big * 1e-6)
+  const scale = base ** Math.floor(Math.log(big) / Math.log(base))
+  const rawStep = span / scale / count
+  const mag = 10 ** Math.floor(Math.log10(rawStep))
+  const norm = rawStep / mag
+  const step = (norm < 1.5 ? 1 : norm < 3 ? 2 : norm < 7 ? 5 : 10) * mag * scale
+  const out: number[] = []
+  // Integer multiples of the step (not a running sum): 0 lands exactly on a
+  // signed axis, and no float drift creeps into the labels.
+  for (let k = Math.ceil(min / step); k * step <= max + step / 100; k++) out.push(k * step)
+  return out
 }
