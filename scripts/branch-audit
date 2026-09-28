@@ -16,7 +16,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 command -v git-didi >/dev/null || { echo "git-didi missing: uv tool install git-didi" >&2; exit 1; }
 
+# A linked worktree has no `.claude/cp.yml` of its own: fall back to the main
+# worktree's (the git common dir's parent).
 CFG=.claude/cp.yml
+[ -f "$CFG" ] || CFG=$(git rev-parse --path-format=absolute --git-common-dir)/../.claude/cp.yml
 if [ $# -ge 2 ]; then
   PAIRS=("$1 $2")
 else
