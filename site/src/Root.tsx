@@ -10,6 +10,7 @@ import { MarksPage } from './MarksPage'
 import { AssignmentsPage } from './AssignmentsPage'
 import { SweepPage } from './SweepPage'
 import { PlanSweepPage } from './PlanSweepPage'
+import { StagedPage } from './StagedPage'
 import { OgPage } from './OgPage'
 import { UserOgPage, UserPage, UsersOgPage, UsersPage } from './UserPage'
 import { DEFAULT_STORE, STORES } from './stores'
@@ -47,6 +48,8 @@ export default function Root() {
       <Route path="/users/*" element={<Navigate to="/" replace />} />
       )}
       <Route path="/sweep" element={<AuthGate>{DEFAULT_STORE.sweep === 'plan' ? <PlanSweepPage /> : <SweepPage />}</AuthGate>} />
+      {/* The opt-in deletion console: what the trash gesture staged, and its runs. */}
+      <Route path="/staged" element={<AuthGate><StagedPage /></AuthGate>} />
       {/* The review lenses became the home page's mark/owner axes — /mark is just the map. */}
       <Route path="/mark" element={<Navigate to="/" replace />} />
       <Route path="*" element={<AuthGate><App /></AuthGate>} />

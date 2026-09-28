@@ -2550,3 +2550,15 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
 .treemap .hint { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .treemap .hint .keys { margin-left: auto; }
 .filterbox input { max-width: 100%; }
+
+// /staged — the opt-in deletion console: one section per trash gesture (who,
+// when, memo), the rows selectable like every table; dispatch controls only
+// render for an admin.
+.staged-page {
+  .staged-actions { display: flex; align-items: center; gap: 12px; margin: 6px 0 10px; font-size: 13px; .sel-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; } }
+  .stage-batch { margin: 12px 0 18px; }
+  .batch-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); .memo { color: var(--ink); } }
+  .staged-table { margin-top: 4px; td.actions { width: 2em; text-align: right; } .rm { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--ink-3); cursor: pointer; padding: 0 6px; &:hover { color: var(--ink); border-color: var(--ink-3); } } }
+  .sweep-empty { color: var(--ink-3); margin: 18px 0; }
+  .dispatch { flex-direction: column; align-items: flex-start; h3 { margin: 0 0 4px; } }
+}

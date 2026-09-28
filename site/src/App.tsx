@@ -878,7 +878,7 @@ function AppContent() {
         <SiteNav />
         <p className="err">
           404 — <code>/{drillPath}</code> is not a bucket or page here.{' '}
-          <Link to="/">home</Link> · <Link to="/sweep">sweep console</Link>{DEFAULT_STORE.owners && <> · <Link to="/users">users</Link></>}
+          <Link to="/">home</Link>{DEFAULT_STORE.staging && <> · <Link to="/staged">staged</Link></>} · <Link to="/sweep">sweep console</Link>{DEFAULT_STORE.owners && <> · <Link to="/users">users</Link></>}
         </p>
       </main>
     )

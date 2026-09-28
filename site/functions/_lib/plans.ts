@@ -63,26 +63,41 @@ export function canonicalPrefix(raw: string, shape: PrefixShape = CW_SHAPE, buck
   return `${shape.scheme}${bucket}/${rel}`
 }
 
+/** `a` covers `b`: the same prefix, or `b` lies under it. Canonical prefixes
+ * end in `/`, so `s3://b/a/` covers `s3://b/a/x/` and not `s3://b/ab/`. */
+export const covers = (a: string, b: string): boolean => b === a || b.startsWith(a.endsWith('/') ? a : `${a}/`)
+
+/** The prefixes of `all` that no other member covers — the set a delete
+ * actually acts on. A staged dir and a staged descendant of it would count
+ * (and delete) the descendant twice; the no-nesting rule keeps one. */
+export function uncovered(all: readonly string[]): string[] {
+  return all.filter(p => !all.some(o => o !== p && covers(o, p)))
+}
+
 /** Stage prefixes for deletion — the opt-in trash model's proposal step
  * (`STAGING` deployments): append them to a shared open plan, creating one
  * ("Staged") if none is open. Any full viewer may stage; an admin approves +
  * dispatches later. One `stage_batches` row per gesture carries the memo
  * (a fact about the action), and every prefix in the call points at it — the
  * 1:many an admin reads back as "trashed together by X: <memo>". A re-staged
- * prefix keeps its first batch (`INSERT OR IGNORE`). Returns the plan + batch
- * ids and what canonicalized, or an error for a malformed prefix. */
+ * prefix keeps its first batch (`INSERT OR IGNORE`).
+ *
+ * No nesting (`covers`): a prefix already under a staged ancestor is skipped
+ * (`covered`), and staging an ancestor absorbs its staged descendants
+ * (`absorbed` — removed from the plan; the ancestor now names them). Returns
+ * the plan + batch ids and what happened, or an error for a malformed prefix. */
 export async function stageItems(
   db: D1Database,
   rawPrefixes: string[],
   who: string,
   note: string | null = null,
   shape: PrefixShape = CW_SHAPE,
-): Promise<{ plan_id: number; batch_id: number; staged: string[] } | { error: string }> {
+): Promise<{ plan_id: number; batch_id: number; staged: string[]; covered: string[]; absorbed: string[] } | { error: string }> {
   const prefixes: string[] = []
   for (const r of rawPrefixes) {
     const c = canonicalPrefix(r, shape)
     if (!c) return { error: `bad prefix ${JSON.stringify(r)}` }
-    prefixes.push(c)
+    if (!prefixes.includes(c)) prefixes.push(c)
   }
   if (!prefixes.length) return { error: 'prefixes required' }
   const ts = Math.floor(Date.now() / 1000)
@@ -93,16 +108,66 @@ export async function stageItems(
     ).bind(who, ts).first<{ id: number }>())!
     await audit(db, 'plans', String(plan.id), 'insert', who, null, { name: 'Staged', auto: true })
   }
+  const have = (await db.prepare('SELECT prefix FROM plan_items WHERE plan_id = ?').bind(plan.id).all<{ prefix: string }>()).results.map(r => r.prefix)
+  const { staged, covered, absorbed } = planStaging(have, uncovered(prefixes))
   const batch = (await db.prepare(
     'INSERT INTO stage_batches (plan_id, note, created_by, created_ts) VALUES (?, ?, ?, ?) RETURNING id',
   ).bind(plan.id, note, who, ts).first<{ id: number }>())!
-  for (const p of prefixes) {
+  for (const p of absorbed) {
+    await db.prepare('DELETE FROM plan_items WHERE plan_id = ? AND prefix = ?').bind(plan.id, p).run()
+  }
+  for (const p of staged) {
     await db.prepare(
       'INSERT OR IGNORE INTO plan_items (plan_id, prefix, batch_id, added_by, added_ts) VALUES (?, ?, ?, ?, ?)',
     ).bind(plan.id, p, batch.id, who, ts).run()
   }
-  await audit(db, 'plan_items', String(plan.id), 'insert', who, null, { staged: prefixes, batch_id: batch.id, note })
-  return { plan_id: plan.id, batch_id: batch.id, staged: prefixes }
+  await audit(db, 'plan_items', String(plan.id), 'insert', who, absorbed.length ? { absorbed } : null, { staged, covered, batch_id: batch.id, note })
+  return { plan_id: plan.id, batch_id: batch.id, staged, covered, absorbed }
+}
+
+/** The no-nesting rule for one gesture against a plan's current items (pure):
+ * `staged` = the new prefixes no existing item covers, `covered` = the new
+ * prefixes an existing item already names, `absorbed` = existing items a new
+ * prefix covers (to remove). A prefix already in the plan stays as it is. */
+export function planStaging(have: readonly string[], add: readonly string[]): { staged: string[]; covered: string[]; absorbed: string[] } {
+  const staged: string[] = []
+  const covered: string[] = []
+  for (const p of add) {
+    if (have.includes(p)) { staged.push(p); continue }
+    if (have.some(h => covers(h, p))) covered.push(p)
+    else staged.push(p)
+  }
+  const absorbed = have.filter(h => !staged.includes(h) && staged.some(p => covers(p, h)))
+  return { staged, covered, absorbed }
+}
+
+export interface StageBatchRow { id: number; plan_id: number; note: string | null; created_by: string; created_ts: number }
+export interface PlanItemRow { prefix: string; note: string | null; added_by: string; added_ts: number; batch_id: number | null }
+
+/** A plan with its items (memo joined from the stage batch where the deployment
+ * stages), its stage batches and its runs — what `/staged` and `/api/plans/:id`
+ * render. `staging` = the `stage_batches` table exists here. */
+export async function planDetail(db: D1Database, id: number, staging: boolean): Promise<{ plan: PlanRow; items: PlanItemRow[]; batches: StageBatchRow[]; runs: Record<string, unknown>[] } | null> {
+  const plan = await db.prepare('SELECT * FROM plans WHERE id = ?').bind(id).first<PlanRow>()
+  if (!plan) return null
+  const items = staging
+    ? await db.prepare(
+      `SELECT i.prefix, COALESCE(i.note, b.note) AS note, i.added_by, i.added_ts, i.batch_id
+       FROM plan_items i LEFT JOIN stage_batches b ON b.id = i.batch_id
+       WHERE i.plan_id = ? ORDER BY i.added_ts DESC, i.prefix`,
+    ).bind(id).all<PlanItemRow>()
+    : await db.prepare('SELECT prefix, note, added_by, added_ts, NULL AS batch_id FROM plan_items WHERE plan_id = ? ORDER BY added_ts DESC, prefix').bind(id).all<PlanItemRow>()
+  const batches = staging
+    ? (await db.prepare('SELECT * FROM stage_batches WHERE plan_id = ? ORDER BY created_ts DESC').bind(id).all<StageBatchRow>()).results
+    : []
+  const runs = await db.prepare('SELECT * FROM deletion_runs WHERE plan_id = ? ORDER BY started_ts DESC').bind(id).all<Record<string, unknown>>()
+  return { plan, items: items.results, batches, runs: runs.results }
+}
+
+/** The shared open plan trash gestures land in (the newest open one), or null. */
+export async function openPlanId(db: D1Database): Promise<number | null> {
+  const row = await db.prepare("SELECT id FROM plans WHERE state = 'open' ORDER BY created_ts DESC LIMIT 1").first<{ id: number }>()
+  return row?.id ?? null
 }
 
 /** A plan whose items name more than one bucket: the executor runs against one

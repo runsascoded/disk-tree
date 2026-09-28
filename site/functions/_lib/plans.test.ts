@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { bucketOf, canonicalPrefix, planBucket, PlanSpansBuckets, prefixShape, relPrefix } from './plans'
+import { bucketOf, canonicalPrefix, covers, planBucket, PlanSpansBuckets, planStaging, prefixShape, relPrefix, uncovered } from './plans'
 
 const P = 'marin-us-east-02a'
 const H = 'hero-checkpoints'
@@ -69,5 +69,35 @@ describe('prefixShape — the deployment\'s scheme + bucket set from [vars]', ()
   })
   it('an unknown bucket canonicalizes under the primary, as on cw', () => {
     expect(canonicalPrefix('gs://other/x/', GCS)).toBe('gs://marin-us-central2/other/x/')
+  })
+})
+
+describe('covers / uncovered — the no-nesting rule', () => {
+  it('a prefix covers itself and its descendants, not a sibling that shares its name as a prefix', () => {
+    expect(covers('s3://b/a/', 's3://b/a/')).toBe(true)
+    expect(covers('s3://b/a/', 's3://b/a/x/y/')).toBe(true)
+    expect(covers('s3://b/a/', 's3://b/ab/')).toBe(false)
+    expect(covers('s3://b/a/x/', 's3://b/a/')).toBe(false)
+  })
+  it('uncovered keeps only the outermost prefixes', () => {
+    expect(uncovered(['s3://b/a/', 's3://b/a/x/', 's3://b/c/', 's3://b/a/y/z/'])).toEqual(['s3://b/a/', 's3://b/c/'])
+    expect(uncovered([])).toEqual([])
+  })
+})
+
+describe('planStaging — one gesture against the plan', () => {
+  const have = ['s3://b/a/', 's3://b/c/d/']
+  it('a new prefix under a staged one is covered; one over staged ones absorbs them', () => {
+    expect(planStaging(have, ['s3://b/a/x/', 's3://b/c/', 's3://b/e/'])).toEqual({
+      staged: ['s3://b/c/', 's3://b/e/'],
+      covered: ['s3://b/a/x/'],
+      absorbed: ['s3://b/c/d/'],
+    })
+  })
+  it('re-staging an existing prefix is a no-op stage (kept, nothing absorbed)', () => {
+    expect(planStaging(have, ['s3://b/a/'])).toEqual({ staged: ['s3://b/a/'], covered: [], absorbed: [] })
+  })
+  it('an empty plan stages everything', () => {
+    expect(planStaging([], ['s3://b/a/'])).toEqual({ staged: ['s3://b/a/'], covered: [], absorbed: [] })
   })
 })

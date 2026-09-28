@@ -179,6 +179,7 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
               {canMark && DEFAULT_STORE.owners && link('/marks', 'Marks')}
               {canMark && DEFAULT_STORE.owners && link('/assignments', 'Assignments')}
               {canMark && link('/sweep', 'Sweep')}
+              {DEFAULT_STORE.staging && link('/staged', 'Staged')}
               <hr />
               <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setAboutOpen(true) }}>About — the data, axes &amp; colors</button>
               {extra?.map(e => (

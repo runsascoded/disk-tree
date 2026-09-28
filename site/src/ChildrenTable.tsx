@@ -190,7 +190,7 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
           <Tooltip content="Optional: one note for this deletion — why these prefixes go. Stored with the batch, visible to the admin who dispatches.">
             <input className="memo" value={memo} onChange={e => setMemo(e.target.value)} placeholder="note (optional)" aria-label="deletion note" />
           </Tooltip>
-          <Tooltip content={<>Stage every selected prefix for deletion — an admin approves and dispatches from <b>/sweep</b></>}>
+          <Tooltip content={<>Stage every selected prefix for deletion — an admin approves and dispatches from <b>/staged</b></>}>
             <button type="button" className="trash" onClick={trashSel} aria-label="trash selected"><FaRegTrashCan /> trash {sel.selected.size}</button>
           </Tooltip>
           {showActions && DEFAULT_STORE.owners && <AssignSelect prefix={selUris.map(u => u + '/')} label={`assign ${sel.selected.size}…`} />}
@@ -333,7 +333,7 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
                   <td className="actions">
                     {synthetic ? null : staging ? (
                       <>
-                        <Tooltip content="Stage this prefix for deletion — an admin approves and dispatches">
+                        <Tooltip content="Stage this prefix for deletion — an admin approves and dispatches from /staged">
                           <button type="button" className="trash" onClick={() => trash(uri)} aria-label="trash"><FaRegTrashCan /></button>
                         </Tooltip>
                         {showActions && DEFAULT_STORE.owners && <AssignSelect prefix={uri + '/'} assigned={cl?.who ?? null} compact />}
