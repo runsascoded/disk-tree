@@ -1,5 +1,5 @@
 -- Stage batches — the deletion *action* as a first-class row (the opt-in
--- trash model, specs/staged-delete.md; gcs lineage 0026 verbatim). One trash
+-- trash model, specs/staged-delete.md; gcs lineage 0026 verbatim; after the squashed `0001_init` baseline). One trash
 -- gesture stages N prefixes with one shared memo, so the note is a fact about
 -- the decision, not copied onto every path. A batch belongs to the plan its
 -- items land in (the shared open "Staged" plan); `plan_items.batch_id` is the
