@@ -18,7 +18,10 @@ export const AUTH_MODE: 'app' | 'edge' | 'public' =
     : import.meta.env.VITE_AUTH_MODE === 'public' ? 'public'
       : 'app'
 // The whoami source only applies to the gated modes; public bypasses the Gate.
-export const WHOAMI_SOURCE: WhoamiSource = { kind: AUTH_MODE === 'edge' ? 'edge' : 'app' }
+// Behind an edge gate the package's default (`/api/auth/whoami`, the app
+// session) knows nothing — `/api/whoami` answers in the same `SsoWhoami` shape
+// from the verified edge JWT (`functions/api/whoami.ts`).
+export const WHOAMI_SOURCE: WhoamiSource | undefined = AUTH_MODE === 'edge' ? { endpoint: '/api/whoami' } : undefined
 
 // `?wall` forces the wall in dev (which otherwise short-circuits to authed,
 // since neither identity source exists locally). A local session disables the
@@ -28,14 +31,20 @@ export const WHOAMI_SOURCE: WhoamiSource = { kind: AUTH_MODE === 'edge' ? 'edge'
 // `oa_dev_session` marker (functions/_lib/devsession.ts); a cookie forged
 // against the local wrangler's SESSION_SECRET via document.cookie also counts.
 // Evaluated per render (not once at load) so an in-page code sign-in flips
-// the gate without a reload.
+// the gate without a reload. The stub carries every scope, matching what the
+// Functions grant a localhost request (`DEV_SCOPES` in functions/_lib/auth.ts).
+const DEV_WHOAMI: Whoami = {
+  kind: 'sso',
+  email: import.meta.env.VITE_DEV_EMAIL ?? 'dev@example.test',
+  admin: true,
+  scopes: ['gcs', 'cw', 'admin', 'requests'],
+  subject: null,
+}
 const forceWall = new URLSearchParams(window.location.search).has('wall')
 const hasLocalSession = (): boolean =>
   document.cookie.includes('oa_auth=') || document.cookie.includes('oa_dev_session=')
 export const devIdentity = (): Whoami | null | undefined =>
-  import.meta.env.DEV && !hasLocalSession()
-    ? (forceWall ? null : { email: import.meta.env.VITE_DEV_EMAIL ?? 'dev@example.test' })
-    : undefined
+  import.meta.env.DEV && !hasLocalSession() ? (forceWall ? null : DEV_WHOAMI) : undefined
 
 /** Where the inline "sign in" links go: the edge tier's `/login`, or the app
  *  tier's own `/signin` page (Google / emailed code), returning here after. */
@@ -45,6 +54,11 @@ export const signInUrl = (): string =>
 export interface Ident {
   email: string
   name?: string
+  /** A share-link (grant) session, not SSO — the chip shows the grant's own
+   *  subject (name + avatar) rather than the owner-registry lookup. */
+  guest?: boolean
+  /** The grant subject's explicit avatar URL (Slack/GitHub/…), when set. */
+  avatar?: string
 }
 
 /** Sign out of the app session (POST /api/auth/logout clears the cookie). */
@@ -63,8 +77,8 @@ export function useIdent(): Ident | null {
   const { whoami } = useWhoami(WHOAMI_SOURCE, { devIdentity: devIdentity() })
   if (!whoami) return null
   const name = displayName(whoami) ?? undefined
-  const email = (whoami as { email?: string | null }).email ?? name ?? 'guest'
-  return { email, name }
+  const email = whoami.email ?? name ?? 'guest'
+  return { email, name, guest: whoami.kind === 'grant', avatar: whoami.subject?.avatar ?? undefined }
 }
 
 /**
@@ -73,5 +87,5 @@ export function useIdent(): Ident | null {
  */
 export function useCanMark(): boolean {
   const { whoami } = useWhoami(WHOAMI_SOURCE, { devIdentity: devIdentity() })
-  return !!(whoami as { email?: string | null } | null)?.email
+  return !!whoami?.email
 }

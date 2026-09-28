@@ -4,10 +4,11 @@
  * Identity sources, in the order `requireScope` tries them:
  *
  *  1. `Cf-Access-Jwt-Assertion` header — only on a deployment that still sits
- *     behind a CF Access edge gate (`ACCESS_AUD` set). Neither gcs.oa.dev nor
- *     (once specs/oidc-cutover-cw.md lands) cw-s3.oa.dev has one: sessions are
- *     minted by our own Google OIDC client (`/auth/google`) or an emailed code
- *     (`/auth/email/*`).
+ *     behind a CF Access edge gate (`ACCESS_AUD` set; `_lib/cfAccess.ts`
+ *     verifies it). gcs.oa.dev has none since 2026-09-24 and cw-s3.oa.dev
+ *     follows (specs/oidc-cutover-cw.md): sessions are minted by our own
+ *     Google OIDC client (`/auth/google`, or its in-page button at
+ *     `/auth/google/onetap`) or an emailed code (`/auth/email/*`).
  *  2. The app session cookie / `Authorization: Bearer` / `?key=` — the
  *     `@open-athena/auth` gate, backed by D1. This is what makes named share
  *     links ("anyone with the link can view") possible: minted links redeem
@@ -21,9 +22,9 @@
  * carry the scopes they were minted with (normally just the base scope).
  */
 import { type Auth, createGate, type Gate, hasScope } from '@open-athena/auth'
-import { verifyAccessJwt } from '@open-athena/auth/cf-access'
 import { d1AuditSink, d1GrantStore, d1RequestStore } from '@open-athena/auth/d1'
 import type { D1Database } from '@cloudflare/workers-types'
+import { verifyAccessJwt } from './cfAccess.js'
 
 export interface Env {
   DB?: D1Database
