@@ -9,6 +9,7 @@ this fixture's scale nothing folds, so the tree is asserted exactly.
 
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -84,6 +85,8 @@ def test_write_path_index_attr(tmp_path: Path, listing: str, attribution: str):
     pidx = tmp_path / "path-index.parquet"
     meta = write_path_index((listing,), out, "2026-07-20", (attribution,), identities_path, path_index=pidx)
 
+    # `published` is the wall clock at publish time (the site's timestamp shape)
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z", meta.pop("published"))
     assert meta == {
         "asof": "2026-07-20",
         "generated": dt.date.today().isoformat(),
@@ -325,9 +328,12 @@ def test_dir_cache_roundtrip(tmp_path: Path, listing: str, attribution: str):
     warm_out = tmp_path / "warm"
     write_path_index((str(bogus),), warm_out, "2026-07-20", (attribution,), identities_path, dir_cache=cache)
 
-    for name in ("age.json", "meta.json"):
-        assert (warm_out / name).read_bytes() == (cold_out / name).read_bytes()
-    meta = json.loads((warm_out / "meta.json").read_text())
+    assert (warm_out / "age.json").read_bytes() == (cold_out / "age.json").read_bytes()
+    # meta.json carries the publish wall clock, so the two runs differ there and nowhere else
+    warm_meta, cold_meta = (json.loads((d / "meta.json").read_text()) for d in (warm_out, cold_out))
+    warm_meta.pop("published"), cold_meta.pop("published")
+    assert warm_meta == cold_meta
+    meta = warm_meta
     assert meta["total_bytes"] == 380 * GB  # cache content won, bogus listing ignored
 
 
