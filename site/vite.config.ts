@@ -35,16 +35,21 @@ const devSeriesIndex = {
 // CF Access gate, `app` for the app-session model, `public` for an open
 // deploy) come from the same file wrangler reads — `STORE` / `AUTH_MODE` under
 // `[vars]` in wrangler.toml — so a deployment branch declares itself in one
-// place. `VITE_STORE` / `VITE_AUTH_MODE` in the environment still override (a
-// CI build of another store, e.g. deploy-r2.yml). Neither set → the registry's
+// place. A Pages environment's overrides (`[env.<name>.vars]`, e.g. the
+// `preview` block the dev stack deploys with) apply on top when
+// `CLOUDFLARE_ENV=<name>` is set — the same variable wrangler itself reads —
+// so a preview build carries the preview's mode, not production's.
+// `VITE_STORE` / `VITE_AUTH_MODE` in the environment still override (a CI
+// build of another store, e.g. deploy-r2.yml). Neither set → the registry's
 // first store, `edge`.
-function wranglerVars(): Record<string, string> {
+function wranglerVars(env = process.env.CLOUDFLARE_ENV): Record<string, string> {
   if (!existsSync('wrangler.toml')) return {}
   const vars: Record<string, string> = {}
+  const sections = new Set(['[vars]', ...(env ? [`[env.${env}.vars]`] : [])])
   let inVars = false
   for (const raw of readFileSync('wrangler.toml', 'utf8').split('\n')) {
     const line = raw.replace(/#.*$/, '').trim()
-    if (line.startsWith('[')) { inVars = line === '[vars]'; continue }
+    if (line.startsWith('[')) { inVars = sections.has(line); continue }
     const m = inVars ? /^([A-Z_][A-Z0-9_]*)\s*=\s*"([^"]*)"$/.exec(line) : null
     if (m) vars[m[1]] = m[2]
   }
