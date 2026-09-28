@@ -350,3 +350,91 @@ describe('<BytesOverTime>', () => {
     expect(container.querySelector('.dt-timeseries')).toBeInTheDocument()
   })
 })
+
+describe('<TimeSeries> series flags + band callouts', () => {
+  const geom = (w: number, h: number, xMin: number, xMax: number, yMin: number, yMax: number) => {
+    const plotW = w - 56 - 16
+    const plotH = h - 12 - 24
+    return {
+      xToPx: (x: number) => 56 + ((x - xMin) / Math.max(1, xMax - xMin)) * plotW,
+      yToPx: (y: number) => 12 + plotH - ((y - yMin) / Math.max(0.001, yMax - yMin)) * plotH,
+    }
+  }
+
+  it('plot: false keeps a series in the tooltip but draws nothing for it', () => {
+    const { container } = withSize(() =>
+      render(
+        <TimeSeries
+          series={[
+            { key: 'a', label: 'a', points: [{ t: 0, y: 10 }, { t: 1, y: 20 }], area: false },
+            { key: 'total', label: 'total', points: [{ t: 0, y: 1000 }, { t: 1, y: 2000 }], area: false, plot: false },
+          ]}
+          getX={p => p.t}
+          getY={p => p.y}
+        />,
+      ),
+    )
+    // One line path (a's); the total has none.
+    expect(container.querySelectorAll('svg path[fill="none"]').length).toBe(1)
+    fireEvent.mouseMove(container.querySelector('svg')!, { clientX: 56 })
+    expect([...container.querySelectorAll('.dt-timeseries > div b')].map(b => b.textContent)).toEqual(['10', '1,000'])
+  })
+
+  it('fit: with yFrom "data", only the marked series set the y-range', () => {
+    const { container } = withSize(() =>
+      render(
+        <TimeSeries
+          series={[
+            { key: 'top', points: [{ t: 0, y: 10 }, { t: 1, y: 20 }], fit: true },
+            { key: 'band', points: [{ t: 0, y: 0 }, { t: 1, y: 1000 }] },
+          ]}
+          getX={p => p.t}
+          getY={p => p.y}
+          yFrom="data"
+        />,
+      ),
+    )
+    // Domain from `top` only: pad 0.5 → [9.5, 20.5] → step 2.
+    expect(yLabelsOf(container)).toEqual(['10', '12', '14', '16', '18', '20'])
+  })
+
+  it('a band callout (y0) sits centred inside the band, and a band too thin to hold it gets none', () => {
+    const pts = [{ t: 0, top: 80, bot: 30 }, { t: 1, top: 31, bot: 30 }]
+    const { container } = withSize(() =>
+      render(
+        <TimeSeries
+          series={[{ key: 'a', points: pts }]}
+          getX={p => p.t}
+          getY={p => p.top}
+          getY0={p => p.bot}
+          annotations={[
+            { x: 0, y: 80, y0: 30, label: 'tall' },
+            { x: 1, y: 31, y0: 30, label: 'thin' },
+          ]}
+        />,
+      ),
+    )
+    const anno = [...container.querySelectorAll('svg text[paint-order="stroke"]')]
+    expect(anno.map(t => t.textContent)).toEqual(['tall'])
+    const { yToPx } = geom(400, 200, 0, 1, 0, 80 * 1.05)
+    expect(Number(anno[0].getAttribute('y'))).toBeCloseTo((yToPx(80) + yToPx(30)) / 2, 6)
+    expect(anno[0].getAttribute('dominant-baseline')).toBe('middle')
+    expect(anno[0].getAttribute('clip-path')).toMatch(/^url\(#dt-ts-clip-\w+\)$/)
+  })
+
+  it('a series that goes negative extends a zero-anchored axis below 0, with the 0 grid line emphasised', () => {
+    const { container } = withSize(() =>
+      render(
+        <TimeSeries
+          series={[{ key: 'd', points: [{ t: 0, y: 0 }, { t: 1, y: -100 }, { t: 2, y: 50 }], area: false }]}
+          getX={p => p.t}
+          getY={p => p.y}
+        />,
+      ),
+    )
+    // Domain [-105, 52.5] → step 50 → -100 … 50.
+    expect(yLabelsOf(container)).toEqual(['-100', '-50', '0', '50'])
+    const gridAt0 = [...container.querySelectorAll('svg g line')].find(l => l.nextElementSibling?.textContent === '0')!
+    expect(gridAt0.getAttribute('stroke')).toBe('var(--dt-ts-axis, rgba(255,255,255,0.2))')
+  })
+})

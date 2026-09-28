@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { DEFAULT_PALETTE } from '@rdub/treemap'
 import { pow10 } from './stats'
@@ -33,14 +33,28 @@ export interface Series<T> {
   dots?: boolean
   /** Line stroke width (default 1.75). */
   strokeWidth?: number
+  /** With `yFrom: 'data'`, only series marked `fit` set the y-range (when any
+   *  is) — e.g. a stack's total, so "fit" zooms to the stack's top edge and the
+   *  bands below are clipped rather than the whole stack shrunk to fit. */
+  fit?: boolean
+  /** `false`: listed in the tooltip but not drawn — a total beside per-part
+   *  lines it would dwarf. */
+  plot?: boolean
 }
 
 export interface Annotation {
   x: number
   y: number
+  /** A band callout: the label sits centred between `y0` and `y` (inside the
+   *  band) instead of beside the point, and is skipped when the band is too
+   *  thin on screen to hold it. */
+  y0?: number
   label: string
   below?: boolean
 }
+
+/** A band callout needs this many px of band to sit inside. */
+const MIN_BAND_PX = 13
 
 export interface TimeSeriesProps<T> {
   series: Series<T>[]
@@ -144,6 +158,9 @@ export function TimeSeries<T>({
   height,
 }: TimeSeriesProps<T>) {
   const wrapRef = useRef<HTMLDivElement>(null)
+  // Per-instance clip id (several charts share a page); `useId`'s delimiters
+  // aren't valid in a `url(#…)` reference.
+  const clipId = 'dt-ts-clip-' + useId().replace(/\W/g, '')
   const [dims, setDims] = useState({ w: 0, h: 0 })
 
   // Measure synchronously first — a ResizeObserver's initial delivery can be
@@ -163,20 +180,23 @@ export function TimeSeries<T>({
   const { xMin, xMax, yMin, yMax } = useMemo(() => {
     const xs: number[] = []
     const ys: number[] = []
-    for (const s of series) for (const p of s.points) {
-      xs.push(getX(p))
-      ys.push(getY(p))
-    }
+    const fit = yScale === 'linear' && yFrom === 'data'
+    // Fitting: the `fit`-marked series set the y-range when any is marked.
+    const fitTo = fit && series.some(s => s.fit) ? series.filter(s => s.fit) : series
+    for (const s of series) for (const p of s.points) xs.push(getX(p))
+    for (const s of fitTo) for (const p of s.points) ys.push(getY(p))
     if (xs.length === 0) return { xMin: 0, xMax: 1, yMin: 0, yMax: 1 }
     const yMinRaw = Math.min(...ys)
     const yMaxRaw = Math.max(...ys)
-    const fit = yScale === 'linear' && yFrom === 'data'
     const pad = fit ? Math.max(yMaxRaw - yMinRaw, Math.abs(yMaxRaw) * 0.01) * 0.05 : 0
+    // Zero-anchored: the axis still spans below 0 when a series goes negative
+    // (a Δ trace), padded like the top.
+    const below = yMinRaw < 0 ? yMinRaw * 1.05 : 0
     return {
       xMin: Math.min(...xs),
       xMax: Math.max(...xs),
-      yMin: yScale === 'log' ? Math.max(1, yMinRaw) : fit ? yMinRaw - pad : 0,
-      yMax: fit ? yMaxRaw + pad : yMaxRaw > 0 ? yMaxRaw * 1.05 : 1,
+      yMin: yScale === 'log' ? Math.max(1, yMinRaw) : fit ? yMinRaw - pad : below,
+      yMax: fit ? yMaxRaw + pad : yMaxRaw > 0 ? yMaxRaw * 1.05 : yMaxRaw < 0 ? 0 : 1,
     }
   }, [series, getX, getY, yScale, yFrom])
 
@@ -346,6 +366,14 @@ export function TimeSeries<T>({
               ))}
             </g>
           )}
+          {/* Series + callouts stay inside the plot: a fitted y-range clips
+              whatever falls below it (a stack's lower bands) instead of
+              painting over the axis. */}
+          <defs>
+            <clipPath id={clipId}>
+              <rect x={PAD.left} y={PAD.top} width={plotW} height={plotH} />
+            </clipPath>
+          </defs>
           {/* Y grid + ticks */}
           {yTickVals.map((y, i) => (
             <g key={`y${i}`}>
@@ -354,7 +382,7 @@ export function TimeSeries<T>({
                 x2={PAD.left + plotW}
                 y1={yToPx(y)}
                 y2={yToPx(y)}
-                stroke="var(--dt-ts-grid, rgba(255,255,255,0.08))"
+                stroke={y === 0 && yMin < 0 ? 'var(--dt-ts-axis, rgba(255,255,255,0.2))' : 'var(--dt-ts-grid, rgba(255,255,255,0.08))'}
               />
               <text
                 x={PAD.left - 6}
@@ -417,8 +445,9 @@ export function TimeSeries<T>({
             </text>
           )}
           {/* Series */}
+          <g clipPath={`url(#${clipId})`}>
           {series.map((s, si) => {
-            if (s.points.length === 0) return null
+            if (s.points.length === 0 || s.plot === false) return null
             const color = s.color ?? DEFAULT_COLORS[si % DEFAULT_COLORS.length]
             const sortedPts = [...s.points].sort((a, b) => getX(a) - getX(b))
             const seg = (pts: T[]) => pts.map((p, i) => `${i === 0 ? 'M' : 'L'} ${xToPx(getX(p))} ${yToPx(getY(p))}`).join(' ')
@@ -451,20 +480,29 @@ export function TimeSeries<T>({
               </g>
             )
           })}
+          </g>
           {/* Annotations: a haloed label beside the point, leaning away from
-              the nearest side edge */}
+              the nearest side edge; a band callout (`y0`) sits inside the
+              band, centred, and only where the band is tall enough */}
           {annotations?.map((a, i) => {
             const px = xToPx(a.x)
-            const py = yToPx(a.y)
             const anchor = px < PAD.left + plotW * 0.15 ? 'start' : px > PAD.left + plotW * 0.85 ? 'end' : 'middle'
             const dx = anchor === 'start' ? 5 : anchor === 'end' ? -5 : 0
-            const dy = a.below ? 14 : -7
+            let py: number
+            if (a.y0 != null) {
+              const top = Math.max(PAD.top, Math.min(yToPx(a.y), yToPx(a.y0)))
+              const bot = Math.min(PAD.top + plotH, Math.max(yToPx(a.y), yToPx(a.y0)))
+              if (bot - top < MIN_BAND_PX) return null
+              py = (top + bot) / 2
+            } else py = yToPx(a.y) + (a.below ? 14 : -7)
             return (
               <text
                 key={`a${i}`}
                 x={px + dx}
-                y={py + dy}
+                y={py}
                 textAnchor={anchor}
+                dominantBaseline={a.y0 != null ? 'middle' : undefined}
+                clipPath={a.y0 != null ? `url(#${clipId})` : undefined}
                 fontSize={10.5}
                 fontWeight={600}
                 fill="var(--dt-ts-anno-ink, #e6e6ea)"
