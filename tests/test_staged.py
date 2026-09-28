@@ -44,6 +44,37 @@ def test_stage_is_idempotent_into_one_shared_plan(session):
     assert _uris(session, p1) == [A, B, C]
 
 
+def test_stage_keeps_the_plan_free_of_nesting(session):
+    """A staged dir covers everything under it: staging a descendant is a
+    no-op, and staging an ancestor absorbs staged descendants — so a plan's
+    items never overlap, and its bytes/objects never double-count."""
+    child, sibling = f"{A}/x/y.zip", "s3://bucket/ab"
+    _, added = staged.stage(session, [child, sibling], "ryan")
+    assert added == [child, sibling]
+    plan, added = staged.stage(session, [A], "ryan")
+    assert added == [A]
+    assert sorted(_uris(session, plan)) == [A, sibling]  # `ab` is not under `a`
+    _, added = staged.stage(session, [f"{A}/x"], "ryan")
+    assert added == []
+    assert sorted(_uris(session, plan)) == [A, sibling]
+
+
+def test_dispatch_skips_items_covered_by_another(session):
+    """A plan staged before nesting was collapsed still counts each byte once:
+    a covered item is neither sized nor deleted."""
+    plan = staged.open_plan(session, "ryan")
+    for u in [A, f"{A}/x.zip"]:
+        session.add(PlanItem(plan_id=plan.id, uri=u, added_by="ryan", added_ts=staged._now()))
+    session.flush()
+    deleted: list[str] = []
+    run = staged.dispatch(session, plan, "ryan", for_real=True, delete_fn=deleted.append, size_fn=lambda u: (10, 1))
+    assert deleted == [A]
+    assert (run.deleted_bytes, run.deleted_objects) == (10, 1)
+    bands = session.scalars(select(DeletionBand).where(DeletionBand.run_id == run.run_id)).all()
+    assert [(b.uri, b.bytes, b.deleted) for b in bands] == [(A, 10, 1)]
+    assert plan.state == "closed"
+
+
 def test_unstage_removes_from_open_plan(session):
     plan, _ = staged.stage(session, [A, B], "ryan")
     assert staged.unstage(session, [A]) == 1

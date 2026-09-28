@@ -37,6 +37,19 @@ def _canonical(uri: str) -> str:
     return canonical(uri)
 
 
+def covers(a: str, b: str) -> bool:
+    """Whether deleting ``a`` deletes ``b``: ``b`` is ``a`` or lies under it
+    (a directory / key prefix). ``s3://b/a`` covers ``s3://b/a/x``, not
+    ``s3://b/ab``."""
+    return b == a or b.startswith(a.rstrip('/') + '/')
+
+
+def uncovered(uris: Iterable[str]) -> list[str]:
+    """``uris`` minus those under another of them (order kept)."""
+    us = list(uris)
+    return [u for u in us if not any(o != u and covers(o, u) for o in us)]
+
+
 def open_plan(session: Session, who: str, name: str = STAGED) -> Plan:
     """The shared open plan named ``name``, created (empty) if none is open."""
     plan = session.scalars(
@@ -50,17 +63,21 @@ def open_plan(session: Session, who: str, name: str = STAGED) -> Plan:
 
 
 def stage(session: Session, uris: Iterable[str], who: str, note: str | None = None) -> tuple[Plan, list[str]]:
-    """Add ``uris`` to the shared open plan (idempotent per URI). Returns the
-    plan and the URIs newly staged (already-staged ones are skipped)."""
+    """Add ``uris`` to the shared open plan. Returns the plan and the URIs newly
+    staged. The plan's items never nest: a URI already covered by a staged one
+    (itself, or a staged ancestor dir) is skipped, and staging a dir absorbs
+    its staged descendants — so a plan's sizes never double-count."""
     plan = open_plan(session, who)
-    have = set(session.scalars(select(PlanItem.uri).where(PlanItem.plan_id == plan.id)))
+    have = {it.uri: it for it in items(session, plan)}
     added: list[str] = []
     for raw in uris:
         uri = _canonical(raw)
-        if uri in have:
+        if any(covers(h, uri) for h in have):
             continue
-        session.add(PlanItem(plan_id=plan.id, uri=uri, added_by=who, added_ts=_now(), note=note))
-        have.add(uri)
+        for h in [h for h in have if covers(uri, h)]:
+            session.delete(have.pop(h))
+        have[uri] = PlanItem(plan_id=plan.id, uri=uri, added_by=who, added_ts=_now(), note=note)
+        session.add(have[uri])
         added.append(uri)
     session.flush()
     return plan, added
@@ -161,6 +178,11 @@ def dispatch(
         targets = [by_uri[u] for u in want]
     else:
         targets = staged_items
+    # items staged before nesting was collapsed at stage time: an item under
+    # another target goes with it, so it's neither sized nor deleted twice
+    keep = set(uncovered(it.uri for it in targets))
+    covered = [it for it in targets if it.uri not in keep]
+    targets = [it for it in targets if it.uri in keep]
     session.add(run)
     for item in targets:
         nbytes, nobjs = size_fn(item.uri)
@@ -173,8 +195,11 @@ def dispatch(
             if subset:
                 session.delete(item)
         session.add(DeletionBand(run_id=run_id, uri=item.uri, bytes=nbytes, objects=nobjs, deleted=deleted))
+    if for_real and subset:
+        for item in covered:
+            session.delete(item)
     run.finished_ts = _now()
-    if for_real and (not subset or len(targets) == len(staged_items)):
+    if for_real and (not subset or len(targets) + len(covered) == len(staged_items)):
         plan.state = "closed"
         plan.closed_ts = run.finished_ts
     session.flush()

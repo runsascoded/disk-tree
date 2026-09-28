@@ -35,8 +35,20 @@ function runState(r: StagedRun): string {
   return r.mode === 'real' ? 'done' : 'dry'
 }
 
-const sum = (items: StagedItem[], k: 'bytes' | 'objects'): number | null =>
-  items.some(i => i[k] != null) ? items.reduce((a, i) => a + (i[k] ?? 0), 0) : null
+/** Whether deleting `a` deletes `b` (`b` is `a` or under it) — the engine's
+ *  `covers`. Plans staged before nesting was collapsed can still hold both. */
+const covers = (a: string, b: string): boolean => b === a || b.startsWith(`${a.replace(/\/+$/, '')}/`)
+
+/** The other staged URI that `uri` lies under, if any. */
+const coveredBy = (uri: string, uris: string[]): string | undefined =>
+  uris.find(o => o !== uri && covers(o, uri))
+
+/** Total over `items`, counting an item under another of them once (with it). */
+const sum = (items: StagedItem[], k: 'bytes' | 'objects'): number | null => {
+  const uris = items.map(i => i.uri)
+  const own = items.filter(i => !coveredBy(i.uri, uris))
+  return own.some(i => i[k] != null) ? own.reduce((a, i) => a + (i[k] ?? 0), 0) : null
+}
 
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
 
@@ -52,6 +64,17 @@ function KindCell({ item, reveal }: { item: StagedItem; reveal: boolean }) {
   return (
     <Tooltip title="Reveal in Finder" placement="top" arrow>
       <button type="button" className="staged-btn" onClick={() => revealPath(item.uri)}><Icon /></button>
+    </Tooltip>
+  )
+}
+
+/** A row's size — dimmed, and left out of the plan total, when a staged
+ *  ancestor already covers it. */
+function SizeCell({ item, under, base }: { item: StagedItem; under?: string; base: string }) {
+  if (!under) return <>{formatSize(item.bytes ?? 0)}</>
+  return (
+    <Tooltip title={`Inside ${under.slice(base.length) || under} — deleted with it, counted once`} placement="top" arrow>
+      <span style={{ opacity: 0.45 }}>({formatSize(item.bytes ?? 0)})</span>
     </Tooltip>
   )
 }
@@ -199,7 +222,7 @@ function PlanSection({ plan: p, canDispatch, perItem, reveal, keys }: {
               </td>
               <td className="col-icon"><KindCell item={it} reveal={reveal} /></td>
               <td><PathCell uri={it.uri} base={base} /></td>
-              {sized && <td className="num col-size">{formatSize(it.bytes ?? 0)}</td>}
+              {sized && <td className="num col-size"><SizeCell item={it} under={coveredBy(it.uri, uris)} base={base} /></td>}
               {canDispatch && (
                 <td className="col-actions">
                   {perItem && (rowConfirming(it.uri) ? (

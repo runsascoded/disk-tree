@@ -22,6 +22,7 @@ import {
   planItems,
   recordInlineRun,
   stage,
+  uncovered,
   unstage,
 } from './staged'
 
@@ -120,7 +121,7 @@ export async function postDispatch(env: Env, request: Request): Promise<Response
   // scope is under the threshold, delete inline and finish the run here — no
   // drainer. Otherwise (unbound bucket, non-R2, or too big) enqueue the fallback.
   const limit = Number(env.DELETE_THRESHOLD ?? 1000)
-  const uris = its.map(i => i.uri)
+  const uris = uncovered(its.map(i => i.uri))
   const cfn = await planR2Deletion(env, uris, limit)
   if (cfn) {
     const bands = []

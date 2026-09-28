@@ -68,6 +68,14 @@ function hex4(): string {
 }
 
 /** The shared open plan named `name`, created (empty) if none is open. */
+/** Whether deleting `a` deletes `b`: `b` is `a` or lies under it (a key
+ *  prefix / directory). `r2://b/a` covers `r2://b/a/x`, not `r2://b/ab`. */
+export const covers = (a: string, b: string): boolean => b === a || b.startsWith(`${a.replace(/\/+$/, '')}/`)
+
+/** `uris` minus those under another of them (order kept). */
+export const uncovered = (uris: string[]): string[] =>
+  uris.filter(u => !uris.some(o => o !== u && covers(o, u)))
+
 export async function openPlan(db: D1Database, who: string, name: string = STAGED): Promise<Plan> {
   const found = await db
     .prepare(`SELECT * FROM plans WHERE name = ?1 AND state = 'open' ORDER BY id DESC LIMIT 1`)
@@ -99,9 +107,15 @@ export async function stage(
   const ts = nowS()
   const added: string[] = []
   const inserts: D1PreparedStatement[] = []
+  // Items never nest: a URI under a staged one is skipped, and staging a dir
+  // absorbs its staged descendants (so a plan's sizes never double-count)
   for (const raw of uris) {
     const uri = canonicalUri(raw)
-    if (have.has(uri)) continue
+    if ([...have].some(h => covers(h, uri))) continue
+    for (const h of [...have].filter(h => covers(uri, h))) {
+      have.delete(h)
+      inserts.push(db.prepare(`DELETE FROM plan_items WHERE plan_id = ?1 AND uri = ?2`).bind(plan.id, h))
+    }
     have.add(uri)
     added.push(uri)
     inserts.push(

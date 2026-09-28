@@ -15,6 +15,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
+from disk_tree.staged import uncovered
+
 SizeFn = Callable[[str], "tuple[int, int]"]
 DeleteFn = Callable[[str], None]
 Announce = Callable[[dict], None]
@@ -54,7 +56,8 @@ def execute_run(
     recorded, not fatal. Large (scope over `batch_threshold`): hand the run to
     Batch (`submit_fn`) and record its `batch_job` instead, leaving it unfinished
     for the Batch job to complete. Returns a summary."""
-    uris = run_items(db, run["plan_id"])
+    # a staged dir covers staged items under it: size + delete each byte once
+    uris = uncovered(run_items(db, run["plan_id"]))
     sized = [(uri, *size_fn(uri)) for uri in uris]  # (uri, bytes, objects)
 
     if submit_fn is not None and batch_threshold is not None and sum(o for _, _, o in sized) > batch_threshold:

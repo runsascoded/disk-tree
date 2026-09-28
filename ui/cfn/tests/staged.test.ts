@@ -53,6 +53,17 @@ describe('cfn/staged (D1 data layer)', () => {
     expect((await S.planItems(db, first.plan.id)).map(i => i.uri)).toEqual([A, B, C])
   })
 
+  it('keeps a plan free of nesting: descendants skipped, ancestors absorb', async () => {
+    const child = `${A}/x/y.zip`
+    const sibling = 'r2://bucket/ab'
+    expect((await S.stage(db, [child, sibling], 'ryan')).added).toEqual([child, sibling])
+    const { plan, added } = await S.stage(db, [A], 'ryan')
+    expect(added).toEqual([A])
+    expect((await S.planItems(db, plan.id)).map(i => i.uri).sort()).toEqual([A, sibling])
+    expect((await S.stage(db, [`${A}/x`], 'ryan')).added).toEqual([])
+    expect(S.uncovered([A, `${A}/z`, sibling])).toEqual([A, sibling])
+  })
+
   it('canonicalizes a trailing slash but keeps the scheme', async () => {
     const { added } = await S.stage(db, ['r2://bucket/d/'], 'ryan')
     expect(added).toEqual(['r2://bucket/d'])
