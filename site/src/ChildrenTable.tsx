@@ -6,12 +6,12 @@ import { useCanMark, useCanStage } from './auth'
 import { FaRegTrashCan } from 'react-icons/fa6'
 import { dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonthShort } from './colors'
 import type { UserIndexEntry } from './colors'
-import { ACTION_COLORS, KEEP_TIP, KLC_TIP, SWEEP_TIP, clearTip } from './MarkControls'
+import { ACTION_COLORS, KEEP_TIP, SWEEP_TIP, clearTip } from './MarkControls'
 import type { MarkAction, MarkIndex } from './marks'
 import { ACTION_LABELS, useMarkMutations } from './marks'
 import { OwnerBar, ownerShares } from './OwnerBar'
-import { looksCkpt, subtreeStateTotals } from './sweep'
-import type { MarkState, MarkAxis, KlcIndex } from './sweep'
+import { subtreeStateTotals } from './sweep'
+import type { MarkState, MarkAxis } from './sweep'
 import { DEFAULT_STORE } from './stores'
 import { Tooltip } from './Tooltip'
 import { elideMid } from './CopyName'
@@ -36,15 +36,13 @@ const PAGE_SIZES = [20, 50, 100, 200]
  *  tooltip); ~60 chars fills the column's 480px at 12px mono. */
 const NAME_MAX = 60
 
-export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, clientStates, userIdx, onPickUser, onOpen }: {
+export function ChildrenTable({ node, segs, scheme, markIdx, states, clientStates, userIdx, onPickUser, onOpen }: {
   /** The treemap's currently-viewed node. */
   node: TreeNode
   /** Path segments from the tree root to `node` (no scheme, no root). */
   segs: string[]
   scheme: string
   markIdx?: MarkIndex | null
-  /** KLC splits, so a keep-last-ckpt subtree's bytes settle into real keep / sweep. */
-  klcIdx?: KlcIndex
   /** The page's mark-state axis: list only children whose effective decision
    * is in it (`{unmarked}` = the old To-do lens). Absent = every child. */
   states?: ReadonlySet<MarkAxis> | null
@@ -161,8 +159,8 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
   const trashSel = () => { if (selUris.length) stage.mutate({ prefixes: selUris.map(u => u + '/'), note: memo }, { onSuccess: () => { sel.clear(); setMemo('') } }) }
   const selBytes = kids.filter(k => sel.selected.has(uriOfKid(k))).reduce((s, k) => s + k.b, 0)
   // Everything a row derives from the tree and the ledger — owner shares, the
-  // resolved mark and claim, the state bar's subtree walk, the last-ckpt
-  // offer — computed once per page of rows × ledger, so a selection change
+  // resolved mark and claim, the state bar's subtree walk — computed once
+  // per page of rows × ledger, so a selection change
   // (which re-renders the table) rebuilds only the JSX.
   const rowData = useMemo(() => shown.map(k => {
     const synthetic = k.n.startsWith('(')
@@ -170,10 +168,10 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
     const uri = scheme + kidSegs.join('/')
     const cl = markIdx && !synthetic ? markIdx.claimOf(uri) : null
     const mk = markIdx && !synthetic ? markIdx.resolve(uri) : null
-    const totals = markIdx && !synthetic && k.b ? subtreeStateTotals(k, uri, markIdx, klcIdx) : null
-    return { k, synthetic, kidSegs, uri, shares: ownerShares(k), cl, mk, totals, ckpt: !synthetic && looksCkpt(k, uri), si: selectable.indexOf(k) }
+    const totals = markIdx && !synthetic && k.b ? subtreeStateTotals(k, uri, markIdx) : null
+    return { k, synthetic, kidSegs, uri, shares: ownerShares(k), cl, mk, totals, si: selectable.indexOf(k) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [shown, path, scheme, markIdx, klcIdx, selectable])
+  }), [shown, path, scheme, markIdx, selectable])
   // Every hook above runs on every render: an empty page (the mark axis or
   // a drill can leave no children) must not shorten the hook list, or React
   // throws "Rendered fewer hooks than expected" on the way in.
@@ -196,7 +194,7 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
           {showActions && DEFAULT_STORE.owners && <AssignSelect prefix={selUris.map(u => u + '/')} label={`assign ${sel.selected.size}…`} />}
         </>) : (<>
         <span className="lbl">mark all</span>
-        {(['keep', 'sweep', 'keep_last_ckpt'] as MarkAction[]).map(a => (
+        {(['keep', 'sweep'] as MarkAction[]).map(a => (
           <Explain text={<>Mark every selected prefix <b>{ACTION_LABELS[a]}</b> (one batched save)</>} key={a}>
             <button type="button" className={`dot ${a}`} style={{ ['--act' as string]: ACTION_COLORS[a] }} onClick={() => bulkMark(a)} aria-label={ACTION_LABELS[a]} />
           </Explain>
@@ -235,11 +233,11 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
       <button type="button" className={`dot ${a}${st === 'own' ? ' on' : st === 'inh' ? ' inh' : ''}`} style={{ ['--act' as string]: ACTION_COLORS[a] }} onClick={() => mark(uri, a)} aria-label={ACTION_LABELS[a]} />
     </Explain>
   )
-  // MarkState of the bytes UNDER a row: keep / last-ckpt / sweep / undecided, as a
-  // bar — a directory is rarely one thing (an inherited keep with swept
-  // subtrees, a KLC with its kept step), and a single word hid that.
-  const STATE_COLORS: Record<MarkState, string> = { keep: ACTION_COLORS.keep, keep_last_ckpt: ACTION_COLORS.keep_last_ckpt, sweep: ACTION_COLORS.sweep, unmarked: 'var(--other)' }
-  const STATE_LABELS: Record<MarkState, string> = { keep: 'keep', keep_last_ckpt: 'last ckpt', sweep: 'sweep', unmarked: 'undecided' }
+  // MarkState of the bytes UNDER a row: keep / sweep / undecided, as a bar — a
+  // directory is rarely one thing (an inherited keep with swept subtrees),
+  // and a single word hid that.
+  const STATE_COLORS: Record<MarkState, string> = { keep: ACTION_COLORS.keep, sweep: ACTION_COLORS.sweep, unmarked: 'var(--other)' }
+  const STATE_LABELS: Record<MarkState, string> = { keep: 'keep', sweep: 'sweep', unmarked: 'undecided' }
   const stateBar = (k: TreeNode, f: Record<MarkState, number> | null) => {
     if (!f) return <span className="none">—</span>
     const parts = (Object.keys(f) as MarkState[]).filter(x => f[x] > 0)
@@ -293,7 +291,7 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
           </tr>
         </thead>
         <tbody>
-          {rowData.map(({ k, synthetic, kidSegs, uri, shares, cl, mk, totals, ckpt, si }) => {
+          {rowData.map(({ k, synthetic, kidSegs, uri, shares, cl, mk, totals, si }) => {
             return (
               <tr key={k.n} ref={si >= 0 ? sel.rowRef(si) : undefined} {...(si >= 0 && showSel ? sel.rowProps(si) : {})}>
                 {showSel && <td className="col-sel">{!synthetic && <input type="checkbox" checked={sel.isSelected(k)} onChange={() => sel.toggle(si)} />}</td>}
@@ -342,9 +340,6 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
                       <>
                         {dot(uri, 'keep', mk?.mark?.action === 'keep' ? (mk.own ? 'own' : 'inh') : null, KEEP_TIP)}
                         {dot(uri, 'sweep', mk?.mark?.action === 'sweep' ? (mk.own ? 'own' : 'inh') : null, SWEEP_TIP)}
-                        {/* Last-ckpt keeps its column whether or not it's offered, so
-                            the row of dots doesn't shift between rows. */}
-                        {ckpt ? dot(uri, 'keep_last_ckpt', mk?.mark?.action === 'keep_last_ckpt' ? (mk.own ? 'own' : 'inh') : null, KLC_TIP) : <span className="dot-gap" />}
                         <span className="tail">
                           {mk?.own && (
                             <Tooltip content={clearTip(true)}>

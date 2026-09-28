@@ -1,21 +1,19 @@
-// The mark axis (specs/cw-sweep.md): keep/keep_last_ckpt/sweep intent over S3
+// The mark axis (specs/cw-sweep.md): keep/sweep intent over S3
 // prefixes, resolved deepest-mark-wins per URI. Plain fetch/useState (no
 // react-query). A mark is intent only; the delete gate is plan curation +
 // admin dispatch on /sweep. No owner axis.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-export type MarkAction = 'keep' | 'keep_last_ckpt' | 'sweep'
+export type MarkAction = 'keep' | 'sweep'
 
 export const ACTION_LABELS: Record<MarkAction, string> = {
   keep: 'keep',
-  keep_last_ckpt: 'keep last ckpt',
   sweep: 'sweep',
 }
 
 // Mark colors (also as CSS vars in app.scss for the children-table dots).
 export const ACTION_COLORS: Record<MarkAction, string> = {
   keep: 'var(--mk-keep)',
-  keep_last_ckpt: 'var(--mk-klc)',
   sweep: 'var(--mk-sweep)',
 }
 

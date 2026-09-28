@@ -21,7 +21,7 @@ import { type Ctx, json, requireAdmin, requireScope, requireViewer } from '../_l
 /** gs://marin-<suffix>/<path>/ — the six marin buckets only, dir prefixes only. */
 const PREFIX_RE = /^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/
 
-const KEEPS = new Set(['keep', 'keep_last_ckpt', 'sweep'])
+const KEEPS = new Set(['keep', 'sweep'])
 
 interface ActionBody {
   pattern?: string

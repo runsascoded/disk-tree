@@ -16,7 +16,7 @@ import { type Ctx, json, requireAdmin, requireViewer } from '../_lib/auth.js'
 /** gs://marin-<suffix>/<path>/ — the six marin buckets only, dir prefixes only. */
 const PREFIX_RE = /^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/
 
-const ACTIONS = new Set(['keep', 'keep_last_ckpt', 'delete'])
+const ACTIONS = new Set(['keep', 'delete'])
 
 export const onRequest = async (ctx: Ctx): Promise<Response> => {
   const { request, env } = ctx

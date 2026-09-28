@@ -25,7 +25,7 @@ import type { DateRange, Highlight, ShadeMode } from './Treemap'
 import { collectFlagged, parseQuery } from './filterTree'
 import { BulkBar } from './BulkBar'
 import { setCurrentScan, useMarkIndex, useMarks } from './marks'
-import { MARK_AXES, klcSplits, useMyUser } from './sweep'
+import { MARK_AXES, useMyUser } from './sweep'
 import type { MarkAxis } from './sweep'
 import { MarkHistory } from './MarkHistory'
 import { MultiSelect } from './MultiSelect'
@@ -96,8 +96,8 @@ const SPANS: [string, number][] = [['1d', 1], ['3d', 3], ['7d', 7], ['14d', 14],
 
 // The mark-state axis chips (`?k=` letters), in bar order.
 const MARK_CHIPS: { f: MarkAxis; key: string; glyph: string; color: string; tip: string }[] = [
-  { f: 'keep', key: 'k', glyph: '✓', color: 'var(--mk-keep)', tip: 'Bytes under a keep decision (keep-last-ckpt counts: it splits its subtree).' },
-  { f: 'sweep', key: 's', glyph: '✕', color: 'var(--mk-del)', tip: 'Bytes marked for the sweep (keep-last-ckpt counts: it splits its subtree).' },
+  { f: 'keep', key: 'k', glyph: '✓', color: 'var(--mk-keep)', tip: 'Bytes under a keep decision.' },
+  { f: 'sweep', key: 's', glyph: '✕', color: 'var(--mk-del)', tip: 'Bytes marked for the sweep.' },
   { f: 'unmarked', key: 'u', glyph: '○', color: 'var(--ink-2)', tip: 'The review backlog — no keep/sweep decision on the prefix or any ancestor.' },
 ]
 
@@ -458,7 +458,7 @@ function AppContent() {
   // nothing across a scope, scan, or drill change, and the page below never
   // reflows; at worst `mapPath` truncates the new drill to an ancestor this
   // tree still has, until the new tree (depth-1 first, then full) replaces it.
-  // Everything derived for the drawn map (`klcIdx`, `dateRange`, `catOrder`,
+  // Everything derived for the drawn map (`dateRange`, `catOrder`,
   // the rules section) follows `mapTree`, not `tree`, so a hold doesn't
   // empty the decorations under a map that is still showing.
   const lastTree = useRef<TreeNode | null>(null)
@@ -471,12 +471,6 @@ function AppContent() {
   const mapStale = !tree && !!lastTree.current
   const mapBusy = mapStale || subtreeQs.some(q => q.isFetching)
 
-  // keep_last_ckpt → concrete keep/sweep split, resolved against the drawn
-  // tree (state cells, stripes, and the state rollup all decompose through it).
-  const klcIdx = useMemo(
-    () => (mapTree && markIdx.count ? klcSplits(mapTree, markIdx.keeps) : undefined),
-    [mapTree, markIdx],
-  )
   // The marks feed filters its (small, client-held) rows by the same name
   // query; the map's filtering is the server's.
   const pred = useMemo(() => (fq ? parseQuery(fq) : null), [fq])
@@ -1107,7 +1101,6 @@ function AppContent() {
             lens={lens}
             scheme={store.scheme}
             markIdx={markMode ? markIdx : undefined}
-            klcIdx={markMode ? klcIdx : undefined}
             // Exact state totals only when they describe THIS view: a server
             // user-lens map gets that user's totals; the unscoped estate gets
             // the estate totals. Any client-side scoping (a pool, a mark
@@ -1156,8 +1149,7 @@ function AppContent() {
               segs={tblSegs}
               scheme={store.scheme}
               markIdx={markMode ? markIdx : undefined}
-              klcIdx={markMode ? klcIdx : undefined}
-              states={markMode ? markAxes : null}
+                states={markMode ? markAxes : null}
               clientStates={!serverLedger}
               userIdx={userIdx}
               onPickUser={u => pickUser(u, false)}

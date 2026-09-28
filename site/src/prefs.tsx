@@ -12,7 +12,7 @@ import { Tooltip } from './Tooltip'
 // - `renderer`: `dom` (one element per cell; the default, full feature
 //   parity) vs `canvas` (one paint loop for the whole map — for the 1e3–1e6
 //   cell views the DOM renderer bogs down on; per-cell React extras — the
-//   actor badges, the KLC ring — don't draw there yet).
+//   actor badges — don't draw there yet).
 export type Renderer = 'dom' | 'canvas'
 
 function pref<T extends string>(key: string, ok: readonly T[], dflt: T) {
@@ -49,7 +49,7 @@ export const setTiling = tiling.set
 export const useRenderer = renderer.use
 
 const TILING_TIP = 'Cell gutters. Off (default): cells share edges — one stroke per boundary, areas stay exact. On: gaps and rounded corners between cells.'
-const RENDERER_TIP = 'DOM (default): one element per cell — every feature, keyboard focus on every cell. Canvas: the whole map painted in one pass, for views of thousands of cells that make the DOM renderer crawl; outlines, tooltips and drilling work the same, but the marker avatars and the last-ckpt ring on cells don’t draw there yet.'
+const RENDERER_TIP = 'DOM (default): one element per cell — every feature, keyboard focus on every cell. Canvas: the whole map painted in one pass, for views of thousands of cells that make the DOM renderer crawl; outlines, tooltips and drilling work the same, but the marker avatars on cells don’t draw there yet.'
 
 /** Map-display preferences behind a ⚙ (in the treemap's key line): tiling
  * gutters and the renderer. A native `<details>`, so it closes on Esc /

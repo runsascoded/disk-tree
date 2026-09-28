@@ -10,7 +10,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DEFAULT_STORE } from './stores'
 import { useMemo } from 'react'
 
-export type MarkAction = 'keep' | 'keep_last_ckpt' | 'sweep'
+export type MarkAction = 'keep' | 'sweep'
 
 export interface KeepRow {
   prefix: string
@@ -51,7 +51,6 @@ export interface Owner {
 
 export const ACTION_LABELS: Record<MarkAction, string> = {
   keep: 'keep',
-  keep_last_ckpt: 'keep last ckpt',
   sweep: 'sweep',
 }
 

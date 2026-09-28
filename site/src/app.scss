@@ -200,7 +200,6 @@ header .hrow {
   border: 3px solid var(--mk-frame); border-radius: 4px;
 }
 .treemap.root-marked-keep { --mk-frame: var(--mk-keep); }
-.treemap.root-marked-keep_last_ckpt { --mk-frame: var(--mk-klc); }
 .treemap.root-marked-sweep { --mk-frame: var(--mk-del); }
 .treemap .dt-treemap-crumbs { display: none !important; }
 .dt-treemap:fullscreen .dt-treemap-crumbs { display: flex !important; }
@@ -1463,30 +1462,11 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
   // Keep is BLUE, not green: (a) red/green is the classic colorblind trap
   // (deutan/protan ~8% of men) — blue/red stays separable under all common
   // CVD; (b) green read as "good/go", which subtly encouraged keeping —
-  // the opposite of the cleanup's aim. Amber KLC stays distinct from both.
+  // the opposite of the cleanup's aim.
   --mk-keep: #3d8bfd;
-  --mk-klc: #d4a72c;
   --mk-del: #d3382f;
 }
 
-
-// Micro-hue mark ring: frames an explicitly-marked cell in its state color,
-// layered over the macro-hue fill. `borderColor` is set inline per action.
-.mark-edge {
-  position: absolute;
-  inset: 0;
-  border: 2.5px solid transparent;
-  border-radius: 3px;
-  box-sizing: border-box;
-  pointer-events: none;
-  // keep_last_ckpt: a keep+sweep barber-pole ring — "both states live inside
-  // this rect" (border-image can't round corners; the straight ring is the
-  // trade for a real two-color edge).
-  &.klc {
-    border-radius: 0;
-    border-image: repeating-linear-gradient(45deg, var(--mk-keep) 0 5px, var(--mk-del) 5px 10px) 1;
-  }
-}
 
 // Corner badge on the top-most marked cell: actor avatar + state glyph. The
 // whole badge is transparent to hover so the cell tooltip (with full mark
@@ -1550,7 +1530,6 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
   select.state-sel, .state-word {
     --act: var(--ink-2);
     &.keep { --act: var(--mk-keep); }
-    &.keep_last_ckpt { --act: var(--mk-klc); }
     &.sweep { --act: var(--mk-del-ink); }
   }
   select.state-sel {
@@ -1745,8 +1724,7 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
     // One dot per decision: hollow = available, filled = this row's own mark.
     .actions {
       white-space: nowrap;
-      display: grid; grid-template-columns: 14px 14px 14px auto; align-items: center; gap: 4px;
-      .dot-gap { width: 14px; height: 14px; }
+      display: grid; grid-template-columns: 14px 14px auto; align-items: center; gap: 4px;
       .tail { display: inline-flex; align-items: center; gap: 4px; margin-left: 2px; }
       // The staging store's trash gesture (one per row): a muted red glyph,
       // red at rest (a grey emoji was near-invisible in dark mode).

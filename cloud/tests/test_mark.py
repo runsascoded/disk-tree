@@ -66,8 +66,8 @@ def test_build_actions_default_sets_both_axes():
 
 
 def test_build_actions_keep_only():
-    assert build_actions([P1], keep="keep_last_ckpt", owner=None) == [
-        {"pattern": P1, "set_keep": True, "keep": "keep_last_ckpt"},
+    assert build_actions([P1], keep="sweep", owner=None) == [
+        {"pattern": P1, "set_keep": True, "keep": "sweep"},
     ]
 
 

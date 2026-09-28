@@ -10,12 +10,6 @@ it can be property-tested against `/api/resolve` and reconciled against
 - **MarkState of an object key** — the effective state of its *deepest marked
   ancestor*: the object's covering rows are exactly that ancestor's covering
   rows, so the winner is the same. Unmarked if no ancestor is in the ledger.
-- **KLC expansion** — mirrors `site/src/sweep.ts` `klcSplits`, at object level:
-  walking down from a `keep_last_ckpt` prefix, at the first level with
-  step-numbered children the max-step child's subtree is kept and everything
-  else at that node sweeps (no deeper recursion); levels without steps recurse.
-  A band where the walk finds no steps at all is *unresolved* — the UI renders
-  those amber, and the planner keeps them (flagged) rather than guessing.
 
 Prefixes are the ledger's `gs://marin-<bucket>/<dir>/` form; object keys are
 listing-style `<bucket>/<name>` (no scheme).
@@ -27,9 +21,6 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
-# Keep in lockstep with site/src/sweep.ts CKPT_NUM_RE and _lib/marks.ts.
-CKPT_NUM_RE = re.compile(r"^(?:step|checkpoint|ckpt|iter|epoch|global_?step)[-_]?(\d+)", re.I)
-
 _GS_RE = re.compile(r"^gs://([a-z0-9-]+)/(.*)$")
 
 
@@ -38,7 +29,7 @@ class KeepRow:
     """One live `keep_prefixes` row (from `GET /api/actions` `keeps`)."""
 
     prefix: str  # gs://marin-<bucket>/<dir>/ (trailing slash)
-    keep: Optional[str]  # keep | keep_last_ckpt | sweep | None (explicit unmark)
+    keep: Optional[str]  # keep | sweep | None (explicit unmark)
     ts: int
     action_id: int
     who: str = ""
@@ -103,7 +94,7 @@ class StateResolver:
         return max(cands, key=lambda r: (r.ts, r.action_id))
 
     def state(self, prefix: str) -> Optional[str]:
-        """Effective keep-state of a prefix: keep/keep_last_ckpt/sweep, or None
+        """Effective keep-state of a prefix: keep/sweep, or None
         (unmarked — no covering row, or the winner is an explicit unmark)."""
         w = self.winner(prefix)
         return w.keep if w else None
@@ -139,7 +130,7 @@ class VoteResolver:
         self.by_actor = {who: StateResolver(rs) for who, rs in by_actor.items()}
 
     def votes(self, prefix: str) -> dict[str, str]:
-        """Live votes at `prefix`: actor → keep|keep_last_ckpt|sweep. Actors
+        """Live votes at `prefix`: actor → keep|sweep. Actors
         whose latest covering row is a retract (NULL) are absent."""
         out: dict[str, str] = {}
         for who, fr in self.by_actor.items():
@@ -168,7 +159,7 @@ class VoteResolver:
         votes = list(votes)
         if not votes:
             return "unmarked"
-        any_keep = any(v in ("keep", "keep_last_ckpt") for v in votes)
+        any_keep = any(v == "keep" for v in votes)
         any_sweep = any(v == "sweep" for v in votes)
         if any_keep and any_sweep:
             return "conflict"
@@ -184,7 +175,7 @@ class Clobber:
     2026-09-01 case: a whole-`checkpoints/` sweep clobbering earlier keeps."""
 
     prefix: str
-    keep: str  # keep | keep_last_ckpt (the clobbered mark)
+    keep: str  # the clobbered mark (always keep)
     keeper: str
     keep_ts: int
     by_prefix: str  # the winning row that repainted it
@@ -200,7 +191,7 @@ def clobbered_keeps(rows: Iterable[KeepRow]) -> list[Clobber]:
     fr = StateResolver(rows)
     latest_keep: dict[str, KeepRow] = {}
     for r in rows:
-        if r.keep in ("keep", "keep_last_ckpt"):
+        if r.keep == "keep":
             b = latest_keep.get(r.prefix)
             if b is None or (r.ts, r.action_id) > (b.ts, b.action_id):
                 latest_keep[r.prefix] = r
@@ -210,7 +201,7 @@ def clobbered_keeps(rows: Iterable[KeepRow]) -> list[Clobber]:
         # a winner that is the victim itself (or any keep-valued row) is fine;
         # a newer covering sweep OR unmark repainted the keep away. Unmarked
         # matters too: "unmarked is swept once the review window closes".
-        if w is not None and w.keep not in ("keep", "keep_last_ckpt"):
+        if w is not None and w.keep != "keep":
             out.append(Clobber(
                 prefix=prefix,
                 keep=victim.keep,
@@ -228,7 +219,7 @@ def ever_kept_prefixes(rows: Iterable[KeepRow]) -> frozenset[str]:
     """Prefixes with ANY live keep-valued row, regardless of what later
     repainted them — the planner's "never delete what anyone ever marked keep"
     guard (Ryan's 2026-09-01 commitment in #internal-discuss)."""
-    return frozenset(r.prefix for r in rows if r.keep in ("keep", "keep_last_ckpt"))
+    return frozenset(r.prefix for r in rows if r.keep == "keep")
 
 
 # ---- object-level manifest (policy (b): sweeper must own the band) ---------
@@ -244,7 +235,6 @@ CATEGORIES = (
     "ever_kept",        # sweep-only but some ancestor once carried a keep (belt+suspenders)
     "conflict",         # keep and sweep votes both present → triage
     "outside_bands",    # not under any approved band — never classified (approved-bands manifests only)
-    "klc_pending",      # keep_last_ckpt only — needs the object-level split (later phase)
     "keep",             # keep votes only
     "unmarked",         # no votes — waits for the deadline
 )
@@ -314,12 +304,12 @@ def classify_dir(
     if not votes:
         return "unmarked", None, ()
     vals = set(votes.values())
-    any_keep = bool(vals & {"keep", "keep_last_ckpt"})
+    any_keep = "keep" in vals
     any_sweep = "sweep" in vals
     if any_keep and any_sweep:
         return "conflict", None, ()
     if any_keep:
-        return ("klc_pending" if vals == {"keep_last_ckpt"} else "keep"), None, ()
+        return "keep", None, ()
     sweepers = tuple(sorted({idmap.resolve(w) for w in votes}))
     anc = key_to_prefixes(bucket, f"{dirname}/f" if dirname else "f")
     if any(p in ever_kept for p in anc):
@@ -346,50 +336,3 @@ def classify_dir(
     if idmap.resolve(owner) not in sweepers:
         return "deferred_owner", owner, sweepers
     return "eligible", owner, sweepers
-
-
-# ---- KLC expansion (object-level klcSplits) --------------------------------
-
-@dataclass(frozen=True)
-class KlcSplit:
-    """Object-level resolution of one keep_last_ckpt band."""
-
-    prefix: str  # the KLC mark prefix (gs:// form)
-    kept: tuple[str, ...]  # kept subtree prefixes, relative to `prefix`
-    resolved: bool  # False = no step-numbered level found (amber / keep+flag)
-
-
-def klc_split(rel_names: Iterable[str], prefix: str = "") -> KlcSplit:
-    """`rel_names` = object keys *relative to* the KLC prefix. Mirrors the tree
-    walk in `site/src/sweep.ts klcSplits`: at a node whose children include
-    step-numbered names, keep the max-step child (no deeper recursion) and
-    sweep the rest; otherwise recurse into each child directory."""
-    # Nested dict of path segments; a terminal file is a leaf ({}).
-    tree: dict = {}
-    for n in rel_names:
-        node = tree
-        for seg in n.split("/"):
-            node = node.setdefault(seg, {})
-
-    kept: list[str] = []
-
-    def walk(node: dict, at: str) -> None:
-        steps = [(seg, m) for seg in node if (m := CKPT_NUM_RE.match(seg))]
-        if steps:
-            best = max(steps, key=lambda s: int(s[1].group(1)))
-            kept.append(f"{at}{best[0]}/")
-            return
-        for seg, kid in node.items():
-            if kid:  # only recurse into directories (files are empty leaves)
-                walk(kid, f"{at}{seg}/")
-
-    walk(tree, "")
-    return KlcSplit(prefix=prefix, kept=tuple(kept), resolved=bool(kept))
-
-
-def klc_key_state(rel_name: str, split: KlcSplit) -> str:
-    """MarkState of one key (relative to the KLC prefix) under a resolved split."""
-    if not split.resolved:
-        return "keep"  # unresolved band: conservative, flagged upstream
-    u = rel_name if rel_name.endswith("/") else rel_name + "/"
-    return "keep" if any(u.startswith(k) for k in split.kept) else "sweep"

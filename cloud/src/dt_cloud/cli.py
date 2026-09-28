@@ -569,7 +569,7 @@ def mark(
 
         dt-cloud mark gs://marin-us-central1/checkpoints/my-run/
 
-        find_my_dirs | dt-cloud mark --keep keep_last_ckpt
+        find_my_dirs | dt-cloud mark --keep sweep
 
     PREFIXES come from arguments, --file (repeatable; '-' reads stdin), or —
     when neither is given — stdin. Each must be a directory prefix under a
@@ -1322,8 +1322,6 @@ def sweep_plan_cmd(bake_candidates: bool, date: str | None, as_json: bool, top: 
             continue
         votes = vr.votes(m["prefix"])
         st = VoteResolver._agg(votes.values())
-        if st == "keep" and votes and all(v == "keep_last_ckpt" for v in votes.values()):
-            st = "keep_last_ckpt"
         b = states.setdefault(st, {"bands": 0, "net_bytes": 0, "net_objects": 0, "rows": []})
         b["bands"] += 1
         b["net_bytes"] += m.get("net_bytes") or 0
@@ -1341,7 +1339,7 @@ def sweep_plan_cmd(bake_candidates: bool, date: str | None, as_json: bool, top: 
         return
 
     err(f"vote-model plan @ head {head} · scan {date or 'latest'} · {len(marks)} mark bands")
-    for st in ("sweep", "conflict", "keep", "keep_last_ckpt", "unmarked"):
+    for st in ("sweep", "conflict", "keep", "unmarked"):
         v = states.get(st)
         if not v:
             continue
@@ -2250,7 +2248,7 @@ def report(out: Path | None, sort: str, token: str | None, site_url: str) -> Non
     """Per-user mark-status CSV — the "who still needs to mark & sweep" list.
 
     The site's `/users` numbers, verbatim: `/api/marks/totals` folds the live
-    ledger (claims applied, keep_last_ckpt decomposed) against the latest
+    ledger (claims applied) against the latest
     scan's index; one row per person. Default order is undecided-bytes desc
     (nag order); `-s` picks a more diff-stable order for a synced mirror (a
     username tiebreaker keeps equal-value rows from swapping seats regardless).
@@ -2278,7 +2276,7 @@ def report(out: Path | None, sort: str, token: str | None, site_url: str) -> Non
     for who, f in (totals.get("users") or {}).items():
         uid = canon(who)
         pu = per_user.setdefault(uid, {"keep": 0.0, "sweep": 0.0, "undecided": 0.0})
-        pu["keep"] += (f.get("keep") or 0) + (f.get("keep_last_ckpt") or 0)
+        pu["keep"] += f.get("keep") or 0
         pu["sweep"] += f.get("sweep") or 0
         pu["undecided"] += f.get("unmarked") or 0
         mix = mixes.setdefault(uid, {})

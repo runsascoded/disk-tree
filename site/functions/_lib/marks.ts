@@ -13,9 +13,9 @@
  * sums of bands; whatever a bucket holds outside every band is undecided.
  */
 
-export type MarkAction = 'keep' | 'sweep' | 'keep_last_ckpt'
+export type MarkAction = 'keep' | 'sweep'
 export type MarkState = MarkAction | 'unmarked'
-export const STATES: MarkState[] = ['keep', 'keep_last_ckpt', 'sweep', 'unmarked']
+export const STATES: MarkState[] = ['keep', 'sweep', 'unmarked']
 
 export interface LedgerRow { prefix: string; ts: number; action_id: number }
 export interface KeepRow extends LedgerRow { keep: MarkAction | null; who?: string }
@@ -74,14 +74,7 @@ export const idxKey = (prefix: string): { path: string; depth: number } => {
   const path = prefix.replace(/^[a-z0-9]+:\/\//, '').replace(/\/+$/, '')
   return { path, depth: path.split('/').length }
 }
-const parentOf = (path: string): string => {
-  const i = path.lastIndexOf('/')
-  return i === -1 ? '' : path.slice(0, i)
-}
-
-export const CKPT_NUM_RE = /^(?:step|checkpoint|ckpt|iter|epoch|global_?step)[-_]?(\d+)/i
-
-export interface StateTotals { keep: number; keep_last_ckpt: number; sweep: number; unmarked: number }
+export interface StateTotals { keep: number; sweep: number; unmarked: number }
 export interface UserTotals extends StateTotals { mix: Record<MarkState, Record<string, number>> }
 export interface MarkRow {
   prefix: string
@@ -100,8 +93,7 @@ export interface MarkRow {
   /** The state this mark's band actually carries (its own keep, or the
    * repainter's) — what a per-node fold applies. */
   eff: MarkState
-  /** The band's bytes by painted state: a decomposed `keep_last_ckpt` splits
-   * into keep + sweep; anything else is all one state. Sums to the band. */
+  /** The band's bytes by painted state — all one state; sums to the band. */
   net: Record<MarkState, number>
   /** The band's bytes per person — the claimant takes the whole band when a
    * live claim covers it, else the scan's per-user slices. */
@@ -140,9 +132,6 @@ export interface TotalsInput {
   aggs: Map<string, PathAgg>
   /** Bucket index paths (depth-1 rows present in the scan). */
   buckets: string[]
-  /** For `keep_last_ckpt` prefixes: candidate children (index path → bytes)
-   * one and two levels down, keyed by the KLC prefix's index path. */
-  klcKids: Map<string, { path: string; b: number }[]>
   /** Scope the totals to one subtree P instead of the whole estate: `buckets`
    * is `[P]`, `keeps`/`owners` hold only the marks under-or-at P, and P's
    * residual (bytes under no deeper mark) takes P's *inherited* state — the
@@ -170,39 +159,8 @@ interface Node {
   band: PathAgg
 }
 
-/** Kept bytes inside a KLC prefix: at the first level (1 or 2 down) that has
- * step-numbered dirs, each ckpt-parent keeps its max-step child. */
-export function klcKeptBytes(kPath: string, kids: { path: string; b: number }[]): number {
-  const byParent = new Map<string, { path: string; b: number }[]>()
-  for (const k of kids) {
-    const par = parentOf(k.path)
-    const arr = byParent.get(par)
-    if (arr) arr.push(k)
-    else byParent.set(par, [k])
-  }
-  const bestOf = (arr: { path: string; b: number }[]): number | null => {
-    let best: { n: number; b: number } | null = null
-    for (const k of arr) {
-      const m = CKPT_NUM_RE.exec(k.path.slice(k.path.lastIndexOf('/') + 1))
-      if (!m) continue
-      const n = Number(m[1])
-      if (!best || n > best.n) best = { n, b: k.b }
-    }
-    return best?.b ?? null
-  }
-  // Direct step children win (the client walk stops at the first step level).
-  const direct = byParent.get(kPath)
-  if (direct) {
-    const b = bestOf(direct)
-    if (b != null) return b
-  }
-  let kept = 0
-  for (const [par, arr] of byParent) if (par !== kPath) kept += bestOf(arr) ?? 0
-  return kept
-}
-
 export function computeTotals(input: TotalsInput): Totals {
-  const { keeps, owners, aggs, buckets, klcKids } = input
+  const { keeps, owners, aggs, buckets } = input
   const nodes = new Map<string, Node>()
   const mk = (prefix: string): Node => {
     let n = nodes.get(prefix)
@@ -234,9 +192,9 @@ export function computeTotals(input: TotalsInput): Totals {
   }
   for (const n of nodes.values()) n.band = subAgg(n.agg, n.kids.map(k => k.agg))
 
-  const total: StateTotals = { keep: 0, keep_last_ckpt: 0, sweep: 0, unmarked: 0 }
+  const total: StateTotals = { keep: 0, sweep: 0, unmarked: 0 }
   const users: Record<string, UserTotals> = {}
-  const userRec = (u: string): UserTotals => (users[u] ??= { keep: 0, keep_last_ckpt: 0, sweep: 0, unmarked: 0, mix: { keep: {}, keep_last_ckpt: {}, sweep: {}, unmarked: {} } })
+  const userRec = (u: string): UserTotals => (users[u] ??= { keep: 0, sweep: 0, unmarked: 0, mix: { keep: {}, sweep: {}, unmarked: {} } })
   const addMix = (into: Record<string, number>, mix: Record<string, number>, f: number) => {
     for (const [c, b] of Object.entries(mix)) if (b * f > 0) into[c] = (into[c] ?? 0) + b * f
   }
@@ -264,22 +222,9 @@ export function computeTotals(input: TotalsInput): Totals {
     const f: MarkState = n.effKeep?.keep ?? 'unmarked'
     const claimant = n.effOwner?.owner ?? null
     bandUs.set(n, claimant ? (n.band.b > 0 ? { [claimant]: n.band.b } : {}) : Object.fromEntries(Object.entries(n.band.us).filter(([, b]) => b > 0)))
-    const split: Record<MarkState, number> = { keep: 0, keep_last_ckpt: 0, sweep: 0, unmarked: 0 }
-    if (f === 'keep_last_ckpt') {
-      // Decompose where the step dirs are in view; the kept child's bytes are
-      // keep, the rest of the band sweeps. Unresolvable → stays "last ckpt".
-      const kPath = idxKey(n.effKeep!.prefix).path
-      const kids = klcKids.get(kPath)
-      const kept = kids?.length ? Math.min(n.band.b, klcKeptBytes(kPath, kids)) : null
-      if (kept == null) { paint(n.band, 'keep_last_ckpt', 1, claimant); split.keep_last_ckpt = n.band.b }
-      else {
-        const r = n.band.b > 0 ? kept / n.band.b : 0
-        paint(n.band, 'keep', r, claimant)
-        paint(n.band, 'sweep', 1 - r, claimant)
-        split.keep = n.band.b * r
-        split.sweep = n.band.b * (1 - r)
-      }
-    } else { paint(n.band, f, 1, claimant); split[f] = n.band.b }
+    const split: Record<MarkState, number> = { keep: 0, sweep: 0, unmarked: 0 }
+    paint(n.band, f, 1, claimant)
+    split[f] = n.band.b
     painted.set(n, split)
   }
   // Undecided remainder: each bucket minus its top-level bands. A ledger row
