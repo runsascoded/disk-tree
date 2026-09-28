@@ -41,7 +41,7 @@ async function verifyRs256Jwt(
     .catch(() => null)
   const jwk = certs?.keys?.find(k => k.kid === header.kid)
   if (!jwk) return null
-  const key = await crypto.subtle.importKey('jwk', jwk as JsonWebKey, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify'])
+  const key = await crypto.subtle.importKey('jwk', jwk as unknown as JsonWebKey, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify'])
   let ok: boolean
   try { ok = await crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64uDecodeBytes(s), enc.encode(`${h}.${p}`)) } catch { return null }
   // Verify before parsing: an unauthenticated payload never reaches JSON.parse.

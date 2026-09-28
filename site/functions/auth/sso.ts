@@ -6,7 +6,7 @@
  * app-gated data, which is what lets `?key=` share links work at all.
  */
 import { type Ctx, gateFor, TEAM_DOMAIN } from '../_lib/auth.js'
-import { verifyAccessJwt } from '@open-athena/auth/cf-access'
+import { verifyAccessJwt } from '../_lib/cfAccess.js'
 
 /** Same-origin paths only — anything else is an open redirect off a login path. */
 const safeNext = (raw: string | null): string => (raw && raw.startsWith('/') && !raw.startsWith('//') ? raw : '/')
