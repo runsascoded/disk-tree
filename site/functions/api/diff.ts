@@ -58,15 +58,17 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   const gated = await st.time('auth', requireViewer(ctx as never))
   if (gated instanceof Response) return gated
 
-  const head = (states || lens) && ctx.env.DB ? await st.time('pre', ledgerHead(ctx.env)) : 0
-  const cacheKey = cacheKeyFor('diff',
-    `${from}/${to}/${encodeURIComponent(path)}?w=${w}&h=${h}&a=${minArea}&t=${atten}&n=${top}&l=${lensRaw ?? ''}` +
-      `&o=${rawOwner ?? ''}&cl=${classKey(classes)}&k=${states ? [...states].sort().join(',') : ''}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}&s=${summary ? 1 : 0}&D=${depth ?? ''}`,
-  )
-  const hit = await st.time('match', cacheMatch(ctx.env, cacheKey))
-  if (hit) return hit
-
+  // One guard over the D1 pre-step, the cache match and the build (see
+  // subtree.ts): a D1 stall becomes a retryable 503, not a raw 500 page.
   try {
+    const head = (states || lens) && ctx.env.DB ? await st.time('pre', ledgerHead(ctx.env)) : 0
+    const cacheKey = cacheKeyFor('diff',
+      `${from}/${to}/${encodeURIComponent(path)}?w=${w}&h=${h}&a=${minArea}&t=${atten}&n=${top}&l=${lensRaw ?? ''}` +
+        `&o=${rawOwner ?? ''}&cl=${classKey(classes)}&k=${states ? [...states].sort().join(',') : ''}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}&s=${summary ? 1 : 0}&D=${depth ?? ''}`,
+    )
+    const hit = await st.time('match', cacheMatch(ctx.env, cacheKey))
+    if (hit) return hit
+
     const diff = await buildDiff(ctx.env, { from, to, path, w, h, minArea, atten, top, lens, owner, states, query, classes, summary, depth, trace: st.trace })
     const body = JSON.stringify({
       prev: from,
@@ -85,6 +87,7 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
     if (e instanceof LensUnavailable) return new Response('lens index not available for a scan', { status: 409 })
     const msg = String((e as Error).message ?? e)
     if (msg.startsWith('query too wide')) return new Response(msg, { status: 413 })
+    if (/D1_ERROR|internal error/i.test(msg)) return new Response(`index backend unavailable, retry: ${msg}`, { status: 503, headers: { 'retry-after': '5' } })
     return new Response(`diff failed: ${msg}`, { status: 500 })
   }
 }

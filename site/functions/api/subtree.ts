@@ -63,15 +63,19 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
 
   // The mark axis folds the live ledger: its cache key carries the head.
   // …and so does a user lens (claims repaint attribution).
-  const [head, xtra] = await st.time('pre', Promise.all([(states || lens) && ctx.env.DB ? ledgerHead(ctx.env) : Promise.resolve(0), hasExtras(ctx.env, date)]))
-  const cacheKey = cacheKeyFor('subtree',
-    `${date}/${encodeURIComponent(path)}?w=${w}&h=${h}&a=${minArea}&t=${atten}&l=${lensRaw ?? ''}` +
-      `&o=${rawOwner ?? ''}&b=${by ?? ''}&D=${depth ?? ''}&cl=${classKey(classes)}&x=${xtra ? 1 : 0}&k=${states ? [...states].sort().join(',') : ''}&F=${query && !full ? 0 : 1}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}`,
-  )
-  const hit = await st.time('match', cacheMatch(ctx.env, cacheKey))
-  if (hit) return hit
-
+  // Everything from here touches D1 or the store, so it all sits under one
+  // guard: a D1 stall ("internal error") used to escape from the pre-steps
+  // as Cloudflare's raw "Worker threw exception" page (2026-09-28); now it is
+  // a 503 the client can retry, with the message the ledger head gave.
   try {
+    const [head, xtra] = await st.time('pre', Promise.all([(states || lens) && ctx.env.DB ? ledgerHead(ctx.env) : Promise.resolve(0), hasExtras(ctx.env, date)]))
+    const cacheKey = cacheKeyFor('subtree',
+      `${date}/${encodeURIComponent(path)}?w=${w}&h=${h}&a=${minArea}&t=${atten}&l=${lensRaw ?? ''}` +
+        `&o=${rawOwner ?? ''}&b=${by ?? ''}&D=${depth ?? ''}&cl=${classKey(classes)}&x=${xtra ? 1 : 0}&k=${states ? [...states].sort().join(',') : ''}&F=${query && !full ? 0 : 1}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}`,
+    )
+    const hit = await st.time('match', cacheMatch(ctx.env, cacheKey))
+    if (hit) return hit
+
     const view = await buildView(ctx.env, { date, path, w, h, minArea, atten, lens, owner, by, maxDepth: depth, states, query, classes, partial: !!query && !full, trace: st.trace })
     const body = JSON.stringify({
       date,
@@ -99,6 +103,7 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
     if (e instanceof LensUnavailable) return new Response('lens index not available for this scan', { status: 409 })
     const msg = String((e as Error).message ?? e)
     if (msg.startsWith('query too wide')) return new Response(msg, { status: 413 })
+    if (/D1_ERROR|internal error/i.test(msg)) return new Response(`index backend unavailable, retry: ${msg}`, { status: 503, headers: { 'retry-after': '5' } })
     return new Response(`subtree failed: ${msg}`, { status: 500 })
   }
 }
