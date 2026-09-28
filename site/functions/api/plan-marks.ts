@@ -1,7 +1,7 @@
 // /api/marks — the mark axis (specs/cw-sweep.md).
 //
 //   GET  /api/marks   -> { marks: [{ prefix, keep, who, ts, note }] }   viewer
-//   POST /api/marks   { prefixes: [...], keep: 'keep'|'keep_last_ckpt'|'sweep'|null, scan?, note? }
+//   POST /api/marks   { prefixes: [...], keep: 'keep'|'sweep'|null, scan?, note? }
 //
 // A mark records intent only — it never deletes. Any authenticated viewer may
 // mark (who is recorded); an admin later curates `sweep`-marked prefixes into a
@@ -13,7 +13,7 @@ import { canonicalPrefix } from "../_lib/plans.js"
 
 type Env = AuthEnv & { DB?: D1Database }
 
-const KEEPS = new Set(["keep", "keep_last_ckpt", "sweep"])
+const KEEPS = new Set(["keep", "sweep"])
 
 export const onRequestGet = async (ctx: Ctx & { env: Env }): Promise<Response> => {
   const gated = await requireViewer(ctx)
@@ -35,7 +35,7 @@ export const onRequestPost = async (ctx: Ctx & { env: Env }): Promise<Response> 
     | { prefixes?: unknown; keep?: unknown; scan?: unknown; note?: unknown } | null
   const keep = body?.keep ?? null
   if (keep !== null && (typeof keep !== "string" || !KEEPS.has(keep))) {
-    return json({ error: "keep must be 'keep' | 'keep_last_ckpt' | 'sweep' | null" }, 400)
+    return json({ error: "keep must be 'keep' | 'sweep' | null" }, 400)
   }
   const raw = Array.isArray(body?.prefixes) ? body!.prefixes : []
   if (!raw.length) return json({ error: "prefixes required" }, 400)

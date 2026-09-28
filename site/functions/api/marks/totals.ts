@@ -1,7 +1,7 @@
 /**
  * GET /api/marks/totals?date=<scan>[&path=gs://marin-<bucket>/…/][&marks=1]
  *
- * Exact keep / sweep / last-ckpt / undecided bytes for the whole estate or a
+ * Exact keep / sweep / undecided bytes for the whole estate or a
  * drilled subtree — `_lib/totals.ts` does the fold; this is the HTTP face.
  * `marks=1` includes the per-mark manifest (the sweep executor's input).
  */

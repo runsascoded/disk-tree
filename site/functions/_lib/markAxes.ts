@@ -16,8 +16,7 @@
  * strictly under N (their subtrees are not N's residual), and every mark
  * under N contributes its band under its *effective* state (a repainted mark's
  * band carries the repainter's). Bands partition the subtree, so this is
- * exact; `keep_last_ckpt` counts as keep ∧ sweep where it can't be split,
- * matching the client's `markAllowed`. */
+ * exact. */
 import { canonId } from './identity.js'
 import type { MarkState, MarkRow } from './marks.js'
 import { idxKey } from './marks.js'
@@ -33,8 +32,7 @@ export function parseMarkAxes(raw: string | null): Set<MarkAxis> | undefined {
   return out.size === 0 || out.size === 3 ? undefined : out
 }
 
-export const markAllowed = (state: MarkState, allowed: ReadonlySet<MarkAxis>): boolean =>
-  state === 'keep_last_ckpt' ? allowed.has('keep') || allowed.has('sweep') : allowed.has(state as MarkAxis)
+export const markAllowed = (state: MarkState, allowed: ReadonlySet<MarkAxis>): boolean => allowed.has(state)
 
 interface Mark {
   path: string // index key (`marin-b/x/y`)
@@ -90,8 +88,7 @@ export function markScope(marks: MarkRow[], allowed: ReadonlySet<MarkAxis>, user
     }
   }
   const bandOf = (m: Mark): number => Object.values(m.net).reduce((s, v) => s + v, 0)
-  // Allowed bytes of a band: all of it, or the lens user's share of it (the
-  // share is assumed spread across a decomposed keep_last_ckpt's halves).
+  // Allowed bytes of a band: all of it, or the lens user's share of it.
   const netAllowed = (m: Mark): number => {
     let s = 0
     for (const f of Object.keys(m.net) as MarkState[]) if (m.net[f] > 0 && markAllowed(f, allowed)) s += m.net[f]

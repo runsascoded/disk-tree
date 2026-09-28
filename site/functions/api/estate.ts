@@ -4,7 +4,7 @@
  *   GET /api/estate?date=<scan>&user=<canonical id>
  *   → { user, date, head, states, marks, claims, undecided }
  *
- * - `states`: their keep / last-ckpt / sweep / undecided bytes (+ class mixes),
+ * - `states`: their keep / sweep / undecided bytes (+ class mixes),
  *   claims applied — the same numbers `/users` and the map's rollup use.
  * - `marks`: every live mark whose band holds some of their bytes (`b` = that
  *   share), plus every mark they authored — the "decided" rows.
@@ -49,7 +49,7 @@ export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
       .sort((a, b) => b.b - a.b || b.bytes - a.bytes)
     const claims = totals.claims.filter(c => mine(c.owner)).map(c => ({ prefix: c.prefix, ts: c.ts, bytes: c.bytes, objects: c.objects, ...(c.repainted_by ? { repainted_by: c.repainted_by } : {}) }))
     const states = Object.entries(totals.users).find(([k]) => mine(k))?.[1] ?? null
-    const userBytes = states ? states.keep + states.keep_last_ckpt + states.sweep + states.unmarked : 0
+    const userBytes = states ? states.keep + states.sweep + states.unmarked : 0
 
     // Undecided: the user lens scoped to unmarked bytes, at a byte threshold
     // that keeps the walk to the sizes worth a decision.

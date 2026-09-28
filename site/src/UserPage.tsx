@@ -42,33 +42,16 @@ interface StateRow {
   mark: Mark | null
 }
 
-// `keep_last_ckpt` decomposes into real keep/sweep proportions server-side
-// wherever the step dirs are in view; only bytes under *unresolvable* KLC
-// marks reach this fold, where they count as keep. Individual mark rows still
-// show the first-class amber "keep last ckpt".
-export type ShownState = 'keep' | 'sweep' | 'unmarked'
+export type ShownState = MarkState
 const SHOWN_STATES: ShownState[] = ['keep', 'sweep', 'unmarked']
-const ALL_STATES: MarkState[] = ['keep', 'keep_last_ckpt', 'sweep', 'unmarked']
-const STATE_ORDER_TOTAL = (f: Record<MarkState, number>): number => ALL_STATES.reduce((s, k) => s + f[k], 0)
-const foldStates = (f: Record<MarkState, number>): Record<ShownState, number> => ({
-  keep: f.keep + f.keep_last_ckpt,
-  sweep: f.sweep,
-  unmarked: f.unmarked,
-})
+const STATE_ORDER_TOTAL = (f: Record<MarkState, number>): number => SHOWN_STATES.reduce((s, k) => s + f[k], 0)
 type ClassMix = Record<string, number>
 const addMix = (into: ClassMix, m: ClassMix): ClassMix => {
   for (const [c, b] of Object.entries(m)) into[c] = (into[c] ?? 0) + b
   return into
 }
-// Same fold for the storage-class mixes behind each state (KLC's kept bytes
-// price as keep).
-const foldMixes = (f: UserStates): Record<ShownState, ClassMix> => ({
-  keep: addMix({ ...f.mix.keep }, f.mix.keep_last_ckpt),
-  sweep: f.mix.sweep,
-  unmarked: f.mix.unmarked,
-})
 // Every state's mix together = the user's whole (claims-applied) estate mix.
-const wholeMix = (f: UserStates): ClassMix => ALL_STATES.reduce((m, k) => addMix(m, f.mix[k]), {} as ClassMix)
+const wholeMix = (f: UserStates): ClassMix => SHOWN_STATES.reduce((m, k) => addMix(m, f.mix[k]), {} as ClassMix)
 const stateLabel = (f: MarkState): string => (f === 'unmarked' ? 'unmarked' : ACTION_LABELS[f])
 // `unmarked` gets the regular secondary ink, not the unattributed-gray — as
 // the most common column value it has to be readable, not washed out.
@@ -171,8 +154,7 @@ function MapLegend({ cells, states }: {
   const present: Record<ShownState, boolean> = { keep: false, sweep: false, unmarked: false }
   if (states) {
     for (const f of states.values()) {
-      const s = foldStates(f)
-      for (const k of SHOWN_STATES) if (s[k] > 0) present[k] = true
+      for (const k of SHOWN_STATES) if (f[k] > 0) present[k] = true
     }
   }
   return (
@@ -213,8 +195,7 @@ function UsersMap({ meta, states, redact = false }: {
           // unclaimed pool, which has no state stripes, keeps its own color.
           if (!n.id) return n.pool ? { bg: POOL_TILE_BG } : null
           const style: CellStyle = { bg: USER_TILE_BG }
-          const raw = states?.get(n.id)
-          const f = raw ? foldStates(raw) : undefined
+          const f = states?.get(n.id)
           if (f) {
             const total = SHOWN_STATES.reduce((s, k) => s + f[k], 0)
             if (total > 0) {
@@ -231,8 +212,7 @@ function UsersMap({ meta, states, redact = false }: {
         }}
         renderTooltip={(n) => {
           if (redact) return null
-          const raw = n.id ? states?.get(n.id) : undefined
-          const f = raw ? foldStates(raw) : undefined
+          const f = n.id ? states?.get(n.id) : undefined
           const total = f ? SHOWN_STATES.reduce((s, k) => s + f[k], 0) : 0
           return (
             <div>
@@ -344,7 +324,7 @@ export function UsersPage() {
   // Client-side CSV of exactly what the table shows (claims applied).
   const downloadCsv = () => {
     const rowsIter = states
-      ? [...states.entries()].map(([u, f]) => ({ u, b: STATE_ORDER_TOTAL(f), f: foldStates(f), m: foldMixes(f), mix: wholeMix(f) }))
+      ? [...states.entries()].map(([u, f]) => ({ u, b: STATE_ORDER_TOTAL(f), f, m: f.mix, mix: wholeMix(f) }))
       : users.map(u => ({ u: u.u, b: u.b, f: null as Record<ShownState, number> | null, m: null as Record<ShownState, ClassMix> | null, mix: mixes?.[u.u] }))
     const usd = (mix: ClassMix | undefined, b: number) => (mix && b ? Math.round(ratePerByte(mix) * b) : '')
     const tib = 1024 ** 4
@@ -382,7 +362,7 @@ export function UsersPage() {
   })
   const cell = (u: string, f: ShownState) => {
     const raw = states?.get(u)
-    const b = raw ? foldStates(raw)[f] : 0
+    const b = raw ? raw[f] : 0
     const dim = { color: 'var(--ink-2)', opacity: 0.5 }
     return (
       <>
@@ -390,7 +370,7 @@ export function UsersPage() {
           {states ? (b ? fmtBytesIec(b) : '—') : '…'}
         </td>
         <td className="num usd" style={b ? undefined : dim}>
-          {states ? <DollarCell b={b} mix={raw ? foldMixes(raw)[f] : undefined} color={stateColor(f)} /> : '…'}
+          {states ? <DollarCell b={b} mix={raw?.mix[f]} color={stateColor(f)} /> : '…'}
         </td>
       </>
     )
@@ -405,9 +385,7 @@ export function UsersPage() {
       const mix = raw ? wholeMix(raw) : mixes?.[u.u]
       if (mix) { t.usd += ratePerByte(mix) * u.b; t.priced++ }
       if (raw) {
-        const f = foldStates(raw); t.keep += f.keep; t.sweep += f.sweep; t.unmarked += f.unmarked
-        const m = foldMixes(raw)
-        for (const k of SHOWN_STATES) addMix(t.mix[k], m[k])
+        for (const k of SHOWN_STATES) { t[k] += raw[k]; addMix(t.mix[k], raw.mix[k]) }
       }
     }
     return t
@@ -558,8 +536,7 @@ export function UserOgPage() {
       else delete document.documentElement.dataset.theme
     }
   }, [])
-  const raw = states?.get(id)
-  const f = raw ? foldStates(raw) : null
+  const f = states?.get(id) ?? null
   const total = f ? SHOWN_STATES.reduce((s, k) => s + f[k], 0) : 0
   const pct = (k: ShownState): number => (f && total ? (100 * f[k]) / total : 0)
   const barColor = (k: ShownState): string => (k === 'unmarked' ? 'var(--other)' : stateColor(k))
@@ -650,14 +627,14 @@ export function UserPage() {
   const totals = useMemo(() => {
     const t = new Map<ShownState, { b: number; n: number }>(SHOWN_STATES.map(f => [f, { b: 0, n: 0 }]))
     for (const r of rows) {
-      const cur = t.get(r.state === 'keep_last_ckpt' ? 'keep' : r.state)!
+      const cur = t.get(r.state)!
       cur.b += r.b
       cur.n++
     }
     return t
   }, [rows])
   const attributed = mine ? STATE_ORDER_TOTAL(mine) : rows.reduce((s, r) => s + r.b, 0)
-  const stripBytes = mine ? foldStates(mine) : null
+  const stripBytes = mine ?? null
   const metaB = metaQ.data?.users?.find(u => u.u === id)?.b
   const mix = metaQ.data?.user_class_bytes?.[id]
   const authored = estate ? estate.marks.filter(m => m.authored).length : 0

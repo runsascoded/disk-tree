@@ -10,10 +10,7 @@ from __future__ import annotations
 from dt_cloud.sweep_plan import (
     StateResolver,
     KeepRow,
-    KlcSplit,
     key_to_prefixes,
-    klc_key_state,
-    klc_split,
     load_keeps,
 )
 
@@ -94,57 +91,6 @@ def test_load_keeps_shapes_api_rows():
     ]
 
 
-# ---- KLC ------------------------------------------------------------------
-
-def test_klc_split_hf_checkpoints_numeric_max():
-    """`checkpoint-N` layout: numeric max (checkpoint-10000 > checkpoint-9000),
-    non-step siblings at that level sweep — matching the site's klcSplits."""
-    split = klc_split([
-        "checkpoint-9000/model.safetensors",
-        "checkpoint-10000/model.safetensors",
-        "checkpoint-10000/optimizer.pt",
-        "config.json",
-        "logs/train.log",
-    ])
-    assert split == KlcSplit(prefix="", kept=("checkpoint-10000/",), resolved=True)
-    assert klc_key_state("checkpoint-10000/model.safetensors", split) == "keep"
-    assert klc_key_state("checkpoint-9000/model.safetensors", split) == "sweep"
-    assert klc_key_state("config.json", split) == "sweep"
-    assert klc_key_state("logs/train.log", split) == "sweep"
-
-
-def test_klc_split_nested_runs_recurse():
-    """Steps one level down: each run dir gets its own max-step keep."""
-    split = klc_split([
-        "run-a/step_100/w.bin",
-        "run-a/step_200/w.bin",
-        "run-b/global_step50/w.bin",
-        "run-b/global_step150/w.bin",
-    ])
-    assert sorted(split.kept) == ["run-a/step_200/", "run-b/global_step150/"]
-    assert split.resolved is True
-    assert klc_key_state("run-a/step_200/w.bin", split) == "keep"
-    assert klc_key_state("run-a/step_100/w.bin", split) == "sweep"
-    assert klc_key_state("run-b/global_step150/w.bin", split) == "keep"
-
-
-def test_klc_split_no_steps_is_unresolved_and_keeps():
-    split = klc_split(["data/part-0.parquet", "data/part-1.parquet"])
-    assert split == KlcSplit(prefix="", kept=(), resolved=False)
-    assert klc_key_state("data/part-0.parquet", split) == "keep"
-
-
-def test_klc_split_stops_at_first_step_level():
-    """A node with step children does NOT recurse — deeper step dirs inside the
-    kept subtree stay kept wholesale (exactly the tree walk's `return`)."""
-    split = klc_split([
-        "step-1/inner/step-99/w.bin",
-        "step-2/inner/step-1/w.bin",
-    ])
-    assert split.kept == ("step-2/",)
-    assert klc_key_state("step-2/inner/step-1/w.bin", split) == "keep"
-    assert klc_key_state("step-1/inner/step-99/w.bin", split) == "sweep"
-
 # ---- clobbered keeps + ever-kept guard ------------------------------------
 
 def test_clobbered_keeps_broad_sweep_incident():
@@ -171,7 +117,7 @@ def test_ever_kept_prefixes_ignores_repaints():
     rows = [
         _r(f"{B}a/", "keep", ts=100, aid=1),
         KeepRow(prefix=f"{B}a/", keep="sweep", ts=200, action_id=2, who="p@x"),
-        _r(f"{B}b/", "keep_last_ckpt", ts=100, aid=3),
+        _r(f"{B}b/", "keep", ts=100, aid=3),
         KeepRow(prefix=f"{B}c/", keep="sweep", ts=100, action_id=4, who="p@x"),
         _r(f"{B}d/", None, ts=100, aid=5),  # unmark is not a keep
     ]
@@ -244,7 +190,6 @@ def test_classify_dir_policy_b():
         KeepRow(prefix=f"{B}unowned/", keep="sweep", ts=100, action_id=3, who="kaiyuewen3@gmail.com"),
         KeepRow(prefix=f"{B}was-kept/", keep="keep", ts=50, action_id=4, who="kaiyuewen3@gmail.com"),
         KeepRow(prefix=f"{B}was-kept/", keep="sweep", ts=100, action_id=5, who="kaiyuewen3@gmail.com"),
-        KeepRow(prefix=f"{B}klc/", keep="keep_last_ckpt", ts=100, action_id=6, who="kaiyuewen3@gmail.com"),
     ]
     owners = {"owners": [
         {"prefix": f"{B}grug/", "owner": "kaiyue", "ts": 90, "action_id": 10, "who": "kaiyuewen3@gmail.com"},
@@ -258,7 +203,6 @@ def test_classify_dir_policy_b():
     assert classify_dir(bkt, "other/x", vr, own, idmap, ever) == ("deferred_owner", "gonzalo", ("kaiyue",))
     assert classify_dir(bkt, "unowned/x", vr, own, idmap, ever) == ("deferred_unowned", None, ("kaiyue",))
     assert classify_dir(bkt, "was-kept/x", vr, own, idmap, ever) == ("ever_kept", None, ("kaiyue",))
-    assert classify_dir(bkt, "klc/run", vr, own, idmap, ever) == ("klc_pending", None, ())
     assert classify_dir(bkt, "nothing/here", vr, own, idmap, ever) == ("unmarked", None, ())
 
 

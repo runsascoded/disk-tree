@@ -8,7 +8,6 @@ import { OwnerFactChip } from './OwnerFactChip'
 import { signInUrl, useCanMark } from './auth'
 import type { Mark, MarkAction, MarkIndex } from './marks'
 import { ACTION_LABELS, useMarkMutations } from './marks'
-import { looksCkpt } from './sweep'
 import { Tooltip } from './Tooltip'
 import type { TreeNode } from './types'
 import type { UserIndexEntry } from './colors'
@@ -23,18 +22,10 @@ import { ClassBar, OwnerBar, ownerShares } from './OwnerBar'
 // has deeper marks inside repaints them (recency beats specificity) — hence
 // the inline override confirm.
 
-// KLC stays amber wherever it renders *as itself* (chips, buttons, history) —
-// green made it indistinguishable from keep. Aggregations (state cells,
-// stripes, rollups) instead *decompose* it into real keep/sweep proportions
-// via `klcSplits` (sweep.ts): last-ckpt child kept, siblings swept.
 export const ACTION_COLORS: Record<MarkAction, string> = {
   keep: 'var(--mk-keep)',
-  keep_last_ckpt: 'var(--mk-klc)',
   sweep: 'var(--mk-del)',
 }
-
-export const KLC_TIP =
-  'Keep only the newest checkpoint under this prefix: the sweep deletes older step-/checkpoint-numbered dirs and keeps the highest step in each run. Offered on checkpoint-shaped directories.'
 
 // Per-button tooltips. Nothing here deletes on click — "sweep" only *marks*
 // for the mark-and-sweep campaign; removal happens after the deadline.
@@ -72,10 +63,8 @@ export function markProvenance(mark: Mark, own: boolean): ReactNode {
 }
 
 /**
- * `node`: the tree node behind `uri`, when the caller has it — gates the
- * `keep_last_ckpt` option to checkpoint-shaped dirs and feeds the ownership
- * bar. Omit (typed prefixes, below the depth cap) and the option stays
- * available. `lensed`: the view is already filtered to one owner, so `node`'s
+ * `node`: the tree node behind `uri`, when the caller has it — feeds the
+ * ownership bar (absent for typed prefixes below the depth cap). `lensed`: the view is already filtered to one owner, so `node`'s
  * user split is that person alone. `userIdx`: the site's user palette, so the
  * ownership bar's colors match the color-by-owner map.
  */
@@ -95,7 +84,6 @@ export function MarkControls({ uri, idx, node, lensed, userIdx, onPickUser }: {
   const prefix = uri.endsWith('/') ? uri : uri + '/'
   const { mark, own, under } = idx.resolve(uri)
   const cl = idx.claimOf(uri)
-  const klcOk = node ? looksCkpt(node, uri) : true
   const ov = idx.overridesOf(uri)
 
   const write = (action: MarkAction | null) => {
@@ -108,13 +96,10 @@ export function MarkControls({ uri, idx, node, lensed, userIdx, onPickUser }: {
   const set = (action: MarkAction | null) => (ov.n > 0 ? setPending({ action }) : write(action))
 
   // The decision as ONE control: a select colored by the current state.
-  // `keep_last_ckpt` is offered on checkpoint-shaped dirs (and kept visible
-  // when it's the current value, so the select never shows a phantom).
   const cur: MarkAction | 'none' = mark?.action ?? 'none'
   const options: { v: MarkAction | 'none'; label: string; tip: string }[] = [
     { v: 'none', label: '—', tip: 'No mark on the whole directory (its subtrees may still carry their own).' },
     { v: 'keep', label: 'keep', tip: KEEP_TIP },
-    ...(klcOk || cur === 'keep_last_ckpt' ? [{ v: 'keep_last_ckpt' as const, label: 'keep last ckpt', tip: KLC_TIP }] : []),
     { v: 'sweep', label: 'sweep', tip: SWEEP_TIP },
   ]
   const stateTip = (

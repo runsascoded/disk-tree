@@ -46,7 +46,7 @@ def creds(token: str | None, url: str | None) -> tuple[str, str | None]:
 PREFIX_RE = re.compile(r"^gs://marin-[a-z0-9-]+/(?:[^\s]*/)?$")
 
 #: Server's `KEEPS` set. `None` = don't touch the keep axis at all.
-KEEP_ACTIONS = ("keep", "keep_last_ckpt", "sweep")
+KEEP_ACTIONS = ("keep", "sweep")
 
 #: The server accepts 1–500 actions per POST; batch to that ceiling.
 MAX_BATCH = 500

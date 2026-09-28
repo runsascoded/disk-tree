@@ -13,11 +13,10 @@ export const LOCAL_TZ: string =
 export const fmtWhen = (ts: number): string =>
   new Date(ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
-export type MarkAct = 'keep' | 'keep_last_ckpt' | 'sweep' | 'clear' | 'claim' | 'release'
+export type MarkAct = 'keep' | 'sweep' | 'clear' | 'claim' | 'release'
 /** Feed-filter letters (`?mk=`), in display order. */
 export const MARK_ACTS: { act: MarkAct; key: string; label: string; glyph: string; color: string }[] = [
   { act: 'keep', key: 'k', label: 'keep', glyph: '✓', color: 'var(--mk-keep)' },
-  { act: 'keep_last_ckpt', key: 'l', label: 'keep last', glyph: '◐', color: 'var(--mk-keep)' },
   { act: 'sweep', key: 's', label: 'sweep', glyph: '✕', color: 'var(--mk-del)' },
   { act: 'clear', key: 'c', label: 'clear', glyph: '○', color: 'var(--line)' },
   { act: 'claim', key: 'o', label: 'assign', glyph: '◆', color: 'var(--t-oa)' },
@@ -40,10 +39,10 @@ export interface MarkEvent {
   memo: string | null
 }
 
-// Action glyph — matches the treemap's state marks (✓ keep / ◐ keep-last-ckpt /
-// ✕ sweep), with distinct marks for clear and ownership changes.
+// Action glyph — matches the treemap's state marks (✓ keep / ✕ sweep), with
+// distinct marks for clear and ownership changes.
 const ACTION_GLYPH: Record<string, string> = {
-  keep: '✓', keep_last_ckpt: '◐', sweep: '✕',
+  keep: '✓', sweep: '✕',
 }
 
 export function useMarkEvents(): { events: MarkEvent[]; isLoading: boolean; isFetching: boolean; error: Error | null } {

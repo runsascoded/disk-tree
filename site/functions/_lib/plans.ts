@@ -141,7 +141,7 @@ export async function audit(
 
 /** Snapshot a plan into the executor's plan.json: the plan's one bucket
  * (`planBucket`; throws `PlanSpansBuckets`), relative sweep prefixes (the
- * plan's items) + relative keep prefixes (the current keep/keep_last_ckpt marks
+ * plan's items) + relative keep prefixes (the current keep marks
  * in that bucket, which carve out at manifest time). Returns null if the plan
  * is missing. */
 export async function snapshotPlan(db: D1Database, planId: number): Promise<
@@ -150,7 +150,7 @@ export async function snapshotPlan(db: D1Database, planId: number): Promise<
   const plan = await db.prepare("SELECT id, name FROM plans WHERE id = ?").bind(planId).first<{ id: number; name: string }>()
   if (!plan) return null
   const items = await db.prepare("SELECT prefix FROM plan_items WHERE plan_id = ? ORDER BY prefix").bind(planId).all<{ prefix: string }>()
-  const keeps = await db.prepare("SELECT prefix FROM marks WHERE keep IN ('keep', 'keep_last_ckpt') ORDER BY prefix").all<{ prefix: string }>()
+  const keeps = await db.prepare("SELECT prefix FROM marks WHERE keep = 'keep' ORDER BY prefix").all<{ prefix: string }>()
   const { bucket, sweep } = planBucket(items.results.map(r => r.prefix))
   return {
     plan_id: planId,

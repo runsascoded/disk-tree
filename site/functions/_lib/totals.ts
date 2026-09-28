@@ -1,11 +1,10 @@
-/** Exact keep / sweep / last-ckpt / undecided bytes for the estate (or a
+/** Exact keep / sweep / undecided bytes for the estate (or a
  * drilled subtree) — the ledger folded server-side and priced against the
  * floor-free path index (specs/path-agnostic-serving.md §2.3), so every
  * consumer (map rollup, /users, digest, sweep executor, the per-node mark
  * axis of `/api/subtree`) reads one number.
  *
- * Cost model: one point lookup per live ledger prefix + a one/two-level
- * range under each keep_last_ckpt prefix. Marks cluster, so ~8k prefixes
+ * Cost model: one point lookup per live ledger prefix. Marks cluster, so ~8k prefixes
  * touch ~25 row groups (~200 MB of parquet, read once per (scan, ledger
  * head) and cached in D1 — `mark_totals`, one head at a time). A new action invalidates by
  * changing the head; the recompute happens on the next request. */
@@ -24,7 +23,7 @@ const MAX_GROUPS = 400
 /** Bump when the manifest's shape changes: cached bodies with another
  * version are recomputed (2: rows carry `eff`/`net`, clears included; 3: `us`
  * per band + `claims`; 4: claims carry `us` + `action_id` for the owner lens). */
-export const MANIFEST_VERSION = 5 // v5: claims carry `who` (the assigner) — /api/assignments
+export const MANIFEST_VERSION = 6 // v6: the last-checkpoint mark kind is gone; states are keep / sweep / unmarked
 
 export interface TotalsBody extends Totals {
   v: number
@@ -70,47 +69,24 @@ async function compute(env: Env, date: string, keeps: Map<string, KeepRow>, owne
   // Roots: the estate's depth-1 buckets, or the single scoped subtree P.
   const scopeDepth = scopePfx ? idxKey(scopePfx).depth : 0
   if (scopeKey) want.set(scopeKey, scopeDepth)
-  const klcPaths = new Set<string>()
-  for (const r of keeps.values()) if (r.keep === 'keep_last_ckpt') klcPaths.add(idxKey(r.prefix).path)
   const asks: Ask[] = scopeKey ? [{ depth: scopeDepth, path: scopeKey }] : [{ depth: 1, under: '' }]
   for (const [path, depth] of want) asks.push({ depth, path })
-  for (const k of klcPaths) {
-    const d = k.split('/').length
-    asks.push({ depth: d + 1, under: k }, { depth: d + 2, under: k })
-  }
-  const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')))
-  const isKlcKid = (r: Row): string | null => {
-    const p1 = parentOf(r.path)
-    if (klcPaths.has(p1)) return p1
-    const p2 = parentOf(p1)
-    return p2 && klcPaths.has(p2) ? p2 : null
-  }
   const isRoot = (r: Row) => (scopeKey ? r.path === scopeKey && r.depth === scopeDepth : r.depth === 1)
   const { rows, groups } = await readAsks(
     idx,
     asks,
-    r => isRoot(r) || want.get(r.path) === r.depth || isKlcKid(r) != null,
+    r => isRoot(r) || want.get(r.path) === r.depth,
     { columns: COLUMNS, maxGroups: MAX_GROUPS },
   )
   const aggs = new Map<string, PathAgg>()
   const buckets = new Set<string>()
-  const klcKidAgg = new Map<string, Map<string, number>>() // klc path → child path → bytes
   for (const r of rows) {
     if (isRoot(r)) buckets.add(r.path)
-    if (isRoot(r) || want.get(r.path) === r.depth) {
-      let a = aggs.get(r.path)
-      if (!a) aggs.set(r.path, (a = newAgg()))
-      addAgg(a, r)
-    }
-    const k = isKlcKid(r)
-    if (k) {
-      let m = klcKidAgg.get(k)
-      if (!m) klcKidAgg.set(k, (m = new Map()))
-      m.set(r.path, (m.get(r.path) ?? 0) + r.b)
-    }
+    let a = aggs.get(r.path)
+    if (!a) aggs.set(r.path, (a = newAgg()))
+    addAgg(a, r)
   }
-  const klcKids = new Map([...klcKidAgg].map(([k, m]) => [k, [...m].map(([path, b]) => ({ path, b }))]))
-  const totals = computeTotals({ keeps, owners, aggs, buckets: [...buckets].sort(), klcKids, scope })
+  const totals = computeTotals({ keeps, owners, aggs, buckets: [...buckets].sort(), scope })
   return {
     v: MANIFEST_VERSION,
     scan: date,

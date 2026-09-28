@@ -137,83 +137,13 @@ const winRow = (ctx: StateWalkCtx, uri: string, inherited: KeepRow | null): Keep
 
 const stateOf = (win: KeepRow | null): MarkState => win?.keep ?? 'unmarked'
 
-// ---- keep_last_ckpt decomposition -----------------------------------------
-// A KLC mark means "within each checkpoint run under this prefix, keep the
-// newest step dir; sweep the rest". Aggregations shouldn't show that as its
-// own category — they should show the *actual* keep/sweep proportions.
-
-const CKPT_NUM_RE = /^(?:step|checkpoint|ckpt|iter|epoch|global_?step)[-_]?(\d+)/i
-const normUri = (uri: string): string => (uri.endsWith('/') ? uri : uri + '/')
-
-export interface KlcSplit {
-  /** Kept subtrees (each ckpt-parent's newest step child), with their bytes. */
-  kept: { uri: string; b: number }[]
-  keptB: number
-  totalB: number
-}
-
-export type KlcIndex = Map<string, KlcSplit>
-
-/**
- * For each live `keep_last_ckpt` mark, walk its subtree in the scan tree: at
- * every node with step-numbered children, the max-step child is kept (no
- * deeper recursion); everything else sweeps. Marks whose prefix the tree
- * can't resolve, or with no ckpt-shaped descendants in view, get no entry —
- * callers render those as first-class KLC (amber).
- */
-export function klcSplits(root: TreeNode, keeps: Map<string, KeepRow>): KlcIndex {
-  const out: KlcIndex = new Map()
-  for (const r of keeps.values()) {
-    if (r.keep !== 'keep_last_ckpt') continue
-    const p = normUri(r.prefix)
-    let node: TreeNode | undefined = root
-    for (const s of p.replace(/^[a-z0-9]+:\/\//, '').replace(/\/+$/, '').split('/')) {
-      node = node?.c?.find(c => c.n === s)
-    }
-    if (!node) continue
-    const kept: { uri: string; b: number }[] = []
-    const walk = (n: TreeNode, u: string) => {
-      const steps = (n.c ?? [])
-        .map(c => ({ c, m: CKPT_NUM_RE.exec(c.n) }))
-        .filter((x): x is { c: TreeNode; m: RegExpExecArray } => x.m != null)
-      if (steps.length) {
-        let best = steps[0]
-        for (const s of steps) if (Number(s.m[1]) > Number(best.m[1])) best = s
-        kept.push({ uri: `${u}${best.c.n}/`, b: best.c.b })
-        return
-      }
-      for (const c of n.c ?? []) if (!c.n.startsWith('(')) walk(c, `${u}${c.n}/`)
-    }
-    walk(node, p)
-    if (kept.length) out.set(p, { kept, keptB: kept.reduce((s, k) => s + k.b, 0), totalB: node.b })
-  }
-  return out
-}
-
-/** A klc-governed uri's concrete state: inside a kept subtree → keep; contains
- * kept subtrees → mixed (caller splits by `klcKeptWithin`); else sweep. */
-export const klcStateAt = (uri: string, split: KlcSplit): 'keep' | 'sweep' | 'mixed' => {
-  const u = normUri(uri)
-  if (split.kept.some(k => u.startsWith(k.uri))) return 'keep'
-  if (split.kept.some(k => k.uri.startsWith(u))) return 'mixed'
-  return 'sweep'
-}
-
-/** Kept bytes inside `uri` (for proportional splits at mixed nodes). */
-export const klcKeptWithin = (uri: string, split: KlcSplit): number => {
-  const u = normUri(uri)
-  return split.kept.reduce((s, k) => s + (k.uri.startsWith(u) ? k.b : 0), 0)
-}
-
 /** The mark-state axis the page filters on: `keep`/`sweep` are effective
- * decisions (a `keep_last_ckpt` mark counts as both — it splits its subtree),
- * `unmarked` is the review backlog. */
+ * decisions, `unmarked` is the review backlog. */
 export type MarkAxis = 'keep' | 'sweep' | 'unmarked'
 export const MARK_AXES: MarkAxis[] = ['keep', 'sweep', 'unmarked']
 
 /** Does a prefix's effective state fall inside the page's mark-state axis? */
-export const markAllowed = (state: MarkState, allowed: ReadonlySet<MarkAxis>): boolean =>
-  state === 'keep_last_ckpt' ? allowed.has('keep') || allowed.has('sweep') : allowed.has(state)
+export const markAllowed = (state: MarkState, allowed: ReadonlySet<MarkAxis>): boolean => allowed.has(state)
 
 /**
  * Scope the map to the mark states in `allowed` (the page's mark axis —
@@ -239,7 +169,6 @@ export interface UserStates extends Record<MarkState, number> {
 export function allUserStates(
   root: TreeNode,
   idx: MarkIndex,
-  klc?: KlcIndex,
   /** Canonicalize claim `owner` values (emails → user ids); claims are the
    * ownership WAL — a claimed subtree attributes wholly to its claimant,
    * overriding scan attribution until the pipeline catches up. */
@@ -252,33 +181,19 @@ export function allUserStates(
   // spread over it pro rata.
   const add = (u: string, f: MarkState, b: number, mix: Record<string, number>, mixB: number) => {
     let rec = out.get(u)
-    if (!rec) out.set(u, (rec = { keep: 0, keep_last_ckpt: 0, sweep: 0, unmarked: 0, mix: { keep: {}, keep_last_ckpt: {}, sweep: {}, unmarked: {} } }))
+    if (!rec) out.set(u, (rec = { keep: 0, sweep: 0, unmarked: 0, mix: { keep: {}, sweep: {}, unmarked: {} } }))
     rec[f] += b
     if (mixB > 0) for (const [c, cb] of Object.entries(mix)) if (cb > 0) rec.mix[f][c] = (rec.mix[f][c] ?? 0) + b * (cb / mixB)
-  }
-  // Settle `each(f, frac)` bytes at `uri` under `win` — KLC decomposes into
-  // its real keep/sweep proportions when the split is resolvable.
-  const settle = (uri: string, nodeB: number, win: KeepRow | null, each: (f: MarkState, frac: number) => void) => {
-    const f = stateOf(win)
-    if (f !== 'keep_last_ckpt' || !klc) return each(f, 1)
-    const split = klc.get(win!.prefix.endsWith('/') ? win!.prefix : win!.prefix + '/')
-    if (!split) return each(f, 1)
-    const rel = klcStateAt(uri, split)
-    if (rel !== 'mixed') return each(rel, 1)
-    const ratio = nodeB > 0 ? Math.min(1, klcKeptWithin(uri, split) / nodeB) : 0
-    each('keep', ratio)
-    each('sweep', 1 - ratio)
   }
   const walk = (n: TreeNode, uri: string, inhKeep: KeepRow | null, inhOwn: OwnerRow | null) => {
     const win = winRow(ctx, uri, inhKeep)
     const ownRow = winOwner(ctx, uri, inhOwn)
     const claimant = ownRow?.owner != null ? canon(ownRow.owner) : null
+    const f = stateOf(win)
     if (!ctx.below(uri)) {
       const mix = classMix(n)
-      settle(uri, n.b, win, (f, frac) => {
-        if (claimant) add(claimant, f, n.b * frac, mix, n.b)
-        else for (const [u, b] of n.us ?? []) if (b > 0) add(u, f, b * frac, mix, n.b)
-      })
+      if (claimant) add(claimant, f, n.b, mix, n.b)
+      else for (const [u, b] of n.us ?? []) if (b > 0) add(u, f, b, mix, n.b)
       return
     }
     const rest = new Map<string, number>(n.us ?? [])
@@ -292,10 +207,8 @@ export function allUserStates(
       for (const [cls, cb] of Object.entries(classMix(c))) restMix[cls] = Math.max(0, (restMix[cls] ?? 0) - cb)
     }
     const restMixB = Object.values(restMix).reduce((a, b) => a + b, 0)
-    settle(uri, n.b, win, (f, frac) => {
-      if (claimant) { if (restB > 0) add(claimant, f, restB * frac, restMix, restMixB) }
-      else for (const [u, b] of rest) if (b > 0) add(u, f, b * frac, restMix, restMixB)
-    })
+    if (claimant) { if (restB > 0) add(claimant, f, restB, restMix, restMixB) }
+    else for (const [u, b] of rest) if (b > 0) add(u, f, b, restMix, restMixB)
   }
   for (const b of root.c ?? []) walk(b, `gs://${b.n}`, null, null)
   return out
@@ -305,42 +218,28 @@ export function allUserStates(
  * MarkState totals (bytes) for one subtree — the "of the current view, how much is
  * keep / sweep / undecided" rollup. `uri` is the node's full URI (`''` for
  * the artifact root, whose children are buckets); marks inherited from
- * ancestors of `uri` are folded in. KLC decomposes via `klc` when given —
- * bytes under an unresolvable KLC mark stay in `keep_last_ckpt`.
+ * ancestors of `uri` are folded in.
  */
 export function subtreeStateTotals(
   node: TreeNode,
   uri: string,
   idx: MarkIndex,
-  klc?: KlcIndex,
 ): Record<MarkState, number> {
   const ctx = stateWalkCtx(idx.keeps)
-  const out: Record<MarkState, number> = { keep: 0, keep_last_ckpt: 0, sweep: 0, unmarked: 0 }
-  const settle = (u: string, b: number, win: KeepRow | null) => {
-    if (b <= 0) return
-    const f = stateOf(win)
-    if (f !== 'keep_last_ckpt' || !klc) { out[f] += b; return }
-    const split = klc.get(win!.prefix.endsWith('/') ? win!.prefix : win!.prefix + '/')
-    if (!split) { out[f] += b; return }
-    const rel = klcStateAt(u, split)
-    if (rel === 'keep') out.keep += b
-    else if (rel === 'sweep') out.sweep += b
-    else {
-      const kept = Math.min(b, klcKeptWithin(u, split))
-      out.keep += kept
-      out.sweep += b - kept
-    }
+  const out: Record<MarkState, number> = { keep: 0, sweep: 0, unmarked: 0 }
+  const settle = (b: number, win: KeepRow | null) => {
+    if (b > 0) out[stateOf(win)] += b
   }
   const walk = (n: TreeNode, u: string, inherited: KeepRow | null) => {
     const win = winRow(ctx, u, inherited)
-    if (!ctx.below(u)) return settle(u, n.b, win)
+    if (!ctx.below(u)) return settle(n.b, win)
     let rest = n.b
     for (const c of n.c ?? []) {
       if (c.n.startsWith('(')) continue
       rest -= c.b
       walk(c, `${u}/${c.n}`, win)
     }
-    settle(u, rest, win)
+    settle(rest, win)
   }
   if (uri === '') {
     for (const b of node.c ?? []) walk(b, `gs://${b.n}`, null)
@@ -357,39 +256,6 @@ export function subtreeStateTotals(
   walk(node, `${scheme}${segs.join('/')}`, inherited)
   return out
 }
-
-const CKPT_SEG_RE = /^(step|checkpoint|ckpt|iter|epoch|global_?step)[-_]?\d+/i
-
-/**
- * Checkpoint-shaped: under a checkpoints path segment, named like one, or
- * ≥2 step-numbered children. Gates the `keep_last_ckpt` button — offering
- * it on arbitrary dirs was confusing. (Scan post-proc will flag this
- * properly per specs/actions-ledger.md; these heuristics cover the interim.)
- */
-// A dir is checkpoint-shaped when IT is the checkpoints dir (its own name),
-// or it directly holds one (a run dir with `checkpoints/` under it), or it
-// holds ≥ 2 step-numbered children. Being *somewhere under* a `checkpoints/`
-// ancestor is not enough — that offered "keep last ckpt" on every leaf of a
-// bucket's `checkpoints/` tree. Children below the pixel budget aren't
-// loaded, so a dir whose shape is unknown is not offered (the CLI still
-// accepts KLC anywhere). Better still would be an ahead-of-time flag on each
-// index row (specs/children-table-selection.md § later).
-/** A run directory: ≥ 2 step-numbered children (`step-100`, `step-200`, …).
- * `keep_last_ckpt` at such a dir keeps the highest step and sweeps the rest. */
-const isRunDir = (n: TreeNode): boolean =>
-  (n.c ?? []).filter(c => CKPT_SEG_RE.test(c.n)).length >= 2
-
-/** Offer keep-last-ckpt only when checkpoints sit within ~2 levels below the
- * node: the run dir itself, or its parent (a `checkpoints/` dir or a group of
- * runs). Higher up (`marin/`, whose runs are 4–5 levels down) it is far too
- * broad — one step would be kept across every run — so it is not offered
- * there; the CLI/API still accepts KLC at any depth for a curated run list.
- * A node's own name is intentionally not enough: naming a dir `checkpoints`
- * doesn't put the steps within reach if they are deep below.
- * Folding can hide children, so an unknown shape is simply not offered. */
-export const looksCkpt = (n: TreeNode, _uri?: string): boolean =>
-  isRunDir(n) ||
-  (n.c ?? []).some(isRunDir)
 
 /** Reviewed = covered by any mark (deepest-wins ancestor or own). */
 export const reviewedBytes = (rows: SweepRow[], idx: MarkIndex): number =>
