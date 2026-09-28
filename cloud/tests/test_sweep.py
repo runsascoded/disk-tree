@@ -1,4 +1,4 @@
-"""Mark & sweep engine: plan model, versioning guard, manifest builder, executor."""
+"""Plan-driven deletion engine: plan model, versioning guard, manifest builder, executor."""
 from __future__ import annotations
 
 import datetime as dt
@@ -51,14 +51,12 @@ def test_load_plan_normalizes(tmp_path: Path) -> None:
         "name": "old ckpts",
         "bucket": BUCKET,
         "sweep": [f"s3://{BUCKET}/marin/ckpt/", "marin/scratch"],
-        "keep": [f"s3://{BUCKET}/marin/ckpt/keep/"],
     }))
     plan = load_plan(p)
     assert plan == Plan(
         name="old ckpts",
         bucket=BUCKET,
         sweep=["marin/ckpt/", "marin/scratch/"],
-        keep=["marin/ckpt/keep/"],
         plan_id=7,
     )
 
@@ -94,17 +92,16 @@ def _read_manifest(path: Path) -> list[tuple]:
     ).fetchall()
 
 
-def test_build_manifest_deepest_wins(tmp_path: Path) -> None:
+def test_build_manifest_covers_staged_prefixes(tmp_path: Path) -> None:
     l2 = tmp_path / "l2.parquet"
     _write_l2(l2, [
         (".", 999, 0, "dir"),                     # bucket root — excluded (not a file)
         ("marin/ckpt", 500, 0, "dir"),            # dir row — excluded
         ("marin/ckpt/a", 100, 111, "file"),       # swept
-        ("marin/ckpt/sub/d", 200, 222, "file"),   # swept (deeper under sweep prefix)
-        ("marin/ckpt/keep/b", 400, 333, "file"),  # carved out by deeper keep prefix
+        ("marin/ckpt/sub/d", 200, 222, "file"),   # swept (deeper under the sweep prefix)
         ("marin/other/c", 800, 444, "file"),      # not under any sweep prefix
     ])
-    plan = Plan(name="p", bucket=BUCKET, sweep=["marin/ckpt/"], keep=["marin/ckpt/keep/"], plan_id=3)
+    plan = Plan(name="p", bucket=BUCKET, sweep=["marin/ckpt/"], plan_id=3)
     out = tmp_path / "run"
     summary = build_manifest(str(l2), plan, str(out))
 
@@ -117,7 +114,6 @@ def test_build_manifest_deepest_wins(tmp_path: Path) -> None:
         "name": "p",
         "bucket": BUCKET,
         "sweep": ["marin/ckpt/"],
-        "keep": ["marin/ckpt/keep/"],
         "objects": 2,
         "bytes": 300,
         "manifest": str(out / "manifest" / f"{BUCKET}.parquet"),
@@ -125,26 +121,11 @@ def test_build_manifest_deepest_wins(tmp_path: Path) -> None:
     assert json.loads((out / "plan-summary.json").read_text()) == summary
 
 
-def test_build_manifest_no_keep(tmp_path: Path) -> None:
-    l2 = tmp_path / "l2.parquet"
-    _write_l2(l2, [
-        ("marin/ckpt/a", 100, 111, "file"),
-        ("marin/other/c", 800, 444, "file"),
-    ])
-    plan = Plan(name="p", bucket=BUCKET, sweep=["marin/ckpt/"], plan_id=1)
-    out = tmp_path / "run"
-    summary = build_manifest(str(l2), plan, str(out))
-    assert _read_manifest(out / "manifest" / f"{BUCKET}.parquet") == [
-        ("marin/ckpt/a", 100, 111, "marin/ckpt/"),
-    ]
-    assert (summary["objects"], summary["bytes"], summary["keep"]) == (1, 100, [])
-
-
 def test_prefix_free_and_eligible() -> None:
     assert prefix_free(["a/b/", "a/", "c/"]) == ["a/", "c/"]
-    assert eligible("a/b/x", ["a/"], ["a/b/"]) is False  # deeper keep wins
-    assert eligible("a/y", ["a/"], ["a/b/"]) is True
-    assert eligible("z/q", ["a/"], []) is False  # no sweep match
+    assert eligible("a/b/x", ["a/"]) is True
+    assert eligible("a/y", ["a/", "c/"]) is True
+    assert eligible("z/q", ["a/"]) is False  # no sweep match
 
 
 class _FakeStore:
@@ -196,20 +177,20 @@ def _run_with_manifest(tmp_path: Path) -> Path:
         ("marin/ckpt/a", 100, 111, "file"),
         ("marin/ckpt/sub/d", 200, 222, "file"),
         ("marin/ckpt/gone", 300, 333, "file"),
-        ("marin/ckpt/keep/b", 400, 444, "file"),  # carved out — not in manifest
+        ("marin/other/c", 400, 444, "file"),  # outside the plan — not in manifest
     ])
-    plan = Plan(name="p", bucket=BUCKET, sweep=["marin/ckpt/"], keep=["marin/ckpt/keep/"], plan_id=3)
+    plan = Plan(name="p", bucket=BUCKET, sweep=["marin/ckpt/"], plan_id=3)
     out = tmp_path / "run"
     build_manifest(str(l2), plan, str(out))
     return out
 
 
 # Live store: a matches; sub/d overwritten (mtime drift); gone is absent;
-# keep/b live but carved out (ignored); new live + eligible → drift.
+# other/c live but outside the plan (ignored); new live + eligible → drift.
 _LIVE = {
     "marin/ckpt/a": (100, 111),
     "marin/ckpt/sub/d": (200, 999),
-    "marin/ckpt/keep/b": (400, 444),
+    "marin/other/c": (400, 444),
     "marin/ckpt/new": (50, 555),
 }
 _COUNTS = {"deleted_objects": 1, "deleted_bytes": 100, "skipped_gone": 1,
@@ -243,7 +224,7 @@ def test_execute_for_real_deletes_matched(tmp_path: Path) -> None:
     assert {k: s[k] for k in _COUNTS} == _COUNTS
     assert s["mode"] == "real"
     assert "marin/ckpt/a" not in store.objects  # the one matched key is gone
-    assert set(store.objects) == {"marin/ckpt/sub/d", "marin/ckpt/keep/b", "marin/ckpt/new"}
+    assert set(store.objects) == {"marin/ckpt/sub/d", "marin/other/c", "marin/ckpt/new"}
     assert s["bands"] == [{"prefix": "marin/ckpt/", "bytes": 100, "objects": 1,
                            "gone": 1, "overwritten": 1, "drift_new": 1}]
 
@@ -334,7 +315,7 @@ def test_delete_undo_purge_lifecycle(tmp_path: Path) -> None:
     store = _FakeVersionedStore({
         "marin/ckpt/a": (100, 111),         # matches → deleted
         "marin/ckpt/sub/d": (200, 999),     # overwritten → skipped
-        "marin/ckpt/keep/b": (400, 444),    # carved out → ignored
+        "marin/other/c": (400, 444),        # outside the plan → ignored
         "marin/ckpt/new": (50, 555),        # drift → ignored
     })
 
@@ -417,7 +398,6 @@ def test_build_expiry_manifest(tmp_path: Path) -> None:
     assert s == {
         "bucket": BUCKET,
         "sweep": ["tmp/ttl=1d/", "tmp/ttl=14d/"],
-        "keep": [],
         "objects": 2,
         "bytes": 30,
         "manifest": str(out / "manifest" / f"{BUCKET}.parquet"),

@@ -5,10 +5,10 @@ network: the pure ``check_*`` functions take already-fetched data and return a
 :class:`Check`; :func:`run_checks` does the I/O and calls them.
 
 Motivating failure (2026-08-31 ``/users`` outage): the data pipeline succeeded
-but a scan's path-index footer never synced to D1, so ``/api/marks/totals`` fell
-back to parsing the parquet footer on a cold isolate, blew the Worker CPU budget
-(``1102``), and the per-user columns went blank. No unit test could catch that —
-only something that exercises the running site against the published scan.
+but a scan's path-index footer never synced to D1, so the site fell back to
+parsing the parquet footer on a cold isolate, blew the Worker CPU budget
+(``1102``), and the page went blank. No unit test could catch that — only
+something that exercises the running site against the published scan.
 """
 
 from __future__ import annotations
@@ -69,23 +69,6 @@ def check_freshness(scans: list[str], max_age_days: int, today: dt.date) -> Chec
     return Check("freshness", age <= max_age_days, f"latest scan {latest} ({age}d old, limit {max_age_days}d)")
 
 
-def check_totals(status: int, body: dict | None, max_ms: int) -> Check:
-    """200 + served from the D1 index (not footer-parse/coarse) + non-empty
-    users + under the compute budget. This is the exact 2026-08-31 assertion."""
-    if status != 200 or body is None:
-        return Check("marks/totals", False, f"HTTP {status} (want 200 JSON)")
-    idx = (body.get("computed") or {}).get("index")
-    ms = (body.get("computed") or {}).get("ms")
-    n_users = len(body.get("users") or {})
-    if idx != "d1":
-        return Check("marks/totals", False, f"index={idx!r} (want 'd1' — footer/coarse fallback risks 1102); users={n_users}")
-    if n_users == 0:
-        return Check("marks/totals", False, "users empty")
-    if ms is None or ms >= max_ms:
-        return Check("marks/totals", False, f"index=d1 users={n_users} but {ms}ms ≥ {max_ms}ms budget")
-    return Check("marks/totals", True, f"200 · index=d1 · users={n_users} · {ms}ms")
-
-
 def check_status(name: str, status: int, ok_codes: tuple[int, ...] = (200, 206)) -> Check:
     return Check(name, status in ok_codes, f"HTTP {status} (want {'/'.join(map(str, ok_codes))})")
 
@@ -98,20 +81,16 @@ def run_checks(
     date: str | None = None,
     *,
     max_age_days: int = 2,
-    max_ms: int = 25000,
     today: dt.date | None = None,
     get: Getter | None = None,
     subdir: str = "",
-    totals: bool = True,
 ) -> tuple[str | None, list[Check]]:
     """Fetch + evaluate. Returns (resolved_date, checks). ``get`` is injected in
     tests; in production it defaults to a token-bound urllib fetch. ``subdir``
     is the store's snapshot subdir under ``/data/`` (the site's
     ``SNAPSHOTS_SUBDIR``: ``cw`` for the CoreWeave deployment, empty for the
     default store) — without it the bare ``/data/scans.json`` is the root
-    listing, empty on a store that only publishes under a subdir. ``totals``
-    off skips the ``/api/marks/totals`` probe — that route folds the actions
-    ledger (gcs), which a plan-first store (cw) doesn't have."""
+    listing, empty on a store that only publishes under a subdir."""
     base = base.rstrip("/")
     sub = f"{subdir.strip('/')}/" if subdir.strip("/") else ""
     today = today or dt.datetime.now(dt.timezone.utc).date()
@@ -151,16 +130,12 @@ def run_checks(
         checks.append(Check("resolve-scan", False, "no --date and scans.json gave none"))
         return None, checks
 
-    # 2. marks/totals — the D1-index serving path (actions-ledger stores only).
-    if totals:
-        t_status, t_body = get_json(f"/api/marks/totals?date={date}")
-        checks.append(check_totals(t_status, t_body, max_ms))
-
-    # 3. subtree — floor-free drill (root, default pixel budget).
+    # 2. subtree — floor-free drill (root, default pixel budget), the D1-index
+    # serving path.
     st_status, _ = get(f"{base}/api/subtree?date={date}&w=128&h=128", None)
     checks.append(check_status("subtree", st_status, (200,)))
 
-    # 4. the published scan meta.
+    # 3. the published scan meta.
     m_status, _ = get(f"{base}/data/{sub}{date}/meta.json", None)
     checks.append(check_status("data/meta.json", m_status, (200,)))
 

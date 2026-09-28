@@ -350,14 +350,14 @@ def load_table(bucket: str, date: str) -> Table:
 
 
 def load_runs(url: str, token: str) -> list[dict]:
-    from .mark import get_json
+    from .site import get_json
 
     return get_json(url, token, "/api/db/deletion_runs", {"limit": 500}).get("rows", [])
 
 
 def load_bands(url: str, token: str, run_ids: Iterable[str]) -> list[str]:
     """Band prefixes (``bucket/dir``) of the given runs, from ``deletion_bands``."""
-    from .mark import get_json
+    from .site import get_json
 
     ids = set(run_ids)
     rows = get_json(url, token, "/api/db/deletion_bands", {"limit": 5000}).get("rows", [])

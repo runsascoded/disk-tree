@@ -1,22 +1,19 @@
-"""CoreWeave S3 mark & sweep — plan-driven deletion (specs/cw-sweep.md).
+"""CoreWeave S3 plan-driven deletion (specs/staged-delete.md).
 
-The flow is mark -> plan -> dispatch -> run. A **plan** is a curated list of
-prefixes (an admin's explicit choice, assembled from `sweep`-marked dirs); it
-replaces gcs's owner==marker attribution slice wholesale — the curated list *is*
-the eligibility decision, so none of gcs's classification / vote / owner logic
-ports over.
+The flow is stage -> dispatch -> run. A **plan** is the staged set (or an
+admin's curated list of prefixes); the plan *is* the eligibility decision, so
+no classification / owner logic applies.
 
-This module (Slice 1) carries the plan model, the CAIOS boto3 client + the
+This module carries the plan model, the CAIOS boto3 client + the
 versioning-enabled guard, and the **manifest builder**: it expands a plan's
 prefixes into an object-level manifest from the pinned layer-2 parquet (the
 canonical per-object scan output at `cw-l2/<date>/<bucket>.parquet`), so a run
-only ever deletes what was reviewed. The executor (the boto3 delete loop,
-sweep_exec-derived) lands in a following slice and consumes this manifest.
+only ever deletes what was reviewed. The executor (the boto3 delete loop)
+consumes this manifest.
 
-Eligibility is deepest-mark-wins: a key is swept iff its longest matching plan
-prefix is a `sweep` prefix (a deeper `keep` prefix carves it back out). The
-layer-2 parquet has no ETag, so the run's overwrite guard keys off (size, mtime)
-captured here, not a version id.
+A key is swept iff some plan prefix covers it. The layer-2 parquet has no
+ETag, so the run's overwrite guard keys off (size, mtime) captured here, not a
+version id.
 """
 from __future__ import annotations
 
@@ -26,7 +23,7 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -55,7 +52,7 @@ class SweepError(Exception):
 
 @dataclass
 class Plan:
-    """A curated deletion plan: prefixes to sweep, minus deeper keep carve-outs.
+    """A deletion plan: the prefixes to sweep.
 
     Prefixes are relative key prefixes (e.g. `marin/checkpoints/old/`), already
     stripped of any `s3://<bucket>/` scheme and normalized to a trailing slash.
@@ -64,13 +61,12 @@ class Plan:
     name: str
     bucket: str
     sweep: list[str]
-    keep: list[str] = field(default_factory=list)
     plan_id: int | None = None
 
     def validate(self) -> None:
         if not self.sweep:
             raise SweepError(f"plan {self.name!r} has no sweep prefixes")
-        for p in (*self.sweep, *self.keep):
+        for p in self.sweep:
             if not PREFIX_RE.match(p):
                 raise SweepError(f"bad prefix {p!r} (want a relative key prefix ending in '/')")
 
@@ -88,14 +84,13 @@ def normalize_prefix(raw: str, bucket: str) -> str:
 
 
 def load_plan(path: str | Path) -> Plan:
-    """Read a plan.json (as written by /api/sweep/dispatch), normalizing prefixes."""
+    """Read a plan.json (as written by /api/plan-sweep/dispatch), normalizing prefixes."""
     d = json.loads(Path(path).read_text())
     bucket = d.get("bucket", CW_BUCKET)
     plan = Plan(
         name=d["name"],
         bucket=bucket,
         sweep=[normalize_prefix(p, bucket) for p in d.get("sweep", [])],
-        keep=[normalize_prefix(p, bucket) for p in d.get("keep", [])],
         plan_id=d.get("plan_id"),
     )
     plan.validate()
@@ -125,14 +120,11 @@ def versioning_enabled(client: "S3Client", bucket: str) -> bool:
 
 
 def _eligible_query() -> str:
-    """DuckDB SELECT of the file rows eligible under a plan (deepest-mark-wins).
+    """DuckDB SELECT of the file rows eligible under a plan.
 
-    Reads the layer-2 parquet from the `L2` DuckDB variable; `$sweep`/`$keep`
-    bind lists of relative key prefixes. A row is kept iff its longest matching
-    sweep prefix is longer than its longest matching keep prefix (no match ->
-    length -1), i.e. the deepest mark wins and keep carves out. `$keep` is sent
-    as `['']` when empty (length 0, beaten by any real sweep prefix) so the
-    lambda has a typed, non-empty list to filter.
+    Reads the layer-2 parquet from the `L2` DuckDB variable; `$sweep` binds a
+    list of relative key prefixes. A row is kept iff some sweep prefix covers
+    its path.
     """
     return """
         SELECT
@@ -142,10 +134,7 @@ def _eligible_query() -> str:
           CASE WHEN path LIKE '%/%' THEN regexp_replace(path, '/[^/]*$', '/') ELSE '' END AS dir
         FROM read_parquet(getvariable('L2'))
         WHERE kind = 'file'
-          AND coalesce(list_max(list_transform(
-                list_filter($sweep, p -> starts_with(path, p)), p -> length(p))), -1)
-            > coalesce(list_max(list_transform(
-                list_filter($keep, p -> starts_with(path, p)), p -> length(p))), -1)
+          AND len(list_filter($sweep, p -> starts_with(path, p))) > 0
     """
 
 
@@ -163,7 +152,7 @@ def build_manifest(l2_path: str, plan: Plan, out_dir: str) -> dict:
     con = duckdb.connect()
     con.execute(f"SET memory_limit='{os.environ.get('DUCKDB_MEM', '8GB')}'")
     con.execute("SET VARIABLE L2 = ?", [l2_path])
-    params = {"sweep": plan.sweep, "keep": plan.keep or [""]}
+    params = {"sweep": plan.sweep}
     con.execute(
         f"COPY ({_eligible_query()} ORDER BY name) TO '{manifest_path}' (FORMAT PARQUET)",
         params,
@@ -177,7 +166,6 @@ def build_manifest(l2_path: str, plan: Plan, out_dir: str) -> dict:
         "name": plan.name,
         "bucket": plan.bucket,
         "sweep": plan.sweep,
-        "keep": plan.keep,
         "objects": int(objects),
         "bytes": int(byts),
         "manifest": str(manifest_path),
@@ -243,7 +231,6 @@ def build_expiry_manifest(
     summary = {
         "bucket": bucket,
         "sweep": [f"tmp/ttl={n}d/" for n in by_ttl],
-        "keep": [],
         "objects": sum(v["objects"] for v in by_ttl.values()),
         "bytes": sum(v["bytes"] for v in by_ttl.values()),
         "manifest": str(manifest_path),
@@ -265,15 +252,9 @@ def prefix_free(prefixes: list[str]) -> list[str]:
     return out
 
 
-def _lp_len(key: str, prefixes: list[str]) -> int:
-    """Length of the longest prefix in `prefixes` that is a prefix of `key` (-1 if none)."""
-    return max((len(p) for p in prefixes if key.startswith(p)), default=-1)
-
-
-def eligible(key: str, sweep: list[str], keep: list[str]) -> bool:
-    """Deepest-mark-wins: a key is swept iff its longest matching sweep prefix is
-    longer than its longest matching keep prefix (same rule as the manifest SQL)."""
-    return _lp_len(key, sweep) > _lp_len(key, keep)
+def eligible(key: str, sweep: list[str]) -> bool:
+    """A key is swept iff some sweep prefix covers it (same rule as the manifest SQL)."""
+    return any(key.startswith(p) for p in sweep)
 
 
 def _dir_of(key: str) -> str:
@@ -323,7 +304,6 @@ def execute_plan(
     plan_summary = json.loads((run / "plan-summary.json").read_text())
     bucket = plan_summary["bucket"]
     sweep = plan_summary["sweep"]
-    keep = plan_summary.get("keep", [])
     roots = prefix_free(sweep)
 
     client = client or s3_client()
@@ -375,11 +355,11 @@ def execute_plan(
                         counters["skipped_overwritten"] += 1
                         band_rec(band)["overwritten"] += 1
                         log_rows.append((key, size, mtime, "skipped_overwritten", _dir_of(key), band))
-                elif eligible(key, sweep, keep):
+                elif eligible(key, sweep):
                     # live, under a swept prefix, but not in the reviewed manifest → new since scan
                     counters["drift_new"] += 1
                     band_rec(band)["drift_new"] += 1
-                # else: kept carve-out or outside the plan — expected, ignore
+                # else: outside the plan — expected, ignore
             token = resp.get("NextContinuationToken")
             if not resp.get("IsTruncated"):
                 break
