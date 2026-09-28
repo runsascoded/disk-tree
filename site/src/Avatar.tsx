@@ -20,11 +20,16 @@ export const avatarHue = (s: string): number => {
 export const whoToHandle = (who: string): string =>
   who.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
 
-export function Avatar({ github, name, size = 20 }: { github?: string; name: string; size?: number }) {
+// `github` → github.com/<handle>.png (curated, never guessed). `src` → an
+// explicit image URL (a share link's `subject.avatar` — Slack/arbitrary, chosen
+// by the admin at mint time, so it's as trusted as a curated handle). Either
+// falls back to the colored initial if absent or if the image 404s.
+export function Avatar({ github, src, name, size = 20 }: { github?: string; src?: string; name: string; size?: number }) {
   const [failed, setFailed] = useState(false)
   const label = name.trim()
   const initial = label ? label[0].toUpperCase() : '?'
-  if (failed || !github) {
+  const url = src ?? (github ? `https://github.com/${github}.png?size=${size * 2}` : undefined)
+  if (failed || !url) {
     return (
       <span
         className="user-avatar fallback"
@@ -38,7 +43,7 @@ export function Avatar({ github, name, size = 20 }: { github?: string; name: str
   return (
     <img
       className="user-avatar"
-      src={`https://github.com/${github}.png?size=${size * 2}`}
+      src={url}
       width={size}
       height={size}
       alt={label}

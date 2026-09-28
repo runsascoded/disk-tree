@@ -209,17 +209,26 @@ function UserMenu() {
   // Public deploys have no auth — no sign-in affordance.
   if (!ident) return AUTH_MODE === 'public' ? null : <a className="tb-signin" href={signInUrl()}>sign in</a>
   const who = myUser ?? ident.email
+  // A guest (share-link) session shows its own subject — the name + avatar the
+  // admin minted it with — not the owner-registry lookup (which an external
+  // guest isn't in, so it'd fall back to an email-derived initial + "ping Ryan").
+  const guest = ident.guest
+  const dispName = guest ? (ident.name ?? ident.email) : shortName(who)
   return (
     <>
       {tokenOpen && <TokenModal onClose={() => setTokenOpen(false)} />}
-      <button type="button" className="tb-avatar" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label={`Signed in as ${shortName(who)}`} title={shortName(who)}>
-        <Avatar github={ghHandle(who)} name={shortName(who)} size={26} />
+      <button type="button" className="tb-avatar" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label={`Signed in as ${dispName}`} title={dispName}>
+        {guest
+          ? <Avatar src={ident.avatar} name={dispName} size={26} />
+          : <Avatar github={ghHandle(who)} name={shortName(who)} size={26} />}
       </button>
       {m.open && (
         <FloatingPortal>
           <FloatingFocusManager context={m.context} modal={false}>
             <div className="menu-pop user-menu" ref={m.refs.setFloating} style={m.floatingStyles} {...m.getFloatingProps()}>
-              <UserCard who={who} extra={<SessionLines email={ident.email} user={myUser} emails={emails} />} />
+              {guest
+                ? <GuestCard name={dispName} avatar={ident.avatar} email={ident.email} />
+                : <UserCard who={who} extra={<SessionLines email={ident.email} user={myUser} emails={emails} />} />}
               <hr />
               <Explain text="Byte units, site-wide: binary (TiB) ↔ decimal (TB)">
                 <button type="button" role="menuitem" className="mi" onClick={() => toggleUnits()}>
@@ -242,6 +251,22 @@ function UserMenu() {
         </FloatingPortal>
       )}
     </>
+  )
+}
+
+// A guest (share-link) session's card: the subject the admin minted — avatar +
+// name + (if present) the bound email. No registry framing (storage-breakdown
+// link, alias lines, "not mapped" warning) — a guest isn't an owner.
+function GuestCard({ name, avatar, email }: { name: string; avatar?: string; email: string }) {
+  return (
+    <div className="user-card">
+      <div className="uc-head">
+        <Avatar src={avatar} name={name} size={38} />
+        <div className="uc-id"><b>{name}</b></div>
+      </div>
+      {email.includes('@') && <div className="uc-sub">{email}</div>}
+      <div className="uc-session"><div className="dim">guest share link</div></div>
+    </div>
   )
 }
 

@@ -27,6 +27,11 @@ export interface Store {
    *  it follows `sweep`: gcs's actions WAL (`/api/actions`) or cw's plan-first
    *  marks (`/api/plan-marks`, adapted in `marks.ts`). Off = the plain map. */
   marks: boolean
+  /** Who may mark: `admin` — marking is a staff decision, everyone else
+   *  proposes deletions by staging (the actions-ledger store, where guests and
+   *  less-trusted collaborators browse); `viewer` — any full viewer marks (the
+   *  plan-first store, staff-only). Read-only share links never mark. */
+  marking: 'admin' | 'viewer'
   /** Attribution + ownership: the owner axes (`?o=`), claims / assignments,
    *  the `/users`, `/marks`, `/assignments` pages and the email → user map.
    *  Only the actions-ledger store has these. */
@@ -68,6 +73,7 @@ const REGISTRY: Store[] = [
     ogImage: '/og.jpg',
     prices: false,
     marks: true,
+    marking: 'viewer',
     owners: false,
     sweep: 'plan',
     lifecycle: 'job/cw-lifecycle.json',
@@ -92,6 +98,7 @@ const REGISTRY: Store[] = [
     ogImage: '/og.jpg',
     prices: true,
     marks: true,
+    marking: 'admin',
     owners: true,
     sweep: 'owner',
     buckets: ['marin-us-central2', 'marin-us-central1', 'marin-us-east1', 'marin-us-east5', 'marin-us-west4', 'marin-eu-west4'],
@@ -115,6 +122,7 @@ const REGISTRY: Store[] = [
     ogImage: '/og.jpg',
     prices: false,
     marks: false,
+    marking: 'viewer',
     owners: false,
     sweep: 'plan',
     buckets: ['ctbk', 'crashes', 'jc-taxes'],

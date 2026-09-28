@@ -103,6 +103,10 @@ export const TEAM_DOMAIN = 'https://openathena-ai-pages.cloudflareaccess.com'
 
 /** The deployment's base scope: what `requireViewer` asks for. */
 export const baseScope = (env: Env): string => env.BASE_SCOPE ?? GCS_SCOPE
+/** The read-only viewer tier (`gcs:read` / `cw:read`): every read endpoint
+ *  admits it, no write does. What a share link mints by default
+ *  (specs/share-link-hardening.md). */
+export const baseReadScope = (env: Env): string => `${baseScope(env)}:read`
 
 const staffDomain = (env: Env) => env.STAFF_DOMAIN ?? 'openathena.ai'
 
@@ -235,8 +239,20 @@ export async function requireScope(ctx: Ctx, scope: string): Promise<Identity | 
 
 export { hasScope }
 
-/** Any authenticated viewer of this deployment (reads). */
-export const requireViewer = (ctx: Ctx): Promise<Identity | Response> => requireScope(ctx, baseScope(ctx.env))
+export async function requireAnyScope(ctx: Ctx, scopes: string[]): Promise<Identity | Response> {
+  if (ctx.env.PUBLIC_READ && scopes.includes(baseScope(ctx.env))) return requireScope(ctx, baseScope(ctx.env))
+  const id = await identify(ctx)
+  if (!id) return json({ error: 'unauthenticated' }, 401)
+  if (!scopes.some(sc => id.scopes.includes(sc)) && !id.scopes.includes('*')) return json({ error: 'forbidden' }, 403)
+  return id
+}
+/** Any authenticated viewer of this deployment (reads): the full viewer scope
+ *  or the read-only tier. */
+export const requireViewer = (ctx: Ctx): Promise<Identity | Response> =>
+  requireAnyScope(ctx, [baseScope(ctx.env), baseReadScope(ctx.env)])
+/** Staging (the opt-in trash proposal) and other non-admin writes: the full
+ *  base scope — a read-only guest link can't. */
+export const requireStager = (ctx: Ctx): Promise<Identity | Response> => requireScope(ctx, baseScope(ctx.env))
 /** An admin (plan writes + sweep dispatch). */
 export const requireAdmin = (ctx: Ctx): Promise<Identity | Response> => requireScope(ctx, ADMIN_SCOPE)
 

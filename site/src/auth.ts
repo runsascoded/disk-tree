@@ -5,6 +5,7 @@
 // (`/auth/google`), an emailed code (`/auth/email/*`), or by redeeming a
 // `?key=` share link (specs/oidc-cutover-cw.md).
 import { displayName, useForgetWhoami, useWhoami, type Whoami, type WhoamiSource } from '@open-athena/auth/react'
+import { DEFAULT_STORE } from './stores'
 
 // Deployment seam (specs/denovo-factor.md): the whoami source is a build-time
 // flag. `edge` = the whole host sits behind a CF Access gate
@@ -81,11 +82,33 @@ export function useIdent(): Ident | null {
   return { email, name, guest: whoami.kind === 'grant', avatar: whoami.subject?.avatar ?? undefined }
 }
 
+/** Scopes on the current identity, or null when nobody is signed in. */
+function useScopes(): string[] | null {
+  const { whoami } = useWhoami(WHOAMI_SOURCE, { devIdentity: devIdentity() })
+  return whoami?.scopes ?? null
+}
+
+const hasBase = (scopes: string[]): boolean => scopes.includes(DEFAULT_STORE.key) || scopes.includes('*')
+
 /**
- * Mark/claim writes require an email-bearing identity — anonymous guest
- * links are read-only (the server enforces the same rule).
+ * Who may mark (keep/sweep/owner): `Store.marking` — `admin` where marking is
+ * a staff decision and everyone else proposes deletions by staging (gcs,
+ * specs/share-link-hardening.md), `viewer` where any full viewer marks (cw's
+ * plan-first marks). Read-only guest links (`<store>:read`) never can. The
+ * server enforces the same (`requireAdmin` / `requireStager`).
  */
 export function useCanMark(): boolean {
-  const { whoami } = useWhoami(WHOAMI_SOURCE, { devIdentity: devIdentity() })
-  return !!whoami?.email
+  const scopes = useScopes()
+  if (scopes === null) return false
+  if (DEFAULT_STORE.marking === 'admin') return scopes.includes('admin') || scopes.includes('*')
+  return hasBase(scopes)
+}
+
+/**
+ * Staging (the opt-in trash proposal) needs the full base scope; a read-only
+ * guest link cannot. The server enforces the same via `requireStager`.
+ */
+export function useCanStage(): boolean {
+  const scopes = useScopes()
+  return scopes !== null && hasBase(scopes)
 }
