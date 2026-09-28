@@ -9,7 +9,7 @@ pages_build_output_dir = "dist"
 compatibility_date = "2026-06-01"
 
 # Mark & sweep store (specs/cw-sweep.md): D1 holds the keep/sweep mark ledger,
-# executed-deletion records, and the admin allowlist (site/migrations/cw/0001–0003).
+# executed-deletion records, and the admin allowlist (site/migrations/cw/0001_init.sql).
 # Create with `wrangler d1 create oa-cw-s3-usage-db` and paste the returned
 # database_id below, then `wrangler d1 migrations apply oa-cw-s3-usage-db
 # --remote` (needs CLOUDFLARE_ACCOUNT_ID=74981a43… + the D1-scoped token).
@@ -43,7 +43,7 @@ ACCESS_TEAM_DOMAIN = "https://openathena-ai-pages.cloudflareaccess.com"
 ACCESS_AUD = "1de65a9ffe270d860911b786720fefe00123e79e71ca038c311479e468dc8378"
 # Domain whose sign-in identities are staff (admin/sweep scope). CoreWeave
 # viewers (coreweave.com) can see the dashboard but are not staff; the
-# sweep-dispatch admin gate is the site/migrations/cw/0004 `admin_emails`
+# sweep-dispatch admin gate is the `admin_emails` (site/migrations/cw/0001_init.sql)
 # allowlist on top of this (`ADMIN_EMAILS` says the table exists here).
 STAFF_DOMAIN = "openathena.ai"
 ADMIN_EMAILS = "1"
