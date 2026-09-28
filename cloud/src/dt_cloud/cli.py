@@ -835,6 +835,82 @@ def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None,
     print(json.dumps(s))
 
 
+@main.command("over-time-groups")
+@option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket the D1 `path` dirs resolve against")
+@option("-g", "--gen", required=True, help="Generation id for the published index dirs (the run's, e.g. the job's $GEN)")
+@option("-K", "--group-size", default=None, type=int, help="Scans per sealed group (default: dt_cloud.overtime.OVER_TIME_GROUP_SIZE)")
+@option("-l", "--layer2-prefix", default=None, help="Layer-2 dir template with `{scan}` (default: $LAYER2_PREFIX, e.g. cw-l2/{scan}/)")
+@option("-m", "--mem", default="8GB", help="DuckDB memory limit")
+@option("-n", "--dry-run", is_flag=True, help="Print the groups that would be built; write nothing")
+@option("-o", "--out", "out_dir", type=Path, required=True, help="Work dir for the group builds")
+@option("-p", "--publish-root", default=None, help="Where the published dirs live (default /gcs/<bucket>, the Batch mount); groups land at <root>/<layer2>/index/<gen>/")
+@option("-r", "--data-root", default=None, help="Root the D1 `path` pointer dirs resolve against (default: the publish root)")
+@option("-t", "--threads", default=8, type=int, help="DuckDB threads")
+@option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
+def over_time_groups(
+    bucket: str,
+    gen: str,
+    group_size: int | None,
+    layer2_prefix: str | None,
+    mem: str,
+    dry_run: bool,
+    out_dir: Path,
+    publish_root: str | None,
+    data_root: str | None,
+    threads: int,
+    tmp_dir: Path | None,
+) -> None:
+    """Seal the next over-time groups (specs/obs-axis-indexing.md Phase 1, the
+    capped-K shape): partition every scan with a synced `path` index into fixed
+    K-scan groups, oldest first, and for each group not yet in the manifest
+    build its over-time MS, publish it under the group's LAST scan's layer-2 dir
+    (`<layer2>/index/<gen>/over-time.parquet` + scans sidecar), sync the footer
+    (`index_schema`/`index_row_groups` as variant `over-time`) and, last, write
+    the `pyramid_multiscans` row the site routes by. Idempotent: sealed groups
+    never change, so a re-run only appends. Prints `{"groups": [<gid>, …]}` for
+    the caller to `publish-r2` each new group's scan dir. The < K tail is served
+    by `/api/series`'s per-scan fallback."""
+    import shutil
+    import time
+
+    from .index_footer import index_dir, sync_d1, synced_variants
+    from .overtime import OVER_TIME_GROUP_SIZE, multiscan_row, sealed_groups, sync_manifest, synced_groups, write_over_time_index
+
+    K = group_size or OVER_TIME_GROUP_SIZE
+    l2 = layer2_prefix or os.environ.get("LAYER2_PREFIX") or "cw-l2/{scan}/"
+    root = publish_root or f"/gcs/{bucket}"
+    data = data_root or root
+    dates = sorted({d for d, v in synced_variants() if v == "path"})
+    done = synced_groups()
+    todo = [g for g in sealed_groups(dates, K) if g[-1] not in done]
+    err(f"over-time-groups: {len(dates)} indexed scans → {len(sealed_groups(dates, K))} sealed groups of {K}, {len(done)} in the manifest, {len(todo)} to build")
+    if dry_run:
+        for g in todo:
+            err(f"  would build {g[-1]}: {g[0]}..{g[-1]} ({len(g)} scans)")
+        print(json.dumps({"groups": [g[-1] for g in todo], "dry_run": True}))
+        return
+    built: list[str] = []
+    for g in todo:
+        gid = g[-1]
+        pairs: list[tuple[str, str]] = []
+        for d in g:
+            dir_ = index_dir(d, "path")
+            if dir_ is None:
+                raise SystemExit(f"over-time-groups: no `path` pointer for {d} (group {gid})")
+            pairs.append((d, f"{data}/{dir_}/path-index.parquet"))
+        summ = write_over_time_index(pairs, out_dir / gid, mem=mem, threads=threads, tmp_dir=tmp_dir)
+        key = f"{l2.format(scan=gid).rstrip('/')}/index/{gen}"
+        dest = Path(root) / key
+        dest.mkdir(parents=True, exist_ok=True)
+        for f in (summ["file"], summ["scans_file"]):
+            shutil.copy2(f, dest / Path(f).name)
+        n = sync_d1(gid, str(dest / Path(summ["file"]).name), variant="over-time", gen=gen, key=key)
+        sync_manifest(multiscan_row(g, written_at_ms=int(time.time() * 1000)))
+        err(f"over-time-groups: sealed {gid} ({g[0]}..{gid}, {len(g)} scans, {summ['rows']:,} intervals, {n} row groups) → {key}")
+        built.append(gid)
+    print(json.dumps({"groups": built}))
+
+
 @main.command("index-sync")
 @option("-A", "--age-only", is_flag=True, help="Only the age-pyramid variants (a ladder-only backfill; the other variants keep their pointer)")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")

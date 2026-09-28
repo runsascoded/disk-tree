@@ -201,3 +201,88 @@ def write_over_time_groups(
         if own:
             con.close()
     return {"group_size": group_size, "groups": groups}
+
+
+# ── Sealed groups → the D1 routing manifest ────────────────────────────────
+# The reader (`site/functions/_lib/overTime.ts`) lists `pyramid_multiscans`
+# rows for dataset `over-time` and, per row, opens `(key, 'over-time')` from
+# `index_schema` — so a group's manifest `key` is the same scan id its footer
+# was synced under (`index-sync -v over-time … <gid>`): the group's LAST scan.
+# pyrmts owns the table's DDL + row shape (`pyrmts_engine.multiscan_index`);
+# the consumer writes rows over its own D1 HTTP path (`index_footer`).
+MULTISCAN_DATASET = OVER_TIME_VARIANT
+MULTISCAN_TIER = "over-time"
+MULTISCAN_ENCODER = "interval"
+
+
+def scan_ms(scan: str) -> int:
+    """A scan id (`YYYY-MM-DD` or `YYYY-MM-DDTHHMM`, UTC) as epoch milliseconds —
+    the manifest's period axis, which orders groups for the reader."""
+    from datetime import datetime, timezone
+
+    fmt = "%Y-%m-%dT%H%M" if "T" in scan else "%Y-%m-%d"
+    return int(datetime.strptime(scan, fmt).replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+
+def sealed_groups(dates: list[str], group_size: int = OVER_TIME_GROUP_SIZE) -> list[list[str]]:
+    """The full ``group_size`` runs of consecutive scans, oldest first; the
+    ``< group_size`` tail is never a group (the per-scan fallback serves it).
+    Fixed partitioning from the oldest scan, so a group's membership never
+    changes once sealed — re-running only appends new groups."""
+    if group_size < 1:
+        raise ValueError(f"sealed_groups: group_size must be >= 1, got {group_size}")
+    ds = sorted(set(dates))
+    return [ds[i : i + group_size] for i in range(0, len(ds) - group_size + 1, group_size)]
+
+
+def multiscan_row(scans: list[str], *, written_at_ms: int) -> dict:
+    """The `pyramid_multiscans` row for one sealed group (mirrors
+    `pyrmts_engine.multiscan_index.multiscan_d1_row`): `key` = the group's last
+    scan id, `shard_dur` = the group size, period = first..last scan."""
+    if not scans:
+        raise ValueError("multiscan_row: no scans")
+    return {
+        "dataset": MULTISCAN_DATASET,
+        "tier": MULTISCAN_TIER,
+        "shard_dur": f"{len(scans)}scans",
+        "period_start": scan_ms(scans[0]),
+        "period_end": scan_ms(scans[-1]),
+        "key": scans[-1],
+        "scans": json.dumps(scans),
+        "encoder": MULTISCAN_ENCODER,
+        "digests": None,
+        "written_at": written_at_ms,
+    }
+
+
+def manifest_sql(row: dict) -> str:
+    """`INSERT OR REPLACE` for one manifest row — idempotent on the
+    `(dataset, key)` primary key."""
+    from .index_footer import _q
+
+    cols = ["dataset", "tier", "shard_dur", "period_start", "period_end", "key", "scans", "encoder", "digests", "written_at"]
+    vals = [str(row[c]) if isinstance(row[c], int) else _q(row[c]) for c in cols]
+    return f"INSERT OR REPLACE INTO pyramid_multiscans ({', '.join(cols)}) VALUES ({', '.join(vals)});"
+
+
+def synced_groups(db_id: str | None = None) -> set[str]:
+    """The group keys already in the manifest (a complete group: footer synced,
+    row written last)."""
+    from .index_footer import D1_DB_ID, _creds, _d1_query
+
+    tok, acct = _creds()
+    rows = _d1_query(f"SELECT key FROM pyramid_multiscans WHERE dataset = '{MULTISCAN_DATASET}';", acct, tok, db_id or D1_DB_ID)
+    return {r["key"] for r in rows}
+
+
+def sync_manifest(row: dict, db_id: str | None = None) -> None:
+    """Write one group's manifest row (the table is pyrmts' DDL, created if
+    absent). Called AFTER the group's footer is in `index_schema`: the row is
+    what makes the reader open the group, so it is the last thing to land."""
+    from pyrmts_engine.multiscan_index import multiscan_d1_ddl
+
+    from .index_footer import D1_DB_ID, _creds, _d1_query
+
+    tok, acct = _creds()
+    _d1_query(multiscan_d1_ddl(), acct, tok, db_id or D1_DB_ID)
+    _d1_query(manifest_sql(row), acct, tok, db_id or D1_DB_ID)
