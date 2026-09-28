@@ -2474,8 +2474,20 @@ select.assign-sel {
     .x { margin-left: auto; background: none; border: none; color: var(--ink-3); cursor: pointer; font-size: 15px; line-height: 1; padding: 0 2px; &:hover { color: var(--ink); } }
   }
   .body { color: var(--ink-2); b { color: var(--ink); } code { color: var(--ink); } }
+  // The control being explained, by name — the card and the lit-up control
+  // read as a pair.
+  .head .tgt { color: var(--ink-2); text-transform: none; letter-spacing: 0; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14em; }
+  .head .snooze { margin-left: auto; background: none; border: 1px solid var(--line); border-radius: 5px; color: var(--ink-3); cursor: pointer; font: inherit; font-size: 10.5px; padding: 0 5px; text-transform: none; letter-spacing: 0; kbd { font-size: 9.5px; margin-left: 2px; } &:hover { color: var(--ink); border-color: var(--ink-3); } }
+  .head .snooze + .x { margin-left: 4px; }
+  // While it tracks a live control the card carries the same accent as the
+  // control's highlight.
+  &.tracking { border-color: color-mix(in oklab, var(--accent, #58a6ff) 55%, var(--line)); }
   @media (max-width: 640px) { left: 8px; right: 8px; width: auto; bottom: calc(8px + env(safe-area-inset-bottom)); }
 }
+// The control the help card is explaining: a soft accent ring so the pair is
+// unmistakable (the card sits far from most controls).
+.has-help.help-active { border-radius: 4px; box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent, #58a6ff) 55%, transparent); }
+.has-help .help-tgt { display: contents; }
 .help-chip {
   position: fixed; left: 16px; bottom: 16px; z-index: 900;
   display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px;
