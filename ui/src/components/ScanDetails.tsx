@@ -356,7 +356,17 @@ function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, 
       </thead>
       <tbody>
         <tr className="root">
-          <td className="col-checkbox"></td>
+          <td className="col-checkbox">
+            {caps?.compare && (
+              <Tooltip title="Compare scans">
+                <Link to={`/compare${uriToPath(uri)}`}>
+                  <Button size="small" sx={{ minWidth: 0, padding: '2px 4px' }}>
+                    <FaExchangeAlt size={12} />
+                  </Button>
+                </Link>
+              </Tooltip>
+            )}
+          </td>
           <td className="col-icon">{root.kind === 'file' ? <FaFileAlt /> : <FaFolder />}</td>
           <td className="col-path"><code>{rootLabel}</code></td>
           <td className="col-numeric">{formatSize(root.size)}</td>
@@ -391,17 +401,23 @@ function DetailsTable({ root, rootLabel, children, uri, routeType, onScanChild, 
                 </span>
               </Tooltip>
             )}
-            {caps?.compare && (
-              <Tooltip title="Compare scans">
-                <Link to={`/compare${uriToPath(uri)}`}>
-                  <Button size="small" sx={{ minWidth: 0, padding: '2px 4px' }}>
-                    <FaExchangeAlt size={12} />
-                  </Button>
-                </Link>
-              </Tooltip>
-            )}
           </td>
-          {canAct && <td className="col-action"></td>}
+          {canAct && (
+            <td className="col-action">
+              <Tooltip title={`${actionVerb} this ${root.kind === 'file' ? 'file' : 'directory'}`}>
+                <span>
+                  <Button
+                    size="small"
+                    onClick={() => onDelete(uri)}
+                    disabled={deletingPaths.has(uri)}
+                    sx={{ minWidth: 0, padding: '2px 4px', color: actionColor }}
+                  >
+                    {deletingPaths.has(uri) ? <CircularProgress size={14} /> : <FaTrash size={12} />}
+                  </Button>
+                </span>
+              </Tooltip>
+            </td>
+          )}
         </tr>
         {/* Render collapsed/expanded parent rows (auto-expanded single-child dirs) */}
         {collapsedRows && collapsedRows.map((collapsedRow, depth) => {
@@ -1161,6 +1177,7 @@ export function ScanDetails() {
   const pathname = window.location.pathname
   const routeType: RouteType = detectRouteType(pathname)
   const uri = segmentsToUri(routeType, pathSegments)
+  const navigate = useNavigate()
 
   // The current location's own name, for the treemap's root cell and the table's
   // root row (the full navigable path already sits in the breadcrumb above, so
@@ -1517,6 +1534,11 @@ export function ScanDetails() {
     setDeletingPaths(prev => new Set(prev).add(path))
     try {
       await deletePath(path)
+      if (path === uri) {
+        // The folder on screen is gone: show its parent instead
+        navigate(uriToPath(path.replace(/\/[^/]+\/?$/, '')))
+        return
+      }
       refetch()
     } catch (e) {
       setMutationError(e instanceof Error ? e.message : 'Failed to delete')
