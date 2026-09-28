@@ -84,6 +84,19 @@ def test_run_checks_all_green_resolves_latest_scan():
     ]
 
 
+def test_run_checks_no_totals_skips_the_ledger_probe():
+    # A plan-first store (cw) has no actions ledger: `totals=False` drops the
+    # probe and the remaining three checks are exactly the same.
+    get = _fake_site(totals_body={})
+    date, checks = run_checks("https://gcs.oa.dev", "tok", None, today=TODAY, get=get, totals=False)
+    assert date == "2026-08-31"
+    assert checks == [
+        Check("freshness", True, "latest scan 2026-08-31 (0d old, limit 2d)"),
+        Check("subtree", True, "HTTP 200 (want 200)"),
+        Check("data/meta.json", True, "HTTP 200 (want 200)"),
+    ]
+
+
 def test_run_checks_flags_footer_fallback_and_missing_data():
     # marks/totals on the footer path + a missing meta.json → two failed checks.
     get = _fake_site(totals_body={"computed": {"index": "footer", "ms": 40000}, "users": {"a": {}}}, meta=404)

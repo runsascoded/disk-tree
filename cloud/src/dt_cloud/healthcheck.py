@@ -102,13 +102,16 @@ def run_checks(
     today: dt.date | None = None,
     get: Getter | None = None,
     subdir: str = "",
+    totals: bool = True,
 ) -> tuple[str | None, list[Check]]:
     """Fetch + evaluate. Returns (resolved_date, checks). ``get`` is injected in
     tests; in production it defaults to a token-bound urllib fetch. ``subdir``
     is the store's snapshot subdir under ``/data/`` (the site's
     ``SNAPSHOTS_SUBDIR``: ``cw`` for the CoreWeave deployment, empty for the
     default store) — without it the bare ``/data/scans.json`` is the root
-    listing, empty on a store that only publishes under a subdir."""
+    listing, empty on a store that only publishes under a subdir. ``totals``
+    off skips the ``/api/marks/totals`` probe — that route folds the actions
+    ledger (gcs), which a plan-first store (cw) doesn't have."""
     base = base.rstrip("/")
     sub = f"{subdir.strip('/')}/" if subdir.strip("/") else ""
     today = today or dt.datetime.now(dt.timezone.utc).date()
@@ -148,9 +151,10 @@ def run_checks(
         checks.append(Check("resolve-scan", False, "no --date and scans.json gave none"))
         return None, checks
 
-    # 2. marks/totals — the D1-index serving path.
-    t_status, t_body = get_json(f"/api/marks/totals?date={date}")
-    checks.append(check_totals(t_status, t_body, max_ms))
+    # 2. marks/totals — the D1-index serving path (actions-ledger stores only).
+    if totals:
+        t_status, t_body = get_json(f"/api/marks/totals?date={date}")
+        checks.append(check_totals(t_status, t_body, max_ms))
 
     # 3. subtree — floor-free drill (root, default pixel budget).
     st_status, _ = get(f"{base}/api/subtree?date={date}&w=128&h=128", None)

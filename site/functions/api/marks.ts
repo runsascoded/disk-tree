@@ -25,11 +25,17 @@ export const onRequest = async (ctx: Ctx): Promise<Response> => {
   if (request.method === 'GET') {
     const gated = await requireViewer(ctx)
     if (gated instanceof Response) return gated
-    const [marks, claims] = await Promise.all([
-      env.DB.prepare('SELECT prefix, action, who, ts, note FROM marks ORDER BY prefix').all(),
-      env.DB.prepare('SELECT prefix, who, ts FROM claims ORDER BY prefix').all(),
-    ])
-    return json({ marks: marks.results, claims: claims.results })
+    // A D1 error (a stall, or a store whose lineage lacks the `claims` table —
+    // cw's plan-first ledger has none) is a JSON 503, not an unhandled throw.
+    try {
+      const [marks, claims] = await Promise.all([
+        env.DB.prepare('SELECT prefix, action, who, ts, note FROM marks ORDER BY prefix').all(),
+        env.DB.prepare('SELECT prefix, who, ts FROM claims ORDER BY prefix').all(),
+      ])
+      return json({ marks: marks.results, claims: claims.results })
+    } catch (e) {
+      return json({ error: `marks unavailable: ${(e as Error).message}` }, 503)
+    }
   }
 
   if (request.method === 'PUT') {

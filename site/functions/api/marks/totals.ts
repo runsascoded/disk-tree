@@ -17,7 +17,7 @@ export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
   if (gated instanceof Response) return gated
   const url = new URL(request.url)
   const date = url.searchParams.get('date') ?? ''
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ error: 'date=YYYY-MM-DD required' }, 400)
+  if (!/^\d{4}-\d{2}-\d{2}(?:T\d{4})?$/.test(date)) return json({ error: 'date=YYYY-MM-DD[THHMM] required' }, 400)
   const withMarks = url.searchParams.get('marks') === '1'
   // Optional subtree scope: exact totals for a drilled prefix P (the map's
   // per-node rollup). `gs://marin-<bucket>/…/`, trailing slash normalized.
