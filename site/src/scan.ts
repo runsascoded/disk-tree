@@ -200,6 +200,15 @@ export function useScans(store: Store): UseQueryResult<string[]> {
   })
 }
 
+/** The scan list has answered and named nothing. The data Function lists a
+ * snapshot only once its index rows are in D1 (`index_schema`), so an empty
+ * list means no indexed snapshot exists for this store — the page has nothing
+ * to fetch, and should say so rather than leave the map's skeleton up. A
+ * pending or failed list is not "empty": the skeleton and the error strip
+ * cover those. */
+export const noScansYet = (q: { isSuccess: boolean; data?: string[] }): boolean =>
+  q.isSuccess && q.data?.length === 0
+
 export function useScan(store: Store): Scan {
   const [sel, setSel] = useUrlState('d', { encode: encodeSel, decode: decodeSel }, true)
   const scansQ = useScans(store)
