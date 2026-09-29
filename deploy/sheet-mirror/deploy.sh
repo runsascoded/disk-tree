@@ -17,7 +17,9 @@ cfg=${1:?usage: deploy.sh <sheet-mirror.yml>}
 eval "$(dt-cloud sheet-mirror env "$cfg")"
 # Validate the mirrors too (fails loudly on a bad source / key / executor).
 n=$(dt-cloud sheet-mirror plan "$cfg" | wc -l | tr -d ' ')
-config_b64=$(base64 < "$cfg" | tr -d '\n')
+# The RENDERED config (every `${NAME}` substituted from this shell's env,
+# validated): ids kept out of the repo reach the job, never git.
+config_b64=$(dt-cloud sheet-mirror render "$cfg" | base64 | tr -d '\n')
 
 echo "== $n mirror(s) → job $JOB ($PROJECT/$REGION), schedule '$SCHEDULE' ==" >&2
 

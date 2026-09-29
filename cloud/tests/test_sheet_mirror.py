@@ -33,6 +33,7 @@ from dt_cloud.sheet_mirror import (
     plan_lines,
     plan_sheet,
     push,
+    render_config,
     write_csv,
 )
 from dt_cloud.site import SiteError
@@ -431,8 +432,8 @@ def test_plan_lines_round_trip_through_shell_quoting():
     lines = plan_lines(load_config(CONFIG))
     assert lines == [
         "source=owners site=https://usage.example.org subdir='' sheet=SHEET_A tab='Storage by user' key=user "
-        "footer='⟳ Auto-synced hourly from https://usage.example.org/users — edits are overwritten' executor=''",
-        "source=runs site=https://usage.example.org subdir='' sheet=SHEET_A tab=Runs key=run footer='' executor=sweep",
+        "footer='⟳ Auto-synced hourly from https://usage.example.org/users — edits are overwritten' executor='' unit=B",
+        "source=runs site=https://usage.example.org subdir='' sheet=SHEET_A tab=Runs key=run footer='' executor=sweep unit=B",
     ]
     assert dict(kv.split("=", 1) for kv in shlex.split(lines[0])) == {
         "source": "owners",
@@ -443,6 +444,7 @@ def test_plan_lines_round_trip_through_shell_quoting():
         "key": "user",
         "footer": "⟳ Auto-synced hourly from https://usage.example.org/users — edits are overwritten",
         "executor": "",
+        "unit": "B",
     }
 
 
@@ -462,8 +464,8 @@ def test_env_lines():
 
 def test_example_config_is_valid():
     example = Path(__file__).parents[2] / "deploy" / "sheet-mirror" / "example.yml"
-    cfg = load_config(example.read_text())
-    assert [(m.source, m.key, m.tab) for m in cfg.mirrors] == [("owners", "user", "Storage by user")]
+    cfg = load_config(example.read_text(), env={"USAGE_SHEET_ID": "SHEET_X"})
+    assert [(m.sheet, m.source, m.key, m.tab, m.unit) for m in cfg.mirrors] == [("SHEET_X", "owners", "user", "Storage by user", "TiB")]
 
 
 def test_cli_plan_from_stdin():
@@ -493,3 +495,75 @@ def test_config_without_mirrors_or_gcp():
     no_gcp = load_config(CONFIG.split("gcp:")[0] + "mirrors:" + CONFIG.split("mirrors:")[1])
     with pytest.raises(ConfigError, match="`gcp` .* is required to build/deploy"):
         env_lines(no_gcp)
+
+
+# --------------------------------------------------------------------------
+# `${NAME}` substitution + byte units
+# --------------------------------------------------------------------------
+
+ENV_CONFIG = CONFIG.replace("sheet: SHEET_A\n    tab: Storage by user", "sheet: ${SHEET_ID}\n    tab: Storage by user")
+
+
+def test_env_substitution_in_values():
+    cfg = load_config(ENV_CONFIG, env={"SHEET_ID": "real-id"})
+    assert [(m.sheet, m.tab) for m in cfg.mirrors] == [("real-id", "Storage by user"), ("SHEET_A", "Runs")]
+
+
+def test_env_substitution_unset_is_an_error_naming_it():
+    with pytest.raises(ConfigError) as e:
+        load_config(ENV_CONFIG.replace("${SHEET_ID}", "${SHEET_ID}-${OTHER}"), env={})
+    assert str(e.value) == "sheet-mirror.yml: unset environment variable(s) ['OTHER', 'SHEET_ID']"
+
+
+def test_env_substitution_cannot_inject_yaml():
+    # Substituted into the parsed value, not the YAML text: a value that looks
+    # like YAML stays one (one-line-checked) string, so it can't add keys.
+    with pytest.raises(ConfigError) as e:
+        load_config(ENV_CONFIG, env={"SHEET_ID": "x\n    tab: Hijack"})
+    assert str(e.value) == "mirrors[0]: `sheet` must be one line"
+    cfg = load_config(ENV_CONFIG, env={"SHEET_ID": "x tab: Hijack"})
+    assert [(m.sheet, m.tab) for m in cfg.mirrors][0] == ("x tab: Hijack", "Storage by user")
+
+
+def test_render_substitutes_and_validates():
+    out = render_config(ENV_CONFIG, env={"SHEET_ID": "real-id"})
+    assert "${" not in out
+    assert [m.sheet for m in load_config(out, env={}).mirrors] == ["real-id", "SHEET_A"]
+
+
+def test_owners_in_tib():
+    assert csv_text("owners", "gcs", ExportArgs(unit="TiB")) == [
+        "user,bytes (TiB),standard (TiB),nearline (TiB),coldline (TiB),archive (TiB)",
+        "alice,4.55,3.64,0.91,0.0,0.0",
+        "bob,1.36,1.36,0.0,0.0,0.0",
+        "carol,1.36,0.45,0.0,0.0,0.91",
+        "dave,0.0,0.0,0.0,0.0,0.0",
+        "",
+    ]
+
+
+def test_staged_in_gib_keeps_blank_sizes():
+    assert csv_text("staged", "gcs", ExportArgs(unit="GiB")) == [
+        "prefix,staged_by,staged_at,note,bytes (GiB)",
+        "gs://marin-us-central2/scratch/gone/,alice@example.org,2025-09-26 15:20,,",
+        "gs://marin-us-central2/scratch/tmp/,alice@example.org,2025-09-26 15:20,,0.0",
+        "gs://marin-us-east1/checkpoints/old-run/,bob@example.org,2025-09-27 16:20,superseded,0.7",
+        "",
+    ]
+
+
+def test_unknown_unit_rejected_in_config():
+    with pytest.raises(ConfigError) as e:
+        load_config(CONFIG.replace("    key: user\n", "    key: user\n    unit: PB\n"), env={})
+    assert str(e.value) == "mirrors[0]: unknown unit 'PB' (one of B, GiB, TiB)"
+
+
+def test_cli_render_unset_var_is_a_clean_error():
+    r = CliRunner(env={"SHEET_ID": None}).invoke(main, ["sheet-mirror", "render", "-"], input=ENV_CONFIG)
+    assert (r.exit_code, r.output) == (1, "Error: sheet-mirror.yml: unset environment variable(s) ['SHEET_ID']\n")
+
+
+def test_cli_render_substitutes():
+    r = CliRunner(env={"SHEET_ID": "real-id"}).invoke(main, ["sheet-mirror", "render", "-"], input=ENV_CONFIG)
+    assert r.exit_code == 0, r.output
+    assert [m.sheet for m in load_config(r.output, env={}).mirrors] == ["real-id", "SHEET_A"]

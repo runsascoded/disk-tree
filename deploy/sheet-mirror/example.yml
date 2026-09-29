@@ -28,10 +28,15 @@ mirrors:
   # `source` is a `dt-cloud export` source (`dt-cloud export --list`); `key`
   # is the stable row identity `sheet-push -k` diffs by, so Version History
   # shows one-row changes. `{site}` in `footer` expands to `site` above.
-  - sheet: YOUR_GOOGLE_SHEET_ID
+  # `${NAME}` in any value comes from the deployer's environment at deploy
+  # time (strict: unset is an error), so a public repo can keep the sheet id
+  # in an untracked `.envrc`. `unit` rescales byte columns: `B` (default),
+  # `GiB`, `TiB` — rounded numbers, header `bytes (TiB)`.
+  - sheet: ${USAGE_SHEET_ID}
     tab: Storage by user
     source: owners
     key: user
+    unit: TiB
     footer: "⟳ Auto-synced hourly from {site}/users — edits are overwritten; add derived views in another tab"
   # A `runs` mirror also names the site's executor (`Store.executor`):
   # - sheet: YOUR_GOOGLE_SHEET_ID

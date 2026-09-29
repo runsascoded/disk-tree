@@ -1897,8 +1897,9 @@ def sii_status(buckets: tuple[str, ...]) -> None:
 @option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ for scans.json (default: $SNAPSHOTS_SUBDIR; `cw` on cw-s3)")
 @option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
 @option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+@option("-U", "--unit", default="B", type=Choice(["B", "GiB", "TiB"]), help="Byte columns as raw bytes (default) or rounded GiB / TiB, header `<col> (<unit>)`")
 @argument("source", required=False)
-def export_cmd(date: str | None, executor: str | None, list_sources: bool, out: str, subdir: str | None, token: str | None, url: str | None, source: str | None) -> None:
+def export_cmd(date: str | None, executor: str | None, list_sources: bool, out: str, subdir: str | None, token: str | None, url: str | None, unit: str, source: str | None) -> None:
     """Export one named SOURCE from the live site API as a CSV with a fixed
     column contract (`--list` shows them) — the input `sheet-push -k` mirrors
     into a Google Sheet tab. See specs/done/sheet-mirror.md."""
@@ -1913,7 +1914,7 @@ def export_cmd(date: str | None, executor: str | None, list_sources: bool, out: 
     base, tok = creds(token, url)
     if not tok:
         raise SystemExit("export: no token (-t or $GCS_USAGE_TOKEN)")
-    args = ExportArgs(date=date, executor=executor, subdir=subdir if subdir is not None else (env_secret("SNAPSHOTS_SUBDIR") or ""))
+    args = ExportArgs(date=date, executor=executor, subdir=subdir if subdir is not None else (env_secret("SNAPSHOTS_SUBDIR") or ""), unit=unit)
     columns, rows = export(source, lambda path, params: get_json(base, tok, path, params), args)
     if out == "-":
         write_csv(columns, rows, sys.stdout)
@@ -2007,11 +2008,22 @@ def sheet_mirror_env(config: str) -> None:
     print("\n".join(env_lines(read_config(config))))
 
 
+@sheet_mirror.command("render")
+@argument("config")
+def sheet_mirror_render(config: str) -> None:
+    """Print CONFIG with every `${NAME}` substituted from the environment, as
+    YAML — validated first; an unset NAME is an error. `deploy.sh` bakes this
+    into the job, so an id kept out of the repo (e.g. `sheet: ${GCS_SHEET_ID}`,
+    set in an untracked `.envrc`) reaches the job but never git."""
+    from .sheet_mirror import render_config  # noqa: PLC0415
+    print(render_config(sys.stdin.read() if config == "-" else Path(config).read_text()), end="")
+
+
 @sheet_mirror.command("plan")
 @argument("config")
 def sheet_mirror_plan(config: str) -> None:
     """Validate CONFIG and print one line per mirror — shell-quoted
-    `source= site= subdir= sheet= tab= key= footer= executor=` assignments —
+    `source= site= subdir= sheet= tab= key= footer= executor= unit=` assignments —
     for `sync.sh` to `eval` in its loop. CONFIG is a path, or `-` for stdin."""
     from .sheet_mirror import plan_lines, read_config  # noqa: PLC0415
 

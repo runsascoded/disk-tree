@@ -19,12 +19,13 @@ import csv
 import datetime as dt
 import re
 import shlex
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any, Protocol
 
 import yaml
+from click import ClickException
 
 from .site import SiteError
 
@@ -38,8 +39,9 @@ class ExportError(Exception):
     answered with something the contract can't be read from)."""
 
 
-class ConfigError(Exception):
-    """A ``sheet-mirror.yml`` that doesn't describe a runnable mirror set."""
+class ConfigError(ClickException):
+    """A ``sheet-mirror.yml`` that doesn't describe a runnable mirror set. A
+    ``ClickException``, so the CLI reports it as one ``Error: …`` line."""
 
 
 # --------------------------------------------------------------------------
@@ -52,6 +54,7 @@ class ExportArgs:
     date: str | None = None  # scan (YYYY-MM-DD[THHMM]); default: newest in scans.json
     executor: str | None = None  # `runs`: the site's executor route family
     subdir: str = ""  # the store's snapshot subdir under /data/ (`cw` on cw-s3)
+    unit: str = "B"  # byte columns as raw bytes (`B`) or rounded `GiB` / `TiB`
 
 
 @dataclass(frozen=True)
@@ -60,6 +63,9 @@ class Source:
     columns: tuple[str, ...]
     desc: str
     fetch: Callable[[Getter, ExportArgs], list[list[Any]]]
+    # Columns holding byte counts: what `unit` rescales (and relabels
+    # `<col> (<unit>)`); the rest of the contract is unit-independent.
+    byte_columns: tuple[str, ...] = ()
 
 
 # `/api/owners` `mix` class ids → column names (STANDARD = "1"; the site's
@@ -195,32 +201,54 @@ SOURCES: dict[str, Source] = {
             ("user", "bytes", *CLASS_COLUMNS.values()),
             "GET /api/owners?date=<scan>: per-user owned bytes + storage-class split (/users)",
             export_owners,
+            ("bytes", *CLASS_COLUMNS.values()),
         ),
         Source(
             "staged",
             ("prefix", "staged_by", "staged_at", "note", "bytes"),
             "GET /api/plans/staged (+ /api/subtree per prefix for bytes): the shared open deletion plan (/staged)",
             export_staged,
+            ("bytes",),
         ),
         Source(
             "runs",
             ("run", "mode", "by", "started", "state", "deleted_bytes"),
             "GET /api/<executor>/jobs joined to /api/plans/staged runs: recent deletion runs (needs -e)",
             export_runs,
+            ("deleted_bytes",),
         ),
     )
 }
 
 
+# Byte-column units: divisor + the decimals kept. Rounded numbers (not
+# "235 TiB" strings), so a sheet can still sort and sum them.
+UNITS: dict[str, tuple[int, int]] = {"B": (1, 0), "GiB": (2**30, 1), "TiB": (2**40, 2)}
+
+
+def scale_bytes(v: Any, unit: str) -> Any:
+    """A byte count in ``unit``; blanks (a size that couldn't be read) stay blank."""
+    div, places = UNITS[unit]
+    if div == 1 or v == "" or v is None:
+        return v
+    return round(int(v) / div, places)
+
+
 def export(source: str, get: Getter, a: ExportArgs) -> tuple[tuple[str, ...], list[list[Any]]]:
     if source not in SOURCES:
         raise ExportError(f"unknown source {source!r} (one of {', '.join(SOURCES)})")
+    if a.unit not in UNITS:
+        raise ExportError(f"unknown unit {a.unit!r} (one of {', '.join(UNITS)})")
     s = SOURCES[source]
     rows = s.fetch(get, a)
     for r in rows:
         if len(r) != len(s.columns):
             raise ExportError(f"{source}: row {r!r} doesn't match columns {s.columns}")
-    return s.columns, rows
+    if a.unit == "B":
+        return s.columns, rows
+    idx = [i for i, c in enumerate(s.columns) if c in s.byte_columns]
+    columns = tuple(f"{c} ({a.unit})" if c in s.byte_columns else c for c in s.columns)
+    return columns, [[scale_bytes(v, a.unit) if i in idx else v for i, v in enumerate(r)] for r in rows]
 
 
 def write_csv(columns: Iterable[str], rows: Iterable[Iterable[Any]], out: IO[str]) -> None:
@@ -414,6 +442,7 @@ class Mirror:
     key: str
     footer: str = ""
     executor: str = ""
+    unit: str = "B"
 
 
 @dataclass(frozen=True)
@@ -445,7 +474,7 @@ class MirrorConfig:
 
 
 TOP_KEYS = {"site", "token_secret", "schedule", "subdir", "gcp", "mirrors"}
-MIRROR_KEYS = {"sheet", "tab", "source", "key", "footer", "executor"}
+MIRROR_KEYS = {"sheet", "tab", "source", "key", "footer", "executor", "unit"}
 GCP_KEYS = {"project", "region", "service_account", "job", "image", "trigger"}
 
 
@@ -472,11 +501,58 @@ def _keys(d: Any, allowed: set[str], where: str) -> dict:
     return d
 
 
-def load_config(text: str) -> MirrorConfig:
-    """Parse + validate a ``sheet-mirror.yml``. Every mirror must name a known
+ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def expand_env(doc: Any, env: Mapping[str, str]) -> Any:
+    """Substitute ``${NAME}`` in every string value of a parsed config, from
+    ``env``. Strict: an unset NAME is a :class:`ConfigError` (listing every
+    missing one), never a silent blank — a mirror aimed at sheet ``""`` would
+    only fail later, in the job. Values, not raw YAML text, so a substituted
+    value can't inject structure. This is how a public repo's config names a
+    sheet without committing its id (``sheet: ${GCS_SHEET_ID}``, the value in
+    the deployer's untracked ``.envrc``)."""
+    missing: set[str] = set()
+
+    def sub(v: Any) -> Any:
+        if isinstance(v, str):
+            def one(m: re.Match) -> str:
+                if m.group(1) not in env:
+                    missing.add(m.group(1))
+                    return ""
+                return env[m.group(1)]
+            return ENV_REF.sub(one, v)
+        if isinstance(v, dict):
+            return {k: sub(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [sub(x) for x in v]
+        return v
+
+    out = sub(doc)
+    if missing:
+        raise ConfigError(f"sheet-mirror.yml: unset environment variable(s) {sorted(missing)}")
+    return out
+
+
+def render_config(text: str, env: Mapping[str, str] | None = None) -> str:
+    """The config with ``${NAME}``s substituted, as YAML — what ``deploy.sh``
+    bakes into the job (validated first, so a bad render never ships)."""
+    import os  # noqa: PLC0415
+
+    doc = expand_env(yaml.safe_load(text), os.environ if env is None else env)
+    out = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
+    load_config(out, env={})
+    return out
+
+
+def load_config(text: str, env: Mapping[str, str] | None = None) -> MirrorConfig:
+    """Parse + validate a ``sheet-mirror.yml``, substituting ``${NAME}`` from
+    ``env`` (default: the process environment). Every mirror must name a known
     source, a ``key`` among that source's columns, and (``runs`` only) an
     executor; no two mirrors may write the same (sheet, tab)."""
-    doc = _keys(yaml.safe_load(text), TOP_KEYS, "sheet-mirror.yml")
+    import os  # noqa: PLC0415
+
+    doc = _keys(expand_env(yaml.safe_load(text), os.environ if env is None else env), TOP_KEYS, "sheet-mirror.yml")
     site = _str(doc, "site", "sheet-mirror.yml").rstrip("/")
     raw = doc.get("mirrors")
     if not isinstance(raw, list) or not raw:
@@ -493,7 +569,10 @@ def load_config(text: str) -> MirrorConfig:
             key=_str(m, "key", where),
             footer=_str(m, "footer", where, required=False).replace("{site}", site),
             executor=_str(m, "executor", where, required=False),
+            unit=_str(m, "unit", where, required=False) or "B",
         )
+        if mirror.unit not in UNITS:
+            raise ConfigError(f"{where}: unknown unit {mirror.unit!r} (one of {', '.join(UNITS)})")
         if mirror.source not in SOURCES:
             raise ConfigError(f"{where}: unknown source {mirror.source!r} (one of {', '.join(SOURCES)})")
         if mirror.key not in SOURCES[mirror.source].columns:
@@ -550,6 +629,7 @@ def plan_lines(cfg: MirrorConfig) -> list[str]:
             ("key", m.key),
             ("footer", m.footer),
             ("executor", m.executor),
+            ("unit", m.unit),
         ])
         for m in cfg.mirrors
     ]

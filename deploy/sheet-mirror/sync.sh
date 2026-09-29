@@ -37,13 +37,14 @@ dt-cloud sheet-mirror plan "$cfg" > "$work/plan"
 n=0
 failed=0
 while IFS= read -r line <&3; do
-  source='' site='' subdir='' sheet='' tab='' key='' footer='' executor=''
+  source='' site='' subdir='' sheet='' tab='' key='' footer='' executor='' unit=''
   eval "$line"
   n=$((n + 1))
   csv=$work/$n-$source.csv
   export_args=(-u "$site" -o "$csv")
   [[ -n $subdir ]] && export_args+=(-s "$subdir")
   [[ -n $executor ]] && export_args+=(-e "$executor")
+  [[ -n $unit ]] && export_args+=(-U "$unit")
   push_args=(-k "$key" -w "$tab")
   [[ -n $footer ]] && push_args+=(-D "$footer")
   if dt-cloud export "$source" "${export_args[@]}" && dt-cloud sheet-push "${push_args[@]}" "$sheet" "$csv"; then
