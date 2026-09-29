@@ -1,0 +1,6 @@
+config:
+  disk-tree-m3-cf:accountId: 0dcad5654e9744de6616f74b8df4af63
+  disk-tree-m3-cf:zoneId: 65e73a5953a764df889a0b4d0c1024b6 # rbw.sh
+  # importIds: cleared 2026-09-29 after adopting the hand-built Pages project,
+  # domain, and CNAME (see cf/__main__.py); set again only to adopt more.
+encryptionsalt: v1:nwPGjbzExuE=:v1:1AMvNuj6jk8rwI5V:XCst82XLfRQYbpPyOf/rRxKA3EkzDA==

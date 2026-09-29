@@ -4,8 +4,8 @@
 # by the Batch ingest (`aws/`), footers → D1.
 #
 # Not yet deployed: disk.rbw.sh still serves `ui/` (Pages project `disk-tree`)
-# until Phase 4. The D1 below is a placeholder until Phase 1 creates it — run
-# `./dev --local-db` only (a remote binding would miss).
+# until Phase 4. The D1 is `cf/`'s (Pulumi): `disk-tree-m3-db`. Migrations:
+#   wrangler d1 migrations apply disk-tree-m3-db --remote
 name = "disk-tree"
 pages_build_output_dir = "dist"
 compatibility_date = "2026-06-01"
@@ -13,7 +13,7 @@ compatibility_date = "2026-06-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "disk-tree-m3-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "e5288564-a010-4177-9f3c-77e25fad9f72"
 migrations_dir = "migrations/cw"
 
 [observability]
