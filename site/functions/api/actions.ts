@@ -16,6 +16,7 @@
  * who-did-what trail.
  */
 import { type Ctx, json, requireAdmin, requireViewer } from '../_lib/auth.js'
+import { canonId, loadRegistry } from '../_lib/identity.js'
 
 /** gs://marin-<suffix>/<path>/ — the six marin buckets only, dir prefixes only. */
 const PREFIX_RE = /^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/
@@ -83,7 +84,9 @@ export const onRequest = async (ctx: Ctx): Promise<Response> => {
     if (ok.some(p => p.owner === '@me')) {
       const row = await env.DB.prepare('SELECT user FROM user_emails WHERE email = ?')
         .bind(id.email.toLowerCase()).first<{ user: string }>()
-      const me = row?.user ?? id.email
+      // No `user_emails` row → the deployment registry's canonical id for the email's
+      // handle, never the raw email (an email owner matches no user).
+      const me = row?.user ?? canonId(id.email, await loadRegistry(env))
       for (const p of ok) if (p.owner === '@me') p.owner = me
     }
     const stmts = []
