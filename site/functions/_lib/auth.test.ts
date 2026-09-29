@@ -55,6 +55,11 @@ describe('scopesFor — the in-app policy that replaces the Access policy', () =
     expect(await scopesFor(cw({}))('ryan@openathena.ai')).toEqual(['gcs', 'cw', 'admin', 'requests'])
   })
 
+  it("staff on a store other than gcs/cw also get that store's base scope", async () => {
+    const env = cw({}, { BASE_SCOPE: 'laptop', STAFF_DOMAIN: 'runsascoded.com' })
+    expect(await scopesFor(env)('ryan@runsascoded.com')).toEqual(['gcs', 'cw', 'admin', 'requests', 'laptop'])
+  })
+
   it('a viewer domain gets the base scope with no allowlist row', async () => {
     expect(await scopesFor(cw({}))('someone@coreweave.com')).toEqual(['cw'])
   })
