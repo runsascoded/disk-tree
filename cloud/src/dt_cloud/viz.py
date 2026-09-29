@@ -195,7 +195,11 @@ def write_path_index(
     con.execute(f"SET threads={os.environ.get('DUCKDB_THREADS', '4')}")
     if tmp := os.environ.get("DUCKDB_TMP"):
         con.execute(f"SET temp_directory='{tmp}'")
-    src = prepare_listing(con, listings)
+    # A local capture's `bucket` is its scan root (`/Users/ryan`); drop the
+    # leading slash so it tiles like a bucket name (`Users/ryan`). Kept, it
+    # yields an empty first segment: a depth-1 node at path '' — the root's own
+    # path — whose parent walk never terminates.
+    src = f"(SELECT * REPLACE (ltrim(bucket, '/') AS bucket) FROM {prepare_listing(con, listings)})"
 
     # --- layer-2 dir rollups (attribution-independent; cached when dir_cache) ---
     # Everything downstream needs objects only via these two aggregates:
