@@ -1,7 +1,7 @@
 import type { D1Database } from '@cloudflare/workers-types'
 import { describe, expect, it } from 'vitest'
 import type { DispatchReq, ExecEnv, Executor } from './dispatch'
-import { dispatchPlan, EXECUTORS, executorOf, type ExecutorKind } from './executor'
+import { dispatchPlan, EXECUTORS, executorOf, type ExecutorKind, planFirstKind } from './executor'
 import type { FinishedRun } from './plans'
 import { sqliteD1 } from './testD1'
 
@@ -59,7 +59,7 @@ async function setup(env: Partial<ExecEnv> = {}) {
     await db.prepare("INSERT INTO plan_items (plan_id, prefix, added_by, added_ts) VALUES (1, ?, 'ann@openathena.ai', 1)").bind(p).run()
   }
   const calls: string[] = []
-  const executors = { 'plan-sweep': fake('plan-sweep', db, calls), sweep: fake('sweep', db, calls) }
+  const executors = { 'plan-sweep': fake('plan-sweep', db, calls), sweep: fake('sweep', db, calls), laptop: EXECUTORS.laptop }
   return { db, calls, executors, env: { DB: db, GCP_SA_KEY: 'test', ...env } as ExecEnv }
 }
 
@@ -67,8 +67,12 @@ const req = (o: Partial<DispatchReq>): DispatchReq => ({ planId: 1, mode: 'dry',
 
 describe('executorOf — the deployment\'s `EXECUTOR`', () => {
   it('defaults to plan-sweep, accepts sweep, throws on anything else', () => {
-    expect([executorOf({}), executorOf({ EXECUTOR: 'plan-sweep' }), executorOf({ EXECUTOR: 'sweep' })]).toEqual(['plan-sweep', 'plan-sweep', 'sweep'])
-    expect(() => executorOf({ EXECUTOR: 'Sweep' })).toThrow('unknown EXECUTOR "Sweep" (expected plan-sweep | sweep)')
+    expect([executorOf({}), executorOf({ EXECUTOR: 'plan-sweep' }), executorOf({ EXECUTOR: 'sweep' }), executorOf({ EXECUTOR: 'laptop' })]).toEqual(['plan-sweep', 'plan-sweep', 'sweep', 'laptop'])
+    expect(() => executorOf({ EXECUTOR: 'Sweep' })).toThrow('unknown EXECUTOR "Sweep" (expected plan-sweep | sweep | laptop)')
+  })
+
+  it('planFirstKind — the /api/plan-sweep routes dispatch to the deployment\'s plan-first executor', () => {
+    expect([planFirstKind({}), planFirstKind({ EXECUTOR: 'sweep' }), planFirstKind({ EXECUTOR: 'laptop' })]).toEqual(['plan-sweep', 'plan-sweep', 'laptop'])
   })
 })
 
@@ -85,16 +89,20 @@ describe('dispatchPlan — executor selection', () => {
     ])
   })
 
-  it('validates the scan id per executor, and needs D1 + the GCP key', async () => {
+  it('validates the scan id per executor, needs D1, and the GCP executors need their key', async () => {
     const s = await setup()
+    // the key check is each GCP executor's own (`prepare`), not the seam's
+    const real = { ...s.executors, sweep: EXECUTORS.sweep, 'plan-sweep': EXECUTORS['plan-sweep'] }
     expect([
       await dispatchPlan(s.env, req({ date: '2026-09-28T1201' }), 'sweep', s.executors),
       await dispatchPlan(s.env, req({}), 'plan-sweep', s.executors),
-      await dispatchPlan({ ...s.env, GCP_SA_KEY: undefined }, req({ date: '2026-09-28' }), 'sweep', s.executors),
+      await dispatchPlan({ ...s.env, GCP_SA_KEY: undefined }, req({ date: '2026-09-28' }), 'sweep', real),
+      await dispatchPlan({ ...s.env, GCP_SA_KEY: undefined }, req({ date: '2026-09-28' }), 'plan-sweep', real),
       await dispatchPlan({ ...s.env, DB: undefined }, req({ date: '2026-09-28' }), 'sweep', s.executors),
     ]).toEqual([
       { ok: false, status: 400, error: 'date must be a scan id (YYYY-MM-DD)' },
       { ok: false, status: 400, error: 'date required for a dry run (YYYY-MM-DD[THHMM])' },
+      { ok: false, status: 503, error: 'dispatch not configured (GCP_SA_KEY secret missing)' },
       { ok: false, status: 503, error: 'dispatch not configured (GCP_SA_KEY secret missing)' },
       { ok: false, status: 503, error: 'plans store not configured (no D1 binding)' },
     ])
