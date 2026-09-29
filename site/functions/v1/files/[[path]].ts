@@ -2,12 +2,12 @@
 //
 // Mounts file-tree's `createHandlers` over an `S3Store` pointed at GCS's
 // S3-compatible XML API (verified: GCS speaks ListObjectsV2 + range GETs).
-// The browser hits this same-origin, behind the site's CF Access gate — so
-// no second sign-in and no CORS. Reads use a dedicated read-only HMAC key
+// The browser hits this same-origin, behind the site's sign-in — so no second
+// sign-in and no CORS. Reads use a dedicated read-only HMAC key
 // (SA `gcs-usage-browse@…`, `objectViewer` on this bucket ONLY); the
 // `prefixes` allow-list caps exposure to the scan outputs.
 //
-// Auth model is intentionally coarse: anyone past CF Access can read the
+// Auth model is intentionally coarse: any signed-in viewer can read the
 // listing/snapshot data (metadata the gcs.oa.dev treemap already shows this
 // audience). No per-user authz.
 import { createHandlers } from '@rdub/file-tree/server'
@@ -22,12 +22,11 @@ export const onRequest = async (ctx0: { request: Request; env: Env }): Promise<R
   // `store=<key>`: a secondary store's env overlay (none = the primary, as is).
   const ctx = withStore(ctx0)
   if (ctx instanceof Response) return ctx
-  // The primary's proxy carries no gate of its own (unchanged); a secondary
-  // store's is gated like its data (the viewer scope + its own `scope`).
-  if (ctx.env.STORE_KEY) {
-    const gated = await requireViewer(ctx)
-    if (gated instanceof Response) return gated
-  }
+  // Gated like `/data` (the viewer scope; a secondary store's own `scope` on
+  // top). It used to lean on the CF Access edge, and was left open when the
+  // deployments moved to app auth; a public deploy passes via PUBLIC_READ.
+  const gated = await requireViewer(ctx)
+  if (gated instanceof Response) return gated
   if (!storeReady(ctx.env)) {
     return new Response('scan-browser proxy not configured (missing store creds)', { status: 503 })
   }
