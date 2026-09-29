@@ -765,8 +765,10 @@ def index_sync(
     pointer (gen, dir) flips last, so the site moves from the previous complete
     generation to this one with no window (specs/view-serving.md). Needs
     CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the env. `--store` files
-    the rows under a secondary store (its generation recorded as
-    `<store>:<gen>`; specs/multi-store.md) — the default is the primary."""
+    the rows under a secondary store (variants recorded as
+    `<store>:<variant>`, the `store` column set — needs the store migration;
+    specs/multi-store.md). The default, the primary, writes exactly the
+    pre-stores SQL."""
     from .index_footer import check_store, sync_d1
 
     try:

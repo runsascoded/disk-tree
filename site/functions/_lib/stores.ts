@@ -97,6 +97,16 @@ export function secondaryStores(env: Env): Record<string, StoreConfig> {
 
 /** The store a (possibly overlaid) env serves: `PRIMARY_STORE` or a key. */
 export const storeKey = (env: Env): string => env.STORE_KEY ?? PRIMARY_STORE
+export const isPrimary = (env: Env): boolean => storeKey(env) === PRIMARY_STORE
+
+/** An index variant as D1 records it (`index_schema` / `index_row_groups`):
+ * the primary's as-is, a secondary store's as `<store>:<variant>`
+ * (`dt_cloud.index_footer.d1_variant`). The primary's queries are exactly
+ * what they were before stores existed (no `store` predicate, so they run on
+ * an un-migrated D1), and always name a bare variant, so they never see a
+ * secondary store's rows; a secondary store's queries also say `store = ?`,
+ * which fails loudly until the store migration is applied. */
+export const d1Variant = (env: Env, variant: string): string => (isPrimary(env) ? variant : `${storeKey(env)}:${variant}`)
 
 /** `env` as secondary store `key` sees it (see the module comment). */
 export function storeEnv(env: Env, key: string, cfg: StoreConfig): Env {

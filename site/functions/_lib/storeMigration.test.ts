@@ -63,11 +63,12 @@ describe.each(CASES)('$lineage/$file', ({ lineage, file }) => {
 
   it('admits a secondary store’s scan under a primary scan’s id, and still refuses a duplicate', async () => {
     const raw = await seeded()
-    raw.exec("INSERT INTO index_schema (store, date, variant, version, schema_json, gen, dir) VALUES ('meta', '2026-09-01', 'path', 1, '[]', 'meta:g1', 'meta-l2/2026-09-01/index/g1')")
-    raw.exec("INSERT INTO index_row_groups (store, date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, row_start, row_end, rg_json) VALUES ('meta', '2026-09-01', 'path', 'meta:g1', 0, 0, 1, 'a', 'b', 7, 0, 3, '[3,\"ZSTD\",[]]')")
-    expect(raw.prepare("SELECT store, gen FROM index_schema WHERE date = '2026-09-01' AND variant = 'path' ORDER BY store").all()).toEqual([
-      { store: 'meta', gen: 'meta:g1' },
-      { store: 'primary', gen: 'g1' },
+    // As `index-sync --store meta` writes it: same scan id and gen, namespaced variant.
+    raw.exec("INSERT INTO index_schema (store, date, variant, version, schema_json, gen, dir) VALUES ('meta', '2026-09-01', 'meta:path', 1, '[]', 'g1', 'meta-l2/2026-09-01/index/g1')")
+    raw.exec("INSERT INTO index_row_groups (store, date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, row_start, row_end, rg_json) VALUES ('meta', '2026-09-01', 'meta:path', 'g1', 0, 0, 1, 'a', 'b', 7, 0, 3, '[3,\"ZSTD\",[]]')")
+    expect(raw.prepare("SELECT store, variant, gen FROM index_schema WHERE date = '2026-09-01' AND variant LIKE '%path' ORDER BY store").all()).toEqual([
+      { store: 'meta', variant: 'meta:path', gen: 'g1' },
+      { store: 'primary', variant: 'path', gen: 'g1' },
     ])
     let err: unknown
     try {

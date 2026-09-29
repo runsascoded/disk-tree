@@ -263,9 +263,14 @@ def _q(v) -> str:  # nullable string literal for SQL
     return "NULL" if v is None else f"'{_sql_escape(v)}'"
 
 
-# Multi-store deploys (specs/multi-store.md): every index row names its store
-# (`index_schema.store`, `index_row_groups.store`); the primary's rows are
-# `'primary'` (site/migrations/{cw/0006,gcs/0030}_store_scoped_index.sql).
+# Multi-store deploys (specs/multi-store.md). The primary store's SQL is
+# exactly what it was before stores existed, so it runs on a D1 with or
+# without the store migration (site/migrations/{cw/0006,gcs/0030}). A
+# secondary store's rows are namespaced twice: their `variant` is
+# `<store>:<variant>` (so no primary query, which always names a bare variant,
+# can see them; and the row-group PK (date, variant, gen, rg) stays disjoint),
+# and they name the `store` column, which only exists once migrated — so a
+# secondary store fails loudly on an un-migrated D1.
 PRIMARY_STORE = "primary"
 _STORE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -277,13 +282,10 @@ def check_store(store: str) -> str:
     return store
 
 
-def d1_gen(gen: str, store: str = PRIMARY_STORE) -> str:
-    """The generation as D1 records it: the primary's as-is, a secondary
-    store's as ``<store>:<gen>``. `index_row_groups` keeps its PK
-    (date, variant, gen, rg) — the multi-GB table isn't rebuilt — so this is
-    what keeps two stores' rows for one scan id and run from colliding."""
-    check_store(store)
-    return gen if store == PRIMARY_STORE else f"{store}:{gen}"
+def d1_variant(variant: str, store: str = PRIMARY_STORE) -> str:
+    """The variant as D1 records it: the primary's as-is, a secondary store's
+    as ``<store>:<variant>`` (the site's `d1Variant`)."""
+    return variant if check_store(store) == PRIMARY_STORE else f"{store}:{variant}"
 
 
 def sync_d1(
@@ -317,11 +319,14 @@ def sync_d1(
     (``write_groups_blob``) first — the durable copy the site opens once
     retention retires this tier's rows from D1.
 
-    ``store`` scopes every row and the gc to that store (default the
-    primary); a secondary store's generation is recorded as ``<store>:<gen>``
-    (`d1_gen`)."""
-    gen = d1_gen(gen, store)
-    st = _sql_escape(store)
+    ``store`` (default the primary, whose SQL is unchanged) files the rows
+    under a secondary store: variant ``<store>:<variant>`` and the ``store``
+    column set (which needs the store migration)."""
+    variant = d1_variant(variant, store)
+    sec = store != PRIMARY_STORE
+    st = f"store='{_sql_escape(store)}' AND " if sec else ""
+    sc = "store, " if sec else ""  # the column, in the INSERTs
+    sv = f"'{_sql_escape(store)}', " if sec else ""  # its value
     schema, rows = extract(parquet_path)
     if blob:
         write_groups_blob(parquet_path, schema, rows)
@@ -329,24 +334,24 @@ def sync_d1(
     # Leftovers from earlier flips (any gen that is neither the current pointer's
     # nor this one) go first — they are unreachable by construction.
     gc_sql = (
-        f"DELETE FROM index_row_groups WHERE store='{st}' AND date='{date}' AND variant='{variant}' AND gen <> '{_sql_escape(gen)}' "
-        f"AND gen <> COALESCE((SELECT gen FROM index_schema WHERE store='{st}' AND date='{date}' AND variant='{variant}'), '');"
+        f"DELETE FROM index_row_groups WHERE {st}date='{date}' AND variant='{variant}' AND gen <> '{_sql_escape(gen)}' "
+        f"AND gen <> COALESCE((SELECT gen FROM index_schema WHERE {st}date='{date}' AND variant='{variant}'), '');"
     )
     schema_sql = (
-        "INSERT OR REPLACE INTO index_schema (store, date, variant, version, schema_json, floor_bytes, gen, dir) VALUES "
-        f"('{st}', '{date}', '{variant}', {schema['version']}, '{_sql_escape(json.dumps(schema['schema'], separators=(',', ':')))}', "
+        f"INSERT OR REPLACE INTO index_schema ({sc}date, variant, version, schema_json, floor_bytes, gen, dir) VALUES "
+        f"({sv}'{date}', '{variant}', {schema['version']}, '{_sql_escape(json.dumps(schema['schema'], separators=(',', ':')))}', "
         f"{'NULL' if floor is None else int(floor)}, '{_sql_escape(gen)}', '{_sql_escape(key)}');"
     )
 
     def group_values(r: dict) -> str:
         return (
-            f"('{st}', '{date}', '{variant}', '{_sql_escape(gen)}', {r['rg']}, {r['d_min']}, {r['d_max']}, "
+            f"({sv}'{date}', '{variant}', '{_sql_escape(gen)}', {r['rg']}, {r['d_min']}, {r['d_max']}, "
             f"'{_sql_escape(r['p_min'])}', '{_sql_escape(r['p_max'])}', {r['b_max']}, "
             f"{_q(r['u_min'])}, {_q(r['u_max'])}, "
             f"{r['row_start']}, {r['row_end']}, '{_sql_escape(r['rg_json'])}')"
         )
 
-    cols = "(store, date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, u_min, u_max, row_start, row_end, rg_json)"
+    cols = f"({sc}date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, u_min, u_max, row_start, row_end, rg_json)"
     # OR REPLACE: a chunk whose request timed out may or may not have landed;
     # re-sending it must be a no-op, not a PK collision (date, variant, gen, rg).
     head = f"INSERT OR REPLACE INTO index_row_groups {cols} VALUES "
@@ -375,11 +380,14 @@ def gc_d1(date: str, db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> int:
     ever query the pointer's generation, and a handle outlives the pointer by
     at most its cache TTL (`_lib/index.ts`), which the end-of-job call clears."""
     tok, acct = _creds()
+    # The primary's statement (unchanged) matches each row to the pointer of its
+    # own (date, variant), so a secondary store's namespaced rows are judged by
+    # their own pointer too; `store=` restricts the sweep to that store.
+    sw = "" if check_store(store) == PRIMARY_STORE else f"store = '{_sql_escape(store)}' AND "
     rows = _d1_query(
-        "DELETE FROM index_row_groups WHERE store = '{s}' AND date = '{d}' AND gen <> COALESCE("
-        "(SELECT s.gen FROM index_schema s WHERE s.store = index_row_groups.store AND s.date = index_row_groups.date "
-        "AND s.variant = index_row_groups.variant), '') "
-        "RETURNING 1 AS n;".format(s=_sql_escape(check_store(store)), d=_sql_escape(date)),
+        "DELETE FROM index_row_groups WHERE {sw}date = '{d}' AND gen <> COALESCE("
+        "(SELECT s.gen FROM index_schema s WHERE s.date = index_row_groups.date AND s.variant = index_row_groups.variant), '') "
+        "RETURNING 1 AS n;".format(sw=sw, d=_sql_escape(date)),
         acct, tok, db_id,
     )
     return len(rows)
@@ -424,11 +432,12 @@ def retire_d1(retain: int, db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) ->
     (date, variant, rows deleted) per retired variant."""
     tok, acct = _creds()
     dates = sorted({d for d, _ in synced_variants(db_id, store)})
+    sw = "" if store == PRIMARY_STORE else f"store = '{_sql_escape(store)}' AND "
     out: list[tuple[str, str, int]] = []
     for d in dates[:-retain] if retain > 0 else dates:
         for v in FLOOR_FREE_VARIANTS:
             rows = _d1_query(
-                f"DELETE FROM index_row_groups WHERE store = '{_sql_escape(store)}' AND date = '{_sql_escape(d)}' AND variant = '{v}' RETURNING 1 AS n;",
+                f"DELETE FROM index_row_groups WHERE {sw}date = '{_sql_escape(d)}' AND variant = '{_sql_escape(d1_variant(v, store))}' RETURNING 1 AS n;",
                 acct, tok, db_id,
             )
             if rows:
@@ -441,9 +450,9 @@ def index_dir(date: str, variant: str = "path", db_id: str = D1_DB_ID, store: st
     pointer (``index_schema.dir``); None when that (date, variant) was never
     synced. The parquet is ``<dir>/<INDEX_VARIANTS[variant]>``."""
     tok, acct = _creds()
+    sw = "" if check_store(store) == PRIMARY_STORE else f"store = '{_sql_escape(store)}' AND "
     rows = _d1_query(
-        f"SELECT dir FROM index_schema WHERE store = '{_sql_escape(check_store(store))}' AND date = '{_sql_escape(date)}' "
-        f"AND variant = '{_sql_escape(variant)}';",
+        f"SELECT dir FROM index_schema WHERE {sw}date = '{_sql_escape(date)}' AND variant = '{_sql_escape(d1_variant(variant, store))}';",
         acct, tok, db_id,
     )
     return rows[0]["dir"] if rows else None
@@ -478,28 +487,35 @@ COMPACT_SQL = (
     "CAST(json_extract(value, '$.meta_data.total_compressed_size') AS INTEGER), "
     "CAST(coalesce(json_extract(value, '$.meta_data.dictionary_page_offset'), '0') AS INTEGER))) "
     "FROM json_each(index_row_groups.rg_json, '$.columns'))"
-    ") WHERE store = '{store}' AND date = '{date}' AND variant = '{variant}' AND rg_json LIKE '{{%';"
+    ") WHERE date = '{date}' AND variant = '{variant}' AND rg_json LIKE '{{%';"
 )
 
 
 def synced_variants(db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> list[tuple[str, str]]:
-    """Every (date, variant) of ``store`` with a schema row in D1 (= a complete sync)."""
+    """Every (date, variant) of ``store`` with a schema row in D1 (= a complete
+    sync); variants as the store names them (a secondary store's prefix off).
+    The primary's query is unchanged: secondary rows (a `:` in the variant)
+    are dropped here, not in SQL."""
     tok, acct = _creds()
+    if check_store(store) == PRIMARY_STORE:
+        rows = _d1_query("SELECT date, variant FROM index_schema ORDER BY date, variant;", acct, tok, db_id)
+        return [(r["date"], r["variant"]) for r in rows if ":" not in r["variant"]]
     rows = _d1_query(
-        f"SELECT date, variant FROM index_schema WHERE store = '{_sql_escape(check_store(store))}' ORDER BY date, variant;",
+        f"SELECT date, variant FROM index_schema WHERE store = '{_sql_escape(store)}' ORDER BY date, variant;",
         acct, tok, db_id,
     )
-    return [(r["date"], r["variant"]) for r in rows]
+    pre = f"{store}:"
+    return [(r["date"], r["variant"][len(pre):]) for r in rows if r["variant"].startswith(pre)]
 
 
 def compact_d1(date: str, variant: str, db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> int:
     """Compact one (date, variant)'s verbose `rg_json` rows in place; returns the
     number of rows left in the old form afterwards (0 = done)."""
     tok, acct = _creds()
-    st = _sql_escape(check_store(store))
-    _d1_query(COMPACT_SQL.format(store=st, date=date, variant=variant), acct, tok, db_id)
+    variant = d1_variant(variant, store)
+    _d1_query(COMPACT_SQL.format(date=date, variant=variant), acct, tok, db_id)
     rows = _d1_query(
-        f"SELECT count(*) AS n FROM index_row_groups WHERE store = '{st}' AND date = '{date}' AND variant = '{variant}' AND rg_json LIKE '{{%';",
+        f"SELECT count(*) AS n FROM index_row_groups WHERE date = '{date}' AND variant = '{variant}' AND rg_json LIKE '{{%';",
         acct, tok, db_id,
     )
     return int(rows[0]["n"])

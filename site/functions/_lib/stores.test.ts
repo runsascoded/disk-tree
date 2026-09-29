@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Env } from './auth'
 import { requireViewer } from './auth'
 import { cacheKeyFor } from './edgeCache'
-import { indexDir, openIndex, storeTarget, storeCreds } from './index'
+import { indexDir, openIndex, pathScans, storeTarget, storeCreds } from './index'
 import { overTimeDataset } from './overTime'
 import { snapshotsPrefix } from './shared'
 import { LENS_PRIMARY_ONLY, primaryOnly, secondaryStores, storeEnv, storeKey, withStore } from './stores'
@@ -125,36 +125,62 @@ describe('cache keys', () => {
   })
 })
 
-describe('D1 isolation', () => {
-  // One scan id in both stores: each env reads only its own pointer and rows.
-  const seeded = async () => {
-    const { db, raw } = await sqliteD1('cw')
-    raw.exec(`
-      INSERT INTO index_schema (store, date, variant, version, schema_json, gen, dir) VALUES
-        ('primary', '2026-09-01', 'path', 1, '[{"name":"schema"}]', 'g1', 'cw-l2/2026-09-01/index/g1'),
-        ('meta', '2026-09-01', 'path', 2, '[{"name":"schema"}]', 'meta:g7', 'meta-l2/2026-09-01/index/g7'),
-        ('meta', '2026-09-02', 'path', 2, '[{"name":"schema"}]', 'meta:g8', 'meta-l2/2026-09-02/index/g8');
-      INSERT INTO index_row_groups (store, date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, row_start, row_end, rg_json) VALUES
-        ('primary', '2026-09-01', 'path', 'g1', 0, 0, 1, 'a', 'b', 1, 0, 1, '[1,"ZSTD",[]]'),
-        ('meta', '2026-09-01', 'path', 'meta:g7', 0, 0, 1, 'a', 'b', 1, 0, 1, '[1,"ZSTD",[]]');
-    `)
-    return { primary: { ...PRIMARY, DB: db } as Env, meta: storeEnv({ ...PRIMARY, DB: db } as Env, 'meta', META) }
-  }
+// Rows as the writers leave them (`dt_cloud.index_footer.sync_d1`): the
+// primary's with no `store` column named (its SQL predates stores), a
+// secondary store's with `store` set and its variant namespaced. Each case
+// uses its own scan ids: `openIndex` memoizes handles per isolate.
+const PRIMARY_ROWS = (d: string) => `
+  INSERT INTO index_schema (date, variant, version, schema_json, gen, dir) VALUES
+    ('${d}', 'path', 1, '[{"name":"schema"}]', 'g1', 'cw-l2/${d}/index/g1');
+  INSERT INTO index_row_groups (date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, row_start, row_end, rg_json) VALUES
+    ('${d}', 'path', 'g1', 0, 0, 1, 'a', 'b', 1, 0, 1, '[1,"ZSTD",[]]');
+`
+const META_ROWS = (d: string, d2: string) => `
+  INSERT INTO index_schema (store, date, variant, version, schema_json, gen, dir) VALUES
+    ('meta', '${d}', 'meta:path', 2, '[{"name":"schema"}]', 'g1', 'meta-l2/${d}/index/g1'),
+    ('meta', '${d2}', 'meta:path', 2, '[{"name":"schema"}]', 'g8', 'meta-l2/${d2}/index/g8');
+  INSERT INTO index_row_groups (store, date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, row_start, row_end, rg_json) VALUES
+    ('meta', '${d}', 'meta:path', 'g1', 0, 0, 1, 'a', 'b', 1, 0, 1, '[1,"ZSTD",[]]');
+`
+const envs = (db: Env['DB']) => ({ primary: { ...PRIMARY, DB: db } as Env, meta: storeEnv({ ...PRIMARY, DB: db } as Env, 'meta', META) })
+const STORE_MIGRATION = { cw: '0006_store_scoped_index.sql', gcs: '0030_store_scoped_index.sql' } as const
 
-  it('indexDir reads the env’s own store', async () => {
-    const { primary, meta } = await seeded()
-    expect(await Promise.all([indexDir(primary, '2026-09-01'), indexDir(meta, '2026-09-01'), indexDir(primary, '2026-09-02'), indexDir(meta, '2026-09-02')])).toEqual([
-      'cw-l2/2026-09-01/index/g1',
-      'meta-l2/2026-09-01/index/g7',
-      null,
-      'meta-l2/2026-09-02/index/g8',
+describe.each([
+  { lineage: 'cw' as const, d: '2026-07-01', d2: '2026-07-02' },
+  { lineage: 'gcs' as const, d: '2026-07-11', d2: '2026-07-12' },
+])('D1, $lineage lineage', ({ lineage, d, d2 }) => {
+  it('primary reads work on the un-migrated schema (their SQL predates stores); a secondary store refuses loudly', async () => {
+    const { db, raw } = await sqliteD1(lineage, { before: STORE_MIGRATION[lineage] })
+    raw.exec(PRIMARY_ROWS(d))
+    const { primary, meta } = envs(db)
+    const h = await openIndex(primary, d)
+    expect([await indexDir(primary, d), (await pathScans(primary, true)).results, h.mode, h.gen, h.version]).toEqual([
+      `cw-l2/${d}/index/g1`, [{ date: d }], 'd1', 'g1', 1,
     ])
+    await expect(indexDir(meta, d)).rejects.toThrow(/^no such column: store/)
+    await expect(pathScans(meta, true)).rejects.toThrow(/^no such column: store/)
   })
 
-  it('openIndex handles are per store (same scan id, separate pointers and memo entries)', async () => {
-    const { primary, meta } = await seeded()
-    const [a, b] = await Promise.all([openIndex(primary, '2026-09-01'), openIndex(meta, '2026-09-01')])
-    expect([a.mode, a.gen, a.version, b.mode, b.gen, b.version]).toEqual(['d1', 'g1', 1, 'd1', 'meta:g7', 2])
+  it('migrated: one scan id (and gen) in both stores; each env reads only its own pointer, rows and scans', async () => {
+    const { db, raw } = await sqliteD1(lineage)
+    raw.exec(PRIMARY_ROWS(`${d}T0001`) + META_ROWS(`${d}T0001`, `${d2}T0001`))
+    const { primary, meta } = envs(db)
+    expect(await Promise.all([indexDir(primary, `${d}T0001`), indexDir(meta, `${d}T0001`), indexDir(primary, `${d2}T0001`), indexDir(meta, `${d2}T0001`)])).toEqual([
+      `cw-l2/${d}T0001/index/g1`,
+      `meta-l2/${d}T0001/index/g1`,
+      null,
+      `meta-l2/${d2}T0001/index/g8`,
+    ])
+    expect([(await pathScans(primary, true)).results, (await pathScans(meta, true)).results]).toEqual([
+      [{ date: `${d}T0001` }],
+      [{ date: `${d}T0001` }, { date: `${d2}T0001` }],
+    ])
+    const [a, b] = await Promise.all([openIndex(primary, `${d}T0001`), openIndex(meta, `${d}T0001`)])
+    expect([a.mode, a.gen, a.version, b.mode, b.gen, b.version]).toEqual(['d1', 'g1', 1, 'd1', 'g1', 2])
+    expect(raw.prepare('SELECT store, variant FROM index_row_groups ORDER BY store').all()).toEqual([
+      { store: 'meta', variant: 'meta:path' },
+      { store: 'primary', variant: 'path' },
+    ])
   })
 })
 

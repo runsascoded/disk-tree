@@ -12,10 +12,10 @@
 // CORS). CF Pages serves static assets before Functions, so this only works
 // because public/data/ is no longer shipped (see the build).
 import { S3Store } from '@rdub/file-tree/stores/s3'
-import { storeKey, withStore } from '../_lib/stores.js'
+import { withStore } from '../_lib/stores.js'
 import { snapshotsPrefix } from '../_lib/shared.js'
 import { type Env, requireViewer } from '../_lib/auth.js'
-import { storeCreds, storeReady, storeTarget } from '../_lib/index.js'
+import { pathScans, storeCreds, storeReady, storeTarget } from '../_lib/index.js'
 
 // Scan ids are `YYYY-MM-DD`, optionally sub-daily as `YYYY-MM-DDTHHMM` (no
 // colon: it keeps the id safe as an object-key path segment). GCS publishes one
@@ -72,7 +72,7 @@ export const onRequest = async (ctx0: { request: Request; env: Env }): Promise<R
       // snapshot with no index (pre-2026-08-26, until re-aggregated) is left
       // out of the picker rather than offered and failing on every drill.
       if (ctx.env.DB) {
-        const rows = await ctx.env.DB.prepare("SELECT DISTINCT date FROM index_schema WHERE store = ? AND variant = 'path'").bind(storeKey(ctx.env)).all<{ date: string }>()
+        const rows = await pathScans(ctx.env, false)
         const indexed = new Set(rows.results.map(r => r.date))
         for (let i = dates.length - 1; i >= 0; i--) if (!indexed.has(dates[i])) dates.splice(i, 1)
       }

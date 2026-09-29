@@ -22,7 +22,6 @@ import { dispatchPlan, type ExecEnv, executorOf, notifyDispatched } from '../_li
 import { audit } from '../_lib/plans.js'
 import { slackUserEmail, verifySlackSignature } from '../_lib/slack.js'
 import { notifyPlan, planGate } from '../_lib/stagedSlack.js'
-import { PRIMARY_STORE } from '../_lib/stores.js'
 
 type Env = AuthEnv & ExecEnv
 interface PagesCtx { request: Request; env: Env; waitUntil: (p: Promise<unknown>) => void }
@@ -41,8 +40,7 @@ async function tell(url: string | undefined, text: string): Promise<void> {
 }
 
 async function latestScan(db: D1Database): Promise<string | null> {
-  // Plans are the primary store's (a secondary store has no executor).
-  const r = await db.prepare("SELECT max(date) AS d FROM index_schema WHERE store = ? AND variant = 'path'").bind(PRIMARY_STORE).first<{ d: string | null }>()
+  const r = await db.prepare("SELECT max(date) AS d FROM index_schema WHERE variant = 'path'").first<{ d: string | null }>()
   return r?.d ?? null
 }
 

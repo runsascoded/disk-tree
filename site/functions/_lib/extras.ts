@@ -9,7 +9,7 @@
  * every consumer keeps today's behaviour.
  */
 import type { Env } from './auth.js'
-import { makeStore } from './index.js'
+import { makeStore, schemaRow } from './index.js'
 import { shared } from './shared.js'
 import { storeKey } from './stores.js'
 
@@ -49,7 +49,7 @@ async function readJson(env: Env, key: string): Promise<unknown | null> {
 /** The scan's sidecar indexes (or null when the generation has none). */
 async function indexes(env: Env, date: string) {
   if (!env.DB) return null
-  const r = await env.DB.prepare('SELECT dir FROM index_schema WHERE store = ? AND date = ? AND variant = ?').bind(storeKey(env), date, 'path').first<{ dir: string | null }>()
+  const r = await schemaRow<{ dir: string | null }>(env, 'dir', date, 'path')
   const dir = r?.dir ?? `listing/${date}`
   const key = `${storeKey(env)}|${date}|${dir}`
   const miss = missAt.get(key)

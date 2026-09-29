@@ -15,7 +15,7 @@
  */
 import { type Ctx, json, requireScope, requireViewer } from '../_lib/auth.js'
 import { snapshotsPrefix } from '../_lib/shared.js'
-import { type Lens, makeStore, storeReady } from '../_lib/index.js'
+import { type Lens, makeStore, pathScans, storeReady } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { classKey, parseClasses, parseOwner } from '../_lib/scope.js'
 import { readRootAgg, readRootRows } from '../_lib/view.js'
@@ -98,7 +98,7 @@ export const onRequestGet = async (ctx0: Ctx & { waitUntil?: (p: Promise<unknown
   if (split && (path || paths.length || lens || owner || classes)) return json({ error: 'split=roots is for the unscoped store root only' }, 400)
 
   // Every scan with a synced floor-free index, oldest first.
-  const rows = await st.time('scans', env.DB.prepare("SELECT DISTINCT date FROM index_schema WHERE store = ? AND variant = 'path' ORDER BY date").bind(storeKey(env)).all<{ date: string }>())
+  const rows = await st.time('scans', pathScans(env, true))
   const dates = rows.results.map(r => r.date)
   // A user lens applies the live claims, so its key carries the ledger head.
   const head = lens ? await ledgerHead(env) : 0

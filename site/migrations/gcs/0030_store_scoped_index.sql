@@ -4,18 +4,22 @@
 -- are `'primary'`, a fixed sentinel rather than the deploy's `STORE` key, the
 -- same in both lineages (cw's `0006_store_scoped_index.sql` is this file).
 --
+-- Only a secondary store needs this migration: the primary's reads and writes
+-- never name `store` (their SQL predates it; its rows get the default), so
+-- they run the same on either schema. A secondary store's rows also carry a
+-- namespaced variant (`<store>:<variant>`), which no primary query asks for,
+-- and its queries say `store = ?`, which fails until this is applied.
+--
 -- `index_schema` (the per-scan pointer: one small row per (scan, variant)) is
--- rebuilt with `store` leading its primary key, so a secondary store's scan
--- may share a scan id with a primary scan. Nothing REFERENCES `index_schema`,
--- so the DROP + RENAME can't trip D1's foreign-key enforcement.
+-- rebuilt with `store` leading its primary key. Nothing REFERENCES
+-- `index_schema`, so the DROP + RENAME can't trip D1's foreign-key
+-- enforcement.
 --
 -- `index_row_groups` is NOT rebuilt: it is the multi-GB table (a DROP COLUMN
 -- on it ran past D1's statement limit, 0019), so `store` is added in place (a
 -- constant default rewrites no rows) and its PK stays (date, variant, gen,
--- rg). Rows are only ever reached through a store-scoped pointer, and
--- `dt-cloud index-sync --store S` namespaces a secondary store's generation
--- as `S:<gen>`, so two stores' rows can't collide on that PK. The writer's
--- gc / retention passes filter on the column.
+-- rg), which the namespaced variant keeps disjoint across stores. The
+-- writer's gc / retention passes filter on the column.
 --
 -- `pyramid_multiscans` (the over-time group manifest) is untouched: pyrmts
 -- owns its DDL and read query (`CREATE TABLE IF NOT EXISTS` at first sync —
