@@ -6,11 +6,12 @@
 # "Run workflow" (workflow_dispatch).
 #
 # Creds (repo secrets/vars): R2_HCCS_RO_* + R2_HCCS_ENDPOINT_URL (ctbk/crashes,
-# HCCS account); R2_DEMO_SRC_RO_* (token "disk-tree-demo-src RO": read, RAC
-# source buckets — jc-taxes) and R2_DEMO_RW_* (token "disk-tree-demo-ingest RW":
+# HCCS account); R2_DEMO_SRC_RO_* (token "disky demo bkts RO": read, RAC
+# source buckets — jc-taxes) and R2_DEMO_RW_* (token "disky demo RW":
 # read/write, disk-tree-demo only), both RAC via vars.R2_ENDPOINT_URL;
-# CLOUDFLARE_API_TOKEN (D1). CI-only tokens: no laptop or deployment shares them
-# (the site reads with its own "disk-tree-demo-site RO", a Pages secret).
+# CLOUDFLARE_API_TOKEN (D1). The demo's own tokens (the root worktree's `.envrc`
+# holds the same ones as R2_RAC_RO_* / R2_RW_*); no other deployment or laptop
+# key is shared. The site reads with "disky demo RO" (a Pages secret).
 name: daily-ingest
 
 on:

@@ -10,7 +10,7 @@
 #   HCCS 2363642879f18d37d52dca114059937e — crashes, ctbk (public sources)
 #
 # Needs, in this repo's settings (secrets):
-#   R2_DEMO_RW_ACCESS_KEY_ID / R2_DEMO_RW_SECRET_ACCESS_KEY  (token "disk-tree-demo-ingest RW", RAC; CI-only)
+#   R2_DEMO_RW_ACCESS_KEY_ID / R2_DEMO_RW_SECRET_ACCESS_KEY  (token "disky demo RW", RAC; CI-only)
 #   R2_HCCS_RO_ACCESS_KEY_ID / R2_HCCS_RO_SECRET_ACCESS_KEY  (token "hccs …RO", HCCS)
 # (jc-taxes, the one RAC *source*, is pending a working read token — see the
 #  scan loop below. It rejoins the loop via R2_DEMO_SRC_RO_*.)

@@ -8,7 +8,7 @@
 # date (a re-run lands a fresh generation and flips the pointer).
 #
 # Creds come from .envrc via direnv (R2_HCCS_RO_* for HCCS ctbk/crashes,
-# R2_RO_* for RAC jc-taxes, R2_RW_* to write disk-tree-demo, CLOUDFLARE_API_TOKEN +
+# R2_RAC_RO_* ("disky demo bkts RO") for RAC jc-taxes, R2_RW_* to write disk-tree-demo, CLOUDFLARE_API_TOKEN +
 # CLOUDFLARE_ACCOUNT_ID for D1). The HCCS account endpoint stays out of this
 # public repo — read from the untracked ~/.config/disk-tree/buckets.yml.
 set -euo pipefail
@@ -32,7 +32,7 @@ list() { AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" AWS_DEFAULT_REGION=au
   disk-tree bulk-list "r2://$3" -E "$4" -o "$WORK/listing/$3" -P 4; }
 list "$R2_HCCS_RO_ACCESS_KEY_ID" "$R2_HCCS_RO_SECRET_ACCESS_KEY" ctbk     "$HCCS_EP"
 list "$R2_HCCS_RO_ACCESS_KEY_ID" "$R2_HCCS_RO_SECRET_ACCESS_KEY" crashes  "$HCCS_EP"
-list "$R2_RO_ACCESS_KEY_ID"      "$R2_RO_SECRET_ACCESS_KEY"      jc-taxes "$R2_ENDPOINT_URL"
+list "$R2_RAC_RO_ACCESS_KEY_ID" "$R2_RAC_RO_SECRET_ACCESS_KEY" jc-taxes "$R2_ENDPOINT_URL"
 
 # 2. Union all three (grouped by bucket → the Map's top cells) → path-index +
 #    coarse tiers (beside -P) + snapshot JSONs.
