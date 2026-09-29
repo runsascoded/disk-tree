@@ -43,12 +43,11 @@ function App() {
                 (specs/done/pages-auth.md); elsewhere `Gate` is a pass-through. */}
             <Gate>
             <Routes>
-              {/* This deployment is single-cloud R2 on `r2.rbw.sh`, so the R2
-                  union IS the home page; `/scans` keeps the scheme-agnostic
-                  all-scans list, and the old `/r2` landing redirects here. */}
-              <Route path="/" element={<ScanList scheme="r2" />} />
-              <Route path="/scans" element={<ScanList />} />
-              <Route path="/r2" element={<Navigate to="/" replace />} />
+              {/* Home is the scheme-agnostic union of every scan (a laptop's
+                  local paths, buckets, …); `/r2`, `/gcs` scope it to one cloud. */}
+              <Route path="/" element={<ScanList />} />
+              <Route path="/scans" element={<Navigate to="/" replace />} />
+              <Route path="/r2" element={<ScanList scheme="r2" />} />
               <Route path="/access" element={<AccessPage />} />
               <Route path="/staged" element={<StagedPage />} />
               <Route path="/file/*" element={<ScanDetails />} />
