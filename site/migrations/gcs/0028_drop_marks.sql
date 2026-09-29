@@ -17,43 +17,23 @@
 -- `owner_prefixes` references `actions (id)`: the drop / rename below runs
 -- inside the migration's transaction, so the constraint is checked once
 -- `actions` exists again (with the same ids) rather than at the DROP.
-PRAGMA defer_foreign_keys = true;
-
+-- `actions` is NOT rebuilt: `owner_prefixes.action_id` references it, and
+-- dropping a parent table runs an implicit DELETE against every child row —
+-- `PRAGMA defer_foreign_keys` does not forgive that once the rebuilt table is
+-- renamed into place, so D1 rejected the rebuild on prod (2026-09-28, code
+-- 7500, rolled back). The keep columns (`set_keep`, `keep`) stay as unused
+-- defaults: the only writer (`api/actions.ts`) inserts `set_owner = 1`, which
+-- satisfies the table's `CHECK (set_owner OR set_keep)`.
 DROP TABLE IF EXISTS marks;
 DROP TABLE IF EXISTS mark_log;
 DROP TABLE IF EXISTS marks_new;
 DROP TABLE IF EXISTS keep_prefixes;
 DROP TABLE IF EXISTS mark_totals;
 DROP TABLE IF EXISTS sweep_approvals;
-
--- Actions that only set a keep decided nothing that survives; an action
--- that also set an owner keeps its owner half (and its provenance row).
+-- Keep-only actions have no owner rows pointing at them (owner_prefixes only
+-- expands owner actions), so this is a plain delete.
 DELETE FROM actions WHERE set_keep = 1 AND set_owner = 0;
-
--- SQLite can't drop a column that a CHECK names: create-copy-drop-rename.
-CREATE TABLE actions_new (
-  id         INTEGER PRIMARY KEY,
-  actor      TEXT NOT NULL,             -- email of the acting identity
-  ts         INTEGER NOT NULL,          -- unix seconds, server-assigned
-  scan       TEXT NOT NULL,             -- scan id the actor was viewing
-  pattern    TEXT NOT NULL,             -- prefix (regex patterns arrive later)
-  set_owner  INTEGER NOT NULL DEFAULT 1,
-  owner      TEXT,                      -- user id; NULL = clear
-  memo       TEXT,
-  CHECK (set_owner)
-);
-INSERT INTO actions_new (id, actor, ts, scan, pattern, set_owner, owner, memo)
-  SELECT id, actor, ts, scan, pattern, set_owner, owner, memo FROM actions;
-DROP TABLE actions;
-ALTER TABLE actions_new RENAME TO actions;
-CREATE INDEX idx_actions_actor ON actions (actor, ts);
-
--- Per-user owned bytes per (scan, ledger head): the claims fold priced
--- against the floor-free path index (`_lib/ownerTotals.ts`), cached here so
--- the index reads happen once per ledger change, not per request — what
--- `mark_totals` was, owner axis only. `claims` is the per-claim slice a user
--- lens reads per scan. Rows for old heads are dead weight; the writer prunes
--- anything but the newest head.
+CREATE INDEX IF NOT EXISTS idx_actions_actor ON actions (actor, ts);
 CREATE TABLE owner_totals (
   scan        TEXT NOT NULL,             -- snapshot date the totals are priced on
   head        INTEGER NOT NULL,          -- max(actions.id) the fold included
