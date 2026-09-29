@@ -1,27 +1,53 @@
-#!/usr/bin/env bash
-# The 12 h scan (LaunchAgent `com.runsascoded.disk-tree.index`; specs/m3-site.md).
-#
-#   1. `disk-tree index` → a scan blob in R2: what disk.rbw.sh's `ui/` reads.
-#      Transitional — dropped at the Phase 4 cut-over to `site/`.
-#   2. `disk-tree capture` → layer-1 listing shards in R2 (bounded memory, no
-#      local disk), then `aws/submit` → the Batch ingest (path index, snapshot,
-#      D1 footers). The laptop only walks.
-#
-# R2 as `AWS_PROFILE=m3` ("disky m3 laptop": `disk-tree` only); the Batch
-# submit as `AWS_PROFILE=r` (RAC AWS).
-set -euo pipefail
-M3=/Users/ryan/c/disky/wt/m3
-BIN=$M3/.venv/bin
-export DISK_TREE_R2_ENDPOINT_URL=https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com
-ts() { date -u +%FT%TZ; }
+#!/usr/bin/env python3
+"""The 12 h scan (LaunchAgent `com.runsascoded.disk-tree.index`; specs/m3-site.md).
 
-echo "[$(ts)] index"
-AWS_PROFILE=m3 DISK_TREE_SCAN_DIRS=r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans \
-  "$BIN/disk-tree" index -C -D --no-progress --to r2://disk-tree/scans /Users/ryan
+  1. `disk-tree index` → a scan blob in R2: what disk.rbw.sh's `ui/` reads.
+     Transitional — dropped at the Phase 4 cut-over to `site/`.
+  2. `disk-tree capture` → layer-1 listing shards in R2 (bounded memory, no
+     local disk), then `aws/submit` → the Batch ingest (path index, snapshot,
+     D1 footers). The laptop only walks.
 
-echo "[$(ts)] capture"
-capture=$(AWS_PROFILE=m3 "$BIN/disk-tree" capture -q -t r2://disk-tree/captures /Users/ryan | tail -1)
-echo "[$(ts)] captured $capture"
+R2 as `AWS_PROFILE=m3` ("disky m3 laptop": `disk-tree` only); the Batch submit
+as `AWS_PROFILE=r` (RAC AWS).
 
-job=$(AWS_PROFILE=r "$BIN/python" "$M3/aws/submit" "$capture")
-echo "[$(ts)] submitted Batch job $job"
+A Python script (not bash) on purpose: launchd runs it as this venv's
+`python`, and macOS TCC attributes the child `gfind`'s reads to that root
+process, so Full Disk Access is granted to the venv's python binary (System
+Settings → Privacy & Security → Full Disk Access; the resolved
+`~/.local/share/uv/python/cpython-<ver>/bin/python3.x`, so a uv python upgrade
+needs a re-grant). Without it the walk silently skips `~/.Trash`,
+`~/Library/{Application Support,Containers,…}` — 69 GiB on 2026-09-29.
+"""
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+M3 = Path(__file__).resolve().parent.parent
+BIN = M3 / '.venv' / 'bin'
+R2 = {'DISK_TREE_R2_ENDPOINT_URL': 'https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com'}
+HOST = 'm3'   # pinned: launchd sees `mac.lan`, a shell `Mac`
+err = lambda *a: print(*a, file=sys.stderr, flush=True)
+log = lambda msg: print(f'[{datetime.now(timezone.utc):%FT%TZ}] {msg}', flush=True)
+
+
+def run(*cmd: str, profile: str, capture: bool = False, **env: str) -> str:
+    r = subprocess.run(cmd, env={**os.environ, 'AWS_PROFILE': profile, **R2, **env}, check=True, text=True, capture_output=capture)
+    return r.stdout.strip() if capture else ''
+
+
+def main() -> None:
+    log('index')
+    run(str(BIN / 'disk-tree'), 'index', '-C', '-D', '--no-progress', '--to', 'r2://disk-tree/scans', '/Users/ryan',
+        profile='m3', DISK_TREE_SCAN_DIRS='r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans')
+    log('capture')
+    out = run(str(BIN / 'disk-tree'), 'capture', '-q', '-t', 'r2://disk-tree/captures', '/Users/ryan', profile='m3', capture=True, DISK_TREE_HOST=HOST)
+    capture = out.splitlines()[-1]
+    log(f'captured {capture}')
+    job = run(str(BIN / 'python'), str(M3 / 'aws' / 'submit'), capture, profile='r', capture=True)
+    log(f'submitted Batch job {job}')
+
+
+if __name__ == '__main__':
+    main()
