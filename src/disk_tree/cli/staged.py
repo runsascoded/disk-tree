@@ -92,23 +92,42 @@ def staged_cmd(as_json: bool):
 
 
 @cli.command("dispatch")
+@option("-a", "--after", default=None, help="--serve: shell command run after each real run that deleted something (the laptop re-captures)")
 @option("-c", "--config", "config_path", default=None, help="--serve: buckets.yml path (for the `delete:` chat/undo/database_id block)")
+@option("-d", "--d1", "d1_ids", multiple=True, help="--serve: D1 database id(s) to drain (repeatable; default the `delete:` block's, else $DISK_TREE_D1_DATABASE_ID)")
 @option("-f", "--for-real", is_flag=True, help="Actually delete (default: dry-run, report only)")
+@option("-H", "--host", default=None, help="--serve: this agent's host name, recorded with its heartbeat")
 @option("-i", "--interval", default=30, type=int, help="--serve: base poll seconds (exp-backoff to 5x while idle)")
 @option("-j", "--json", "as_json", is_flag=True, help="Emit JSON")
 @option("-o", "--once", is_flag=True, help="--serve: drain the enqueued runs once and exit")
 @option("-s", "--serve", is_flag=True, help="Drain edge-enqueued runs from D1 and execute them (the CP4 drainer)")
+@option("-t", "--trash", "trash_on", is_flag=True, help="--serve: real runs rename paths into ~/.Trash/disk-tree/<run>/ instead of deleting (`disk-tree trash` restores / empties)")
 @option("-u", "--uri", "uris", multiple=True, help="Dispatch only these staged URIs (repeatable); the plan stays open while items remain")
+@option("-x", "--ttl", default=None, help="--serve: with --trash, empty runs trashed longer ago than this (e.g. 7d) on each poll")
 @argument("plan_ref", required=False)
-def dispatch_cmd(config_path: str | None, for_real: bool, interval: int, as_json: bool, once: bool, serve: bool, uris: tuple[str, ...], plan_ref: str | None):
+def dispatch_cmd(
+    after: str | None,
+    config_path: str | None,
+    d1_ids: tuple[str, ...],
+    for_real: bool,
+    host: str | None,
+    interval: int,
+    as_json: bool,
+    once: bool,
+    serve: bool,
+    trash_on: bool,
+    uris: tuple[str, ...],
+    ttl: str | None,
+    plan_ref: str | None,
+):
     """Dispatch a plan (PLAN_REF = id or name; default the open `Staged` plan):
     delete its staged URIs, or (default) report what would be deleted.
 
-    With `--serve`, instead run the drainer: poll the edge's D1 for enqueued
-    runs (the browser dispatched them; the edge can't reach user buckets) and
-    execute each here, where `buckets.yml` creds live."""
+    With `--serve`, instead run the drainer: poll the edge's D1(s) for enqueued
+    runs (the browser dispatched them; the edge can't reach user buckets, or a
+    laptop's disk) and execute each here, where the creds live."""
     if serve:
-        _serve(config_path, interval, once)
+        _serve(config_path, interval, once, d1_ids=list(d1_ids), trash_on=trash_on, ttl=ttl, after=after, host=host)
         return
 
     from disk_tree.staged import dispatch, items, plan_by_ref
@@ -219,41 +238,94 @@ def _batch_submitter(batch_cfg: dict | None):
     return submit, int(batch_cfg.get("threshold", 10000))
 
 
-def _serve(config_path: str | None, interval: int, once: bool) -> None:
+def _serve(
+    config_path: str | None,
+    interval: int,
+    once: bool,
+    *,
+    d1_ids: list[str],
+    trash_on: bool = False,
+    ttl: str | None = None,
+    after: str | None = None,
+    host: str | None = None,
+) -> None:
     """The CP4 drainer: execute edge-enqueued runs from D1, here where the
     backend creds live. Exp-backoff polling (base `interval`, up to 5x while
-    idle); Ctrl-C stops cleanly."""
+    idle); Ctrl-C stops cleanly. Several `--d1`s are drained in turn each poll
+    (the laptop serves `site/`'s and `ui/`'s until the cut-over)."""
+    import subprocess
     import time
 
+    from disk_tree import trash as trash_mod
+    from disk_tree.cli.trash import parse_duration
     from disk_tree.d1 import D1Client, D1Error
-    from disk_tree.drain import drain_once
+    from disk_tree.drain import Schema, drain_once
     from disk_tree.notify.announce import make_announcer
 
     delete_cfg = _delete_cfg(config_path)
     try:
-        d1 = D1Client.from_env(delete_cfg.get("database_id"))
+        clients = [D1Client.from_env(i) for i in (d1_ids or [delete_cfg.get("database_id")])]
     except D1Error as e:
         raise SystemExit(f"dispatch --serve: {e}")
     undo_state = delete_cfg.get("undo", "none")
     announce = make_announcer(delete_cfg)
     submit_fn, batch_threshold = _batch_submitter(delete_cfg.get("batch"))
-    err(f"dispatch --serve: draining D1 {d1.database_id} (undo={undo_state}, "
-        f"chat={delete_cfg.get('chat', 'none')}, batch={'on' if submit_fn else 'off'})")
+    ttl_s = parse_duration(ttl) if ttl else None
+    if ttl_s is not None and not trash_on:
+        raise SystemExit("dispatch --serve: --ttl needs --trash")
+
+    # A `site/` plan prefix is `file:///Users/…/`; the scan DB and backends
+    # take the local path.
+    def local(uri: str) -> str:
+        return trash_mod.local_path(uri) if uri.startswith("file://") else uri
+
+    size_fn = lambda uri: _size_fn(local(uri))  # noqa: E731
+    delete_fn = lambda uri: _delete_fn(local(uri))  # noqa: E731
+    trash_fn = (lambda uri, run_id: trash_mod.trash(local(uri), run_id)) if trash_on else None
+
+    def run_after(summary: dict) -> None:
+        if not after:
+            return
+        err(f"  after {summary['run_id']}: {after}")
+        r = subprocess.run(after, shell=True)
+        if r.returncode:
+            err(f"  after {summary['run_id']}: exit {r.returncode}")
+
+    schemas = {c.database_id: Schema.detect(c) for c in clients}
+    err(f"dispatch --serve: draining D1 {', '.join(c.database_id for c in clients)} (undo={undo_state}, "
+        f"chat={delete_cfg.get('chat', 'none')}, batch={'on' if submit_fn else 'off'}, "
+        f"{'trash' if trash_on else 'rm'}{f', ttl {ttl}' if ttl else ''})")
+
+    def sweep_ttl() -> None:
+        for r in trash_mod.expired(ttl_s):
+            nbytes, files = trash_mod.empty(r.run_id)
+            err(f"  emptied {r.run_id} (older than {ttl}): freed {naturalsize(nbytes, binary=True)}, {files} file(s)")
+            for c in clients:
+                if schemas[c.database_id].hold:
+                    c.query("UPDATE deletion_runs SET purge_state = 'done' WHERE run_id = ? AND purge_state = 'pending'", [r.run_id])
 
     idle = 0
     try:
         while True:
-            summaries = drain_once(
-                d1, size_fn=_size_fn, delete_fn=_delete_fn, undo_state=undo_state, announce=announce,
-                submit_fn=submit_fn, batch_threshold=batch_threshold,
-            )
+            summaries = []
+            for c in clients:
+                summaries += drain_once(
+                    c, size_fn=size_fn, delete_fn=delete_fn, schema=schemas[c.database_id], trash_fn=trash_fn,
+                    undo_state=undo_state, hold_s=ttl_s, announce=announce, after=run_after,
+                    submit_fn=submit_fn, batch_threshold=batch_threshold, host=host,
+                )
             for s in summaries:
                 if s.get("submitted"):
                     err(f"  submitted {s['run_id']} to Batch job {s['batch_job']} ({s['items']} path(s), over threshold)")
                     continue
-                err(f"  ran {s['run_id']}: deleted {naturalsize(s['deleted_bytes'])}"
-                    f" across {s['deleted_objects']}/{s['items']} object(s)"
+                verb = "would delete" if s["mode"] == "dry" else ("trashed" if s["trashed"] else "deleted")
+                err(f"  ran {s['run_id']}: {verb} {naturalsize(s['deleted_bytes'], binary=True)}"
+                    f" across {s['deleted_objects']} object(s), {s['items']} path(s)"
                     + (f", {len(s['errors'])} failed" if s['errors'] else ""))
+                for uri, why in s["errors"]:
+                    err(f"    {uri}: {why}")
+            if ttl_s is not None:
+                sweep_ttl()
             if once:
                 if not summaries:
                     err("dispatch --serve --once: no enqueued runs")
