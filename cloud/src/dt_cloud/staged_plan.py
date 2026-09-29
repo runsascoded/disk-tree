@@ -2,12 +2,11 @@
 sweep-plan-union checkpoint 3).
 
 A dispatch snapshots a plan's items into ``plan.json`` in the run dir; ``sweep
-manifest --plan`` reads it here instead of the marks ledger. Items are the
-canonical ``gs://<bucket>/<path>/`` prefixes the plans store keeps, and a gcs
-plan may span buckets — so the plan is read into per-bucket relative prefix
-sets, and the manifest's bucket set is derived from it. Under the opt-in model
-the plan is the whole intent: no ledger is consulted, and the only carve-outs
-are the plan's own ``keep`` list (deepest prefix wins, as on cw).
+manifest --plan`` reads it here. Items are the canonical
+``gs://<bucket>/<path>/`` prefixes the plans store keeps, and a gcs plan may
+span buckets — so the plan is read into per-bucket relative prefix sets, and
+the manifest's bucket set is derived from it. Under the opt-in model the plan
+is the whole intent: nothing carves out.
 
 plan.json::
 
@@ -15,7 +14,6 @@ plan.json::
       "plan_id": 12,
       "name": "Staged",
       "sweep": ["gs://marin-us-east1/checkpoints/old/", "gs://marin-eu-west4/tmp/x/"],
-      "keep": ["gs://marin-us-east1/checkpoints/old/best/"],   # optional
       "buckets": ["marin-eu-west4", "marin-us-east1"]           # optional, derived here anyway
     }
 """
@@ -59,16 +57,21 @@ def _by_bucket(prefixes: list[str]) -> dict[str, tuple[str, ...]]:
     return {b: tuple(sorted(rels)) for b, rels in sorted(out.items())}
 
 
+#: Why a directory's keys are (or aren't) in the manifest.
+CATEGORIES = (
+    "eligible",       # under a staged prefix → delete
+    "outside_bands",  # not under any staged prefix — never classified
+)
+
+
 @dataclass(frozen=True)
 class StagedPlan:
-    """A plan's items grouped by bucket: ``sweep[bucket]`` / ``keep[bucket]`` are
-    sorted relative prefixes (trailing slash). ``keep`` only carries buckets
-    that have a keep."""
+    """A plan's items grouped by bucket: ``sweep[bucket]`` are sorted relative
+    prefixes (trailing slash)."""
 
     plan_id: int
     name: str
     sweep: dict[str, tuple[str, ...]]
-    keep: dict[str, tuple[str, ...]]
 
     @property
     def buckets(self) -> tuple[str, ...]:
@@ -82,21 +85,9 @@ class StagedPlan:
 
     def classify(self, bucket: str, dirname: str) -> str:
         """One directory (``''`` = bucket root, else ``a/b``) under the plan:
-        ``eligible`` when its deepest covering sweep prefix is deeper than any
-        covering keep prefix, ``keep`` when a keep carves it out, else
-        ``outside_bands``. The same deepest-mark-wins rule as cw's manifest."""
+        ``eligible`` when a staged prefix covers it, else ``outside_bands``."""
         key = f"{dirname}/" if dirname else ""
-        sw = _deepest(key, self.sweep.get(bucket, ()))
-        kp = _deepest(key, self.keep.get(bucket, ()))
-        if sw > kp:
-            return "eligible"
-        if kp >= 0:
-            return "keep"
-        return "outside_bands"
-
-
-def _deepest(key: str, prefixes: tuple[str, ...]) -> int:
-    return max((len(p) for p in prefixes if key.startswith(p)), default=-1)
+        return "eligible" if any(key.startswith(p) for p in self.sweep.get(bucket, ())) else "outside_bands"
 
 
 def parse_plan(d: object) -> StagedPlan:
@@ -110,13 +101,10 @@ def parse_plan(d: object) -> StagedPlan:
     sweep = d.get("sweep")
     if not isinstance(sweep, list) or not sweep or not all(isinstance(p, str) for p in sweep):
         raise PlanError("sweep must be a non-empty list of gs:// prefixes")
-    keep = d.get("keep", [])
-    if not isinstance(keep, list) or not all(isinstance(p, str) for p in keep):
-        raise PlanError("keep must be a list of gs:// prefixes")
     name = d.get("name", f"plan {plan_id}")
     if not isinstance(name, str):
         raise PlanError(f"name must be a string, got {name!r}")
-    return StagedPlan(plan_id=plan_id, name=name, sweep=_by_bucket(sweep), keep=_by_bucket(keep))
+    return StagedPlan(plan_id=plan_id, name=name, sweep=_by_bucket(sweep))
 
 
 def load_plan(path: str) -> StagedPlan:

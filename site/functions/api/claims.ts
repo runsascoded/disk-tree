@@ -1,16 +1,16 @@
 /**
- * Lost & found claims (specs/mark-sweep-ui.md): POST { prefix } to claim an
- * unattributed prefix as yours; POST { prefix, release: true } to release a
- * claim you hold. Claim ≠ mark — an unmarked claim still defaults to delete.
+ * Lost & found claims (the pre-ledger `claims` table): POST { prefix } to
+ * claim an unattributed prefix as yours; POST { prefix, release: true } to
+ * release a claim you hold.
  */
-import { type Ctx, json, requireScope, requireViewer } from '../_lib/auth.js'
+import { type Ctx, json, requireViewer } from '../_lib/auth.js'
 
 const PREFIX_RE = /^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/
 
 export const onRequest = async (ctx: Ctx): Promise<Response> => {
   const { request, env } = ctx
   if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405)
-  if (!env.DB) return json({ error: 'marks backend not configured (DB)' }, 503)
+  if (!env.DB) return json({ error: 'claims backend not configured (DB)' }, 503)
   const id = await requireViewer(ctx)
   if (id instanceof Response) return id
   if (!id.email) {

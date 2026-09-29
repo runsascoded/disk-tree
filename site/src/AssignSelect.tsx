@@ -1,11 +1,13 @@
-import { useMarkMutations } from './marks'
+import { useOwnerMutations } from './owners'
 import { Tooltip } from './Tooltip'
 import { UserChip, allUsers } from './UserChip'
-import { ASSIGN_TIP } from './MarkControls'
+
+export const ASSIGN_TIP =
+  'Assign this prefix an owner — you by default, or anyone you name. Overrides the inferred owner (paths, W&B runs, sidecars) and pulls it out of the “Unowned” pool so it counts as that person’s data.'
 
 /**
  * Ownership assignment as one native select — "me", then everyone the site
- * knows — for the mark panel and every table row alike. Choosing a name
+ * knows — for the owner panel and every table row alike. Choosing a name
  * saves at once (the tooltip says so); the control resets to its placeholder
  * because the assignee then shows as the row's / panel's owner.
  */
@@ -19,7 +21,7 @@ export function AssignSelect({ prefix, assigned, compact, label }: {
   /** Placeholder override (the selection bar says "assign N…"). */
   label?: string
 }) {
-  const { post } = useMarkMutations()
+  const { post } = useOwnerMutations()
   const prefixes = Array.isArray(prefix) ? prefix : [prefix]
   const users = [...new Map(allUsers().map(u => [u.name, u])).values()]
   return (

@@ -1,6 +1,6 @@
-"""`sweep manifest --plan`: the staged set as the delete set (specs/staged-delete.md;
-sweep-plan-union checkpoint 3) — plan.json parsing, the per-dir rule, the run
-record's `plan_id`, and the manifest command end to end over local shards."""
+"""`sweep manifest --plan`: the staged set as the delete set (specs/staged-delete.md)
+— plan.json parsing, the per-dir rule, the run record's `plan_id`, and the
+manifest command end to end over local shards."""
 
 from __future__ import annotations
 
@@ -22,7 +22,6 @@ PLAN = {
     "plan_id": 12,
     "name": "Staged",
     "sweep": [f"gs://{E1}/ckpt/old/", f"gs://{W4}/tmp/x", f"gs://{E1}/ckpt/old/"],
-    "keep": [f"gs://{E1}/ckpt/old/best/"],
 }
 
 
@@ -37,25 +36,23 @@ def test_parse_groups_items_by_bucket_relative_and_sorted() -> None:
         plan_id=12,
         name="Staged",
         sweep={W4: ("tmp/x/",), E1: ("ckpt/old/",)},
-        keep={E1: ("ckpt/old/best/",)},
     )
     assert plan.buckets == (W4, E1)
     assert plan.bands(E1) == (f"gs://{E1}/ckpt/old/",)
     assert plan.bands("marin-us-west4") == ()
 
 
-def test_name_defaults_from_the_id_and_keep_is_optional() -> None:
+def test_name_defaults_from_the_id() -> None:
     plan = parse_plan({"plan_id": 3, "sweep": [f"gs://{E1}/x/"]})
-    assert plan == StagedPlan(plan_id=3, name="plan 3", sweep={E1: ("x/",)}, keep={})
+    assert plan == StagedPlan(plan_id=3, name="plan 3", sweep={E1: ("x/",)})
 
 
-def test_classify_deepest_prefix_wins() -> None:
+def test_classify_a_staged_prefix_covers_its_subtree() -> None:
     plan = parse_plan(PLAN)
     cases = {
         (E1, "ckpt/old"): "eligible",
         (E1, "ckpt/old/run7"): "eligible",
-        (E1, "ckpt/old/best"): "keep",
-        (E1, "ckpt/old/best/deeper"): "keep",
+        (E1, "ckpt/old/best"): "eligible",
         (E1, "ckpt/older"): "outside_bands",
         (E1, "ckpt"): "outside_bands",
         (E1, ""): "outside_bands",
@@ -64,12 +61,6 @@ def test_classify_deepest_prefix_wins() -> None:
         ("marin-us-west4", "ckpt/old"): "outside_bands",
     }
     assert {k: plan.classify(*k) for k in cases} == cases
-
-
-def test_a_keep_under_a_deeper_sweep_loses() -> None:
-    plan = parse_plan({"plan_id": 1, "sweep": [f"gs://{E1}/a/b/c/"], "keep": [f"gs://{E1}/a/"]})
-    assert plan.classify(E1, "a/b/c/d") == "eligible"
-    assert plan.classify(E1, "a/b") == "keep"
 
 
 @pytest.mark.parametrize("bad", [
@@ -84,7 +75,6 @@ def test_a_keep_under_a_deeper_sweep_loses() -> None:
     {"plan_id": 12, "sweep": [f"gs://{E1}/a/../b/"]},
     {"plan_id": 12, "sweep": [f"gs://{E1}/a//b/"]},
     {"plan_id": 12, "sweep": [f"gs://{E1}/a\\b/"]},
-    {"plan_id": 12, "sweep": [f"gs://{E1}/x/"], "keep": "y/"},
     {"plan_id": 12, "sweep": [f"gs://{E1}/x/"], "name": 5},
 ])
 def test_malformed_plan_raises(bad: object) -> None:
@@ -95,9 +85,8 @@ def test_malformed_plan_raises(bad: object) -> None:
 T0 = int(dt.datetime(2026, 9, 1, tzinfo=dt.timezone.utc).timestamp())
 
 
-def test_run_id_names_the_plan_not_a_ledger_head() -> None:
-    assert run_id_for({"date": "2026-09-01", "head": 0, "plan_id": 12}, T0) == "2026-09-01-p12/20260901T000000Z"
-    assert run_id_for({"date": "2026-09-01", "head": 7686}, T0) == "2026-09-01-h7686/20260901T000000Z"
+def test_run_id_names_the_plan() -> None:
+    assert run_id_for({"date": "2026-09-01", "plan_id": 12}, T0) == "2026-09-01-p12/20260901T000000Z"
 
 
 def test_record_run_start_links_the_plan(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -106,8 +95,8 @@ def test_record_run_start_links_the_plan(monkeypatch: pytest.MonkeyPatch) -> Non
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(index_footer, "_creds", lambda: ("tok", "acct"))
     monkeypatch.setattr(index_footer, "_d1_query", lambda sql, acct, tok: sent.append((sql, acct, tok)) or [])
-    summary = {"date": "2026-09-01", "head": 0, "plan_id": 12}
-    run_id = record_run_start(summary, "gs://b/runs/j1", exec_head=0, actor="me@x", started_ts=T0, for_real=False, buckets=(E1,))
+    summary = {"date": "2026-09-01", "plan_id": 12}
+    run_id = record_run_start(summary, "gs://b/runs/j1", actor="me@x", started_ts=T0, for_real=False, buckets=(E1,))
     assert run_id == "2026-09-01-p12/20260901T000000Z"
     assert sent == [(
         "INSERT INTO deletion_runs (run_id, plan, scan, head, exec_head, actor, mode, started_ts, finished_ts, "
@@ -145,7 +134,6 @@ def _manifest(runner_args: list[str], tmp_path: Path, monkeypatch: pytest.Monkey
     from dt_cloud import cli
 
     monkeypatch.setattr(cli, "_hard_exit", lambda: None)
-    monkeypatch.delenv("GCS_USAGE_TOKEN", raising=False)
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(json.dumps(PLAN))
     out = tmp_path / "out"
@@ -153,44 +141,37 @@ def _manifest(runner_args: list[str], tmp_path: Path, monkeypatch: pytest.Monkey
     return r, out
 
 
-def test_manifest_from_plan_spans_buckets_and_reads_no_ledger(listing: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_manifest_from_plan_spans_buckets(listing: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     r, out = _manifest(["-r", str(listing)], tmp_path, monkeypatch)
     assert (r.exit_code, r.exception) == (0, None)
     summary = json.loads((out / "plan-summary.json").read_text())
     assert summary == {
         "date": "2026-09-01",
-        "head": 0,
-        "policy": "plan",
         "plan_id": 12,
         "plan_name": "Staged",
         "approved": [f"gs://{W4}/tmp/x/", f"gs://{E1}/ckpt/old/"],
-        "keep": [f"gs://{E1}/ckpt/old/best/"],
-        "approved_full": [],
         "buckets": {
             W4: {
-                "objects": 3, "dirs": 2, "residue_dirs": 0,
+                "objects": 3, "dirs": 2,
                 "eligible": {"bytes": 15, "objects": 2},
                 "outside_bands": {"bytes": 9, "objects": 1},
             },
             E1: {
-                "objects": 4, "dirs": 2, "residue_dirs": 0,
-                "eligible": {"bytes": 10, "objects": 1},
-                "keep": {"bytes": 20, "objects": 1},
+                "objects": 4, "dirs": 2,
+                "eligible": {"bytes": 30, "objects": 2},
                 "outside_bands": {"bytes": 35, "objects": 2},
             },
         },
         "total": {
-            "eligible": {"bytes": 25, "objects": 3},
-            "keep": {"bytes": 20, "objects": 1},
+            "eligible": {"bytes": 45, "objects": 4},
             "outside_bands": {"bytes": 44, "objects": 3},
         },
     }
     e1 = pq.read_table(out / "manifest" / f"{E1}.parquet").to_pylist()
     w4 = pq.read_table(out / "manifest" / f"{W4}.parquet").to_pylist()
-    assert [(r["name"], r["size_bytes"], r["dir"], r["owner"], r["sweepers"]) for r in e1] == [("ckpt/old/a", 10, "ckpt/old", None, "")]
+    assert [(r["name"], r["size_bytes"], r["dir"]) for r in e1] == [("ckpt/old/a", 10, "ckpt/old"), ("ckpt/old/best/m", 20, "ckpt/old/best")]
     assert [(r["name"], r["size_bytes"], r["dir"]) for r in w4] == [("tmp/x/1", 7, "tmp/x"), ("tmp/x/deep/2", 8, "tmp/x/deep")]
     assert sorted(p.name for p in (out / "manifest").iterdir()) == [f"{W4}.parquet", f"{E1}.parquet"]
-    assert not (out / "residue").exists()
 
 
 def test_bucket_flags_intersect_the_plans_buckets(listing: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,27 +188,21 @@ def test_bucket_flags_disjoint_from_the_plan_refuse(listing: Path, tmp_path: Pat
     assert (r.exit_code, str(r.exception)) == (1, f"no plan bucket among -b marin-us-west4 (plan 12 names {W4}, {E1})")
 
 
-def test_ledger_flags_are_refused_with_a_plan(listing: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    r, _ = _manifest(["-r", str(listing), "-A", f"gs://{E1}/ckpt/"], tmp_path, monkeypatch)
-    assert (r.exit_code, str(r.exception)) == (1, "--plan is the whole delete set: -a/-A/-S do not apply")
-
-
-def test_execute_takes_a_staged_plan_without_the_ledger(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_execute_takes_a_staged_plan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from dt_cloud import cli, sweep_exec
 
     monkeypatch.setattr(cli, "_hard_exit", lambda: None)
-    monkeypatch.delenv("GCS_USAGE_TOKEN", raising=False)
     plan_dir = tmp_path / "run"
     plan_dir.mkdir()
-    (plan_dir / "plan-summary.json").write_text(json.dumps({"date": "2026-09-01", "head": 0, "plan_id": 12, "plan_name": "Staged", "buckets": {}}))
+    (plan_dir / "plan-summary.json").write_text(json.dumps({"date": "2026-09-01", "plan_id": 12, "plan_name": "Staged", "buckets": {}}))
     calls: list[dict] = []
 
     def fake_execute(plan_dir: str, **kw) -> dict:
-        calls.append({"plan_dir": plan_dir, "reclassify": kw["reclassify"], "for_real": kw["for_real"]})
+        calls.append({"plan_dir": plan_dir, "for_real": kw["for_real"], "drift": kw["drift"]})
         return {"plan": plan_dir, "for_real": kw["for_real"], "drift": kw["drift"], "buckets": {}, "_plan": {}}
 
     monkeypatch.setattr(sweep_exec, "execute_plan", fake_execute)
     monkeypatch.setattr(sweep_exec, "stop_file_watch", lambda plan_dir, stop: None)
     r = CliRunner().invoke(cli.main, ["sweep", "execute", "--no-record", str(plan_dir)])
     assert (r.exit_code, r.exception) == (0, None)
-    assert calls == [{"plan_dir": str(plan_dir), "reclassify": None, "for_real": False}]
+    assert calls == [{"plan_dir": str(plan_dir), "for_real": False, "drift": "skip"}]

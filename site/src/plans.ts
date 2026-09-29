@@ -57,7 +57,7 @@ export interface DeletionRun {
 export interface StagedPlan { plan: PlanSummary | null; items: StagedItem[]; batches: StageBatch[]; runs: DeletionRun[] }
 
 /** The deployment's executor routes: cw's plan-first Batch bridge or gcs's. */
-export const EXEC_API = DEFAULT_STORE.sweep === 'plan' ? '/api/plan-sweep' : '/api/sweep'
+export const EXEC_API = `/api/${DEFAULT_STORE.executor}`
 
 async function call<T>(url: string, method = 'GET', body?: unknown): Promise<T> {
   const r = await fetch(url, {

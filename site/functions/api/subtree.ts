@@ -2,17 +2,16 @@
  * (specs/view-serving.md; the folding lives in `_lib/view.ts`).
  *
  *   GET /api/subtree?date=<scan>&path=<P>&w=<px>&h=<px>[&minArea=<px²>]
- *                    [&lens=user:<id>][&o=claimed|unclaimed][&k=<⊆ksu>][&q=<name filter>]
+ *                    [&lens=user:<id>][&o=claimed|unclaimed][&q=<name filter>]
  *
  * The page's scope axes (specs/view-serving.md §2) are applied server-side:
- * the owner axis (`lens` for a user, `o` for the pools), the mark axis (`k`,
- * folded from the live ledger), the name filter (`q`). Responses are
- * immutable per (date, path, w₁₂₈, h₁₂₈, minArea, atten, scope) plus the
- * ledger head when `k` is set — and cached in the edge cache accordingly.
- * w/h arrive quantized-up to 128px so resizes mostly re-hit the cache.
+ * the owner axis (`lens` for a user, `o` for the pools), the name filter
+ * (`q`). Responses are immutable per (date, path, w₁₂₈, h₁₂₈, minArea,
+ * atten, scope) plus the ledger head under a user lens — and cached in the
+ * edge cache accordingly. w/h arrive quantized-up to 128px so resizes mostly
+ * re-hit the cache.
  */
 import { type Env, requireViewer } from '../_lib/auth.js'
-import { parseMarkAxes } from '../_lib/markAxes.js'
 import { storeReady, type Lens } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { parseOwner, parseQuery, classKey, parseClasses } from '../_lib/scope.js'
@@ -51,7 +50,6 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   const by = url.searchParams.get('by') ?? undefined
   // `depth=N`: cap the read N levels below the root (see ViewOpts.maxDepth).
   const depth = Number(url.searchParams.get('depth')) || undefined
-  const states = parseMarkAxes(url.searchParams.get('k'))
   const classes = parseClasses(url.searchParams.get('cl'))
   const qRaw = url.searchParams.get('q') ?? ''
   const full = url.searchParams.get('full') === '1'
@@ -61,22 +59,22 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   const gated = await st.time('auth', requireViewer(ctx as never))
   if (gated instanceof Response) return gated
 
-  // The mark axis folds the live ledger: its cache key carries the head.
-  // …and so does a user lens (claims repaint attribution).
+  // A user lens folds the live ledger (claims repaint attribution): its cache
+  // key carries the head.
   // Everything from here touches D1 or the store, so it all sits under one
   // guard: a D1 stall ("internal error") used to escape from the pre-steps
   // as Cloudflare's raw "Worker threw exception" page (2026-09-28); now it is
   // a 503 the client can retry, with the message the ledger head gave.
   try {
-    const [head, xtra] = await st.time('pre', Promise.all([(states || lens) && ctx.env.DB ? ledgerHead(ctx.env) : Promise.resolve(0), hasExtras(ctx.env, date)]))
+    const [head, xtra] = await st.time('pre', Promise.all([lens && ctx.env.DB ? ledgerHead(ctx.env) : Promise.resolve(0), hasExtras(ctx.env, date)]))
     const cacheKey = cacheKeyFor('subtree',
       `${date}/${encodeURIComponent(path)}?w=${w}&h=${h}&a=${minArea}&t=${atten}&l=${lensRaw ?? ''}` +
-        `&o=${rawOwner ?? ''}&b=${by ?? ''}&D=${depth ?? ''}&cl=${classKey(classes)}&x=${xtra ? 1 : 0}&k=${states ? [...states].sort().join(',') : ''}&F=${query && !full ? 0 : 1}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}`,
+        `&o=${rawOwner ?? ''}&b=${by ?? ''}&D=${depth ?? ''}&cl=${classKey(classes)}&x=${xtra ? 1 : 0}&F=${query && !full ? 0 : 1}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}`,
     )
     const hit = await st.time('match', cacheMatch(ctx.env, cacheKey))
     if (hit) return hit
 
-    const view = await buildView(ctx.env, { date, path, w, h, minArea, atten, lens, owner, by, maxDepth: depth, states, query, classes, partial: !!query && !full, trace: st.trace })
+    const view = await buildView(ctx.env, { date, path, w, h, minArea, atten, lens, owner, by, maxDepth: depth, query, classes, partial: !!query && !full, trace: st.trace })
     const body = JSON.stringify({
       date,
       path,
@@ -91,7 +89,6 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
       nodes: view.nodes,
       truncated: view.truncated,
       ...(owner ? { owner } : {}),
-      ...(states ? { states: [...states].sort() } : {}),
       ...(query ? { q: qRaw, matches: view.matches, matched: view.matched ?? [], ...(view.partial ? { partial: true } : {}) } : {}),
       tree: view.tree,
     })

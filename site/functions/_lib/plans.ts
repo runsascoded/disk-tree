@@ -1,14 +1,14 @@
-// Plans store (specs/cw-sweep.md): the first-class deletion plan. An admin
-// curates `sweep`-marked prefixes into a named plan; a dispatch snapshots the
-// plan's items into the plan.json the Batch executor consumes. D1 CRUD +
-// snapshot + the admin-edit audit trail live here; the HTTP surface is
-// api/plans/[[path]].ts.
+// Plans store (specs/staged-delete.md): the first-class deletion plan. Trash
+// gestures stage prefixes into the shared open plan (or an admin curates a
+// named one); a dispatch snapshots the plan's items into the plan.json the
+// Batch executor consumes. D1 CRUD + snapshot + the admin-edit audit trail
+// live here; the HTTP surface is api/plans/[[path]].ts.
 import type { D1Database } from "@cloudflare/workers-types"
 import { CW_BUCKET, CW_BUCKETS } from "./cwBatch.js"
 
-// A plan prefix stored as `<scheme><bucket>/<path>/` (matching the marks
-// convention — `s3://` on the CoreWeave deployment, `gs://` on gcs.oa.dev);
-// normalized to a relative key prefix only at snapshot time.
+// A plan prefix stored as `<scheme><bucket>/<path>/` (`s3://` on the
+// CoreWeave deployment, `gs://` on gcs.oa.dev); normalized to a relative key
+// prefix only at snapshot time.
 const PREFIX_RE = /^(?!\/)(?![.]{1,2}\/)[^\\]+\/$/
 const SCHEME_RE = /^[a-z0-9]+:\/\//
 
@@ -28,7 +28,7 @@ export function prefixShape(env: { STORE_SCHEME?: string; STORE_BUCKETS?: string
 
 /** The bucket a raw prefix names — `<scheme><b>/…` or `<b>/…` for a scanned
  * bucket — else the primary. The treemap's paths start with the bucket, so
- * a mark or plan item under `hero-checkpoints/…` must not canonicalize under
+ * a plan item under `hero-checkpoints/…` must not canonicalize under
  * the primary (specs/cw-multi-bucket.md §4). */
 export function bucketOf(raw: string, buckets: readonly string[] = CW_BUCKETS): string {
   const s = raw.trim().replace(SCHEME_RE, "").replace(/^\/+/, "")
@@ -203,8 +203,8 @@ export function planBuckets(prefixes: string[], buckets: readonly string[] = CW_
 /** The plan.json a multi-bucket dispatch drops in the run dir for
  * `dt-cloud sweep manifest --plan`: the plan's items in canonical form
  * (`<scheme><bucket>/<path>/`, the executor groups them by bucket itself) and
- * the buckets they name (the run's `-b` cut). No `keep`: the opt-in model has
- * no protective marks, so nothing is read from the marks ledger. */
+ * the buckets they name (the run's `-b` cut). The plan is the whole intent:
+ * nothing carves out. */
 export interface PlanBucketsSnapshot {
   plan_id: number
   name: string
@@ -238,23 +238,15 @@ export async function audit(
 }
 
 /** Snapshot a plan into the executor's plan.json: the plan's one bucket
- * (`planBucket`; throws `PlanSpansBuckets`), relative sweep prefixes (the
- * plan's items) + relative keep prefixes (the current keep marks
- * in that bucket, which carve out at manifest time). Returns null if the plan
- * is missing. */
+ * (`planBucket`; throws `PlanSpansBuckets`) and the relative sweep prefixes
+ * (the plan's items — the whole intent; nothing carves out). Returns null if
+ * the plan is missing. */
 export async function snapshotPlan(db: D1Database, planId: number): Promise<
-  { plan_id: number; name: string; bucket: string; sweep: string[]; keep: string[] } | null
+  { plan_id: number; name: string; bucket: string; sweep: string[] } | null
 > {
   const plan = await db.prepare("SELECT id, name FROM plans WHERE id = ?").bind(planId).first<{ id: number; name: string }>()
   if (!plan) return null
   const items = await db.prepare("SELECT prefix FROM plan_items WHERE plan_id = ? ORDER BY prefix").bind(planId).all<{ prefix: string }>()
-  const keeps = await db.prepare("SELECT prefix FROM marks WHERE keep = 'keep' ORDER BY prefix").all<{ prefix: string }>()
   const { bucket, sweep } = planBucket(items.results.map(r => r.prefix))
-  return {
-    plan_id: planId,
-    name: plan.name,
-    bucket,
-    sweep,
-    keep: keeps.results.map(r => r.prefix).filter(p => bucketOf(p) === bucket).map(p => relPrefix(p, bucket)),
-  }
+  return { plan_id: planId, name: plan.name, bucket, sweep }
 }

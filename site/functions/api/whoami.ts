@@ -1,7 +1,7 @@
-// GET /api/whoami — the viewer's identity for the plain-fetch callers
-// (`planMarks.ts`, the sweep console), in the package's `SsoWhoami` shape
-// ({ kind, email, admin, scopes, subject }): scopes + the admin flag are
-// decided server-side (staff domain, viewer domains, the `admin_emails` /
+// GET /api/whoami — the viewer's identity for FE gating and the plain-fetch
+// callers (`StagedPage.tsx`), in the package's `SsoWhoami` shape ({ kind,
+// email, admin, scopes, subject }): scopes + the admin flag are decided
+// server-side (staff domain, viewer domains, the `admin_emails` /
 // `allowed_emails` rows). Signed out = 401, which the package hook reads as
 // "nobody"; the body still says so.
 import { type Ctx, type Env as AuthEnv, identify, json } from "../_lib/auth.js"

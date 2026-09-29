@@ -6,10 +6,7 @@ import { AdminPage } from './AdminPage'
 import App from './App'
 import { AuthGate, SignInPage } from './AuthGate'
 import { FilesPage } from './FilesPage'
-import { MarksPage } from './MarksPage'
 import { AssignmentsPage } from './AssignmentsPage'
-import { SweepPage } from './SweepPage'
-import { PlanSweepPage } from './PlanSweepPage'
 import { StagedPage } from './StagedPage'
 import { OgPage } from './OgPage'
 import { UserOgPage, UserPage, UsersOgPage, UsersPage } from './UserPage'
@@ -36,9 +33,8 @@ export default function Root() {
       <Route path="/admin/db" element={<AuthGate><AdminDbPage /></AuthGate>} />
       <Route path="/admin/db/:table" element={<AuthGate><AdminDbPage /></AuthGate>} />
       <Route path="/files/*" element={<AuthGate><FilesPage /></AuthGate>} />
-      {/* The ledger pages exist only on a marks store; elsewhere they go home. */}
+      {/* The owner pages exist only on an attribution store; elsewhere they go home. */}
       {DEFAULT_STORE.owners ? (<>
-      <Route path="/marks" element={<AuthGate><MarksPage /></AuthGate>} />
       <Route path="/assignments" element={<AuthGate><AssignmentsPage /></AuthGate>} />
       <Route path="/users/og" element={<UsersOgPage />} />
       <Route path="/user/:id/og" element={<UserOgPage />} />
@@ -47,10 +43,12 @@ export default function Root() {
       </>) : (
       <Route path="/users/*" element={<Navigate to="/" replace />} />
       )}
-      <Route path="/sweep" element={<AuthGate>{DEFAULT_STORE.sweep === 'plan' ? <PlanSweepPage /> : <SweepPage />}</AuthGate>} />
       {/* The opt-in deletion console: what the trash gesture staged, and its runs. */}
       <Route path="/staged" element={<AuthGate><StagedPage /></AuthGate>} />
-      {/* The review lenses became the home page's mark/owner axes — /mark is just the map. */}
+      {/* Retired pages: the mark & sweep console became /staged; the review
+          lenses became the home page's owner axis. Old links land somewhere sane. */}
+      <Route path="/sweep" element={<Navigate to="/staged" replace />} />
+      <Route path="/marks" element={<Navigate to="/" replace />} />
       <Route path="/mark" element={<Navigate to="/" replace />} />
       <Route path="*" element={<AuthGate><App /></AuthGate>} />
     </Routes>

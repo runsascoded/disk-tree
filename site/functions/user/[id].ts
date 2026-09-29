@@ -20,7 +20,7 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
   const hasCard = !!probe?.ok && (probe.headers.get('content-type') ?? '').startsWith('image/')
   return unfurlShell(ctx, {
     title: `${name} — Marin GCS usage`,
-    desc: 'Per-user storage breakdown: what’s keep-marked, sweep-marked, and still undecided.',
+    desc: 'Per-user storage breakdown: what they own, and what was assigned to them.',
     image: hasCard ? perUser : `${url.origin}/og-users.jpg`,
     page: `${url.origin}${url.pathname}`,
   })

@@ -3,8 +3,8 @@
 // stage prefixes into one shared open plan; this page shows that plan — each
 // gesture's batch with who/when/memo — lets a stager take their own back, and
 // lets an admin dry-run or really dispatch it to the deployment's executor
-// (`EXEC_API`: cw's plan-first Batch bridge, or gcs's sweep bridge given a
-// `plan_id`). Non-admins see everything read-only. Nothing is deleted by
+// (`EXEC_API`, `Store.executor`: cw's plan-first Batch bridge, or gcs's
+// sweep bridge). Non-admins see everything read-only. Nothing is deleted by
 // inaction: no deadline, no auto-sweep.
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -49,7 +49,7 @@ export function StagedPage() {
   const ident = useIdent()
   const admin = useIsAdmin()
   const canStage = useCanStage()
-  const planFirst = DEFAULT_STORE.sweep === 'plan'
+  const planFirst = DEFAULT_STORE.executor === 'plan-sweep'
 
   const [live, setLive] = useState(false)
   const staged = useStagedPlan(live)
@@ -99,8 +99,8 @@ export function StagedPage() {
   useEffect(() => setArmed(false), [plan?.id, items.length])
 
   return (
-    <div className="sweep-page staged-page">
-      <div className="sweep-head">
+    <div className="staged-page">
+      <div className="staged-head">
         <Link to="/" className="back">← treemap</Link>
         <h1>Staged for deletion</h1>
         <span className="who">
@@ -112,10 +112,10 @@ export function StagedPage() {
         from the table under the map (the trash icon); a memo travels with each gesture.
         {admin ? ' Dry-run first to see what a real run would delete; a real run deletes recoverably.' : ' An admin reviews and dispatches from here.'}
       </p>
-      {error && <p className="sweep-err" role="alert">{error.message}</p>}
+      {error && <p className="staged-err" role="alert">{error.message}</p>}
 
       {staged.isLoading ? <p className="loading">loading…</p> : !plan || !items.length ? (
-        <p className="sweep-empty">Nothing is staged.</p>
+        <p className="staged-empty">Nothing is staged.</p>
       ) : (
         <>
           <div className="pp-head">
@@ -134,7 +134,7 @@ export function StagedPage() {
                   ? <><UserChip who={g.batch.created_by} size={18} /> staged <Tooltip content={iso(g.batch.created_ts)}><span>{ago(g.batch.created_ts)} ago</span></Tooltip>{g.batch.note && <> — <i className="memo">{g.batch.note}</i></>}</>
                   : <span className="dim">staged earlier</span>}
               </div>
-              <table className="sweep-table staged-table">
+              <table className="staged-table">
                 <tbody>
                   {g.items.map(it => {
                     const i = items.indexOf(it)

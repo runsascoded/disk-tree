@@ -1,8 +1,8 @@
 /**
  * A scan's index tiers (`<dir>/path-index[-coarse<E>][-by-user].parquet`) as
  * a row-group-pruned range reader — shared by `/api/subtree` (pixel-budget
- * drill), `/api/diff`, `/api/series` and `/api/marks/totals` (exact keep /
- * sweep bytes per live mark).
+ * drill), `/api/diff`, `/api/series` and the owner totals (exact bytes per
+ * live claim, `_lib/ownerTotals.ts`).
  *
  * Each file is sorted (depth, path) (or (usr, depth, path)): the descendants
  * of P at each depth are one contiguous run, so any prefix query is a few

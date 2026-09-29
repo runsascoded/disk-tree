@@ -81,17 +81,13 @@ function useScopes(): string[] | null {
 const hasBase = (scopes: string[]): boolean => scopes.includes(DEFAULT_STORE.key) || scopes.includes('*')
 
 /**
- * Who may mark (keep/sweep/owner): `Store.marking` — `admin` where marking is
- * a staff decision and everyone else proposes deletions by staging (gcs,
- * specs/share-link-hardening.md), `viewer` where any full viewer marks (cw's
- * plan-first marks). Read-only guest links (`<store>:read`) never can. The
- * server enforces the same (`requireAdmin` / `requireStager`).
+ * Who may assign owners: admins — assignment is a staff decision, everyone
+ * else proposes deletions by staging (specs/share-link-hardening.md). The
+ * server enforces the same (`POST /api/actions` is `requireAdmin`).
  */
-export function useCanMark(): boolean {
+export function useCanAssign(): boolean {
   const scopes = useScopes()
-  if (scopes === null) return false
-  if (DEFAULT_STORE.marking === 'admin') return scopes.includes('admin') || scopes.includes('*')
-  return hasBase(scopes)
+  return scopes !== null && (scopes.includes('admin') || scopes.includes('*'))
 }
 
 /**

@@ -31,7 +31,7 @@ export function AttributionRules({ tree }: { tree: TreeNode }) {
           wrote these bytes” — a starting point for finding your data, not a bill. Ownership has one axis: a
           person, or nobody. <b>{pct}%</b> of bytes have an owner today; the rest shows as{' '}
           <i>unowned</i> (gray) until someone assigns it — shared corpora and infra included, because a
-          keep/sweep decision needs a person to sign off.
+          deletion needs a person to sign off.
         </p>
         <p className="feedback">
           Questions, a wrong owner, access for a teammate:{' '}
