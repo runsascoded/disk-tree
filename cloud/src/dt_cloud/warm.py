@@ -5,7 +5,9 @@ and cached in two tiers (colo cache + global KV, `site/functions/_lib/edgeCache.
 The first viewer of a scan would otherwise pay the compute (a root diff is
 several seconds; it was 20 s before the batched lookups). So the daily job,
 once the scan is servable, replays the requests the home page makes for its
-default views — one subtree + the diff span chips (1d/3d/7d/14d/30d, plus the
+default views — the size-over-time series per path (width-independent; a new
+scan is a new cache key, so its first viewer otherwise pays the over-time
+reads), then one subtree + the diff span chips (1d/3d/7d/14d/30d, plus the
 plain previous-scan pair) each with its `summary=1` twin — at the canvas
 widths common laptops and phones produce. The cache keys include the pixel
 budget: the client sends `w = ceil(innerWidth / 128) * 128`, `h = round(0.6 w)`,
@@ -45,10 +47,17 @@ def nearest_prior(dates: list[str], date: str, days: int) -> str | None:
     return min(earlier, key=lambda d: abs(_ts(d) - t))
 
 
+def series_url(path: str) -> str:
+    """The size-over-time request `SizeOverTime.tsx` makes for an unscoped
+    ``path``: the store root asks for one trace per root (`split=roots`)."""
+    return "/api/series?path=&split=roots" if path == "" else f"/api/series?path={path}"
+
+
 def plan(date: str, dates: list[str], widths: tuple[int, ...] = WIDTHS, spans: tuple[int, ...] = SPANS, paths: tuple[str, ...] = PATHS) -> list[str]:
-    """The request paths (no host) to replay for ``date``, deduplicated, in
-    the order the page issues them: per width, the root's subtree and each
-    diff pair's summary + full rows, then the same for each bucket drill."""
+    """The request paths (no host) to replay for ``date``, deduplicated: each
+    path's series first, then, in the order the page issues them, per width
+    the root's subtree and each diff pair's summary + full rows, then the same
+    for each bucket drill."""
     earlier = [d for d in dates if d < date]
     pairs: list[str] = []
     if earlier:
@@ -57,7 +66,7 @@ def plan(date: str, dates: list[str], widths: tuple[int, ...] = WIDTHS, spans: t
         p = nearest_prior(dates, date, s)
         if p and p not in pairs:
             pairs.append(p)
-    out: list[str] = []
+    out: list[str] = [series_url(path) for path in paths]
     for w in widths:
         h = round(w * 0.6)
         for path in paths:
