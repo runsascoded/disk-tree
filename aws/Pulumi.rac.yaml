@@ -1,9 +1,10 @@
 config:
   aws:region: us-east-1
   # RAC AWS (006196295121, `AWS_PROFILE=r` from the worktree's `.envrc`).
-  disk-tree-m3:vcpu: "4"
-  disk-tree-m3:memory_mib: "16384"
-  disk-tree-m3:ephemeral_gib: "50"
+  # Sized from the Phase 0 run: path-index peaked at 1.5 GiB over 6.6M files.
+  disk-tree-m3:vcpu: "1"
+  disk-tree-m3:memory_mib: "4096"
+  disk-tree-m3:ephemeral_gib: "30"
   disk-tree-m3:env:
     R2_ENDPOINT_URL: https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com
   # Created empty; values set out of band by `aws/put-secrets` (never in state).
