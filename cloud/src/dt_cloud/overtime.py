@@ -215,6 +215,17 @@ MULTISCAN_TIER = "over-time"
 MULTISCAN_ENCODER = "interval"
 
 
+def multiscan_dataset(store: str | None = None) -> str:
+    """The manifest `dataset` of ``store``'s groups: ``over-time`` for the
+    primary, ``<store>:over-time`` for a secondary store (specs/multi-store.md;
+    the site's `overTimeDataset`). pyrmts owns `pyramid_multiscans`, whose
+    ``(dataset, key)`` PK already keeps stores apart — no store column."""
+    from .index_footer import PRIMARY_STORE, check_store
+
+    s = check_store(store or PRIMARY_STORE)
+    return MULTISCAN_DATASET if s == PRIMARY_STORE else f"{s}:{MULTISCAN_DATASET}"
+
+
 def scan_ms(scan: str) -> int:
     """A scan id (`YYYY-MM-DD` or `YYYY-MM-DDTHHMM`, UTC) as epoch milliseconds —
     the manifest's period axis, which orders groups for the reader."""
@@ -235,14 +246,14 @@ def sealed_groups(dates: list[str], group_size: int = OVER_TIME_GROUP_SIZE) -> l
     return [ds[i : i + group_size] for i in range(0, len(ds) - group_size + 1, group_size)]
 
 
-def multiscan_row(scans: list[str], *, written_at_ms: int) -> dict:
+def multiscan_row(scans: list[str], *, written_at_ms: int, store: str | None = None) -> dict:
     """The `pyramid_multiscans` row for one sealed group (mirrors
     `pyrmts_engine.multiscan_index.multiscan_d1_row`): `key` = the group's last
     scan id, `shard_dur` = the group size, period = first..last scan."""
     if not scans:
         raise ValueError("multiscan_row: no scans")
     return {
-        "dataset": MULTISCAN_DATASET,
+        "dataset": multiscan_dataset(store),
         "tier": MULTISCAN_TIER,
         "shard_dur": f"{len(scans)}scans",
         "period_start": scan_ms(scans[0]),
@@ -265,13 +276,13 @@ def manifest_sql(row: dict) -> str:
     return f"INSERT OR REPLACE INTO pyramid_multiscans ({', '.join(cols)}) VALUES ({', '.join(vals)});"
 
 
-def synced_groups(db_id: str | None = None) -> set[str]:
+def synced_groups(db_id: str | None = None, store: str | None = None) -> set[str]:
     """The group keys already in the manifest (a complete group: footer synced,
     row written last)."""
     from .index_footer import D1_DB_ID, _creds, _d1_query
 
     tok, acct = _creds()
-    rows = _d1_query(f"SELECT key FROM pyramid_multiscans WHERE dataset = '{MULTISCAN_DATASET}';", acct, tok, db_id or D1_DB_ID)
+    rows = _d1_query(f"SELECT key FROM pyramid_multiscans WHERE dataset = '{multiscan_dataset(store)}';", acct, tok, db_id or D1_DB_ID)
     return {r["key"] for r in rows}
 
 

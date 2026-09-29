@@ -146,21 +146,23 @@ def _verbose_rg_json(md: "pq.FileMetaData", g: int) -> str:
 def test_compact_sql_rewrites_verbose_rows_to_the_synced_form(tmp_path):
     md = _write_index(tmp_path / "i.parquet")
     con = sqlite3.connect(":memory:")
-    con.execute("CREATE TABLE index_row_groups (date TEXT, variant TEXT, rg INTEGER, rg_json TEXT)")
+    con.execute("CREATE TABLE index_row_groups (store TEXT NOT NULL DEFAULT 'primary', date TEXT, variant TEXT, rg INTEGER, rg_json TEXT)")
     for g in range(md.num_row_groups):
-        con.execute("INSERT INTO index_row_groups VALUES ('2026-09-01', 'path', ?, ?)", (g, _verbose_rg_json(md, g)))
-    con.execute("INSERT INTO index_row_groups VALUES ('2026-09-02', 'path', 0, ?)", (_verbose_rg_json(md, 0),))
-    con.execute(COMPACT_SQL.format(date="2026-09-01", variant="path"))
-    got = con.execute("SELECT date, rg, rg_json FROM index_row_groups ORDER BY date, rg").fetchall()
+        con.execute("INSERT INTO index_row_groups (date, variant, rg, rg_json) VALUES ('2026-09-01', 'path', ?, ?)", (g, _verbose_rg_json(md, g)))
+    con.execute("INSERT INTO index_row_groups (date, variant, rg, rg_json) VALUES ('2026-09-02', 'path', 0, ?)", (_verbose_rg_json(md, 0),))
+    con.execute("INSERT INTO index_row_groups (store, date, variant, rg, rg_json) VALUES ('meta', '2026-09-01', 'path', 0, ?)", (_verbose_rg_json(md, 0),))
+    con.execute(COMPACT_SQL.format(store="primary", date="2026-09-01", variant="path"))
+    got = con.execute("SELECT store, date, rg, rg_json FROM index_row_groups ORDER BY store, date, rg").fetchall()
     fresh = {r["rg"]: r["rg_json"] for r in _group_rows(md)}
     assert got == [
-        ("2026-09-01", 0, fresh[0]),
-        ("2026-09-01", 1, fresh[1]),
-        ("2026-09-02", 0, _verbose_rg_json(md, 0)),  # other scans untouched
+        ("meta", "2026-09-01", 0, _verbose_rg_json(md, 0)),  # another store's same scan untouched
+        ("primary", "2026-09-01", 0, fresh[0]),
+        ("primary", "2026-09-01", 1, fresh[1]),
+        ("primary", "2026-09-02", 0, _verbose_rg_json(md, 0)),  # other scans untouched
     ]
     # Idempotent: compact rows don't match the verbose-form predicate.
-    con.execute(COMPACT_SQL.format(date="2026-09-01", variant="path"))
-    assert con.execute("SELECT rg_json FROM index_row_groups WHERE date='2026-09-01' ORDER BY rg").fetchall() == [(fresh[0],), (fresh[1],)]
+    con.execute(COMPACT_SQL.format(store="primary", date="2026-09-01", variant="path"))
+    assert con.execute("SELECT rg_json FROM index_row_groups WHERE store='primary' AND date='2026-09-01' ORDER BY rg").fetchall() == [(fresh[0],), (fresh[1],)]
 
 
 def test_sync_d1_packs_inserts_greedily_under_the_byte_limit(tmp_path, monkeypatch):
@@ -184,54 +186,82 @@ def test_sync_d1_packs_inserts_greedily_under_the_byte_limit(tmp_path, monkeypat
     # Generation protocol: sweep unreachable gens, land every group under this
     # gen, then flip the pointer — nothing is deleted before the flip.
     assert sent[0] == (
-        "DELETE FROM index_row_groups WHERE date='2026-09-01' AND variant='path' AND gen <> '20260901T070000Z' "
-        "AND gen <> COALESCE((SELECT gen FROM index_schema WHERE date='2026-09-01' AND variant='path'), '');"
+        "DELETE FROM index_row_groups WHERE store='primary' AND date='2026-09-01' AND variant='path' AND gen <> '20260901T070000Z' "
+        "AND gen <> COALESCE((SELECT gen FROM index_schema WHERE store='primary' AND date='2026-09-01' AND variant='path'), '');"
     )
     assert sent[-1] == (
-        "INSERT OR REPLACE INTO index_schema (date, variant, version, schema_json, floor_bytes, gen, dir) VALUES "
-        "('2026-09-01', 'path', 1, '[]', NULL, '20260901T070000Z', 'listing/2026-09-01/index/20260901T070000Z');"
+        "INSERT OR REPLACE INTO index_schema (store, date, variant, version, schema_json, floor_bytes, gen, dir) VALUES "
+        "('primary', '2026-09-01', 'path', 1, '[]', NULL, '20260901T070000Z', 'listing/2026-09-01/index/20260901T070000Z');"
     )
     inserts = sent[1:-1]
-    head = "INSERT OR REPLACE INTO index_row_groups (date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, u_min, u_max, row_start, row_end, rg_json) VALUES "
+    head = "INSERT OR REPLACE INTO index_row_groups (store, date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, u_min, u_max, row_start, row_end, rg_json) VALUES "
     tuples = [stmt[len(head):-1].split("),(") for stmt in inserts]
     assert all(stmt.startswith(head) and stmt.endswith(";") and len(stmt) <= limit for stmt in inserts)
-    assert [len(t) for t in tuples] == [5, 5, 2]  # 12 rows, five ~165-byte tuples per 1000-byte statement
+    assert [len(t) for t in tuples] == [4, 4, 4]  # 12 rows, four ~190-byte tuples per 1000-byte statement
     # Greedy: no statement could have taken the next one's first tuple.
     for stmt, nxt in zip(inserts, inserts[1:]):
         first = nxt[len(head):].split("),(")[0] + ")"
         assert len(stmt) + 1 + len(first) > limit
-    assert [t.split(", ")[3] for stmt in tuples for t in stmt] == [str(i) for i in range(12)]
+    assert [t.split(", ")[4] for stmt in tuples for t in stmt] == [str(i) for i in range(12)]
+
+
+def test_sync_d1_files_a_secondary_store_under_its_own_rows_and_namespaced_gen(tmp_path, monkeypatch):
+    """`store='meta'`: every statement is scoped to the store, and the gen is
+    recorded as `meta:<gen>` so the unchanged row-group PK can't collide with
+    the primary's rows for the same scan id and run."""
+    from dt_cloud.index_footer import sync_d1
+
+    md = _write_index(tmp_path / "i.parquet")
+    rows = [dict(r) for r in _group_rows(md)][:1]
+    monkeypatch.setattr(index_footer, "extract", lambda _p: ({"version": 1, "schema": []}, rows))
+    monkeypatch.setattr(index_footer, "_creds", lambda: ("tok", "acct"))
+    monkeypatch.setattr(index_footer, "write_groups_blob", lambda path, schema, rs: (path, 0))
+    sent: list[str] = []
+    monkeypatch.setattr(index_footer, "_d1_query", lambda sql, acct, tok, db_id: sent.append(sql) or [])
+    assert sync_d1("2026-09-01", "x.parquet", variant="path", gen="G", key="meta-l2/2026-09-01/index/G", store="meta") == 1
+    r = rows[0]
+    assert sent == [
+        "DELETE FROM index_row_groups WHERE store='meta' AND date='2026-09-01' AND variant='path' AND gen <> 'meta:G' "
+        "AND gen <> COALESCE((SELECT gen FROM index_schema WHERE store='meta' AND date='2026-09-01' AND variant='path'), '');",
+        "INSERT OR REPLACE INTO index_row_groups (store, date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, u_min, u_max, row_start, row_end, rg_json) VALUES "
+        f"('meta', '2026-09-01', 'path', 'meta:G', 0, {r['d_min']}, {r['d_max']}, '{r['p_min']}', '{r['p_max']}', {r['b_max']}, {index_footer._q(r['u_min'])}, {index_footer._q(r['u_max'])}, "
+        f"{r['row_start']}, {r['row_end']}, '{r['rg_json']}');",
+        "INSERT OR REPLACE INTO index_schema (store, date, variant, version, schema_json, floor_bytes, gen, dir) VALUES "
+        "('meta', '2026-09-01', 'path', 1, '[]', NULL, 'meta:G', 'meta-l2/2026-09-01/index/G');",
+    ]
+    with pytest.raises(ValueError, match=r"^bad store 'Meta' \(want 'primary' or \[a-z0-9\]\[a-z0-9-\]\*\)$"):
+        sync_d1("2026-09-01", "x.parquet", gen="G", key="k", store="Meta")
 
 
 def test_gc_d1_deletes_only_generations_no_pointer_names(monkeypatch):
     """The gc statement against a real SQLite: rows of the pointer's gen stay,
-    every other gen of that date goes, other dates untouched."""
+    every other gen of that date goes, other dates and other stores untouched."""
     import re
     import sqlite3
 
     from dt_cloud.index_footer import gc_d1
 
     con = sqlite3.connect(":memory:")
-    # The schema from the gcs lineage, whichever shape it has: one squashed
-    # `0001_init.sql` (creates every table itself), or the migration that
-    # introduced `index_row_groups` on top of an earlier `index_schema`.
+    con.execute("PRAGMA foreign_keys = ON")
+    # The schema as D1 has it: the whole gcs lineage, in order.
     mig = Path(__file__).parents[2] / "site/migrations/gcs"
-    (ddl_path,) = [f for f in sorted(mig.glob("*.sql")) if "CREATE TABLE index_row_groups" in f.read_text()]
-    ddl = ddl_path.read_text()
-    if "CREATE TABLE index_schema" not in ddl:
-        con.executescript("CREATE TABLE index_schema (date TEXT, variant TEXT, version INTEGER, schema_json TEXT, floor_bytes INTEGER, PRIMARY KEY (date, variant));")
-    con.executescript(ddl)
-    row = "(?, ?, ?, ?, 1, 1, 'a', 'b', 1, NULL, NULL, 0, 1, '[]')"
-    con.executemany(f"INSERT INTO index_row_groups VALUES {row}", [
-        ("2026-09-01", "path", "g1", 0), ("2026-09-01", "path", "g1", 1),
-        ("2026-09-01", "path", "g2", 0),  # the pointer's gen
-        ("2026-09-01", "user", "g1", 0),  # user variant still points at g1
-        ("2026-09-01", "user", "orphan", 0),
-        ("2026-09-02", "path", "g1", 0),  # another date: a dangling gen, but not asked
+    for f in sorted(mig.glob("*.sql")):
+        con.executescript(f.read_text())
+    cols = "(store, date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, u_min, u_max, row_start, row_end, rg_json)"
+    row = "(?, ?, ?, ?, ?, 1, 1, 'a', 'b', 1, NULL, NULL, 0, 1, '[]')"
+    con.executemany(f"INSERT INTO index_row_groups {cols} VALUES {row}", [
+        ("primary", "2026-09-01", "path", "g1", 0), ("primary", "2026-09-01", "path", "g1", 1),
+        ("primary", "2026-09-01", "path", "g2", 0),  # the pointer's gen
+        ("primary", "2026-09-01", "user", "g1", 0),  # user variant still points at g1
+        ("primary", "2026-09-01", "user", "orphan", 0),
+        ("primary", "2026-09-02", "path", "g1", 0),  # another date: a dangling gen, but not asked
+        ("meta", "2026-09-01", "path", "meta:g9", 0),  # another store's pointer gen
+        ("meta", "2026-09-01", "path", "meta:old", 0),  # another store's stale gen
     ])
-    con.executemany("INSERT INTO index_schema (date, variant, version, schema_json, gen, dir) VALUES (?, ?, 1, '[]', ?, ?)", [
-        ("2026-09-01", "path", "g2", "listing/2026-09-01/index/g2"),
-        ("2026-09-01", "user", "g1", "listing/2026-09-01"),
+    con.executemany("INSERT INTO index_schema (store, date, variant, version, schema_json, gen, dir) VALUES (?, ?, ?, 1, '[]', ?, ?)", [
+        ("primary", "2026-09-01", "path", "g2", "listing/2026-09-01/index/g2"),
+        ("primary", "2026-09-01", "user", "g1", "listing/2026-09-01"),
+        ("meta", "2026-09-01", "path", "meta:g9", "meta-l2/2026-09-01/index/g9"),
     ])
     sent: list[str] = []
 
@@ -244,14 +274,19 @@ def test_gc_d1_deletes_only_generations_no_pointer_names(monkeypatch):
     monkeypatch.setattr(index_footer, "_creds", lambda: ("tok", "acct"))
     assert gc_d1("2026-09-01") == 3
     assert re.sub(r"\s+", " ", sent[0]) == (
-        "DELETE FROM index_row_groups WHERE date = '2026-09-01' AND gen <> COALESCE("
-        "(SELECT s.gen FROM index_schema s WHERE s.date = index_row_groups.date AND s.variant = index_row_groups.variant), '') RETURNING 1 AS n;"
+        "DELETE FROM index_row_groups WHERE store = 'primary' AND date = '2026-09-01' AND gen <> COALESCE("
+        "(SELECT s.gen FROM index_schema s WHERE s.store = index_row_groups.store AND s.date = index_row_groups.date "
+        "AND s.variant = index_row_groups.variant), '') RETURNING 1 AS n;"
     )
-    assert con.execute("SELECT date, variant, gen, rg FROM index_row_groups ORDER BY 1, 2, 3, 4").fetchall() == [
-        ("2026-09-01", "path", "g2", 0),
-        ("2026-09-01", "user", "g1", 0),
-        ("2026-09-02", "path", "g1", 0),
+    assert con.execute("SELECT store, date, variant, gen, rg FROM index_row_groups ORDER BY 1, 2, 3, 4, 5").fetchall() == [
+        ("meta", "2026-09-01", "path", "meta:g9", 0),
+        ("meta", "2026-09-01", "path", "meta:old", 0),
+        ("primary", "2026-09-01", "path", "g2", 0),
+        ("primary", "2026-09-01", "user", "g1", 0),
+        ("primary", "2026-09-02", "path", "g1", 0),
     ]
+    assert gc_d1("2026-09-01", store="meta") == 1
+    assert con.execute("SELECT store, gen FROM index_row_groups WHERE store = 'meta'").fetchall() == [("meta", "meta:g9")]
 
 
 def test_retire_d1_drops_floor_free_groups_of_scans_past_the_retention_window(monkeypatch):
@@ -262,14 +297,17 @@ def test_retire_d1_drops_floor_free_groups_of_scans_past_the_retention_window(mo
     from dt_cloud.index_footer import retire_d1
 
     con = sqlite3.connect(":memory:")
-    con.executescript("CREATE TABLE index_schema (date TEXT, variant TEXT, version INTEGER, schema_json TEXT, floor_bytes INTEGER, gen TEXT, dir TEXT, PRIMARY KEY (date, variant));")
+    con.executescript("CREATE TABLE index_schema (store TEXT NOT NULL DEFAULT 'primary', date TEXT, variant TEXT, version INTEGER, schema_json TEXT, floor_bytes INTEGER, gen TEXT, dir TEXT, PRIMARY KEY (store, date, variant));")
     con.executescript("""
-      CREATE TABLE index_row_groups (date TEXT, variant TEXT, gen TEXT, rg INTEGER, PRIMARY KEY (date, variant, gen, rg));
+      CREATE TABLE index_row_groups (date TEXT, variant TEXT, gen TEXT, rg INTEGER, store TEXT NOT NULL DEFAULT 'primary', PRIMARY KEY (date, variant, gen, rg));
     """)
     for d in ("2026-09-01", "2026-09-02", "2026-09-03"):
         for v in ("path", "user", "coarse24", "coarse24-user"):
-            con.execute("INSERT INTO index_schema VALUES (?, ?, 1, '[]', NULL, 'legacy', ?)", (d, v, f"listing/{d}"))
-            con.executemany("INSERT INTO index_row_groups VALUES (?, ?, 'legacy', ?)", [(d, v, i) for i in range(2)])
+            con.execute("INSERT INTO index_schema (date, variant, version, schema_json, floor_bytes, gen, dir) VALUES (?, ?, 1, '[]', NULL, 'legacy', ?)", (d, v, f"listing/{d}"))
+            con.executemany("INSERT INTO index_row_groups (date, variant, gen, rg) VALUES (?, ?, 'legacy', ?)", [(d, v, i) for i in range(2)])
+    # Another store's oldest scan: out of the primary's retention pass entirely.
+    con.execute("INSERT INTO index_schema (store, date, variant, version, schema_json, gen, dir) VALUES ('meta', '2026-08-01', 'path', 1, '[]', 'meta:g', 'x')")
+    con.executemany("INSERT INTO index_row_groups (store, date, variant, gen, rg) VALUES ('meta', '2026-08-01', 'path', 'meta:g', ?)", [(i,) for i in range(2)])
 
     def fake_query(sql, acct, tok, db_id):
         cur = con.execute(sql)
@@ -279,11 +317,12 @@ def test_retire_d1_drops_floor_free_groups_of_scans_past_the_retention_window(mo
     monkeypatch.setattr(index_footer, "_creds", lambda: ("tok", "acct"))
     assert retire_d1(2) == [("2026-09-01", "path", 2), ("2026-09-01", "user", 2)]
     assert con.execute("SELECT date, variant, count(*) FROM index_row_groups GROUP BY 1, 2 ORDER BY 1, 2").fetchall() == [
+        ("2026-08-01", "path", 2),
         ("2026-09-01", "coarse24", 2), ("2026-09-01", "coarse24-user", 2),
         ("2026-09-02", "coarse24", 2), ("2026-09-02", "coarse24-user", 2), ("2026-09-02", "path", 2), ("2026-09-02", "user", 2),
         ("2026-09-03", "coarse24", 2), ("2026-09-03", "coarse24-user", 2), ("2026-09-03", "path", 2), ("2026-09-03", "user", 2),
     ]
-    assert con.execute("SELECT count(*) FROM index_schema").fetchone() == (12,)
+    assert con.execute("SELECT count(*) FROM index_schema").fetchone() == (13,)
     assert retire_d1(2) == []  # idempotent
 
 

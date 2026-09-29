@@ -190,6 +190,13 @@ def test_multiscan_row_is_pyrmts_row_shape_keyed_by_the_last_scan():
     }
 
 
+def test_multiscan_dataset_namespaces_secondary_stores():
+    """The manifest's `dataset` keeps stores apart (pyrmts owns the table; its
+    PK is `(dataset, key)`): the primary's is unchanged."""
+    assert [OT.multiscan_dataset(), OT.multiscan_dataset("primary"), OT.multiscan_dataset("meta")] == ["over-time", "over-time", "meta:over-time"]
+    assert OT.multiscan_row(["2026-09-01T0001"], written_at_ms=1, store="meta")["dataset"] == "meta:over-time"
+
+
 def test_manifest_sql_is_one_idempotent_upsert():
     row = {
         "dataset": "over-time", "tier": "over-time", "shard_dur": "2scans", "period_start": 1, "period_end": 2,
@@ -205,9 +212,14 @@ def test_over_time_groups_cli_dry_run_lists_unsealed_groups(monkeypatch, tmp_pat
     from dt_cloud import index_footer as IF
 
     dates = [f"2026-09-{d:02d}T0001" for d in range(1, 19)]  # 18 scans → 2 groups of 8, tail of 2
-    monkeypatch.setattr(IF, "synced_variants", lambda: [(d, "path") for d in dates])
-    monkeypatch.setattr(OT, "synced_groups", lambda: {dates[7]})  # first group already sealed
+    asked: list[tuple[str, str]] = []
+    monkeypatch.setattr(IF, "synced_variants", lambda store: asked.append(("variants", store)) or [(d, "path") for d in dates])
+    monkeypatch.setattr(OT, "synced_groups", lambda store: asked.append(("groups", store)) or {dates[7]})  # first group already sealed
     r = CliRunner().invoke(main, ["over-time-groups", "-g", "G", "-K", "8", "-n", "-o", str(tmp_path)])
     assert r.exit_code == 0, r.output + r.stderr
     assert json.loads(r.output) == {"groups": [dates[15]], "dry_run": True}
+    # `-s` scopes both reads to that store; the default is the primary.
+    r = CliRunner().invoke(main, ["over-time-groups", "-g", "G", "-K", "8", "-n", "-s", "meta", "-o", str(tmp_path)])
+    assert r.exit_code == 0, r.output + r.stderr
+    assert asked == [("variants", "primary"), ("groups", "primary"), ("variants", "meta"), ("groups", "meta")]
     # (the plan lines go to the real stderr via `err`, outside CliRunner's capture)
