@@ -43,7 +43,9 @@ export default function Root() {
       <Route path="/users" element={<AuthGate><UsersPage /></AuthGate>} />
       <Route path="/user/:id" element={<AuthGate><UserPage /></AuthGate>} />
       </>) : (
-      <Route path="/users/*" element={<Navigate to="/" replace />} />
+      // caseSensitive: React Router matches case-insensitively, and a laptop
+      // store's drill paths start `/Users/…`.
+      <Route path="/users/*" caseSensitive element={<Navigate to="/" replace />} />
       )}
       {/* The opt-in deletion console: what the trash gesture staged, and its runs. */}
       <Route path="/staged" element={<AuthGate><StagedPage /></AuthGate>} />
