@@ -81,7 +81,7 @@ def test_dry_run_sizes_without_deleting_and_reports_would_delete(db):
     out = drain.drain_once(db, size_fn=lambda u: (100, 2), delete_fn=deleted.append, trash_fn=lambda u, r: deleted.append(u), now=lambda: 200)
     assert deleted == []
     assert out == [{
-        "run_id": "laptop-dry-1", "plan_id": 1, "actor": "ryan", "mode": "dry", "items": 2,
+        "run_id": "laptop-dry-1", "plan_id": 1, "actor": "ryan", "mode": "dry", "items": 2, "deleted_paths": 0,
         "deleted_bytes": 200, "deleted_objects": 4, "errors": [], "submitted": False, "finished_ts": 200, "trashed": False,
     }]
     assert db.query("SELECT finished_ts, deleted_bytes, deleted_objects, undo_state, undo_deadline, purge_state FROM deletion_runs") == [
@@ -120,10 +120,20 @@ def test_real_run_without_trash_deletes_and_leaves_no_hold(db):
 
 def test_after_hook_skips_dry_runs_and_runs_that_deleted_nothing(db):
     _enqueue(db, "laptop-dry-3", 3, [A], mode="dry")
-    _enqueue(db, "laptop-real-4", 4, [B])
+    _enqueue(db, "laptop-real-4", 4, [])
     after = []
     drain.drain_once(db, size_fn=lambda u: (0, 0), delete_fn=lambda u: None, trash_fn=lambda u, r: "", after=after.append, now=lambda: 500)
     assert after == []
+
+
+def test_an_unscanned_path_still_opens_the_hold_and_the_after_hook(db):
+    # the scan sizes it as 0 (staged since the last scan), but it was trashed
+    _enqueue(db, "laptop-real-6", 6, [A])
+    after = []
+    out = drain.drain_once(db, size_fn=lambda u: (0, 0), delete_fn=lambda u: None, trash_fn=lambda u, r: "/t", hold_s=100, after=after.append, now=lambda: 700)
+    assert (out[0]["deleted_paths"], out[0]["deleted_objects"]) == (1, 0)
+    assert [s["run_id"] for s in after] == ["laptop-real-6"]
+    assert db.query("SELECT undo_deadline, purge_state FROM deletion_runs") == [{"undo_deadline": 800, "purge_state": "pending"}]
 
 
 def test_a_failed_path_is_recorded_not_fatal(db):
