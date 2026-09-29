@@ -1,0 +1,11 @@
+name: disk-tree-m3
+description: m3's AWS Batch ingest (RAC account) — laptop capture → path index + snapshot in R2 (specs/m3-site.md)
+runtime:
+  name: python
+  options:
+    toolchain: pip
+    virtualenv: .venv
+# Committed local state (as hccs/crashes/batch/infra), passphrase-encrypted:
+# `PULUMI_CONFIG_PASSPHRASE` in the worktree's `.envrc`.
+backend:
+  url: file://./state

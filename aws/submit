@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Submit one capture to the `disk-tree-m3` Batch queue (aws/__main__.py).
+#
+#   aws/submit r2://disk-tree/captures/<host>/<root slug>/<stamp>
+#
+# Prints the job id; follow it with
+#   aws logs tail /disk-tree-m3-ingest/batch --follow
+# The account is `.envrc`'s `AWS_PROFILE` (`r`, RAC).
+set -euo pipefail
+capture=${1:?usage: aws/submit r2://<bucket>/<capture dir>}
+name=ingest-$(date -u +%Y%m%d-%H%M%S)
+aws batch submit-job --region us-east-1 \
+  --job-name "$name" --job-queue disk-tree-m3 --job-definition disk-tree-m3-ingest \
+  --container-overrides "$(jq -nc --arg c "$capture" '{command: [$c]}')" \
+  --query jobId --output text

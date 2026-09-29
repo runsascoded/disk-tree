@@ -1,0 +1,13 @@
+config:
+  aws:region: us-east-1
+  # RAC AWS (006196295121, `AWS_PROFILE=r` from the worktree's `.envrc`).
+  disk-tree-m3:vcpu: "4"
+  disk-tree-m3:memory_mib: "16384"
+  disk-tree-m3:ephemeral_gib: "50"
+  disk-tree-m3:env:
+    R2_ENDPOINT_URL: https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com
+  # Created empty; values set out of band by `aws/put-secrets` (never in state).
+  disk-tree-m3:secrets:
+    AWS_ACCESS_KEY_ID: disk-tree-m3/r2-access-key-id
+    AWS_SECRET_ACCESS_KEY: disk-tree-m3/r2-secret-access-key
+encryptionsalt: v1:QvVtYICwoEI=:v1:siNh6SqB8PdKdjVa:KJ40inG3RlfZPPjQqOdNm2PLHq01Yw==
