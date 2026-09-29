@@ -117,7 +117,7 @@ def _plan_dir(tmp_path):
     d = tmp_path / "plan"
     (d / "manifest").mkdir(parents=True)
     (d / "plan-summary.json").write_text(json.dumps({
-        "date": "2026-09-01", "head": 7686,
+        "date": "2026-09-01", "plan_id": 12,
         "buckets": {"b1": {"eligible": {"bytes": 60, "objects": 4}}},
     }))
     mf = pd.DataFrame([
@@ -176,7 +176,6 @@ def test_dry_run_decisions_and_drift_skip(tmp_path):
     assert b["decisions"] == {"delete": 1, "skipped_gone": 1, "skipped_overwritten": 1}
     assert b["delete_bytes"] == 10
     assert b["drift_dirs"] == [{"dir": "b", "new_objects": 1, "new_bytes": 5, "skipped_deletes": 1}]
-    assert b["ledger_drift_dirs"] == []
 
 
 def test_for_real_deletes_with_generation_match_and_drift_proceed(tmp_path):
@@ -304,26 +303,6 @@ def test_stop_leaves_unstarted_roots_for_a_rerun(tmp_path):
     assert _decisions(plan, "would-delete") == [("a/x", "delete", 111), ("a/y", "skipped_gone", 0), ("a/z", "skipped_overwritten", 333)]
 
 
-def test_reconstruct_deleted_log_from_the_soft_deleted_listing(tmp_path):
-    # A real run that died before writing its log (2026-09-11: 241 deletes, 0
-    # rows): the bucket's soft-deleted objects in the run's window, matched to
-    # the manifest by name, become the `deleted/` log an undo can read.
-    from dt_cloud.sweep_exec import reconstruct_deleted_log
-    plan = _plan_dir(tmp_path)
-    t = lambda m: dt.datetime(2026, 9, 11, 5, 55, m, tzinfo=dt.timezone.utc)
-    client = FakeClient(blobs={}, soft_deleted={"b1": [
-        FakeBlob("a/x", 10, 111, T0, soft_delete_time=t(5)),   # in window, in manifest
-        FakeBlob("b/w", 40, 444, T0, soft_delete_time=t(9)),   # in window, in manifest
-        FakeBlob("a/y", 20, 222, T0, soft_delete_time=t(30)),  # after the window: not this run's
-        FakeBlob("c/q", 7, 777, T0, soft_delete_time=t(6)),    # not in the manifest: not ours
-    ]})
-    s = reconstruct_deleted_log(str(plan), "b1", since=t(0), until=t(12), client=client)
-    assert s["buckets"]["b1"] == {"decisions": {"delete": 2}, "delete_bytes": 50, "bands": {"gs://b1/a/": {"bytes": 10, "objects": 1}, "gs://b1/b/": {"bytes": 40, "objects": 1}}}
-    assert s["reconstructed"] == {"since": "2026-09-11T05:55:00+00:00", "until": "2026-09-11T05:55:12+00:00"}
-    assert _decisions(plan, "deleted") == [("a/x", "delete", 111), ("b/w", "delete", 444)]
-    assert json.loads((plan / "deleted-summary.json").read_text())["buckets"]["b1"]["decisions"] == {"delete": 2}
-
-
 def test_dry_run_reads_the_soft_delete_window(tmp_path):
     # The rehearsal reads the bucket's soft-delete policy like a real run
     # would (same call, same parse) and records the window; a short one warns
@@ -364,44 +343,11 @@ def test_dry_run_reports_missing_real_permissions(tmp_path):
     assert ok["buckets"]["b1"]["missing_perms"] == []
 
 
-def test_ledger_drift_reclassify_drops_dirs(tmp_path):
-    plan = _plan_dir(tmp_path)
-    client = _client()
-    s = execute_plan(str(plan), client=client, reclassify=lambda b, dn, approved: "eligible" if dn == "b" else "conflict")
-    assert s["buckets"]["b1"]["ledger_drift_dirs"] == ["a"]
-    # only b was processed; it drifted (new key) → nothing would-delete
-    assert s["buckets"]["b1"]["decisions"] == {}
-
-
-def test_reclassify_receives_plan_approved_bands(tmp_path):
-    # A plan built from approved bands must hand those bands to reclassify —
-    # without them every band-approved dir reclassifies as deferred and the
-    # whole plan silently no-ops as "ledger drift".
-    plan = _plan_dir(tmp_path)
-    summ = json.loads((plan / "plan-summary.json").read_text())
-    summ["approved"] = ["gs://b1/a/"]
-    (plan / "plan-summary.json").write_text(json.dumps(summ))
-    client = _client()
-    seen: list[tuple[str, str, tuple[str, ...]]] = []
-
-    def reclassify(bucket, dn, approved):
-        seen.append((bucket, dn, tuple(approved)))
-        return "eligible"
-
-    s = execute_plan(str(plan), client=client, reclassify=reclassify)
-    assert sorted(seen) == [
-        ("b1", "a", ("gs://b1/a/",)),
-        ("b1", "b", ("gs://b1/a/",)),
-    ]
-    assert s["buckets"]["b1"]["ledger_drift_dirs"] == []
-    assert s["buckets"]["b1"]["decisions"] == {"delete": 1, "skipped_gone": 1, "skipped_overwritten": 1}
-
-
 def _sized_plan(tmp_path, dirs: dict[str, int], **summary):
     """A plan whose manifest holds `dirs[dn]` objects under each dir."""
     d = tmp_path / "plan"
     (d / "manifest").mkdir(parents=True)
-    (d / "plan-summary.json").write_text(json.dumps({"date": "2026-09-01", "head": 1, "buckets": {"b1": {"eligible": {"bytes": 1, "objects": sum(dirs.values())}}}, **summary}))
+    (d / "plan-summary.json").write_text(json.dumps({"date": "2026-09-01", "plan_id": 1, "buckets": {"b1": {"eligible": {"bytes": 1, "objects": sum(dirs.values())}}}, **summary}))
     rows = [{"name": f"{dn}/o{i}", "size_bytes": 1, "storage_class_id": 1, "created": T0, "dir": dn, "owner": "k", "sweepers": "k"} for dn, n in dirs.items() for i in range(n)]
     pd.DataFrame(rows).to_parquet(d / "manifest" / "b1.parquet")
     return d
@@ -445,7 +391,7 @@ def test_streamed_merge_buffers_nested_dirs_until_the_listing_passes_them(tmp_pa
     d = tmp_path / "plan"
     (d / "manifest").mkdir(parents=True)
     (d / "plan-summary.json").write_text(json.dumps({
-        "date": "2026-09-01", "head": 1, "approved": ["gs://b1/a/"],
+        "date": "2026-09-01", "plan_id": 1, "approved": ["gs://b1/a/"],
         "buckets": {"b1": {"eligible": {"bytes": 1, "objects": 1}}},
     }))
     row = lambda name, dn, size=1: {"name": name, "size_bytes": size, "storage_class_id": 1, "created": T0, "dir": dn, "owner": None, "sweepers": "k"}
@@ -506,7 +452,7 @@ class _UndoClient:
 def _real_run_dir(tmp_path, for_real=True):
     d = tmp_path / "run"
     (d / "deleted").mkdir(parents=True)
-    (d / "plan-summary.json").write_text(json.dumps({"date": "2026-09-01", "head": 7686, "approved": ["gs://b1/a/"], "buckets": {}}))
+    (d / "plan-summary.json").write_text(json.dumps({"date": "2026-09-01", "plan_id": 12, "approved": ["gs://b1/a/"], "buckets": {}}))
     (d / "deleted-summary.json").write_text(json.dumps({"plan": str(d), "for_real": for_real, "buckets": {"b1": {}}}))
     pd.DataFrame([
         {"name": "a/x", "size_bytes": 10, "generation": 11, "decision": "delete", "dir": "a"},

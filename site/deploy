@@ -34,8 +34,11 @@ if [ "$mode" = dev ]; then push=false; fi
 # OA account (as well as Access + oa.dev DNS edit). We deliberately do NOT fall
 # back to `wrangler login` OAuth: that session tends to drift to a personal
 # account and then fails with auth error 10000 against the OA account.
-pnpm build
+# A preview build takes the `[env.preview.vars]` overrides (`vite.config.ts`
+# reads `CLOUDFLARE_ENV`, as wrangler does): the dev stack's `STORE`/`AUTH_MODE`
+# are its own, not production's.
 branch=main; [ "$mode" = dev ] && branch=dev
+if [ "$mode" = dev ]; then CLOUDFLARE_ENV=preview pnpm build; else pnpm build; fi
 CLOUDFLARE_ACCOUNT_ID=74981a43be0de7712369306c7b19133d \
   npx wrangler pages deploy dist --project-name "$PROJECT" --branch "$branch"
 

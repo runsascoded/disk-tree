@@ -156,7 +156,6 @@ def execute_plan(
     max_root_objects: int = 250_000,  # a listing root bigger than this splits into its children (one listing thread per root)
     min_soft_delete_days: int = 7,
     client=None,
-    reclassify=None,  # (bucket, dir, approved) -> category at the CURRENT ledger head; non-eligible dirs are skipped (ledger drift). `approved` is the plan's approved bands — without them, band-approved dirs would all reclassify as deferred and be dropped.
     stop: threading.Event | None = None,  # set → roots not yet started are skipped; the log and summary still land (`interrupted`)
 ) -> dict:
     import fsspec
@@ -234,14 +233,7 @@ def execute_plan(
         names = mt["name"]
         order = pc.sort_indices(mt, sort_keys=[("name", "ascending")])
         dirs_all = set(pc.unique(mt["dir"]).to_pylist())
-        ledger_drift: list[str] = []
-        if reclassify is not None:
-            for dn in sorted(dirs_all):
-                if reclassify(bucket, dn, approved) != "eligible":
-                    ledger_drift.append(dn)
-            dirs_all -= set(ledger_drift)
-        err(f"{bucket}: {len(mt):,} manifest keys in {len(dirs_all):,} dirs ({mode})"
-            + (f" — {len(ledger_drift):,} dirs dropped by newer marks" if ledger_drift else ""))
+        err(f"{bucket}: {len(mt):,} manifest keys in {len(dirs_all):,} dirs ({mode})")
         bkt = client.bucket(bucket)
         counts: Counter = Counter()
         drift_dirs: list[dict] = []
@@ -265,19 +257,16 @@ def execute_plan(
             return _lower_bound(prefix), _lower_bound(prefix + "\x7f")
 
         BATCH_ROWS = 262_144
-        dropped = pa.array(ledger_drift, pa.string()) if ledger_drift else None
 
         def root_rows(root: str):
             """The manifest rows under `root/` (every row for the bucket root)
-            in name order, minus dirs dropped by ledger drift, as
-            `(name, size, created, dir)` tuples — materialized 256k rows at a
-            time, so a root holding most of the bucket never becomes one frame."""
+            in name order, as `(name, size, created, dir)` tuples — materialized
+            256k rows at a time, so a root holding most of the bucket never
+            becomes one frame."""
             lo, hi = _bisect(root + "/") if root else (0, len(order))
             sl = order.slice(lo, hi - lo)
             for start in range(0, len(sl), BATCH_ROWS):
                 t = mt.take(sl.slice(start, BATCH_ROWS))
-                if dropped is not None:
-                    t = t.filter(pc.invert(pc.is_in(pc.cast(t["dir"], pa.string()), value_set=dropped)))
                 yield from zip(*(t[c].to_pylist() for c in ("name", "size_bytes", "created", "dir")))
 
         # One recursive listing per *root* (a band's child directory, or the
@@ -427,7 +416,7 @@ def execute_plan(
         # moment it lands — a job killed from outside loses at most the chunk
         # in memory, never the run (the 2026-09-11 eu-west4 run's single
         # parquet had no footer when its job was deleted: ~2M deletes with no
-        # record until `reconstruct-log`). Readers glob the directory. Small
+        # record). Readers glob the directory. Small
         # chunks on a real run (the undo record); the site's parquet viewer
         # pages within a row group, so 64k rows (~1.7 MB) keeps a dry run's
         # pages cheap.
@@ -517,7 +506,6 @@ def execute_plan(
             "decisions": dict(counts),
             "delete_bytes": total_deleted_b,
             "drift_dirs": drift_dirs,
-            "ledger_drift_dirs": ledger_drift,
             "failed_dirs": failed_dirs,
             "bands": {b: dict(c) for b, c in bands.items()},
             **({"interrupted": {"roots_skipped": roots_skipped, "roots": len(roots)}} if roots_skipped else {}),
@@ -541,7 +529,7 @@ def execute_plan(
 def read_log(fs, ppath: str, mode: str, bucket: str):
     """A run's decision log for `bucket`: the part files under
     `<mode>/<bucket>/` (current layout) plus the single `<mode>/<bucket>.parquet`
-    of older or reconstructed runs, as one table (None if neither exists)."""
+    of older runs, as one table (None if neither exists)."""
     import pyarrow as pa
     import pyarrow.parquet as pq
 
@@ -578,78 +566,6 @@ def stop_file_watch(plan_dir: str, stop: threading.Event, every: float = 10.0) -
     t = threading.Thread(target=poll, name="stop-file-watch", daemon=True)
     t.start()
     return t
-
-
-def reconstruct_deleted_log(
-    plan_dir: str,
-    bucket: str,
-    since: dt.datetime,
-    until: dt.datetime,
-    client=None,
-) -> dict:
-    """Rebuild `deleted/<bucket>.parquet` (+ `deleted-summary.json`) for a
-    real run that died before writing its log: the bucket's soft-deleted
-    objects under the plan's bands whose soft-delete time is in
-    [since, until], matched to the manifest by name. Refuses to replace a log
-    that already has rows."""
-    import fsspec
-    import pyarrow as pa
-    import pyarrow.parquet as pq
-    from google.cloud import storage
-
-    fs, ppath = fsspec.core.url_to_fs(plan_dir)
-    with fs.open(f"{ppath}/plan-summary.json") as fh:
-        plan = json.load(fh)
-    client = client or storage.Client()
-    pre = f"gs://{bucket}/"
-    approved = tuple(plan.get("approved") or ())
-    bands = [a[len(pre):] for a in approved if a.startswith(pre)] or [""]
-    with fs.open(f"{ppath}/manifest/{bucket}.parquet", "rb") as fh:
-        mt = pq.read_table(fh, columns=["name", "size_bytes", "dir"])
-    manifest = {n: (s, d) for n, s, d in zip(mt["name"].to_pylist(), mt["size_bytes"].to_pylist(), mt["dir"].to_pylist())}
-    lpath = f"{ppath}/deleted/{bucket}/part-00000.parquet"
-    existing = read_log(fs, ppath, "deleted", bucket)
-    if existing is not None and existing.num_rows:
-        raise SystemExit(f"{plan_dir}/deleted/{bucket} already has {existing.num_rows:,} log rows — not replacing them")
-    rows: list[tuple] = []
-    for band in bands:
-        for blob in client.list_blobs(bucket, prefix=band, soft_deleted=True):
-            t = blob.soft_delete_time
-            if t is None or not (since <= t <= until) or blob.name not in manifest:
-                continue
-            size, dn = manifest[blob.name]
-            rows.append((blob.name, int(size), int(blob.generation), "delete", dn))
-    rows.sort()
-    log_schema = pa.schema([
-        ("name", pa.string()), ("size_bytes", pa.int64()), ("generation", pa.int64()),
-        ("decision", pa.string()), ("dir", pa.string()),
-    ])
-    fs.makedirs(f"{ppath}/deleted/{bucket}", exist_ok=True)
-    cols = list(zip(*rows)) if rows else [[] for _ in log_schema.names]
-    with fs.open(lpath, "wb") as fh:
-        pq.write_table(pa.table(dict(zip(log_schema.names, cols)), schema=log_schema), fh, row_group_size=8_192)
-    bands_c: dict[str, Counter] = {}
-    for name, size, _gen, _d, dn in rows:
-        p = f"gs://{bucket}/{dn}/" if dn else pre
-        hits = [a for a in approved if p.startswith(a)]
-        band = max(hits, key=len) if hits else f"gs://{bucket}/{dn.split('/', 1)[0]}/"
-        c = bands_c.setdefault(band, Counter())
-        c["bytes"] += size
-        c["objects"] += 1
-    summary = {
-        "plan": plan_dir, "for_real": True, "drift": "skip",
-        "reconstructed": {"since": since.isoformat(), "until": until.isoformat()},
-        "buckets": {bucket: {
-            "decisions": {"delete": len(rows)} if rows else {},
-            "delete_bytes": sum(r[1] for r in rows),
-            "bands": {b: dict(c) for b, c in bands_c.items()},
-        }},
-    }
-    with fsspec.open(f"{plan_dir}/deleted-summary.json", "w") as fh:
-        json.dump(summary, fh, indent=2)
-    err(f"{bucket}: {len(rows):,} soft-deleted objects in the window matched the manifest → {plan_dir}/deleted/{bucket}/part-00000.parquet")
-    summary["_plan"] = plan
-    return summary
 
 
 #: Per-key outcomes of an undo (the `restored/` log's `decision` column).
@@ -806,10 +722,16 @@ def record_undo(run_id: str, summary: dict, deleted_objects: int) -> str:
 
 
 def run_id_for(plan: dict, started_ts: int) -> str:
-    return f"{plan['date']}-h{plan['head']}/{dt.datetime.fromtimestamp(started_ts, dt.timezone.utc):%Y%m%dT%H%M%SZ}"
+    """`<date>-p<plan_id>/<stamp>`: the staged plan the run executes
+    (`sweep manifest --plan` writes `plan_id` into the summary)."""
+    stamp = f"{dt.datetime.fromtimestamp(started_ts, dt.timezone.utc):%Y%m%dT%H%M%SZ}"
+    return f"{plan['date']}-p{int(plan['plan_id'])}/{stamp}"
 
 
-def record_run_start(plan: dict, plan_dir: str, exec_head: int, actor: str, started_ts: int, for_real: bool, buckets: tuple[str, ...] = ()) -> str:
+# `deletion_runs.head` / `exec_head` recorded a ledger position a plan-first
+# run doesn't have (it reads no ledger); both are written as 0. Likewise
+# `ledger_drift_dirs`: nothing re-classifies the manifest.
+def record_run_start(plan: dict, plan_dir: str, actor: str, started_ts: int, for_real: bool, buckets: tuple[str, ...] = ()) -> str:
     """Insert the run's D1 row as soon as it starts (`finished_ts` NULL, zero
     totals) so the console lists it while it runs; `record_run` fills it in.
     `buckets` = the `-b` cut (empty = every bucket in the plan → NULL)."""
@@ -820,10 +742,10 @@ def record_run_start(plan: dict, plan_dir: str, exec_head: int, actor: str, star
     _d1_query(
         "INSERT INTO deletion_runs (run_id, plan, scan, head, exec_head, actor, mode, started_ts, finished_ts, "
         "deleted_bytes, deleted_objects, skipped_gone, skipped_overwritten, drift_dirs, ledger_drift_dirs, "
-        "undo_deadline, log_dir, buckets) VALUES ("
-        f"{_q(run_id)}, {_q(plan_dir)}, {_q(plan['date'])}, {plan['head']}, {exec_head}, {_q(actor)}, "
+        "undo_deadline, log_dir, buckets, plan_id) VALUES ("
+        f"{_q(run_id)}, {_q(plan_dir)}, {_q(plan['date'])}, 0, 0, {_q(actor)}, "
         f"{_q('real' if for_real else 'dry')}, {started_ts}, NULL, 0, 0, 0, 0, 0, 0, NULL, {_q(plan_dir)}, "
-        f"{_q(','.join(sorted(buckets))) if buckets else 'NULL'})",
+        f"{_q(','.join(sorted(buckets))) if buckets else 'NULL'}, {int(plan['plan_id'])})",
         acct, tok,
     )
     return run_id
@@ -832,7 +754,6 @@ def record_run_start(plan: dict, plan_dir: str, exec_head: int, actor: str, star
 def record_run(
     summary: dict,
     plan: dict,
-    exec_head: int,
     actor: str,
     started_ts: int,
     finished_ts: int,
@@ -855,7 +776,6 @@ def record_run(
         tot["skipped_gone"] += d.get("skipped_gone", 0)
         tot["skipped_overwritten"] += d.get("skipped_overwritten", 0)
         tot["drift_dirs"] += len(b.get("drift_dirs", []))
-        tot["ledger_drift_dirs"] += len(b.get("ledger_drift_dirs", []))
         for prefix, c in (b.get("bands") or {}).items():
             band_rows.append(
                 f"({_q(run_id)}, {_q(prefix)}, {c.get('bytes', 0)}, {c.get('objects', 0)}, "
@@ -866,11 +786,11 @@ def record_run(
     _d1_query(
         "INSERT INTO deletion_runs (run_id, plan, scan, head, exec_head, actor, mode, started_ts, finished_ts, "
         "deleted_bytes, deleted_objects, skipped_gone, skipped_overwritten, drift_dirs, ledger_drift_dirs, "
-        "undo_deadline, log_dir) VALUES ("
-        f"{_q(run_id)}, {_q(summary['plan'])}, {_q(plan['date'])}, {plan['head']}, {exec_head}, {_q(actor)}, "
+        "undo_deadline, log_dir, plan_id) VALUES ("
+        f"{_q(run_id)}, {_q(summary['plan'])}, {_q(plan['date'])}, 0, 0, {_q(actor)}, "
         f"{_q(mode)}, {started_ts}, {finished_ts}, {tot['deleted_bytes']}, {tot['deleted_objects']}, "
-        f"{tot['skipped_gone']}, {tot['skipped_overwritten']}, {tot['drift_dirs']}, {tot['ledger_drift_dirs']}, "
-        f"{undo}, {_q(summary['plan'])}) "
+        f"{tot['skipped_gone']}, {tot['skipped_overwritten']}, {tot['drift_dirs']}, 0, "
+        f"{undo}, {_q(summary['plan'])}, {int(plan['plan_id'])}) "
         "ON CONFLICT (run_id) DO UPDATE SET finished_ts = excluded.finished_ts, deleted_bytes = excluded.deleted_bytes, "
         "deleted_objects = excluded.deleted_objects, skipped_gone = excluded.skipped_gone, "
         "skipped_overwritten = excluded.skipped_overwritten, drift_dirs = excluded.drift_dirs, "

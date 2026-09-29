@@ -24,8 +24,7 @@ from click import Choice, argument, group, option
 
 from .cw_digest import REPLY_HOUR_UTC
 from .identity import DEFAULT_IDENTITIES, load_identities
-from .mark import DEFAULT_URL as MARK_DEFAULT_URL
-from .mark import KEEP_ACTIONS as MARK_KEEPS
+from .site import DEFAULT_URL as SITE_DEFAULT_URL
 from .secrets import env_secret, secret
 from .index_footer import INDEX_VARIANTS
 from .viz import COARSE_EXPS
@@ -542,206 +541,30 @@ def rules(identities_path: Path, out: Path | None) -> None:
 
 
 @main.command()
-@option("-f", "--file", "sources", multiple=True, type=Path, help="Read prefixes from FILE (one per line; '-' = stdin). Repeatable.")
-@option("-k", "--keep", default="keep", type=Choice([*MARK_KEEPS, "none"]), help="Keep action to set ('none' leaves the keep axis untouched)")
-@option("-m", "--memo", default=None, help="Note stored with every action in the ledger")
-@option("-n", "--dry-run", is_flag=True, help="Print the actions that would be posted, and send nothing")
-@option("-o", "--owner", default="@me", help="Owner to set ('@me' = you, resolved server-side); empty string leaves the owner axis untouched")
-@option("-s", "--scan", default=None, help="Snapshot id these marks were derived from (provenance)")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN); copy yours from the dashboard")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
-@argument("prefixes", nargs=-1)
-def mark(
-    sources: tuple[Path, ...],
-    keep: str,
-    memo: str | None,
-    dry_run: bool,
-    owner: str,
-    scan: str | None,
-    token: str | None,
-    url: str | None,
-    prefixes: tuple[str, ...],
-) -> None:
-    """Bulk-mark GCS prefixes in the mark & sweep ledger.
-
-    The agent-facing entry point: an agent that knows which prefixes it owns
-    hands them over and claims them in one call.
-
-        dt-cloud mark gs://marin-us-central1/checkpoints/my-run/
-
-        find_my_dirs | dt-cloud mark --keep keep_last_ckpt
-
-    PREFIXES come from arguments, --file (repeatable; '-' reads stdin), or —
-    when neither is given — stdin. Each must be a directory prefix under a
-    marin bucket, gs://marin-<bucket>/<path>/, trailing slash required.
-    """
-    from .mark import (
-        MarkError,
-        batches,
-        build_actions,
-        creds as mark_creds,
-        gather_prefixes,
-        post_actions,
-    )
-
-    line_sources = []
-    opened = []
-    try:
-        for s in sources:
-            if str(s) == "-":
-                line_sources.append(sys.stdin)
-            else:
-                f = open(s)
-                opened.append(f)
-                line_sources.append(f)
-        # No explicit prefixes anywhere → read stdin, the pipe-friendly default.
-        if not prefixes and not sources:
-            line_sources.append(sys.stdin)
-        try:
-            all_prefixes = gather_prefixes(list(prefixes), line_sources)
-            actions = build_actions(
-                all_prefixes,
-                keep=None if keep == "none" else keep,
-                owner=owner or None,
-                memo=memo,
-                scan=scan,
-            )
-        except MarkError as e:
-            raise SystemExit(f"error: {e}")
-    finally:
-        for f in opened:
-            f.close()
-
-    chunks = batches(actions)
-    if dry_run:
-        print(json.dumps(actions, indent=2))
-        err(f"dry-run: {len(actions)} action(s) in {len(chunks)} request(s); nothing sent")
-        return
-
-    base, tok = mark_creds(token, url)
-    if not tok:
-        raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN (copy it from the dashboard)")
-
-    total = 0
-    for i, chunk in enumerate(chunks, 1):
-        try:
-            res = post_actions(base, tok, chunk)
-        except MarkError as e:
-            raise SystemExit(f"error: {e}")
-        total += res.get("count", len(chunk))
-        err(f"batch {i}/{len(chunks)}: {res.get('count', len(chunk))} action(s) accepted")
-    err(f"marked {total} prefix(es) as {'owner=' + owner if owner else ''}{' ' if owner and keep != 'none' else ''}{'keep=' + keep if keep != 'none' else ''}")
-
-
-@main.command()
-@option("-j", "--json", "as_json", is_flag=True, help="Emit the raw /api/resolve JSON")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
-@argument("path")
-def status(as_json: bool, token: str | None, url: str | None, path: str) -> None:
-    """Show the effective keep + owner of PATH (a gs://marin-<bucket>/<dir>/ prefix).
-
-    Resolves via /api/resolve — the same recency fold the dashboard uses, so an
-    agent sees exactly what a person would. Works at any depth (resolution is
-    prefix-matching over the ledger, independent of the tree's depth cap).
-    """
-    from .mark import MarkError, creds, resolve_path
-
-    base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN")
-    try:
-        r = resolve_path(base, tok, path)
-    except MarkError as e:
-        raise SystemExit(f"error: {e}")
-    if as_json:
-        print(json.dumps(r, indent=2))
-        return
-
-    def _src(hit: dict) -> str:
-        where = "here" if hit["own"] else f"inherited from {hit['prefix']}"
-        day = dt.datetime.fromtimestamp(hit["ts"], dt.timezone.utc).strftime("%Y-%m-%d")
-        memo = f', memo="{hit["memo"]}"' if hit.get("memo") else ""
-        return f"{where}, by {hit['who']} on {day}{memo}"
-
-    keep, owner = r.get("keep"), r.get("owner")
-    print(f"path:  {r['path']}")
-    print(f"keep:  {keep['action'] + '  (' + _src(keep) + ')' if keep else 'unmarked — sweeps at the deadline unless kept'}")
-    print(f"owner: {owner['owner'] + '  (' + _src(owner) + ')' if owner else 'unattributed — in lost & found'}")
-
-
-@main.command()
-@option("-f", "--min-frac", default=None, type=float, help="Ignore prefixes below this fraction of total bytes")
-@option("-j", "--json", "as_json", is_flag=True, help="Emit the raw /api/todo JSON")
-@option("-n", "--limit", default=None, type=int, help="Max items to return")
-@option("-p", "--prefixes", "prefixes_only", is_flag=True, help="Print bare prefixes (pipe into `dt-cloud mark`)")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
-def todo(
-    min_frac: float | None,
-    as_json: bool,
-    limit: int | None,
-    prefixes_only: bool,
-    token: str | None,
-    url: str | None,
-) -> None:
-    """List the largest prefixes still needing a keep/sweep decision.
-
-    The review backlog: prefixes with no decision anywhere in their subtree or
-    ancestry (unmarked defaults to sweep at the deadline). Marking a chunk
-    keep/sweep drops it and surfaces its still-undecided siblings.
-
-        dt-cloud todo -p | head        # feed prefixes to review
-
-    Note the `-p` output is a review queue, not a mark command — you still
-    decide keep vs sweep per prefix.
-    """
-    from .mark import MarkError, creds, todo_list
-
-    base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN")
-    try:
-        r = todo_list(base, tok, limit=limit, min_frac=min_frac)
-    except MarkError as e:
-        raise SystemExit(f"error: {e}")
-    if as_json:
-        print(json.dumps(r, indent=2))
-        return
-    items = r.get("items", [])
-    if prefixes_only:
-        for it in items:
-            print(it["prefix"])
-        return
-    err(f"scan {r.get('scan')}: {r.get('count')} undecided prefix(es) ≥ {r.get('min_bytes', 0) / 1e9:.1f} GB")
-    for it in items:
-        print(f"{it['bytes'] / 1e9:8.1f} GB  {it['objects']:>10,}  {it['prefix']}")
-
-
-@main.command()
 @option("-d", "--date", default=None, help="Scan date YYYY-MM-DD (default: latest from scans.json)")
 @option("-f", "--max-age-days", default=2, type=int, help="Freshness: latest scan must be within this many days")
 @option("-j", "--json", "as_json", is_flag=True, help="Emit machine-readable JSON to stdout")
-@option("-m", "--max-ms", default=25000, type=int, help="marks/totals compute budget (ms) before it's flagged")
+@option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ (default: $SNAPSHOTS_SUBDIR; `cw` for the CoreWeave deployment, empty for the default store)")
 @option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
-def healthcheck(date: str | None, max_age_days: int, as_json: bool, max_ms: int, token: str | None, url: str | None) -> None:
+@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+def healthcheck(date: str | None, max_age_days: int, as_json: bool, subdir: str | None, token: str | None, url: str | None) -> None:
     """Live-site health: is the latest scan actually *servable* end-to-end?
 
     Catches failures where the data pipeline succeeds but the site can't serve
-    the scan — e.g. a path-index footer that never synced to D1, so
-    /api/marks/totals footer-parses and 1102s (the 2026-08-31 /users outage).
-    Checks scan freshness, marks/totals (200 + D1-index path + non-empty users
-    + compute budget), subtree, and the published data JSONs. Exits nonzero if
-    any check fails — wire it into a cron / post-snapshot gate.
+    the scan — e.g. a path-index footer that never synced to D1, so the site
+    footer-parses and 1102s (the 2026-08-31 /users outage). Checks scan
+    freshness, subtree (the D1-index serving path), and the published data
+    JSONs. Exits nonzero if any check fails — wire it into a cron /
+    post-snapshot gate.
     """
     from .healthcheck import as_dict, run_checks
-    from .mark import creds
+    from .site import creds
 
     base, tok = creds(token, url)
     if not tok:
         raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN")
-    resolved, checks = run_checks(base, tok, date, max_age_days=max_age_days, max_ms=max_ms)
+    sub = subdir if subdir is not None else os.environ.get("SNAPSHOTS_SUBDIR", "")
+    resolved, checks = run_checks(base, tok, date, max_age_days=max_age_days, subdir=sub)
     err(f"healthcheck {base} @ {resolved or '?'}")
     for c in checks:
         err(f"  {'✓' if c.ok else '✗'} {c.name:<16} {c.detail}")
@@ -830,6 +653,82 @@ def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None,
     s = write_over_time_index(pairs, out_dir, mem=mem, threads=threads, tmp_dir=tmp_dir)
     err(f"over-time-write: {s['rows']:,} intervals / {s['paths']:,} paths over {len(s['scans'])} scans → {s['file']}")
     print(json.dumps(s))
+
+
+@main.command("over-time-groups")
+@option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket the D1 `path` dirs resolve against")
+@option("-g", "--gen", required=True, help="Generation id for the published index dirs (the run's, e.g. the job's $GEN)")
+@option("-K", "--group-size", default=None, type=int, help="Scans per sealed group (default: dt_cloud.overtime.OVER_TIME_GROUP_SIZE)")
+@option("-l", "--layer2-prefix", default=None, help="Layer-2 dir template with `{scan}` (default: $LAYER2_PREFIX, e.g. cw-l2/{scan}/)")
+@option("-m", "--mem", default="8GB", help="DuckDB memory limit")
+@option("-n", "--dry-run", is_flag=True, help="Print the groups that would be built; write nothing")
+@option("-o", "--out", "out_dir", type=Path, required=True, help="Work dir for the group builds")
+@option("-p", "--publish-root", default=None, help="Where the published dirs live (default /gcs/<bucket>, the Batch mount); groups land at <root>/<layer2>/index/<gen>/")
+@option("-r", "--data-root", default=None, help="Root the D1 `path` pointer dirs resolve against (default: the publish root)")
+@option("-t", "--threads", default=8, type=int, help="DuckDB threads")
+@option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
+def over_time_groups(
+    bucket: str,
+    gen: str,
+    group_size: int | None,
+    layer2_prefix: str | None,
+    mem: str,
+    dry_run: bool,
+    out_dir: Path,
+    publish_root: str | None,
+    data_root: str | None,
+    threads: int,
+    tmp_dir: Path | None,
+) -> None:
+    """Seal the next over-time groups (specs/obs-axis-indexing.md Phase 1, the
+    capped-K shape): partition every scan with a synced `path` index into fixed
+    K-scan groups, oldest first, and for each group not yet in the manifest
+    build its over-time MS, publish it under the group's LAST scan's layer-2 dir
+    (`<layer2>/index/<gen>/over-time.parquet` + scans sidecar), sync the footer
+    (`index_schema`/`index_row_groups` as variant `over-time`) and, last, write
+    the `pyramid_multiscans` row the site routes by. Idempotent: sealed groups
+    never change, so a re-run only appends. Prints `{"groups": [<gid>, …]}` for
+    the caller to `publish-r2` each new group's scan dir. The < K tail is served
+    by `/api/series`'s per-scan fallback."""
+    import shutil
+    import time
+
+    from .index_footer import index_dir, sync_d1, synced_variants
+    from .overtime import OVER_TIME_GROUP_SIZE, multiscan_row, sealed_groups, sync_manifest, synced_groups, write_over_time_index
+
+    K = group_size or OVER_TIME_GROUP_SIZE
+    l2 = layer2_prefix or os.environ.get("LAYER2_PREFIX") or "cw-l2/{scan}/"
+    root = publish_root or f"/gcs/{bucket}"
+    data = data_root or root
+    dates = sorted({d for d, v in synced_variants() if v == "path"})
+    done = synced_groups()
+    todo = [g for g in sealed_groups(dates, K) if g[-1] not in done]
+    err(f"over-time-groups: {len(dates)} indexed scans → {len(sealed_groups(dates, K))} sealed groups of {K}, {len(done)} in the manifest, {len(todo)} to build")
+    if dry_run:
+        for g in todo:
+            err(f"  would build {g[-1]}: {g[0]}..{g[-1]} ({len(g)} scans)")
+        print(json.dumps({"groups": [g[-1] for g in todo], "dry_run": True}))
+        return
+    built: list[str] = []
+    for g in todo:
+        gid = g[-1]
+        pairs: list[tuple[str, str]] = []
+        for d in g:
+            dir_ = index_dir(d, "path")
+            if dir_ is None:
+                raise SystemExit(f"over-time-groups: no `path` pointer for {d} (group {gid})")
+            pairs.append((d, f"{data}/{dir_}/path-index.parquet"))
+        summ = write_over_time_index(pairs, out_dir / gid, mem=mem, threads=threads, tmp_dir=tmp_dir)
+        key = f"{l2.format(scan=gid).rstrip('/')}/index/{gen}"
+        dest = Path(root) / key
+        dest.mkdir(parents=True, exist_ok=True)
+        for f in (summ["file"], summ["scans_file"]):
+            shutil.copy2(f, dest / Path(f).name)
+        n = sync_d1(gid, str(dest / Path(summ["file"]).name), variant="over-time", gen=gen, key=key)
+        sync_manifest(multiscan_row(g, written_at_ms=int(time.time() * 1000)))
+        err(f"over-time-groups: sealed {gid} ({g[0]}..{gid}, {len(g)} scans, {summ['rows']:,} intervals, {n} row groups) → {key}")
+        built.append(gid)
+    print(json.dumps({"groups": built}))
 
 
 @main.command("index-sync")
@@ -1075,22 +974,55 @@ def warm_cache(date: str | None, jobs: int, dry_run: bool, root: str | None, tok
 @main.group()
 def lifecycle() -> None:
     """Bucket lifecycle rules as a tracked file: `pull` (live → JSON), `diff`
-    (file vs live), `push` (file → bucket, whole-config PUT + read-back
-    verification), `gc-rule` (print the bucket-wide noncurrent-version GC rule
-    to add to the file). Creds: the CAIOS keys from the env (see `sweep`)."""
+    (file vs live), `push` (file → bucket, whole-config write + read-back
+    verification), `gc-rule` (print the S3 bucket-wide noncurrent-version GC
+    rule to add to a file). `gs://<bucket>` reads GCS (ADC: the job SA, or
+    your gcloud application-default login); a bare name is S3 / CAIOS with the
+    keys from the env (see `sweep`). Several `-b` → one JSON map keyed by
+    bucket, the per-scan snapshot shape."""
+
+
+def _lifecycle_clients(buckets: tuple[str, ...]):
+    """The S3 and/or GCS client the given bucket URIs need (`None` for a cloud
+    none of them name), so one `pull` can snapshot a mixed set."""
+    from .lifecycle import is_gcs
+
+    gcs = s3 = None
+    if any(is_gcs(b) for b in buckets):
+        from google.cloud import storage
+
+        gcs = storage.Client()
+    if any(not is_gcs(b) for b in buckets):
+        from .sweep import s3_client
+
+        s3 = s3_client()
+    return s3, gcs
+
+
+_LC_BUCKET = option("-b", "--bucket", "buckets", multiple=True, help="`gs://<bucket>` (GCS) or a bare S3 bucket name; repeatable (default $CW_BUCKET)")
+
+
+def _lc_buckets(buckets: tuple[str, ...]) -> tuple[str, ...]:
+    if buckets:
+        return buckets
+    from .sweep import CW_BUCKET
+
+    return (CW_BUCKET,)
 
 
 @lifecycle.command("pull")
-@option("-b", "--bucket", "buckets", multiple=True, help="Bucket (repeatable; default $CW_BUCKET). One → the bare `Rules[]`; several → `{<bucket>: Rules[]}` in this order")
+@_LC_BUCKET
 @option("-o", "--out", type=Path, help="Write here instead of stdout")
 def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
-    from .lifecycle import dump, dump_map, pull
-    from .sweep import CW_BUCKET, s3_client
+    """One bucket → the bare rule list; several → `{<bucket>: rules}` in this order."""
+    from .lifecycle import dump, dump_map, pull_any, pull_many
 
-    buckets = buckets or (CW_BUCKET,)
-    client = s3_client()
-    by_bucket = {b: pull(client, b) for b in buckets}
-    text = dump(by_bucket[buckets[0]]) if len(buckets) == 1 else dump_map(by_bucket)
+    buckets = _lc_buckets(buckets)
+    s3, gcs = _lifecycle_clients(buckets)
+    if len(buckets) == 1:
+        text = dump(pull_any(buckets[0], s3=s3, gcs=gcs), bucket=buckets[0])
+    else:
+        text = dump_map(pull_many(list(buckets), s3=s3, gcs=gcs))
     if out is None:
         sys.stdout.write(text)
     else:
@@ -1099,39 +1031,40 @@ def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
 
 
 @lifecycle.command("diff")
-@option("-b", "--bucket", default=lambda: os.environ.get("CW_BUCKET", "marin-us-east-02a"), help="Bucket (default $CW_BUCKET)")
+@_LC_BUCKET
 @argument("path", type=Path)
-def lifecycle_diff(bucket: str, path: Path) -> None:
-    """Exit 1 when PATH (intended) differs from the live rules."""
-    from .lifecycle import diff, load, pull
-    from .sweep import s3_client
+def lifecycle_diff(buckets: tuple[str, ...], path: Path) -> None:
+    """Exit 1 when PATH (intended) differs from the live rules of the one -b bucket."""
+    from .lifecycle import diff_any, load, pull_any
 
-    d = diff(load(str(path)), pull(s3_client(), bucket))
+    (bucket,) = _lc_buckets(buckets)
+    s3, gcs = _lifecycle_clients((bucket,))
+    d = diff_any(bucket, load(str(path)), pull_any(bucket, s3=s3, gcs=gcs))
     print(json.dumps(d))
     if any(d.values()):
         sys.exit(1)
 
 
 @lifecycle.command("push")
-@option("-b", "--bucket", default=lambda: os.environ.get("CW_BUCKET", "marin-us-east-02a"), help="Bucket (default $CW_BUCKET)")
+@_LC_BUCKET
 @option("-n", "--dry-run", is_flag=True, help="Print the diff that would be applied; touch nothing")
 @argument("path", type=Path)
-def lifecycle_push(bucket: str, dry_run: bool, path: Path) -> None:
-    """Replace the bucket's lifecycle configuration with PATH (read back + verified)."""
-    from .lifecycle import diff, load, pull, push
-    from .sweep import s3_client
+def lifecycle_push(buckets: tuple[str, ...], dry_run: bool, path: Path) -> None:
+    """Replace the one -b bucket's lifecycle configuration with PATH (read back + verified)."""
+    from .lifecycle import diff_any, load, pull_any, push_any
 
-    client = s3_client()
+    (bucket,) = _lc_buckets(buckets)
+    s3, gcs = _lifecycle_clients((bucket,))
     intended = load(str(path))
-    base = pull(client, bucket)
-    d = diff(intended, base)
+    base = pull_any(bucket, s3=s3, gcs=gcs)
+    d = diff_any(bucket, intended, base)
     if not any(d.values()):
         err(f"lifecycle: {bucket} already matches {path}")
         return
     err(f"lifecycle: {'would apply' if dry_run else 'applying'} to {bucket}: {json.dumps(d)}")
     if dry_run:
         return
-    live = push(client, bucket, intended, base=base)  # refuses if live moved since the diff
+    live = push_any(bucket, intended, base=base, s3=s3, gcs=gcs)  # refuses if live moved since the diff
     err(f"lifecycle: {bucket} now has {len(live)} rule(s), verified")
 
 
@@ -1146,7 +1079,7 @@ def lifecycle_gc_rule(days: int, prefix: str) -> None:
 
 @main.group("plan-sweep")
 def plan_sweep() -> None:
-    """Mark & sweep: build deletion manifests and execute them (boto3/CAIOS)."""
+    """Plan-first deletion on CoreWeave: build manifests from a plan and execute them (boto3/CAIOS)."""
 
 
 @plan_sweep.command("manifest")
@@ -1250,284 +1183,60 @@ def plan_sweep_purge(dry_run: bool, run_dir: str) -> None:
 
 @main.group()
 def sweep() -> None:
-    """Sweep-executor phases — plan / review / execute (specs/sweep-executor.md)."""
-
-
-@sweep.command("clobbers")
-@option("-j", "--json", "as_json", is_flag=True, help="Machine-readable JSON to stdout")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
-def sweep_clobbers(as_json: bool, token: str | None, url: str | None) -> None:
-    """Keeps whose effective state is now sweep — a newer covering sweep
-    repainted them (recency beats specificity). The review list for reverting
-    accidental broad sweeps; the planner independently refuses to delete
-    anything with keep history (`ever_kept_prefixes`)."""
-    from .mark import creds, get_json
-    from .sweep_plan import clobbered_keeps, load_keeps
-
-    base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
-    payload = get_json(base, tok, "/api/actions")
-    rows = load_keeps(payload)
-    clobbers = clobbered_keeps(rows)
-    if as_json:
-        print(json.dumps([asdict(c) for c in clobbers], indent=2))
-        return
-    if not clobbers:
-        err("no clobbered keeps — every keep-marked prefix still resolves keep")
-        return
-    n_sweep = sum(1 for c in clobbers if c.to == "sweep")
-    err(f"{len(clobbers)} keep-marked prefix(es) repainted away ({n_sweep} → sweep, {len(clobbers) - n_sweep} → unmarked):")
-    fmt_ts = lambda ts: dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%m-%d %H:%M")  # noqa: E731
-    for c in clobbers:
-        print(f"{c.prefix}")
-        print(f"    {c.keep} by {c.keeper} @ {fmt_ts(c.keep_ts)}  ⟵ now {c.to} via {c.by_prefix} ({c.by_who} @ {fmt_ts(c.by_ts)})")
-
-
-@sweep.command("plan")
-@option("-C", "--candidates", "bake_candidates", is_flag=True, help="Bake candidates.json (+ sweep/latest.json pointer) for the /sweep console")
-@option("-d", "--date", default=None, help="Scan date (default: latest from scans.json)")
-@option("-j", "--json", "as_json", is_flag=True, help="Machine-readable JSON to stdout")
-@option("-n", "--top", default=20, type=int, help="Top sweep-only bands to list")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
-def sweep_plan_cmd(bake_candidates: bool, date: str | None, as_json: bool, top: int, token: str | None, url: str | None) -> None:
-    """Band-level sweep plan under the VOTE model (specs/vote-model.md):
-    per-mark bands (the site's `?marks=1` manifest — exact D1-index bytes)
-    re-aggregated by vote-state. `sweep` bands are deletable now; `conflict`
-    goes to triage; `unmarked` waits for the deadline. Object-level manifest
-    generation (the exact delete list) is the Batch-side follow-up."""
-    from .mark import creds, get_json
-    from .sweep_plan import VoteResolver, load_keeps
-
-    base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
-    actions = get_json(base, tok, "/api/actions")
-    rows = load_keeps(actions)
-    head = max((r.action_id for r in rows), default=0)
-    vr = VoteResolver(rows)
-    if not date:
-        scans = get_json(base, tok, "/data/scans.json")
-        date = scans[0] if isinstance(scans, list) and scans else None
-        if not date:
-            raise SystemExit("no --date and scans.json gave none")
-    totals = get_json(base, tok, "/api/marks/totals", {"marks": "1", "date": date}, timeout=90)
-    marks = totals.get("marks") or []
-
-    states: dict[str, dict] = {}
-    for m in marks:
-        if not m.get("keep"):  # a clear (keep null) decides nothing — not a band to sweep
-            continue
-        votes = vr.votes(m["prefix"])
-        st = VoteResolver._agg(votes.values())
-        if st == "keep" and votes and all(v == "keep_last_ckpt" for v in votes.values()):
-            st = "keep_last_ckpt"
-        b = states.setdefault(st, {"bands": 0, "net_bytes": 0, "net_objects": 0, "rows": []})
-        b["bands"] += 1
-        b["net_bytes"] += m.get("net_bytes") or 0
-        b["net_objects"] += m.get("net_objects") or 0
-        b["rows"].append({**m, "votes": votes})
-
-    if as_json:
-        print(json.dumps({
-            "date": date, "head": head,
-            "site_total": totals.get("total"),
-            "states": {k: {kk: vv for kk, vv in v.items() if kk != "rows"} for k, v in states.items()},
-            "sweep_bands": sorted(states.get("sweep", {}).get("rows", []), key=lambda r: -(r.get("net_bytes") or 0)),
-            "conflict_bands": sorted(states.get("conflict", {}).get("rows", []), key=lambda r: -(r.get("net_bytes") or 0)),
-        }, indent=2))
-        return
-
-    err(f"vote-model plan @ head {head} · scan {date or 'latest'} · {len(marks)} mark bands")
-    for st in ("sweep", "conflict", "keep", "keep_last_ckpt", "unmarked"):
-        v = states.get(st)
-        if not v:
-            continue
-        err(f"  {st:15s} {v['bands']:6,} bands  {v['net_bytes'] / 1e12:10.2f} TB  {v['net_objects']:>13,} objects")
-    err(f"\ntop {top} sweep-only (deletable) bands:")
-    for r in sorted(states.get("sweep", {}).get("rows", []), key=lambda r: -(r.get("net_bytes") or 0))[:top]:
-        who = ",".join(sorted(r["votes"]))
-        print(f"{(r.get('net_bytes') or 0) / 1e12:9.2f} TB  {r['prefix']}  [{who}]")
-
-    if bake_candidates:
-        # Evidence rows for the /sweep console: sweep-only bands (largest
-        # first, capped) + who swept them + the attribution top-user via the
-        # subtree API — the owner signal the empty owner axis can't provide.
-        import fsspec
-        from urllib.parse import quote
-
-        from .attr_index import AttrIndex
-        from .identity import load_identities
-        from .index_footer import index_dir
-
-        idmap = load_identities()
-        aidx = AttrIndex(f"gs://oa-gcs-usage-dvx/{index_dir(date)}/path-index.parquet")
-        bands = sorted(states.get("sweep", {}).get("rows", []), key=lambda r: -(r.get("net_bytes") or 0))[:150]
-        cands = []
-        for r in bands:
-            pth = r["prefix"].removeprefix("gs://").rstrip("/")
-            top_user = share = None
-            try:
-                t = get_json(base, tok, f"/api/subtree", {"date": date, "path": pth, "w": 64, "h": 64})["tree"]
-                us = t.get("us") or []
-                if us and t.get("b"):
-                    top_user, share = us[0][0], us[0][1] / t["b"]
-            except Exception:
-                pass
-            sweepers = sorted({idmap.resolve(w) for w in r["votes"]})
-            # per-child sweeper-vs-attribution split — what the manifest's
-            # attr gate will actually let an approval delete (gross estimate)
-            try:
-                m, o, u = aidx.child_split(r["prefix"], set(sweepers))
-            except Exception:
-                m = o = u = None
-            cands.append({
-                "prefix": r["prefix"], "net_bytes": r.get("net_bytes") or 0, "net_objects": r.get("net_objects") or 0,
-                "sweepers": sweepers, "top_user": top_user, "share": share,
-                "owner_match": top_user in sweepers if top_user else False,
-                "attr_match_bytes": m, "attr_other_bytes": o, "attr_unattr_bytes": u,
-            })
-        plan_id = f"{date}-h{head}"
-        root = "gs://oa-gcs-usage-dvx/sweep"
-        with fsspec.open(f"{root}/{plan_id}/candidates.json", "w") as fh:
-            json.dump({"plan": plan_id, "scan": date, "head": head, "bands": cands}, fh, indent=1)
-        with fsspec.open(f"{root}/latest.json", "w") as fh:
-            json.dump({"plan": plan_id}, fh)
-        err(f"candidates: {len(cands)} bands → {root}/{plan_id}/candidates.json (+ latest.json)")
-
-
-#: The daily job's attribution parquets (`job/run.sh` AG), under `--root`.
-DEFAULT_ATTRIBUTIONS = ("attr/attribution-2026-07-20.parquet", "attr/attribution-wandb.parquet")
-
-
-def _rule_attr(aidx, attributions: tuple[str, ...], idmap, root: str):
-    """``(bucket, dirname) -> (user, source) | None`` from the deepest
-    attribution rule covering the dir — the same prefix map the path index is
-    built from (:func:`~dt_cloud.prefixes.load_prefix_map`), so the manifest
-    and the site agree on whose data a directory is. Path-glob rules expand
-    against the index's shallow dirs; the parquets are fetched to a temp dir
-    (DuckDB reads them locally)."""
-    import shutil
-    import tempfile
-
-    import duckdb
-    import fsspec
-
-    from .prefixes import deepest_lookup, load_prefix_map
-
-    # Path-glob rules (`gs://marin-*/grug/swarm_*/`) expand against real dirs
-    # at their own depth, so read the index only that deep (bucket = depth 1).
-    glob_depth = max(
-        (o.prefix.removeprefix("gs://").partition("/")[2].rstrip("/").count("/") + 2
-         for o in idmap.prefix_owners if "*" in o.prefix.removeprefix("gs://").partition("/")[2]),
-        default=1,
-    )
-    con = duckdb.connect()
-    con.register("listing_dirs", aidx.dirs(max_depth=glob_depth))
-    tmp = tempfile.mkdtemp(prefix="gcs-usage-attr-")
-    local = []
-    for i, a in enumerate(attributions):
-        src = a if "://" in a or a.startswith("/") else f"{root.rstrip('/')}/{a}"
-        dst = f"{tmp}/{i}-{src.rsplit('/', 1)[1]}"
-        with fsspec.open(src, "rb") as fi, open(dst, "wb") as fo:
-            shutil.copyfileobj(fi, fo)
-        local.append(dst)
-    deepest = deepest_lookup(load_prefix_map(con, tuple(local), idmap, "listing_dirs"))
-    return lambda bucket, dirname: deepest(f"{bucket}/{dirname}" if dirname else bucket)
+    """The GCS executor's phases — manifest / execute / undo (specs/staged-delete.md)."""
 
 
 @sweep.command("manifest")
-@option("-a", "--attribution", "attributions", multiple=True, help=f"Attribution parquet(s) whose deepest rule decides each dir's user (default: {', '.join(DEFAULT_ATTRIBUTIONS)} under --root); an eligible dir must be ruled to its sweeper — others' and unruled dirs defer as residue")
-@option("-A", "--approve", "approved", multiple=True, help="Approved band prefix (gs://…/); given ≥1, approval REPLACES the ownership check")
-@option("-S", "--approved-from-site", is_flag=True, help="Load approved bands from the site's sweep_approvals table (the /sweep console's sign-offs)")
-@option("-b", "--bucket", "only_buckets", multiple=True, help="Only these buckets (default: all six)")
+@option("-b", "--bucket", "only_buckets", multiple=True, help="Only these buckets (default: every bucket the plan names)")
 @option("-d", "--date", required=True, help="Scan date whose listing to plan from (pinned)")
-@option("-o", "--out", default=None, help="Output dir (default gs://oa-gcs-usage-dvx/sweep/<date>-h<head>)")
+@option("-o", "--out", default=None, help="Output dir (default gs://oa-gcs-usage-dvx/sweep/<date>-p<plan_id>)")
+@option("-p", "--plan", "plan_path", required=True, help="The dispatched plan.json (path or gs:// URL): its items are the delete set, and the buckets are the plan's (∩ -b)")
 @option("-r", "--root", default="gs://oa-gcs-usage-dvx", help="Listing root (gs:// or local mount)")
-@option("-R", "--no-residue-check", is_flag=True, help="Skip the per-dir rule check (pre-2026-09-10 behavior: a sweeper-majority dir deletes whole, other users' and unattributed data inside it included)")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
-@option("-X", "--no-attr-check", is_flag=True, help="Skip the per-dir sweeper-vs-owner gate on approved bands (default ON: approval deletes only the sweeper's own slice)")
-def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], approved_from_site: bool, only_buckets: tuple[str, ...], date: str, out: str | None, root: str, no_residue_check: bool, token: str | None, url: str | None, no_attr_check: bool) -> None:
-    """Object-level sweep manifest under the vote model + policy (b): stream
-    the pinned listing, classify every directory (specs/sweep-executor.md,
-    specs/vote-model.md), and write per-bucket parquets of the ELIGIBLE keys
-    (sweep-only, sweeper-owned, no keep history) plus a category summary.
-    Co-located residue — dirs inside an approved band that pass the majority
-    gate but are ruled to another user or to nobody — is deferred and listed
-    in ``residue/<bucket>.parquet`` (specs/sweep-coowned-residue.md).
-    Pure read + artifact write — deletes nothing."""
+def sweep_manifest(only_buckets: tuple[str, ...], date: str, out: str | None, plan_path: str, root: str) -> None:
+    """Object-level manifest of a staged plan (specs/staged-delete.md): stream
+    the pinned listing and write per-bucket parquets of the ELIGIBLE keys —
+    every key under a staged prefix — plus a category summary. The plan is
+    the whole intent: nothing carves out. Pure read + artifact write —
+    deletes nothing."""
     import fsspec
     import pyarrow as pa
     import pyarrow.parquet as pq
 
-    from .identity import load_identities
-    from .mark import creds, get_json
-    from .sweep_plan import (
-        CATEGORIES, VoteResolver, bands_for_bucket, classify_dir, ever_kept_prefixes, load_keeps, owners_resolver,
-    )
+    from .staged_plan import CATEGORIES, load_plan
 
-    base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
-    actions = get_json(base, tok, "/api/actions")
-    rows = load_keeps(actions)
-    head = max((r.action_id for r in rows), default=0)
-    vr = VoteResolver(rows)
-    own = owners_resolver(actions)
-    idmap = load_identities()
-    ever = ever_kept_prefixes(rows)
-    attr_exempt: frozenset[str] = frozenset()
-    if approved_from_site:
-        site_rows = get_json(base, tok, "/api/db/sweep_approvals")["rows"]
-        approved = tuple(sorted(set(approved) | {r["prefix"] for r in site_rows}))
-        attr_exempt = frozenset(r["prefix"] for r in site_rows if r.get("mode") == "full")
-        err(f"approved-from-site: {len(site_rows)} band(s) from sweep_approvals"
-            + (f" ({len(attr_exempt)} in full mode — attr gate skipped)" if attr_exempt else ""))
-    out = out or f"gs://oa-gcs-usage-dvx/sweep/{date}-h{head}"
-    err(f"sweep manifest: scan {date} @ head {head} → {out}"
-        + (f" · {len(approved)} approved band(s)" if approved else ""))
-    attr = None
-    if approved and not no_attr_check:
-        from .attr_index import AttrIndex
-        from .index_footer import index_dir
-        aidx = AttrIndex(f"{root}/{index_dir(date)}/path-index.parquet")
-        attr = aidx.lookup
-        err("attr gate ON: approved-band dirs must be majority-attributed to their sweeper")
-    rule_attr = None
-    if attr is not None and not no_residue_check:
-        rule_attr = _rule_attr(aidx, attributions or DEFAULT_ATTRIBUTIONS, idmap, root)
-        err("residue check ON: an eligible dir must also be ruled to its sweeper (others' / unruled dirs defer)")
-    RESIDUE = ("deferred_residue", "deferred_unattr")
+    sp = load_plan(plan_path)
+    buckets = [b for b in sp.buckets if not only_buckets or b in only_buckets]
+    if not buckets:
+        raise SystemExit(f"no plan bucket among -b {', '.join(only_buckets)} (plan {sp.plan_id} names {', '.join(sp.buckets)})")
+    out = out or f"gs://oa-gcs-usage-dvx/sweep/{date}-p{sp.plan_id}"
+    err(f"sweep manifest: scan {date} from plan {sp.plan_id} ({sp.name!r}) → {out}"
+        + f" · {sum(len(sp.sweep[b]) for b in buckets)} staged prefix(es) on {', '.join(buckets)}")
+    # The staged prefixes are the run's bands: `sweep execute` lists one
+    # segment below each and accounts per band, so every `deletion_bands` row
+    # is one staged item.
+    summary: dict = {
+        "date": date, "plan_id": sp.plan_id, "plan_name": sp.name,
+        "approved": [a for b in buckets for a in sp.bands(b)],
+        "buckets": {},
+    }
 
     fs, rootpath = fsspec.core.url_to_fs(root)
-    buckets = list(only_buckets) or [
-        "marin-us-east1", "marin-us-east5", "marin-us-central1",
-        "marin-us-central2", "marin-eu-west4", "marin-us-west4",
-    ]
-    summary: dict = {"date": date, "head": head, "policy": "b:approved-bands" if approved else "b:sweeper-owns", "approved": list(approved), "approved_full": sorted(attr_exempt), "buckets": {}}
     schema = pa.schema([
         ("name", pa.string()), ("size_bytes", pa.int64()),
         ("storage_class_id", pa.int8()), ("created", pa.timestamp("us", tz="UTC")),
-        ("dir", pa.string()), ("owner", pa.string()), ("sweepers", pa.string()),
+        ("dir", pa.string()),
     ])
     for bucket in buckets:
         shards = sorted(fs.glob(f"{rootpath}/listing/{date}/{bucket}/*.parquet"))
         if not shards:
             raise SystemExit(f"no listing shards for {bucket} under {root}/listing/{date}/")
-        cache: dict[str, tuple[str, str | None, tuple[str, ...]]] = {}
+        cache: dict[str, str] = {}
         cats = {c: [0, 0] for c in CATEGORIES}  # bytes, objects
-        bands = bands_for_bucket(bucket, approved) if approved else None
-        if bands is not None and not bands:
-            err(f"  {bucket}: no approved band on this bucket — skipped")
-            summary["buckets"][bucket] = {"objects": 0, "dirs": 0, "skipped": "no approved band"}
-            continue
+        bands = sp.sweep[bucket]
         writer = None
         out_path = f"{out}/manifest/{bucket}.parquet"
         ofs, opath = fsspec.core.url_to_fs(out_path)
-        residue: dict[str, list[int]] = {}  # dir -> [bytes, objects] for the two residue categories
+        ofs.makedirs(opath.rsplit("/", 1)[0], exist_ok=True)
         n = 0
         for shard in shards:
           # Open/close each shard deterministically: a gcsfs file left for the
@@ -1540,58 +1249,33 @@ def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], app
             for batch in pf.iter_batches(columns=["name", "size_bytes", "storage_class_id", "created"], batch_size=1 << 17):
                 df = batch.to_pandas()
                 n += len(df)
-                if bands is not None:
-                    inb = df["name"].str.startswith(bands)
-                    if not inb.all():
-                        cats["outside_bands"][0] += int(df["size_bytes"][~inb].sum())
-                        cats["outside_bands"][1] += int((~inb).sum())
-                        df = df[inb]
-                        if df.empty:
-                            continue
+                inb = df["name"].str.startswith(bands)
+                if not inb.all():
+                    cats["outside_bands"][0] += int(df["size_bytes"][~inb].sum())
+                    cats["outside_bands"][1] += int((~inb).sum())
+                    df = df[inb]
+                    if df.empty:
+                        continue
                 dirs = df["name"].str.rpartition("/")[0]
                 for dn in dirs.unique():
                     if dn not in cache:
-                        cache[dn] = classify_dir(bucket, dn, vr, own, idmap, ever, approved, attr, attr_exempt, rule_attr)
-                cat = dirs.map(lambda dn: cache[dn][0])
+                        cache[dn] = sp.classify(bucket, dn)
+                cat = dirs.map(lambda dn: cache[dn])
                 sizes = df["size_bytes"]
                 for c, g in sizes.groupby(cat):
                     cats[c][0] += int(g.sum())
                     cats[c][1] += len(g)
-                res = cat.isin(RESIDUE)
-                if res.any():
-                    for dn, g in sizes[res].groupby(dirs[res]):
-                        r = residue.setdefault(dn, [0, 0])
-                        r[0] += int(g.sum())
-                        r[1] += len(g)
                 elig = cat == "eligible"
                 if elig.any():
                     sel = df[elig].copy()
                     sel["dir"] = dirs[elig]
-                    sel["owner"] = sel["dir"].map(lambda dn: cache[dn][1])
-                    sel["sweepers"] = sel["dir"].map(lambda dn: ",".join(cache[dn][2]))
                     t = pa.Table.from_pandas(sel, preserve_index=False).select(schema.names).cast(schema)
                     if writer is None:
                         writer = pq.ParquetWriter(opath, schema, filesystem=ofs)
                     writer.write_table(t)
         if writer is not None:
             writer.close()
-        if residue:
-            # The surfaced residue, one row per deferred dir, largest first —
-            # what a human inspects (and what an owner's own vote could later
-            # include) before any real run.
-            rrows = sorted(residue.items(), key=lambda kv: -kv[1][0])
-            rt = pa.table({
-                "dir": [dn for dn, _ in rrows],
-                "category": [cache[dn][0] for dn, _ in rrows],
-                "user": [(rule_attr(bucket, dn) or (None,))[0] for dn, _ in rrows],
-                "sweepers": [",".join(cache[dn][2]) for dn, _ in rrows],
-                "bytes": pa.array([v[0] for _, v in rrows], pa.int64()),
-                "objects": pa.array([v[1] for _, v in rrows], pa.int64()),
-            })
-            rfs, rpath = fsspec.core.url_to_fs(f"{out}/residue/{bucket}.parquet")
-            rfs.makedirs(rpath.rsplit("/", 1)[0], exist_ok=True)
-            pq.write_table(rt, rpath, filesystem=rfs, row_group_size=65_536)
-        summary["buckets"][bucket] = {"objects": n, "dirs": len(cache), "residue_dirs": len(residue), **{c: {"bytes": b, "objects": o} for c, (b, o) in cats.items() if o}}
+        summary["buckets"][bucket] = {"objects": n, "dirs": len(cache), **{c: {"bytes": b, "objects": o} for c, (b, o) in cats.items() if o}}
         eb, eo = cats["eligible"]
         err(f"  {bucket}: {n:,} keys, {len(cache):,} dirs — eligible {eb / 1e12:.2f} TB / {eo:,} objects")
 
@@ -1615,52 +1299,34 @@ def sweep_manifest(attributions: tuple[str, ...], approved: tuple[str, ...], app
 @sweep.command("execute")
 @option("-b", "--bucket", "only_buckets", multiple=True, help="Only these buckets")
 @option("-D", "--drift", type=Choice(["skip", "proceed"]), default="skip", help="Dirs that gained new keys since the scan: skip (default) or proceed (manifest keys only — new keys always survive)")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {MARK_DEFAULT_URL})")
 @option("-w", "--workers", default=8, type=int, help="Concurrent directory re-lists")
 @option("-W", "--delete-workers", default=32, type=int, help="Concurrent delete batches (100 objects each), shared by every re-list; the bucket's ~1000 writes/s is the ceiling")
 @option("--for-real", is_flag=True, help="Actually delete (default: dry-run writes would-delete/)")
 @option("--no-record", is_flag=True, help="Skip the D1 deletion_runs/bands record (recorded by default)")
 @argument("plan_dir")
-def sweep_execute(only_buckets: tuple[str, ...], drift: str, delete_workers: int, token: str | None, url: str | None, workers: int, for_real: bool, no_record: bool, plan_dir: str) -> None:
+def sweep_execute(only_buckets: tuple[str, ...], drift: str, delete_workers: int, workers: int, for_real: bool, no_record: bool, plan_dir: str) -> None:
     """Execute (default: DRY-RUN) a `sweep manifest` plan: fresh re-list per
     eligible dir, generation-matched deletes of manifest∩live keys whose
-    timeCreated is unchanged. Every manifest dir is re-classified at the
-    CURRENT ledger head first — newer keeps/unmarks drop dirs (ledger drift).
-    `--for-real` additionally requires ≥7d soft delete on every bucket."""
-    from .identity import load_identities
-    from .mark import creds, get_json
-    from .sweep_plan import (
-        VoteResolver, classify_dir, ever_kept_prefixes, load_keeps, owners_resolver,
-    )
+    timeCreated is unchanged. The plan is the whole intent: nothing is
+    re-classified. `--for-real` additionally requires ≥7d soft delete on every
+    bucket."""
+    import fsspec
+
     from .sweep_exec import DELETE_ATTEMPTS, execute_plan
 
     DELETE_ATTEMPTS_NOTE = f"{DELETE_ATTEMPTS} attempts"
-    base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
-    actions = get_json(base, tok, "/api/actions")
-    rows = load_keeps(actions)
-    vr = VoteResolver(rows)
-    own = owners_resolver(actions)
-    idmap = load_identities()
-    ever = ever_kept_prefixes(rows)
-    head = max((r.action_id for r in rows), default=0)
-    err(f"execute {'FOR REAL' if for_real else '(dry-run)'} @ current head {head}")
-
-    def reclassify(bucket: str, dn: str, approved: tuple[str, ...]) -> str:
-        return classify_dir(bucket, dn, vr, own, idmap, ever, approved)[0]
+    with fsspec.open(f"{plan_dir}/plan-summary.json") as fh:
+        plan_summary = json.load(fh)
+    err(f"execute {'FOR REAL' if for_real else '(dry-run)'} plan {plan_summary['plan_id']} ({plan_summary.get('plan_name')!r})")
 
     started = int(dt.datetime.now(dt.timezone.utc).timestamp())
     actor = os.environ.get("USER", "?")
     if not no_record:
-        # The run's D1 row goes in now (finished NULL) so /sweep lists it while
+        # The run's D1 row goes in now (finished NULL) so /staged lists it while
         # the re-list runs — hours, on the big bands; completed at the end.
-        import fsspec
         from .sweep_exec import record_run_start
         try:
-            with fsspec.open(f"{plan_dir}/plan-summary.json") as fh:
-                run_id = record_run_start(json.load(fh), plan_dir, exec_head=head, actor=actor, started_ts=started, for_real=for_real, buckets=only_buckets)
+            run_id = record_run_start(plan_summary, plan_dir, actor=actor, started_ts=started, for_real=for_real, buckets=only_buckets)
             err(f"recorded deletion run {run_id} (in progress)")
         except Exception as e:  # recording must never block the run
             err(f"WARN: deletion-run start record failed: {e}")
@@ -1680,7 +1346,6 @@ def sweep_execute(only_buckets: tuple[str, ...], drift: str, delete_workers: int
         drift=drift,
         workers=workers,
         delete_workers=delete_workers,
-        reclassify=reclassify,
         stop=stop,
     )
     finished = int(dt.datetime.now(dt.timezone.utc).timestamp())
@@ -1693,7 +1358,7 @@ def sweep_execute(only_buckets: tuple[str, ...], drift: str, delete_workers: int
         # the run's buckets (the guard already refused anything under 7 d).
         windows = [int(v["soft_delete_days"]) for v in summary["buckets"].values() if "soft_delete_days" in v]
         try:
-            run_id = record_run(summary, summary["_plan"], exec_head=head, actor=actor, started_ts=started, finished_ts=finished, soft_delete_days=min(windows) if windows else 7)
+            run_id = record_run(summary, summary["_plan"], actor=actor, started_ts=started, finished_ts=finished, soft_delete_days=min(windows) if windows else 7)
             err(f"recorded deletion run {run_id}")
         except Exception as e:  # recording must never mask a completed run
             err(f"WARN: deletion-run record failed: {e}")
@@ -1727,23 +1392,6 @@ def sweep_stop(plan_dir: str) -> None:
     _hard_exit()
 
 
-@sweep.command("reconstruct-log")
-@option("-b", "--bucket", "bucket", required=True, help="Bucket whose deleted/ log to rebuild")
-@option("-s", "--since", "since", required=True, help="Window start — soft-delete time, ISO 8601 UTC (e.g. 2026-09-11T05:55:00Z)")
-@option("-u", "--until", "until", required=True, help="Window end, ISO 8601 UTC")
-@argument("plan_dir")
-def sweep_reconstruct_log(bucket: str, since: str, until: str, plan_dir: str) -> None:
-    """Rebuild PLAN_DIR/deleted/<bucket>.parquet for a real run that died
-    before writing its log: the bucket's soft-deleted objects under the plan's
-    bands whose soft-delete time falls in [--since, --until], matched to the
-    manifest by name. Writes deleted-summary.json too. Refuses to replace a
-    log that already has rows."""
-    from .sweep_exec import reconstruct_deleted_log
-    parse = lambda v: dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
-    reconstruct_deleted_log(plan_dir, bucket, since=parse(since), until=parse(until))
-    _hard_exit()
-
-
 @sweep.command("undo")
 @option("-b", "--bucket", "only_buckets", multiple=True, help="Only these buckets")
 @option("-n", "--dry-run", is_flag=True, help="List what would be restored; call nothing")
@@ -1752,10 +1400,10 @@ def sweep_reconstruct_log(bucket: str, since: str, until: str, plan_dir: str) ->
 @option("--no-record", is_flag=True, help="Skip the D1 undo_state / undone_objects update")
 @argument("run")
 def sweep_undo(only_buckets: tuple[str, ...], dry_run: bool, prefixes: tuple[str, ...], workers: int, no_record: bool, run: str) -> None:
-    """Restore what a real sweep run deleted, from its `deleted/` logs — the
+    """Restore what a real run deleted, from its `deleted/` logs — the
     soft-delete restore of exactly the logged generations, valid until the
     run's `undo_deadline` (finish + the buckets' 7-day window). RUN is the D1
-    run id (`<scan>-h<head>/<utc stamp>`, as /sweep lists it) or the run's
+    run id (`<scan>-p<plan_id>/<utc stamp>`, as /staged lists it) or the run's
     gs:// log dir. Re-runnable: names already live again are left alone."""
     from .index_footer import _creds, _d1_query, _q
     from .sweep_exec import record_undo, undo_run
@@ -1773,7 +1421,7 @@ def sweep_undo(only_buckets: tuple[str, ...], dry_run: bool, prefixes: tuple[str
             raise SystemExit(f"D1 lookup failed and RUN is not a gs:// log dir: {e}")
         err(f"WARN: D1 lookup failed ({e}); proceeding on the log dir alone (no deadline check, no record)")
     if row is None and not run.startswith("gs://"):
-        raise SystemExit(f"no deletion run {run!r} in D1 (see /sweep for run ids)")
+        raise SystemExit(f"no deletion run {run!r} in D1 (see /staged for run ids)")
     if row is not None and row["mode"] != "real":
         raise SystemExit(f"{row['run_id']} was a dry run — nothing to undo")
     log_dir = row["log_dir"] if row is not None else run
@@ -2239,104 +1887,6 @@ def sii_status(buckets: tuple[str, ...]) -> None:
             blobs = by_day[day]
             latest = max(x.time_created for x in blobs)
             print(f"    landed {day}: {len(blobs)} shards ({sum(x.size for x in blobs) / 1e9:.1f} GB, written {latest:%m-%d %H:%M}Z)")
-
-
-@main.command()
-@option("-o", "--out", type=Path, default=None, help="Write CSV here (default: stdout)")
-@option("-s", "--sort", "sort", type=Choice(["undecided", "attributed", "user"]), default="undecided", help="row order: undecided desc (nag order, default), attributed desc (size, stable within a day), or user A-Z (stable identity)")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--site-url", default="https://gcs.oa.dev", help="Site base: the API read from, and the per-user page links")
-def report(out: Path | None, sort: str, token: str | None, site_url: str) -> None:
-    """Per-user mark-status CSV — the "who still needs to mark & sweep" list.
-
-    The site's `/users` numbers, verbatim: `/api/marks/totals` folds the live
-    ledger (claims applied, keep_last_ckpt decomposed) against the latest
-    scan's index; one row per person. Default order is undecided-bytes desc
-    (nag order); `-s` picks a more diff-stable order for a synced mirror (a
-    username tiebreaker keeps equal-value rows from swapping seats regardless).
-    """
-    import csv
-    import io
-    import sys
-
-    from .identity import load_identities
-    from .mark import creds, get_json
-
-    base, tok = creds(token, site_url)
-    if not tok:
-        raise SystemExit("no token — set $GCS_USAGE_TOKEN or pass -t")
-    scans = get_json(base, tok, "/data/scans.json")
-    if not scans:
-        raise SystemExit("no published scans")
-    date = scans[0]
-    totals = get_json(base, tok, "/api/marks/totals", {"date": date, "marks": "1"}, timeout=120)
-    canon = load_identities().resolve
-
-    # user -> state -> bytes (+ class mix), canonical ids merged.
-    per_user: dict[str, dict[str, float]] = {}
-    mixes: dict[str, dict[str, float]] = {}
-    for who, f in (totals.get("users") or {}).items():
-        uid = canon(who)
-        pu = per_user.setdefault(uid, {"keep": 0.0, "sweep": 0.0, "undecided": 0.0})
-        pu["keep"] += (f.get("keep") or 0) + (f.get("keep_last_ckpt") or 0)
-        pu["sweep"] += f.get("sweep") or 0
-        pu["undecided"] += f.get("unmarked") or 0
-        mix = mixes.setdefault(uid, {})
-        for state_mix in (f.get("mix") or {}).values():
-            for c, b in state_mix.items():
-                mix[str(c)] = mix.get(str(c), 0) + b
-
-    authored: dict[str, int] = {}
-    for m in totals.get("marks") or []:
-        if m.get("keep") and m.get("who"):
-            authored[canon(m["who"])] = authored.get(canon(m["who"]), 0) + 1
-
-    price = {"1": 0.02, "2": 0.01, "3": 0.004, "4": 0.0012}
-
-    def usd_mo(uid: str, b: float) -> float:
-        mix = mixes.get(uid)
-        if not mix:
-            return b / 1024**3 * 0.02
-        tot = sum(mix.values()) or 1
-        rate = sum(price.get(c, 0.02) * v for c, v in mix.items()) / tot
-        return b / 1024**3 * rate
-
-    tib = 1024**4
-    rows_out = []
-    for uid, f in per_user.items():
-        total = f["keep"] + f["sweep"] + f["undecided"]
-        if total < 1e9:
-            continue
-        rows_out.append({
-            "user": uid,
-            "attributed_TiB": round(total / tib, 1),
-            "est_usd_mo": round(usd_mo(uid, total)),
-            "keep_TiB": round(f["keep"] / tib, 1),
-            "sweep_TiB": round(f["sweep"] / tib, 1),
-            "undecided_TiB": round(f["undecided"] / tib, 1),
-            "undecided_pct": round(100 * f["undecided"] / total) if total else 0,
-            "marks_made": authored.get(uid, 0),
-            "page": f"{site_url}/user/{uid}",
-        })
-    sort_key = {
-        "undecided": lambda r: (-r["undecided_TiB"], r["user"]),
-        "attributed": lambda r: (-r["attributed_TiB"], r["user"]),
-        "user": lambda r: r["user"],
-    }[sort]
-    rows_out.sort(key=sort_key)
-
-    buf = io.StringIO()
-    w = csv.DictWriter(buf, fieldnames=list(rows_out[0].keys()))
-    w.writeheader()
-    w.writerows(rows_out)
-    text = buf.getvalue()
-    err(f"{len(rows_out)} users · scan {date} · {sum(r['undecided_TiB'] for r in rows_out):,.0f} TiB undecided across users")
-    if out is not None:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(text)
-        err(f"wrote {out}")
-    else:
-        sys.stdout.write(text)
 
 
 @main.command("sheet-push")
@@ -2819,7 +2369,7 @@ def weekly(date: str | None, top: int, dry_run: bool, prior: str | None, root: s
     week ago, what the sweep removed, and the biggest movers with owners, from
     the two scans' coarse index tiers. See specs/weekly-discord-report.md."""
     from . import weekly as wk
-    from .mark import creds
+    from .site import creds
 
     site_url = site_url or wk.DEFAULT_URL
     bucket = os.environ.get("DATA_BUCKET", "oa-gcs-usage-dvx")

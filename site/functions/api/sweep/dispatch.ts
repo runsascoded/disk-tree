@@ -1,22 +1,33 @@
-// POST /api/sweep/dispatch — launch a sweep executor run on GCP Batch from
-// the /sweep console (specs/sweep-executor.md, "web dispatch bridge").
+// POST /api/sweep/dispatch — launch a deletion run on GCP Batch from /staged
+// (specs/staged-delete.md; the "web dispatch bridge" of
+// specs/sweep-executor.md).
 //
-// Body: { mode: 'dry' | 'real', date: 'YYYY-MM-DD', buckets?: string[] }.
-// Admin scope only. The submitted job runs the daily-snapshot image with the
-// entrypoint overridden to `sweep manifest -S` (consuming the console's
-// `sweep_approvals` sign-offs) followed by `sweep execute` — which re-lists,
+// Body: { plan_id: number, mode: 'dry' | 'real', date: 'YYYY-MM-DD', buckets?: string[] }.
+// Admin scope only. The plan's items are the delete set: they are snapshotted
+// into `plan.json` in the run dir (a gcs plan MAY span buckets), and the
+// submitted job runs the daily-snapshot image with the entrypoint overridden
+// to `sweep manifest --plan` followed by `sweep execute` — which re-lists,
 // generation-matches, records to D1 (`deletion_runs`/`deletion_bands`, so the
-// run surfaces in the console within its refetch window), and for `real`
-// requires ≥7d soft delete on every bucket before deleting anything.
+// run surfaces on /staged within its refetch window; `plan_id` comes from the
+// plan.json — no row is inserted here), and for `real` requires ≥7d soft
+// delete on every bucket before deleting anything. The `-b` cut is the plan's
+// buckets (∩ `buckets`, when given).
 //
 // Auth to GCP: `_lib/gcp.ts` (the `GCP_SA_KEY` Pages secret — a dedicated SA
-// that can submit Batch jobs and act as the job SA, and nothing else).
+// that can submit Batch jobs, act as the job SA, and write the plan.json into
+// the data bucket).
 import { ADMIN_SCOPE, type Env as AuthEnv, json, requireScope } from '../../_lib/auth.js'
 import { GCP_PROJECT, batchJobsUrl, batchRegionFor, gcpToken } from '../../_lib/gcp.js'
+import { type PlanBucketsSnapshot, prefixShape, snapshotPlanBuckets } from '../../_lib/plans.js'
+import { bucketCut, planJsonObject, planJsonPath, runDir, sweepScript } from '../../_lib/sweepDispatch.js'
 
 interface Env extends AuthEnv {
   GCP_SA_KEY?: string
+  STORE_SCHEME?: string
+  STORE_BUCKETS?: string
 }
+
+const DATA_BUCKET = 'oa-gcs-usage-dvx'
 
 const PROJECT = GCP_PROJECT
 const IMAGE = `us-central1-docker.pkg.dev/${PROJECT}/cloud-run-source-deploy/gcs-usage-snapshot:latest`
@@ -30,24 +41,27 @@ export const onRequestPost = async (ctx: { request: Request; env: Env }): Promis
   if (!ctx.env.GCP_SA_KEY) return json({ error: 'dispatch not configured (GCP_SA_KEY secret missing)' }, 503)
 
   const body = (await ctx.request.json().catch(() => null)) as
-    | { mode?: string; date?: string; buckets?: string[] } | null
+    | { mode?: string; date?: string; buckets?: string[]; plan_id?: number } | null
   const mode = body?.mode
   const date = body?.date
+  const planId = body?.plan_id
+  if (!Number.isInteger(planId)) return json({ error: 'plan_id required (an integer)' }, 400)
   if (mode !== 'dry' && mode !== 'real') return json({ error: "mode must be 'dry' or 'real'" }, 400)
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ error: 'date must be YYYY-MM-DD (the plan scan)' }, 400)
-  const buckets = body?.buckets ?? []
-  if (buckets.some(b => !/^marin-[a-z0-9-]+$/.test(b))) return json({ error: 'bad bucket name' }, 400)
+  const requested = body?.buckets ?? []
+  if (requested.some(b => !/^marin-[a-z0-9-]+$/.test(b))) return json({ error: 'bad bucket name' }, 400)
+  if (!ctx.env.DB) return json({ error: 'plans store not configured (no D1 binding)' }, 503)
+  const snapshot: PlanBucketsSnapshot | null = await snapshotPlanBuckets(ctx.env.DB, planId!, prefixShape(ctx.env))
+  if (!snapshot) return json({ error: 'no such plan' }, 404)
+  if (!snapshot.sweep.length) return json({ error: 'plan has no items to sweep' }, 400)
+  const buckets = bucketCut(snapshot.buckets, requested)
+  if (!buckets.length) return json({ error: 'buckets name none of the plan\'s', plan_buckets: snapshot.buckets }, 400)
   const region = batchRegionFor(buckets)
 
   const ts = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-').toLowerCase()
   const jobId = `gcs-sweep-${mode}-${ts}z`
-  const plan = `gs://oa-gcs-usage-dvx/sweep/runs/${jobId}`
-  const bflags = buckets.map(b => `-b ${b}`).join(' ')
-  const script = [
-    'set -euo pipefail',
-    `dt-cloud sweep manifest -d "$SWEEP_DATE" -S ${bflags} -o "${plan}"`,
-    `dt-cloud sweep execute ${bflags} ${mode === 'real' ? '--for-real ' : ''}"${plan}"`,
-  ].join('\n')
+  const plan = runDir(jobId)
+  const script = sweepScript({ mode, jobId, buckets, plan: planJsonPath(jobId) })
 
   const spec = {
     taskGroups: [{
@@ -82,6 +96,12 @@ export const onRequestPost = async (ctx: { request: Request; env: Env }): Promis
   }
 
   const token = await gcpToken(ctx.env.GCP_SA_KEY)
+  // Drop plan.json into the run dir; the executor reads it back over gs://.
+  const up = await fetch(
+    `https://storage.googleapis.com/upload/storage/v1/b/${DATA_BUCKET}/o?uploadType=media&name=${encodeURIComponent(planJsonObject(jobId))}`,
+    { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(snapshot) },
+  )
+  if (!up.ok) return json({ error: 'plan.json write failed', status: up.status, detail: (await up.text()).slice(0, 300) }, 500)
   const r = await fetch(
     `${batchJobsUrl(region)}?job_id=${jobId}`,
     { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(spec) },
@@ -95,5 +115,5 @@ export const onRequestPost = async (ctx: { request: Request; env: Env }): Promis
     console.error('batch submit failed', r.status, text.slice(0, 2000))
     return json({ error: `batch submit failed (${r.status})`, status: r.status, detail: out }, 500)
   }
-  return json({ job_id: jobId, mode, date, plan, region, by: gated.email })
+  return json({ job_id: jobId, mode, date, plan, region, by: gated.email, plan_id: snapshot.plan_id, buckets })
 }

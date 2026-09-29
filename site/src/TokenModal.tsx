@@ -134,8 +134,8 @@ export default function TokenModal({ onClose }: { onClose: () => void }) {
           return (
           <>
             <p className="token-muted">
-              A personal token lets your agents mark prefixes as you, from the CLI or any HTTP client.
-              It carries only the <code>gcs</code> scope (mark &amp; view) — the server stores only its
+              A personal token lets your agents assign prefixes as you, from any HTTP client.
+              It carries only the <code>gcs</code> scope (assign &amp; view) — the server stores only its
               hash, but the browser that minted it can re-show it.
             </p>
             {phase.s.active
@@ -182,7 +182,9 @@ export default function TokenModal({ onClose }: { onClose: () => void }) {
             </div>
             <p className="token-muted token-small">Then, in your agent’s environment:</p>
             <pre className="token-recipe">{`export GCS_USAGE_TOKEN=${phase.token}
-echo gs://marin-us-central1/checkpoints/my-run/ | dt-cloud mark`}</pre>
+curl -sS -H "Authorization: Bearer $GCS_USAGE_TOKEN" -H 'content-type: application/json' \\
+  -d '{"pattern": "gs://marin-us-central1/checkpoints/my-run/", "owner": "@me"}' \\
+  https://gcs.oa.dev/api/actions`}</pre>
             <div className="token-actions">
               <button type="button" onClick={() => void loadStatus()}>Done</button>
             </div>

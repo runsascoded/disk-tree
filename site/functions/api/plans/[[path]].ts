@@ -6,15 +6,18 @@
 //   PATCH  /api/plans/:id          { state: 'closed' }                     admin
 //   POST   /api/plans/:id/items    { prefixes: [...], note? }              admin
 //   DELETE /api/plans/:id/items    { prefixes: [...] }                     admin
-//   POST   /api/plans/stage        { prefixes: [...], note? } -> { plan_id } stager (`STAGING` deployments)
+//   POST   /api/plans/stage        { prefixes: [...], note? } -> { plan_id, batch_id, staged, covered, absorbed }
+//                                                                          stager (`STAGING` deployments)
+//   GET    /api/plans/staged       the shared open plan (+ items, batches, runs), or { plan: null }   viewer
 //
 // Reads are open to any authenticated viewer; curating a plan's items and
 // closing plans require admin; staging (the opt-in trash proposal) needs the
-// full base scope. Items are editable only while the plan is `open`. Prefixes
-// canonicalize in the deployment's shape (`STORE_SCHEME` / `STORE_BUCKETS`).
+// full base scope, and a stager may remove what they staged themselves. Items
+// are editable only while the plan is `open`. Prefixes canonicalize in the
+// deployment's shape (`STORE_SCHEME` / `STORE_BUCKETS`).
 import type { D1Database } from "@cloudflare/workers-types"
 import { type Ctx, type Env as AuthEnv, json, requireAdmin, requireStager, requireViewer } from "../../_lib/auth.js"
-import { audit, canonicalPrefix, type PlanRow, type PrefixShape, prefixShape, stageItems } from "../../_lib/plans.js"
+import { audit, canonicalPrefix, openPlanId, planDetail, type PlanRow, type PrefixShape, prefixShape, stageItems } from "../../_lib/plans.js"
 
 type Env = AuthEnv & { DB?: D1Database }
 
@@ -35,20 +38,17 @@ async function listPlans(db: D1Database): Promise<Response> {
 }
 
 async function getPlan(db: D1Database, id: number, staging: boolean): Promise<Response> {
-  const plan = await db.prepare("SELECT * FROM plans WHERE id = ?").bind(id).first<PlanRow>()
-  if (!plan) return json({ error: "no such plan" }, 404)
   // On a staging deployment the memo lives on the item's stage batch (one
-  // gesture, one note) — join it back so a staged item carries the reason it
+  // gesture, one note) — joined back so a staged item carries the reason it
   // was trashed. Elsewhere `stage_batches` doesn't exist.
-  const items = staging
-    ? await db.prepare(
-      `SELECT i.prefix, COALESCE(i.note, b.note) AS note, i.added_by, i.added_ts, i.batch_id
-       FROM plan_items i LEFT JOIN stage_batches b ON b.id = i.batch_id
-       WHERE i.plan_id = ? ORDER BY i.prefix`,
-    ).bind(id).all()
-    : await db.prepare("SELECT prefix, note, added_by, added_ts FROM plan_items WHERE plan_id = ? ORDER BY prefix").bind(id).all()
-  const runs = await db.prepare("SELECT * FROM deletion_runs WHERE plan_id = ? ORDER BY started_ts DESC").bind(id).all()
-  return json({ plan, items: items.results, runs: runs.results })
+  const d = await planDetail(db, id, staging)
+  return d ? json(d) : json({ error: "no such plan" }, 404)
+}
+
+async function getStaged(db: D1Database, staging: boolean): Promise<Response> {
+  const id = await openPlanId(db)
+  if (id == null) return json({ plan: null, items: [], batches: [], runs: [] })
+  return json(await planDetail(db, id, staging))
 }
 
 async function createPlan(db: D1Database, who: string, body: Record<string, unknown>): Promise<Response> {
@@ -73,7 +73,7 @@ async function closePlan(db: D1Database, who: string, id: number, body: Record<s
 }
 
 async function editItems(
-  db: D1Database, who: string, id: number, add: boolean, body: Record<string, unknown>, shape: PrefixShape,
+  db: D1Database, who: string, id: number, add: boolean, body: Record<string, unknown>, shape: PrefixShape, own = false,
 ): Promise<Response> {
   const plan = await db.prepare("SELECT * FROM plans WHERE id = ?").bind(id).first<PlanRow>()
   if (!plan) return json({ error: "no such plan" }, 404)
@@ -96,10 +96,14 @@ async function editItems(
     }
     await audit(db, "plan_items", String(id), "insert", who, null, { prefixes })
   } else {
+    // A stager (not admin) may only take back what they staged themselves.
     for (const p of prefixes) {
-      await db.prepare("DELETE FROM plan_items WHERE plan_id = ? AND prefix = ?").bind(id, p).run()
+      const r = own
+        ? await db.prepare("DELETE FROM plan_items WHERE plan_id = ? AND prefix = ? AND added_by = ?").bind(id, p, who).run()
+        : await db.prepare("DELETE FROM plan_items WHERE plan_id = ? AND prefix = ?").bind(id, p).run()
+      if (own && !r.meta.changes) return json({ error: `not yours to unstage: ${p}` }, 403)
     }
-    await audit(db, "plan_items", String(id), "delete", who, { prefixes }, null)
+    await audit(db, "plan_items", String(id), "delete", who, { prefixes, own }, null)
   }
   return json({ id, [add ? "added" : "removed"]: prefixes })
 }
@@ -123,6 +127,12 @@ export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
       return gated instanceof Response ? gated : createPlan(db, (gated.email ?? gated.name ?? 'guest'), await readBody(ctx.request))
     }
     return json({ error: "method not allowed" }, 405)
+  }
+
+  // /api/plans/staged — the shared open plan, for the /staged console.
+  if (segs.length === 1 && segs[0] === "staged" && method === "GET") {
+    const gated = await requireViewer(ctx)
+    return gated instanceof Response ? gated : getStaged(db, staging)
   }
 
   // /api/plans/stage — the opt-in trash proposal, on deployments that stage.
@@ -156,10 +166,12 @@ export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
     return json({ error: "method not allowed" }, 405)
   }
 
-  // /api/plans/:id/items
+  // /api/plans/:id/items — admins curate; on a staging deployment a stager
+  // may DELETE (unstage) their own items.
   if (segs.length === 2 && segs[1] === "items" && (method === "POST" || method === "DELETE")) {
-    const gated = await requireAdmin(ctx)
-    return gated instanceof Response ? gated : editItems(db, (gated.email ?? gated.name ?? 'guest'), id, method === "POST", await readBody(ctx.request), shape)
+    const gated = await (staging && method === "DELETE" ? requireStager(ctx) : requireAdmin(ctx))
+    if (gated instanceof Response) return gated
+    return editItems(db, (gated.email ?? gated.name ?? 'guest'), id, method === "POST", await readBody(ctx.request), shape, !gated.admin)
   }
 
   return json({ error: "not found" }, 404)

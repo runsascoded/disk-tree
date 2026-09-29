@@ -1,7 +1,7 @@
 /** `ownerLens` as a spec: the claims fold behind a user lens — bands under
  * the newest covering claim, U's slice elsewhere (owners.ts header). */
 import { describe, expect, it } from 'vitest'
-import type { ClaimRow } from './marks.js'
+import type { ClaimRow } from './claims.js'
 import { ownerLens } from './owners.js'
 
 const claim = (prefix: string, owner: string | null, ts: number, bytes: number, us: Record<string, number>): ClaimRow =>

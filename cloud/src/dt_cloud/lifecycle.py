@@ -2,19 +2,30 @@
 
 The bucket's lifecycle configuration is the one piece of storage state that
 decides what gets deleted without anyone running a job — Marin's `tmp/ttl=<N>d/`
-TTLs, the abort-incomplete-MPU rule, and (since the 2026-09-16 quota incident)
-a bucket-wide noncurrent-version GC. Nobody should hand-edit it in place, and
-its history should be reviewable, so:
+TTLs on every bucket it uses, CoreWeave's abort-incomplete-MPU rule and (since
+the 2026-09-16 quota incident) its bucket-wide noncurrent-version GC. Nobody
+should hand-edit it in place, and its history should be reviewable, so:
 
-- `pull` snapshots the live rules (normalized: sorted by ID) to a JSON file —
-  `job/cw-lifecycle.json` in the repo is the intended state, and the scan job
-  writes one per snapshot so every scan carries the rules that were in force;
+- `pull` snapshots the live rules (normalized, stably sorted) to a JSON file —
+  the tracked copy in the repo is the intended state, and the scan job writes
+  one per snapshot so every scan carries the rules that were in force;
 - `diff` shows file vs live (added / removed / changed rules);
-- `push` applies the file read-modify-write style: PUT replaces the whole
-  configuration, so the whole intended set is sent and then read back and
-  compared — a mismatch raises rather than leaving a half-applied config.
+- `push` applies the file read-modify-write style: the whole intended set is
+  sent and then read back and compared — a mismatch raises rather than
+  leaving a half-applied config.
 
-`gc_rule` builds the bucket-wide GC rule (`NoncurrentVersionExpiration` +
+Two clouds, one file shape per bucket. **S3 / CAIOS** rules carry an `ID`
+(`{"ID", "Filter", "Status", "Expiration", …}`), so `diff` can say *changed*.
+**GCS** rules are anonymous (`{"action": {"type"}, "condition": {…}}`), so a
+rule's identity is its content: `diff_gcs` reports added / removed only, and
+the site synthesizes a display name from the content. A `gs://` bucket URI
+picks the GCS backend (`*_any`); a bare name is S3 (the CoreWeave deployment's
+default). A deployment with several buckets snapshots a map `{bucket: rules}`
+(`pull_many` + `dump_map`, specs/cw-multi-bucket.md §2) — the site reads this
+and the bare list alike, normalizing each bucket's rules through the store's
+adapter (`site/src/lifecycle.ts`).
+
+`gc_rule` builds the S3 bucket-wide GC rule (`NoncurrentVersionExpiration` +
 `ExpiredObjectDeleteMarker`): a no-op for null-version objects while versioning
 is Suspended, it cleans stragglers and zero-byte delete markers, and it is the
 safety net that was missing when versioning was Enabled without one.
@@ -22,13 +33,16 @@ safety net that was missing when versioning was Enabled without one.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from google.cloud.storage import Client as GcsClient
     from mypy_boto3_s3 import S3Client
 
 GC_RULE_ID = "cw-noncurrent-gc"
 
+
+# --- S3 / CAIOS (rules keyed by ID) ------------------------------------------
 
 def normalize(rules: list[dict]) -> list[dict]:
     """Rules sorted by ID, so file and live compare and diff stably."""
@@ -96,17 +110,132 @@ def push(client: "S3Client", bucket: str, intended: list[dict], *, base: list[di
     return got
 
 
+# --- GCS (anonymous rules; identity = content) ----------------------------------
+
+def gcs_key(rule: dict) -> str:
+    """A GCS rule's identity: its canonical JSON (sorted keys, no whitespace)."""
+    return json.dumps(rule, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def normalize_gcs(rules: list[Any]) -> list[dict]:
+    """Plain dicts (the client yields dict subclasses), sorted by content."""
+    return sorted((json.loads(json.dumps(r, default=str)) for r in rules), key=gcs_key)
+
+
+def pull_gcs(client: "GcsClient", bucket: str) -> list[dict]:
+    """The live rules of a GCS bucket, normalized (`[]` when it has none).
+    Needs `storage.buckets.get` (the job SA's `legacyBucketReader` has it)."""
+    b = client.bucket(bucket)
+    b.reload()
+    return normalize_gcs(list(b.lifecycle_rules))
+
+
+def diff_gcs(intended: list[dict], live: list[dict]) -> dict[str, list]:
+    """`{"added": [keys only in intended], "removed": [keys only in live],
+    "changed": []}` — a GCS rule has no ID, so an edit is a removal plus an
+    addition; the shape matches `diff` so callers treat both alike."""
+    a = {gcs_key(r) for r in normalize_gcs(intended)}
+    b = {gcs_key(r) for r in normalize_gcs(live)}
+    return {"added": sorted(a - b), "removed": sorted(b - a), "changed": []}
+
+
+def push_gcs(client: "GcsClient", bucket: str, intended: list[dict], *, base: list[dict] | None = None) -> list[dict]:
+    """Replace a GCS bucket's lifecycle rules with `intended` (a PATCH of the
+    whole `lifecycle` field) and verify the read-back. Same `base` guard as
+    `push`: the live rules are re-read right before the write and, if they
+    moved since the caller's diff, nothing is written."""
+    want = normalize_gcs(intended)
+    b = client.bucket(bucket)
+    if base is not None:
+        live = pull_gcs(client, bucket)
+        if live != normalize_gcs(base):
+            raise LifecycleRaced(f"{bucket}: live rules changed since they were read: {diff_gcs(live, base)}")
+    b.reload()
+    b.lifecycle_rules = want
+    b.patch()
+    got = pull_gcs(client, bucket)
+    if got != want:
+        raise RuntimeError(
+            f"lifecycle push did not round-trip on {bucket}: live differs from intended: {diff_gcs(want, got)}"
+        )
+    return got
+
+
+# --- either cloud, by the bucket URI's scheme -------------------------------------
+
+GCS_SCHEME = "gs://"
+
+
+def is_gcs(bucket: str) -> bool:
+    return bucket.startswith(GCS_SCHEME)
+
+
+def bucket_name(bucket: str) -> str:
+    """`gs://name` → `name`; a bare name unchanged."""
+    return bucket[len(GCS_SCHEME):] if is_gcs(bucket) else bucket
+
+
+def normalize_any(bucket: str, rules: list[dict]) -> list[dict]:
+    return normalize_gcs(rules) if is_gcs(bucket) else normalize(rules)
+
+
+def diff_any(bucket: str, intended: list[dict], live: list[dict]) -> dict[str, list]:
+    return diff_gcs(intended, live) if is_gcs(bucket) else diff(intended, live)
+
+
+def pull_any(bucket: str, *, s3: "S3Client | None" = None, gcs: "GcsClient | None" = None) -> list[dict]:
+    """`pull` or `pull_gcs` by the bucket's scheme; the matching client must be given."""
+    if is_gcs(bucket):
+        if gcs is None:
+            raise ValueError(f"{bucket}: a GCS client is required")
+        return pull_gcs(gcs, bucket_name(bucket))
+    if s3 is None:
+        raise ValueError(f"{bucket}: an S3 client is required")
+    return pull(s3, bucket)
+
+
+def push_any(
+    bucket: str,
+    intended: list[dict],
+    *,
+    base: list[dict] | None = None,
+    s3: "S3Client | None" = None,
+    gcs: "GcsClient | None" = None,
+) -> list[dict]:
+    """`push` or `push_gcs` by the bucket's scheme; the matching client must be given."""
+    if is_gcs(bucket):
+        if gcs is None:
+            raise ValueError(f"{bucket}: a GCS client is required")
+        return push_gcs(gcs, bucket_name(bucket), intended, base=base)
+    if s3 is None:
+        raise ValueError(f"{bucket}: an S3 client is required")
+    return push(s3, bucket, intended, base=base)
+
+
+def pull_many(buckets: list[str], *, s3: "S3Client | None" = None, gcs: "GcsClient | None" = None) -> dict[str, list[dict]]:
+    """`{bucket as given: rules}` for several buckets, in the given order — the
+    input to `dump_map` (which knows each bucket's cloud from its scheme)."""
+    return {b: pull_any(b, s3=s3, gcs=gcs) for b in buckets}
+
+
 def load(path: str) -> list[dict]:
+    """A tracked file: a rule list (either cloud's shape), as written by `dump`."""
     with open(path) as f:
-        return normalize(json.load(f))
+        rules = json.load(f)
+    if not isinstance(rules, list):
+        raise ValueError(f"{path}: expected a JSON list of rules (a per-bucket map is a snapshot, not a tracked file)")
+    return rules
 
 
-def dump(rules: list[dict]) -> str:
-    return json.dumps(normalize(rules), indent=2) + "\n"
+def dump(rules: list[dict], bucket: str = "") -> str:
+    """JSON text for a tracked file: a rule list, normalized for `bucket`'s cloud
+    (a bare name / empty = S3)."""
+    return json.dumps(normalize_any(bucket, rules), indent=2) + "\n"
 
 
 def dump_map(by_bucket: dict[str, list[dict]]) -> str:
     """The multi-bucket snapshot the scan job writes (specs/cw-multi-bucket.md
-    §2): `{<bucket>: Rules[]}` in the given (deployment) order, each bucket's
-    rules normalized. The site reads this and the bare `Rules[]` alike."""
-    return json.dumps({b: normalize(r) for b, r in by_bucket.items()}, indent=2) + "\n"
+    §2): `{<bucket>: rules}` in the given (deployment) order — the primary
+    first — each bucket's rules normalized for its cloud (a `gs://` key) and
+    keyed by the bare name, which is how the site's `Store.buckets` name them."""
+    return json.dumps({bucket_name(b): normalize_any(b, r) for b, r in by_bucket.items()}, indent=2) + "\n"

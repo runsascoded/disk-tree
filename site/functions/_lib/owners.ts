@@ -1,9 +1,8 @@
-/** The ownership ledger applied to a user lens, server-side — the claims
- * counterpart of `states.ts` (specs/view-serving.md §2, "claims applied to the
- * user lens"): of a path's bytes, how many are U's once claims repaint
- * attribution.
+/** The ownership ledger applied to a user lens, server-side
+ * (specs/view-serving.md §2, "claims applied to the user lens"): of a path's
+ * bytes, how many are U's once claims repaint attribution.
  *
- * Model (`marks.ts`): every live claim is a band — its subtree minus deeper
+ * Model (`claims.ts`): every live claim is a band — its subtree minus deeper
  * claims' subtrees — whose claimant is the newest claim on its
  * ancestor-or-self chain (recency beats specificity, so a newer ancestor
  * repaints a deeper claim). A band with a claimant belongs to that person
@@ -27,8 +26,8 @@
  * scan attributes to others (`regions`) — a by-path read of those ranges
  * gives all(·) for every path inside. */
 import { canonId } from './identity.js'
-import type { ClaimRow } from './marks.js'
-import { idxKey } from './marks.js'
+import type { ClaimRow } from './claims.js'
+import { idxKey } from './claims.js'
 
 export interface Region { path: string; depth: number; all: number; objects: number }
 

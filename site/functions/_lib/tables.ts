@@ -57,7 +57,7 @@ export const TABLES: TableSpec[] = [
   {
     name: 'user_emails',
     pk: 'email',
-    desc: 'Sign-in email → canonical attribution user id (powers the /mark "My files" tab).',
+    desc: 'Sign-in email → canonical attribution user id (powers the "me" owner filter).',
     columns: [
       { name: 'email', type: 'text', required: true },
       { name: 'user', type: 'text', editable: true, required: true },
@@ -76,7 +76,7 @@ export const TABLES: TableSpec[] = [
   {
     name: 'actions',
     pk: 'id',
-    desc: 'Actions ledger (append-only WAL): attribution + keep/sweep judgments. Writes go through /api/actions.',
+    desc: 'Actions ledger (append-only WAL): owner assignments. Writes go through /api/actions.',
     columns: [
       { name: 'id', type: 'int' },
       { name: 'actor', type: 'text' },
@@ -85,28 +85,11 @@ export const TABLES: TableSpec[] = [
       { name: 'pattern', type: 'text' },
       { name: 'set_owner', type: 'int' },
       { name: 'owner', type: 'text' },
-      { name: 'set_keep', type: 'int' },
-      { name: 'keep', type: 'text' },
       { name: 'memo', type: 'text' },
     ],
     readScope: 'gcs',
     writeScope: null,
     orderBy: 'id DESC',
-  },
-  {
-    name: 'marks',
-    pk: 'prefix',
-    desc: 'Legacy (pre-ledger) marks table — migrated into `actions`; read-only history.',
-    columns: [
-      { name: 'prefix', type: 'text' },
-      { name: 'action', type: 'text' },
-      { name: 'who', type: 'text' },
-      { name: 'ts', type: 'int' },
-      { name: 'note', type: 'text' },
-    ],
-    readScope: 'admin',
-    writeScope: null,
-    orderBy: 'prefix',
   },
   {
     name: 'claims',
@@ -122,46 +105,9 @@ export const TABLES: TableSpec[] = [
     orderBy: 'prefix',
   },
   {
-    name: 'mark_log',
-    pk: 'id',
-    desc: 'Append-only history of every mark change.',
-    columns: [
-      { name: 'id', type: 'int' },
-      { name: 'prefix', type: 'text' },
-      { name: 'action', type: 'text' },
-      { name: 'who', type: 'text' },
-      { name: 'ts', type: 'int' },
-      { name: 'note', type: 'text' },
-    ],
-    readScope: 'admin',
-    writeScope: null,
-    orderBy: 'id DESC',
-  },
-  {
-    name: 'sweep_approvals',
-    pk: 'prefix',
-    desc: 'Approved sweep bands — the human owner-verification gate the executor honors (specs/sweep-executor.md; the /sweep console writes these).',
-    columns: [
-      { name: 'prefix', type: 'text', required: true },
-      { name: 'scan', type: 'text', required: true },
-      { name: 'head', type: 'int', required: true },
-      { name: 'mode', type: 'text', editable: true },
-      { name: 'note', type: 'text', editable: true },
-      { name: 'who', type: 'text', server: 'who' },
-      { name: 'ts', type: 'int', server: 'now' },
-    ],
-    readScope: 'gcs',
-    writeScope: 'admin',
-    orderBy: 'prefix',
-    validate: (col, v) =>
-      col === 'prefix' && !/^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/.test(v) ? 'must be gs://marin-<bucket>/<dir>/ (trailing slash)'
-      : col === 'mode' && v !== 'slice' && v !== 'full' ? "mode must be 'slice' or 'full'"
-      : null,
-  },
-  {
     name: 'deletion_runs',
     pk: 'run_id',
-    desc: 'Executed sweeps (dry + real): plan, actor, totals, expected-vs-actual counters, undo window, log dir. Written by `dt-cloud sweep execute`.',
+    desc: 'Executed deletion runs (dry + real): plan, actor, totals, expected-vs-actual counters, undo window, log dir. Written by `dt-cloud sweep execute`.',
     columns: [
       { name: 'run_id', type: 'text' },
       { name: 'plan', type: 'text' },
@@ -208,7 +154,7 @@ export const TABLES: TableSpec[] = [
   {
     name: 'admin_emails',
     pk: 'email',
-    desc: 'Admin allowlist: non-staff emails that may mark sweep and dispatch deletes (`admin` scope on top of viewing). Takes effect on the next request.',
+    desc: 'Admin allowlist: non-staff emails that may assign owners and dispatch deletes (`admin` scope on top of viewing). Takes effect on the next request.',
     columns: [
       { name: 'email', type: 'text', required: true },
       { name: 'note', type: 'text', editable: true },

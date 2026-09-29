@@ -7,22 +7,14 @@
 import { displayName, useForgetWhoami, useWhoami, type Whoami, type WhoamiSource } from '@open-athena/auth/react'
 import { DEFAULT_STORE } from './stores'
 
-// Deployment seam (specs/denovo-factor.md): the whoami source is a build-time
-// flag. `edge` = the whole host sits behind a CF Access gate
-// (`/cdn-cgi/access/get-identity`, sign-in bounces through `/login`); `app` =
-// the app session (`/api/auth/whoami`, minted at `/signin`). The default lives
-// in vite.config.ts; the cutover deploy flips it (specs/oidc-cutover-cw.md).
-// `public` = no gate (r2.rbw.sh, per-project embeds): the app renders for an
-// anonymous viewer, no whoami fetch or login wall (specs/federated-scans.md).
-export const AUTH_MODE: 'app' | 'edge' | 'public' =
-  import.meta.env.VITE_AUTH_MODE === 'edge' ? 'edge'
-    : import.meta.env.VITE_AUTH_MODE === 'public' ? 'public'
-      : 'app'
-// The whoami source only applies to the gated modes; public bypasses the Gate.
-// Behind an edge gate the package's default (`/api/auth/whoami`, the app
-// session) knows nothing — `/api/whoami` answers in the same `SsoWhoami` shape
-// from the verified edge JWT (`functions/api/whoami.ts`).
-export const WHOAMI_SOURCE: WhoamiSource | undefined = AUTH_MODE === 'edge' ? { endpoint: '/api/whoami' } : undefined
+// Deployment seam (specs/denovo-factor.md): a build-time flag from
+// `wrangler.toml` `[vars]` `AUTH_MODE` (vite.config.ts). `app` = the app
+// session (`/api/auth/whoami`, minted at `/signin`); `public` = no gate
+// (r2.rbw.sh, per-project embeds): the app renders for an anonymous viewer,
+// no whoami fetch or login wall (specs/federated-scans.md).
+export const AUTH_MODE: 'app' | 'public' = import.meta.env.VITE_AUTH_MODE === 'public' ? 'public' : 'app'
+// The package's default whoami source (`/api/auth/whoami`, the app session).
+export const WHOAMI_SOURCE: WhoamiSource | undefined = undefined
 
 // `?wall` forces the wall in dev (which otherwise short-circuits to authed,
 // since neither identity source exists locally). A local session disables the
@@ -47,10 +39,9 @@ const hasLocalSession = (): boolean =>
 export const devIdentity = (): Whoami | null | undefined =>
   import.meta.env.DEV && !hasLocalSession() ? (forceWall ? null : DEV_WHOAMI) : undefined
 
-/** Where the inline "sign in" links go: the edge tier's `/login`, or the app
- *  tier's own `/signin` page (Google / emailed code), returning here after. */
-export const signInUrl = (): string =>
-  AUTH_MODE === 'edge' ? '/login' : `/signin?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
+/** Where the inline "sign in" links go: the `/signin` page (Google / emailed
+ *  code), returning here after. */
+export const signInUrl = (): string => `/signin?next=${encodeURIComponent(window.location.pathname + window.location.search)}`
 
 export interface Ident {
   email: string
@@ -66,7 +57,6 @@ export interface Ident {
 export function useSignOut(): () => void {
   const forget = useForgetWhoami()
   return () => {
-    if (AUTH_MODE === 'edge') { forget(); window.location.assign('/cdn-cgi/access/logout'); return }
     void fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).then(() => {
       forget()
     })
@@ -91,17 +81,13 @@ function useScopes(): string[] | null {
 const hasBase = (scopes: string[]): boolean => scopes.includes(DEFAULT_STORE.key) || scopes.includes('*')
 
 /**
- * Who may mark (keep/sweep/owner): `Store.marking` — `admin` where marking is
- * a staff decision and everyone else proposes deletions by staging (gcs,
- * specs/share-link-hardening.md), `viewer` where any full viewer marks (cw's
- * plan-first marks). Read-only guest links (`<store>:read`) never can. The
- * server enforces the same (`requireAdmin` / `requireStager`).
+ * Who may assign owners: admins — assignment is a staff decision, everyone
+ * else proposes deletions by staging (specs/share-link-hardening.md). The
+ * server enforces the same (`POST /api/actions` is `requireAdmin`).
  */
-export function useCanMark(): boolean {
+export function useCanAssign(): boolean {
   const scopes = useScopes()
-  if (scopes === null) return false
-  if (DEFAULT_STORE.marking === 'admin') return scopes.includes('admin') || scopes.includes('*')
-  return hasBase(scopes)
+  return scopes !== null && (scopes.includes('admin') || scopes.includes('*'))
 }
 
 /**

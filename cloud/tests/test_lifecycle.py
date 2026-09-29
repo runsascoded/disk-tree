@@ -1,4 +1,4 @@
-"""`dt_cloud.lifecycle`: pull / diff / push against a fake S3 client."""
+"""`dt_cloud.lifecycle`: pull / diff / push against fake S3 and GCS clients."""
 import json
 
 import pytest
@@ -110,3 +110,117 @@ def test_dump_map_keeps_bucket_order_and_normalizes():
     assert L.dump_map({"marin-us-east-02a": [TTL, MPU], "hero-checkpoints": [TTL]}) == (
         json.dumps({"marin-us-east-02a": [MPU, TTL], "hero-checkpoints": [TTL]}, indent=2) + "\n"
     )
+
+
+# --- GCS ---------------------------------------------------------------------
+
+G_TTL1 = {"action": {"type": "Delete"}, "condition": {"age": 1, "matchesPrefix": ["tmp/ttl=1d/"]}}
+G_TTL14 = {"action": {"type": "Delete"}, "condition": {"age": 14, "matchesPrefix": ["tmp/ttl=14d/"]}}
+G_COLD = {"action": {"type": "SetStorageClass", "storageClass": "COLDLINE"}, "condition": {"age": 90}}
+
+
+class _RuleDict(dict):
+    """The client yields dict *subclasses* (`LifecycleRuleDelete`, …)."""
+
+
+class _FakeGcsBucket:
+    def __init__(self, store: "_FakeGcs", name: str):
+        self._store, self.name = store, name
+        self._rules: list[dict] | None = None
+
+    def reload(self) -> None:
+        self._rules = list(self._store.rules.get(self.name, []))
+
+    @property
+    def lifecycle_rules(self):
+        assert self._rules is not None, "reload() first"
+        return (_RuleDict(r) for r in self._rules)
+
+    @lifecycle_rules.setter
+    def lifecycle_rules(self, rules: list[dict]) -> None:
+        self._pending = list(rules)
+
+    def patch(self) -> None:
+        self._store.patches.append((self.name, self._pending))
+        self._store.rules[self.name] = list(self._pending)
+
+
+class _FakeGcs:
+    def __init__(self, rules: dict[str, list[dict]]):
+        self.rules = rules
+        self.patches: list[tuple[str, list[dict]]] = []
+
+    def bucket(self, name: str) -> _FakeGcsBucket:
+        return _FakeGcsBucket(self, name)
+
+
+def test_gcs_key_and_normalize_are_content_based():
+    assert L.gcs_key(G_TTL1) == '{"action":{"type":"Delete"},"condition":{"age":1,"matchesPrefix":["tmp/ttl=1d/"]}}'
+    assert L.normalize_gcs([_RuleDict(G_TTL14), _RuleDict(G_TTL1), G_COLD]) == [G_COLD, G_TTL1, G_TTL14]
+    assert all(type(r) is dict for r in L.normalize_gcs([_RuleDict(G_TTL1)]))
+
+
+def test_pull_gcs_reloads_and_normalizes():
+    gcs = _FakeGcs({"b": [G_TTL14, G_TTL1], "empty": []})
+    assert L.pull_gcs(gcs, "b") == [G_TTL1, G_TTL14]
+    assert L.pull_gcs(gcs, "empty") == []
+
+
+def test_diff_gcs_has_no_changed_only_added_and_removed():
+    assert L.diff_gcs([G_TTL1, G_COLD], [G_TTL1, G_TTL14]) == {
+        "added": [L.gcs_key(G_COLD)],
+        "removed": [L.gcs_key(G_TTL14)],
+        "changed": [],
+    }
+    assert L.diff_gcs([G_TTL14, G_TTL1], [G_TTL1, G_TTL14]) == {"added": [], "removed": [], "changed": []}
+
+
+def test_push_gcs_patches_whole_set_and_round_trips():
+    gcs = _FakeGcs({"b": [G_TTL1]})
+    live = L.push_gcs(gcs, "b", [G_TTL14, G_TTL1], base=[G_TTL1])
+    assert gcs.patches == [("b", [G_TTL1, G_TTL14])]
+    assert live == [G_TTL1, G_TTL14]
+
+
+def test_push_gcs_refuses_when_live_moved():
+    gcs = _FakeGcs({"b": [G_TTL1, G_COLD]})
+    with pytest.raises(L.LifecycleRaced):
+        L.push_gcs(gcs, "b", [G_TTL14], base=[G_TTL1])
+    assert gcs.patches == []
+
+
+def test_scheme_dispatch():
+    assert L.is_gcs("gs://x") and not L.is_gcs("x")
+    assert L.bucket_name("gs://marin-us-east5") == "marin-us-east5"
+    assert L.bucket_name("marin-us-east-02a") == "marin-us-east-02a"
+    gcs = _FakeGcs({"g1": [G_TTL14, G_TTL1], "g2": [G_COLD]})
+    s3 = _FakeS3([TTL, MPU])
+    assert L.pull_any("gs://g1", gcs=gcs) == [G_TTL1, G_TTL14]
+    assert L.pull_any("s3b", s3=s3) == [MPU, TTL]
+    with pytest.raises(ValueError, match="GCS client is required"):
+        L.pull_any("gs://g1", s3=s3)
+    with pytest.raises(ValueError, match="S3 client is required"):
+        L.pull_any("s3b", gcs=gcs)
+    assert L.diff_any("gs://g1", [G_TTL1], [G_TTL1]) == {"added": [], "removed": [], "changed": []}
+    assert L.diff_any("b", [TTL], [MPU]) == {"added": ["marin-ttl-1d"], "removed": ["marin-abort-incomplete-mpu"], "changed": []}
+    assert L.push_any("gs://g2", [G_TTL1], base=[G_COLD], gcs=gcs) == [G_TTL1]
+    assert gcs.patches == [("g2", [G_TTL1])]
+    assert L.push_any("s3b", [MPU], base=[TTL, MPU], s3=s3) == [MPU]
+    assert s3.puts == [[MPU]]
+
+
+def test_pull_many_and_dump_map_key_by_bare_name_per_cloud():
+    gcs = _FakeGcs({"g1": [G_TTL14, G_TTL1], "g2": [G_COLD]})
+    s3 = _FakeS3([TTL, MPU])
+    snap = L.pull_many(["gs://g2", "s3b", "gs://g1"], s3=s3, gcs=gcs)
+    assert snap == {"gs://g2": [G_COLD], "s3b": [MPU, TTL], "gs://g1": [G_TTL1, G_TTL14]}
+    assert L.dump_map(snap) == json.dumps({"g2": [G_COLD], "s3b": [MPU, TTL], "g1": [G_TTL1, G_TTL14]}, indent=2) + "\n"
+
+
+def test_dump_and_load_gcs(tmp_path):
+    p = tmp_path / "b.json"
+    p.write_text(L.dump([G_TTL14, G_TTL1], bucket="gs://b"))
+    assert L.load(str(p)) == [G_TTL1, G_TTL14]
+    (tmp_path / "snap.json").write_text(L.dump_map({"gs://g1": [G_TTL1]}))
+    with pytest.raises(ValueError, match="expected a JSON list"):
+        L.load(str(tmp_path / "snap.json"))

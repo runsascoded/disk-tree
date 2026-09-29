@@ -16,8 +16,9 @@
 # (auth + D1) off-prod. First `--local-db` with no prior seed applies this
 # deployment's migrations (`migrations_dir` in wrangler.toml) into an empty
 # local D1; `--refresh` mirrors the real prod ledger in (see ./refresh-db —
-# needs a live `wrangler login`). (`pnpm dev` alone runs only vite → blank
-# treemap, since /api + /data aren't served.)
+# needs a live `wrangler login` + `sqlite3`; it loads the export straight into
+# the miniflare sqlite file, so a multi-GB prod export is fine). (`pnpm dev`
+# alone runs only vite → blank treemap, since /api + /data aren't served.)
 #
 # .dev.vars keys: DEV_EMAIL (the localhost identity — use a staff address to get
 # the admin console), the store creds (GCS_HMAC_KEY_ID/GCS_HMAC_SECRET, or

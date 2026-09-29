@@ -1,6 +1,7 @@
 /** The page's scope axes, applied server-side to a view's rows
- * (specs/view-serving.md §2): the owner axis (`o=`), and the name filter
- * (`q=`). The mark axis (`k=`) lives in `states.ts` — it needs the ledger.
+ * (specs/view-serving.md §2): the owner axis (`o=`), the storage-class axis
+ * (`cl=`), and the name filter (`q=`). A user lens (`lens=user:`) lives in
+ * `owners.ts` — it needs the ledger.
  *
  * Both are pure functions over index rows / per-path aggregates so `buildView`
  * stays one pipeline: read a superset by total bytes, narrow per row, fold. */

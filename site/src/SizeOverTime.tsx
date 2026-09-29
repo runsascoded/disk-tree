@@ -69,15 +69,15 @@ function LayoutToggle({ v, set }: { v: Layout; set: (l: Layout) => void }) {
   )
 }
 
-// y-axis origin toggle (`?y0` — from-zero on): fit the data (default — a ~1%
-// wiggle on 3 PiB is invisible from zero) or anchor at zero (honest
-// proportions). Stacked, "fit" zooms to the stack's top edge (the total's own
-// movement), clipping the bands below.
+// y-axis origin toggle (`?fit` — fit on): anchor at zero (default — honest
+// proportions; the Δ / % values are the way to see a small movement in a
+// large total) or fit the y-range to the data. Stacked, "fit" zooms to the
+// stack's top edge (the total's own movement), clipping the bands below.
 function YFromToggle({ v, set, stacked }: { v: YFrom; set: (y: YFrom) => void; stacked: boolean }) {
   return (
     <span className="gran" role="radiogroup" aria-label="Y-axis range">
       <span className="lbl">y-axis</span>
-      {(['data', 'zero'] as YFrom[]).map(y => (
+      {(['zero', 'data'] as YFrom[]).map(y => (
         <Explain key={y} text={y === 'data' ? (stacked ? 'Zoom the y-range to the top of the stack — the total’s own movement, and which band it came from' : 'Fit the y-range to the data (a small movement in a large total stays visible)') : 'Start the y-axis at zero (honest proportions)'}>
           <button role="radio" aria-checked={v === y} className={v === y ? 'on' : ''} onClick={() => set(y)}>{y === 'data' ? 'fit' : 'from 0'}</button>
         </Explain>
@@ -159,9 +159,9 @@ export function SizeOverTime({ scans, prefix, user, pool, onPickDate, onBrush, w
   window?: [string, string]
 }) {
   const { fmtBytes, units } = useUnits()
-  const [y0P, setY0P] = useUrlState('y0', boolParam)
-  const yFrom: YFrom = y0P ? 'zero' : 'data'
-  const setYFrom = (y: YFrom) => setY0P(y === 'zero')
+  const [fitP, setFitP] = useUrlState('fit', boolParam)
+  const yFrom: YFrom = fitP ? 'data' : 'zero'
+  const setYFrom = (y: YFrom) => setFitP(y === 'data')
   const [linesP, setLinesP] = useUrlState('ln', boolParam)
   const layout: Layout = linesP ? 'lines' : 'stacked'
   const setLayout = (l: Layout) => setLinesP(l === 'lines')

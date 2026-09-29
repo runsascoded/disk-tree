@@ -159,3 +159,55 @@ def test_cli_over_time_write_explicit(tmp_path: Path):
         (2, f"{B}/a", 50, 5, 0, 3),
         (2, f"{B}/b", 7, 1, 1, 2),
     ]
+
+
+def test_sealed_groups_are_fixed_k_runs_from_the_oldest_scan():
+    dates = [f"2026-09-{d:02d}T{h}" for d in range(1, 11) for h in ("0001", "1201")]  # 20 scans
+    assert OT.sealed_groups(dates, 8) == [dates[0:8], dates[8:16]]      # the 4-scan tail is not a group
+    assert OT.sealed_groups(list(reversed(dates)), 8) == [dates[0:8], dates[8:16]]  # order-insensitive
+    assert OT.sealed_groups(dates[:7], 8) == []
+    assert OT.sealed_groups(dates[:16] + dates[:3], 8) == [dates[0:8], dates[8:16]]  # duplicates collapse
+
+
+def test_scan_ms_reads_both_scan_id_shapes_as_utc():
+    assert OT.scan_ms("2026-09-28") == 1_790_553_600_000
+    assert OT.scan_ms("2026-09-28T1201") == 1_790_553_600_000 + (12 * 3600 + 60) * 1000
+
+
+def test_multiscan_row_is_pyrmts_row_shape_keyed_by_the_last_scan():
+    scans = ["2026-09-01T0001", "2026-09-01T1201", "2026-09-02T0001"]
+    assert OT.multiscan_row(scans, written_at_ms=1_790_000_000_000) == {
+        "dataset": "over-time",
+        "tier": "over-time",
+        "shard_dur": "3scans",
+        "period_start": OT.scan_ms("2026-09-01T0001"),
+        "period_end": OT.scan_ms("2026-09-02T0001"),
+        "key": "2026-09-02T0001",
+        "scans": '["2026-09-01T0001", "2026-09-01T1201", "2026-09-02T0001"]',
+        "encoder": "interval",
+        "digests": None,
+        "written_at": 1_790_000_000_000,
+    }
+
+
+def test_manifest_sql_is_one_idempotent_upsert():
+    row = {
+        "dataset": "over-time", "tier": "over-time", "shard_dur": "2scans", "period_start": 1, "period_end": 2,
+        "key": "2026-09-02T0001", "scans": '["a", "b"]', "encoder": "interval", "digests": None, "written_at": 7,
+    }
+    assert OT.manifest_sql(row) == (
+        "INSERT OR REPLACE INTO pyramid_multiscans (dataset, tier, shard_dur, period_start, period_end, key, scans, encoder, digests, written_at) "
+        "VALUES ('over-time', 'over-time', '2scans', 1, 2, '2026-09-02T0001', '[\"a\", \"b\"]', 'interval', NULL, 7);"
+    )
+
+
+def test_over_time_groups_cli_dry_run_lists_unsealed_groups(monkeypatch, tmp_path: Path):
+    from dt_cloud import index_footer as IF
+
+    dates = [f"2026-09-{d:02d}T0001" for d in range(1, 19)]  # 18 scans → 2 groups of 8, tail of 2
+    monkeypatch.setattr(IF, "synced_variants", lambda: [(d, "path") for d in dates])
+    monkeypatch.setattr(OT, "synced_groups", lambda: {dates[7]})  # first group already sealed
+    r = CliRunner().invoke(main, ["over-time-groups", "-g", "G", "-K", "8", "-n", "-o", str(tmp_path)])
+    assert r.exit_code == 0, r.output + r.stderr
+    assert json.loads(r.output) == {"groups": [dates[15]], "dry_run": True}
+    # (the plan lines go to the real stderr via `err`, outside CliRunner's capture)

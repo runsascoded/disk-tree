@@ -91,13 +91,11 @@ describe('isAdmin', () => {
   })
 })
 
-describe('identify — the edge header is only trusted behind an edge', () => {
-  const withEdgeJwt = (env: Env) => identify({
-    request: new Request('https://cw-s3.oa.dev/api/whoami', { headers: { 'Cf-Access-Jwt-Assertion': 'not-a-jwt' } }),
-    env,
-  })
-
-  it('no ACCESS_AUD and no gate → anonymous, without touching the header', async () => {
-    expect(await withEdgeJwt(cw({}))).toBeNull()
+describe('identify — without a gate there is no identity', () => {
+  it('no session store and no session → anonymous (a stray Access header is just a header)', async () => {
+    expect(await identify({
+      request: new Request('https://cw-s3.oa.dev/api/whoami', { headers: { 'Cf-Access-Jwt-Assertion': 'not-a-jwt' } }),
+      env: cw({}),
+    })).toBeNull()
   })
 })

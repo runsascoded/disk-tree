@@ -7,8 +7,7 @@ import { useUnits } from './units'
 
 const SLOTS = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8']
 
-/** Color axes the chart can stratify by — every mode with a per-row value.
- *  Marks are absent on purpose: age.json strata predate the ledger. */
+/** Color axes the chart can stratify by — every mode with a per-row value. */
 export const AGE_MODES: ColorMode[] = ['date', 'read', 'user', 'tree']
 
 // Read-mode key for "no read observed in the logging window"; sorts first so

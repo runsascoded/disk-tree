@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom'
 import { Avatar, whoToHandle } from './Avatar'
 import { IDENTITIES } from './identities.gen'
 
-// Canonical display for an actor. Marks/claims carry `who` as an email or a raw
+// Canonical display for an actor. Assignments carry `who` as an email or a raw
 // id; canonicalize it, then read the bundled registry (short name + GitHub
 // avatar). Everything shows the *short name*, never the raw email — with a
 // GitHub-style hover card (interactive: you can move into it and click the link).

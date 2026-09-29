@@ -1,17 +1,12 @@
-import { Explain } from './Help'
 import { useEffect, useMemo, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { intParam, useUrlState } from 'use-prms'
-import { useCanMark, useCanStage } from './auth'
+import { useCanAssign, useCanStage } from './auth'
 import { FaRegTrashCan } from 'react-icons/fa6'
 import { dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonthShort } from './colors'
 import type { UserIndexEntry } from './colors'
-import { ACTION_COLORS, KEEP_TIP, KLC_TIP, SWEEP_TIP, clearTip } from './MarkControls'
-import type { MarkAction, MarkIndex } from './marks'
-import { ACTION_LABELS, useMarkMutations } from './marks'
+import type { OwnerIndex } from './owners'
 import { OwnerBar, ownerShares } from './OwnerBar'
-import { looksCkpt, subtreeStateTotals } from './sweep'
-import type { MarkState, MarkAxis, KlcIndex } from './sweep'
 import { DEFAULT_STORE } from './stores'
 import { Tooltip } from './Tooltip'
 import { elideMid } from './CopyName'
@@ -25,7 +20,7 @@ import { useUnits } from './units'
 
 // Sortable, paged listing of the treemap's current node's children — the
 // tabular twin of the map above it (same drill: clicking a row opens it).
-// Row selection + bulk marking: specs/children-table-selection.md.
+// Row selection + bulk staging / assignment: specs/children-table-selection.md.
 
 type SortKey = 'n' | 'b' | 'o' | 'd' | 'a'
 
@@ -36,61 +31,39 @@ const PAGE_SIZES = [20, 50, 100, 200]
  *  tooltip); ~60 chars fills the column's 480px at 12px mono. */
 const NAME_MAX = 60
 
-export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, clientStates, userIdx, onPickUser, onOpen }: {
+export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUser, onOpen }: {
   /** The treemap's currently-viewed node. */
   node: TreeNode
   /** Path segments from the tree root to `node` (no scheme, no root). */
   segs: string[]
   scheme: string
-  markIdx?: MarkIndex | null
-  /** KLC splits, so a keep-last-ckpt subtree's bytes settle into real keep / sweep. */
-  klcIdx?: KlcIndex
-  /** The page's mark-state axis: list only children whose effective decision
-   * is in it (`{unmarked}` = the old To-do lens). Absent = every child. */
-  states?: ReadonlySet<MarkAxis> | null
-  /** The server did NOT cut the view to `states` (a plan-first ledger is
-   *  client-side): filter the rows here by each child's effective state. */
-  clientStates?: boolean
+  /** The ownership ledger (`Store.owners`): assignments show as the row's
+   *  owner, and admins assign from the actions column. */
+  ownerIdx?: OwnerIndex | null
   userIdx?: Map<string, UserIndexEntry>
   onPickUser?: (u: string) => void
   onOpen: (segs: string[]) => void
 }) {
   const { fmtBytes } = useUnits()
-  const { put, post } = useMarkMutations()
-  const canMark = useCanMark()
+  const canAssign = useCanAssign()
   const [sort, setSort] = useState<{ k: SortKey; asc: boolean }>({ k: 'b', asc: false })
   const [page, setPage] = useState(0)
   const [nP, setNP] = useUrlState('n', intParam(20))
   const PAGE = PAGE_SIZES.includes(nP) ? nP : 20
-  const showActions = !!markIdx && canMark
-  const mark = (uri: string, action: MarkAction | null) => put.mutate({ prefix: uri + '/', action })
   // A staging store (`Store.staging`): full viewers — not read-only guest
-  // links — select + trash (stage for deletion; an admin approves later), and
-  // the mark dots give way to the trash gesture; owner-assign stays with the
-  // markers. Elsewhere the table's actions ARE the mark controls.
+  // links — select + trash (stage for deletion; an admin approves later).
+  // Owner assignment (`Store.owners`) is an admin's, alongside.
   const staging = DEFAULT_STORE.staging
   const canStage = useCanStage()
   const stage = useStage()
-  const showSel = staging ? canStage : showActions
+  const assigning = !!ownerIdx && DEFAULT_STORE.owners && canAssign
+  const showSel = staging ? canStage : assigning
   const trash = (uri: string) => stage.mutate({ prefixes: [uri + '/'] })
   // One memo for the whole multi-select gesture (stored on the stage batch).
   const [memo, setMemo] = useState('')
 
   const kids = useMemo(() => {
-    let ks = (node.c ?? []).slice()
-    // Mark axis: the server already cut every node's bytes to the selected
-    // states (`/api/subtree?k=`), so a child with bytes left holds some — by
-    // its own decision or a deeper mark's. Judging children by their own
-    // effective decision here was wrong: the marks that keep bytes alive
-    // under a swept band usually sit below the pixel-budgeted tree.
-    if (states) ks = ks.filter(k => !k.n.startsWith('(') && k.b > 0)
-    if (states && clientStates && markIdx) {
-      const stateOf = (k: TreeNode): MarkAxis => {
-        const a = markIdx.resolve(scheme + [...segs, k.n].join('/')).mark?.action
-        return a === 'sweep' ? 'sweep' : a ? 'keep' : 'unmarked'
-      }
-      ks = ks.filter(k => states.has(stateOf(k)))
-    }
+    const ks = (node.c ?? []).slice()
     const dir = sort.asc ? 1 : -1
     const val = (n: TreeNode): number | string =>
       sort.k === 'n' ? n.n
@@ -103,15 +76,15 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
       const vb = val(b)
       return (typeof va === 'string' ? (va as string).localeCompare(vb as string) : (va as number) - (vb as number)) * dir
     })
-  }, [node, sort, states, clientStates, markIdx, scheme, segs])
-  // A new listing (drill, sort, lens) starts on page 1.
-  useEffect(() => setPage(0), [node, sort, states])
+  }, [node, sort])
+  // A new listing (drill, sort) starts on page 1.
+  useEffect(() => setPage(0), [node, sort])
 
   // Columns the data can't fill are left out (no access logs → no `read`; no
-  // attribution and no marks → no `owner(s)`): a store without those axes
+  // attribution and no ledger → no `owner(s)`): a store without those axes
   // shouldn't read as a table of dashes.
   const hasRead = kids.some(k => k.a != null)
-  const hasOwners = (!!markIdx && DEFAULT_STORE.owners) || kids.some(k => k.us?.length)
+  const hasOwners = (!!ownerIdx && DEFAULT_STORE.owners) || kids.some(k => k.us?.length)
 
   // Created-month ink: an age gradient over the listed rows' range, so a
   // column of "May / Jun / Apr" also reads at a glance as older ↔ newer.
@@ -135,12 +108,12 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
   const shown = useMemo(() => kids.slice(pg * PAGE, (pg + 1) * PAGE), [kids, pg, PAGE])
   const uriOfKid = (k: TreeNode) => scheme + [...segs, k.n].join('/')
   // Rows select (click / shift / ⌘, checkboxes, j/k) into one set keyed by
-  // uri; the bar above the table marks or assigns the whole selection at once.
+  // uri; the bar above the table stages or assigns the whole selection at once.
   const selectable = useMemo(() => shown.filter(k => !k.n.startsWith('(')), [shown])
   const sel = useRowSelection(selectable, uriOfKid)
   useRowSelectionKeys(sel, 'tbl', 'Children table')
   // Selection survives paging and sort by key, but not a drill: the rows
-  // picked under one path aren't candidates for a bulk mark under another.
+  // picked under one path aren't candidates for a bulk action under another.
   const path = segs.join('/')
   const clearSel = sel.clear
   useEffect(() => clearSel(), [path, clearSel])
@@ -157,55 +130,36 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
     return () => document.removeEventListener('mousedown', onDown)
   }, [selCount, clearSel])
   const selUris = [...sel.selected]
-  const bulkMark = (action: MarkAction | null) => { if (selUris.length) post.mutate(selUris.map(u => ({ pattern: u + '/', keep: action })), { onSuccess: () => sel.clear() }) }
   const trashSel = () => { if (selUris.length) stage.mutate({ prefixes: selUris.map(u => u + '/'), note: memo }, { onSuccess: () => { sel.clear(); setMemo('') } }) }
   const selBytes = kids.filter(k => sel.selected.has(uriOfKid(k))).reduce((s, k) => s + k.b, 0)
-  // Everything a row derives from the tree and the ledger — owner shares, the
-  // resolved mark and claim, the state bar's subtree walk, the last-ckpt
-  // offer — computed once per page of rows × ledger, so a selection change
-  // (which re-renders the table) rebuilds only the JSX.
+  // Everything a row derives from the tree and the ledger — owner shares and
+  // the resolved assignment — computed once per page of rows × ledger, so a
+  // selection change (which re-renders the table) rebuilds only the JSX.
   const rowData = useMemo(() => shown.map(k => {
     const synthetic = k.n.startsWith('(')
     const kidSegs = [...segs, k.n]
     const uri = scheme + kidSegs.join('/')
-    const cl = markIdx && !synthetic ? markIdx.claimOf(uri) : null
-    const mk = markIdx && !synthetic ? markIdx.resolve(uri) : null
-    const totals = markIdx && !synthetic && k.b ? subtreeStateTotals(k, uri, markIdx, klcIdx) : null
-    return { k, synthetic, kidSegs, uri, shares: ownerShares(k), cl, mk, totals, ckpt: !synthetic && looksCkpt(k, uri), si: selectable.indexOf(k) }
+    const cl = ownerIdx && !synthetic ? ownerIdx.claimOf(uri) : null
+    return { k, synthetic, kidSegs, uri, shares: ownerShares(k), cl, si: selectable.indexOf(k) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [shown, path, scheme, markIdx, klcIdx, selectable])
-  // Every hook above runs on every render: an empty page (the mark axis or
-  // a drill can leave no children) must not shorten the hook list, or React
-  // throws "Rendered fewer hooks than expected" on the way in.
-  if (!kids.length) {
-    return states
-      ? <section className="children-tbl"><p className="tab-note">No prefix under this view is {[...states].join(' / ')}.</p></section>
-      : null
-  }
+  }), [shown, path, scheme, ownerIdx, selectable])
+  // Every hook above runs on every render: an empty page (a drill can leave
+  // no children) must not shorten the hook list, or React throws "Rendered
+  // fewer hooks than expected" on the way in.
+  if (!kids.length) return null
   const selBar = showSel && sel.selected.size > 0 && (
     <span className="sel-bar">
       <b>{sel.selected.size}</b> selected · {fmtBytes(selBytes)}
       <span className="acts">
-        {staging ? (<>
+        {staging && (<>
           <Tooltip content="Optional: one note for this deletion — why these prefixes go. Stored with the batch, visible to the admin who dispatches.">
             <input className="memo" value={memo} onChange={e => setMemo(e.target.value)} placeholder="note (optional)" aria-label="deletion note" />
           </Tooltip>
-          <Tooltip content={<>Stage every selected prefix for deletion — an admin approves and dispatches from <b>/sweep</b></>}>
+          <Tooltip content={<>Stage every selected prefix for deletion — an admin approves and dispatches from <b>/staged</b></>}>
             <button type="button" className="trash" onClick={trashSel} aria-label="trash selected"><FaRegTrashCan /> trash {sel.selected.size}</button>
           </Tooltip>
-          {showActions && DEFAULT_STORE.owners && <AssignSelect prefix={selUris.map(u => u + '/')} label={`assign ${sel.selected.size}…`} />}
-        </>) : (<>
-        <span className="lbl">mark all</span>
-        {(['keep', 'sweep', 'keep_last_ckpt'] as MarkAction[]).map(a => (
-          <Explain text={<>Mark every selected prefix <b>{ACTION_LABELS[a]}</b> (one batched save)</>} key={a}>
-            <button type="button" className={`dot ${a}`} style={{ ['--act' as string]: ACTION_COLORS[a] }} onClick={() => bulkMark(a)} aria-label={ACTION_LABELS[a]} />
-          </Explain>
-        ))}
-        <Explain text="Clear the marks on every selected prefix (back to undecided)">
-          <button type="button" className="dot clear" onClick={() => bulkMark(null)} aria-label="clear marks">×</button>
-        </Explain>
-        {DEFAULT_STORE.owners && <AssignSelect prefix={selUris.map(u => u + '/')} label={`assign ${sel.selected.size}…`} />}
         </>)}
+        {assigning && <AssignSelect prefix={selUris.map(u => u + '/')} label={`assign ${sel.selected.size}…`} />}
         <button type="button" className="quiet" onClick={sel.clear}>deselect</button>
       </span>
     </span>
@@ -227,34 +181,6 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
   // A click on the section's own dead space (not a row / control) deselects.
   const clearOnDeadClick = (e: MouseEvent) => {
     if (sel.selected.size && !(e.target as HTMLElement).closest('tr, button, input, select, a, .sel-bar')) sel.clear()
-  }
-  // One small dot per decision, colored by state: filled = this row's OWN
-  // mark, dashed = the mark it inherits from above, hollow = available.
-  const dot = (uri: string, a: MarkAction, st: 'own' | 'inh' | null, tip: string) => (
-    <Explain text={<>{st === 'own' ? 'Marked ' : st === 'inh' ? 'Inherits ' : 'Mark '}<b>{ACTION_LABELS[a]}</b>{st === 'inh' ? ' from a directory above (click to set it here)' : ''} — {tip}</>} key={a}>
-      <button type="button" className={`dot ${a}${st === 'own' ? ' on' : st === 'inh' ? ' inh' : ''}`} style={{ ['--act' as string]: ACTION_COLORS[a] }} onClick={() => mark(uri, a)} aria-label={ACTION_LABELS[a]} />
-    </Explain>
-  )
-  // MarkState of the bytes UNDER a row: keep / last-ckpt / sweep / undecided, as a
-  // bar — a directory is rarely one thing (an inherited keep with swept
-  // subtrees, a KLC with its kept step), and a single word hid that.
-  const STATE_COLORS: Record<MarkState, string> = { keep: ACTION_COLORS.keep, keep_last_ckpt: ACTION_COLORS.keep_last_ckpt, sweep: ACTION_COLORS.sweep, unmarked: 'var(--other)' }
-  const STATE_LABELS: Record<MarkState, string> = { keep: 'keep', keep_last_ckpt: 'last ckpt', sweep: 'sweep', unmarked: 'undecided' }
-  const stateBar = (k: TreeNode, f: Record<MarkState, number> | null) => {
-    if (!f) return <span className="none">—</span>
-    const parts = (Object.keys(f) as MarkState[]).filter(x => f[x] > 0)
-    return (
-      <Tooltip content={
-        <span className="own-tip">
-          <div>Bytes under this directory by decision:</div>
-          {parts.map(x => <div className="row" key={x}><i style={{ background: STATE_COLORS[x] }} />{STATE_LABELS[x]}<span className="n">{fmtBytes(f[x])} · {Math.round((100 * f[x]) / k.b)}%</span></div>)}
-        </span>
-      }>
-        <span className="own-bar state-bar" style={{ width: 70 }} aria-label="marks distribution">
-          {parts.map(x => <i key={x} style={{ width: `${(100 * f[x]) / k.b}%`, background: STATE_COLORS[x] }} />)}
-        </span>
-      </Tooltip>
-    )
   }
   return (
     <section className="children-tbl" onClick={clearOnDeadClick}>
@@ -288,12 +214,11 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
             </th>
             {hasRead && th('a', 'read', false)}
             {hasOwners && <th>owner(s)</th>}
-            {markIdx && <th>marks</th>}
             {showSel && <th>actions</th>}
           </tr>
         </thead>
         <tbody>
-          {rowData.map(({ k, synthetic, kidSegs, uri, shares, cl, mk, totals, ckpt, si }) => {
+          {rowData.map(({ k, synthetic, kidSegs, uri, shares, cl, si }) => {
             return (
               <tr key={k.n} ref={si >= 0 ? sel.rowRef(si) : undefined} {...(si >= 0 && showSel ? sel.rowProps(si) : {})}>
                 {showSel && <td className="col-sel">{!synthetic && <input type="checkbox" checked={sel.isSelected(k)} onChange={() => sel.toggle(si)} />}</td>}
@@ -328,31 +253,16 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
                     : <span className="none">—</span>}
                 </td>
                 )}
-                {markIdx && <td className="state">{stateBar(k, totals)}</td>}
                 {showSel && (
                   <td className="actions">
-                    {synthetic ? null : staging ? (
+                    {!synthetic && (
                       <>
-                        <Tooltip content="Stage this prefix for deletion — an admin approves and dispatches">
-                          <button type="button" className="trash" onClick={() => trash(uri)} aria-label="trash"><FaRegTrashCan /></button>
-                        </Tooltip>
-                        {showActions && DEFAULT_STORE.owners && <AssignSelect prefix={uri + '/'} assigned={cl?.who ?? null} compact />}
-                      </>
-                    ) : (
-                      <>
-                        {dot(uri, 'keep', mk?.mark?.action === 'keep' ? (mk.own ? 'own' : 'inh') : null, KEEP_TIP)}
-                        {dot(uri, 'sweep', mk?.mark?.action === 'sweep' ? (mk.own ? 'own' : 'inh') : null, SWEEP_TIP)}
-                        {/* Last-ckpt keeps its column whether or not it's offered, so
-                            the row of dots doesn't shift between rows. */}
-                        {ckpt ? dot(uri, 'keep_last_ckpt', mk?.mark?.action === 'keep_last_ckpt' ? (mk.own ? 'own' : 'inh') : null, KLC_TIP) : <span className="dot-gap" />}
-                        <span className="tail">
-                          {mk?.own && (
-                            <Tooltip content={clearTip(true)}>
-                              <button type="button" className="dot clear" onClick={() => mark(uri, null)} aria-label="clear mark">×</button>
-                            </Tooltip>
-                          )}
-                          {DEFAULT_STORE.owners && <AssignSelect prefix={uri + '/'} assigned={cl?.who ?? null} compact />}
-                        </span>
+                        {staging && (
+                          <Tooltip content="Stage this prefix for deletion — an admin approves and dispatches from /staged">
+                            <button type="button" className="trash" onClick={() => trash(uri)} aria-label="trash"><FaRegTrashCan /></button>
+                          </Tooltip>
+                        )}
+                        {assigning && <AssignSelect prefix={uri + '/'} assigned={cl?.who ?? null} compact />}
                       </>
                     )}
                   </td>
@@ -362,15 +272,14 @@ export function ChildrenTable({ node, segs, scheme, markIdx, klcIdx, states, cli
           })}
         </tbody>
         <tfoot>
-          {/* Totals of the LISTED rows — under a scoping lens (to-do) this is
-              the lens total, not the parent node's. */}
+          {/* Totals of the LISTED rows. */}
           <tr className="total-row">
             {showSel && <td />}
             <td>total{kids.length !== (node.c ?? []).length ? ` (${kids.length} shown)` : ''}</td>
             <td className="num">{fmtBytes(kids.reduce((s, k) => s + k.b, 0))}</td>
             <td className="num">{node.b ? ((100 * kids.reduce((s, k) => s + k.b, 0)) / node.b).toFixed(1) : 0}%</td>
             <td className="num">{kids.reduce((s, k) => s + k.o, 0).toLocaleString('en-US')}</td>
-            <td colSpan={2 + (hasRead ? 1 : 0) + (hasOwners ? 1 : 0) + (markIdx ? 1 : 0) + (showSel ? 2 : 0)} />
+            <td colSpan={2 + (hasRead ? 1 : 0) + (hasOwners ? 1 : 0) + (showSel ? 2 : 0)} />
           </tr>
         </tfoot>
       </table>

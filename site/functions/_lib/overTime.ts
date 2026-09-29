@@ -48,9 +48,22 @@ export async function readOverTime(env: Env, path: string): Promise<Map<string, 
     const entry = byKey.get(archiveKey)
     if (!entry) return { rows: [], scans: [], encoder: 'interval' }
     const rows = await readPoint(await openIndex(env, archiveKey, 'over-time'), depth, path, COLS)
-    return { rows: rows as MultiScan['rows'], scans: entry.scans, encoder: 'interval' }
+    // Parquet int64 columns (`depth` as DuckDB wrote it, `b`/`o`, the scan
+    // bounds) arrive as BigInt; pyrmts' own reader normalizes to number and
+    // its key/interval code `JSON.stringify`s the key, which throws on BigInt
+    // ("Do not know how to serialize a BigInt" — every plain-path series 500'd
+    // for the first hours the groups existed, 2026-09-28).
+    return { rows: rows.map(plainRow) as MultiScan['rows'], scans: entry.scans, encoder: 'interval' }
   }
-  const pts = await seriesAcrossGroups(entries, SCHEMA, { depth, path }, load)
+  let pts: Awaited<ReturnType<typeof seriesAcrossGroups>>
+  try {
+    pts = await seriesAcrossGroups(entries, SCHEMA, { depth, path }, load)
+  } catch (e) {
+    // A broken or half-published group must degrade to the per-scan reads,
+    // never fail the chart.
+    console.log(`over-time: falling back to per-scan reads for ${path || '/'}: ${(e as Error).message}`)
+    return null
+  }
   const out = new Map<string, { b: number; o: number }>()
   for (const p of pts) {
     const b = num(p.state.b)
@@ -61,3 +74,14 @@ export async function readOverTime(env: Env, path: string): Promise<Map<string, 
 }
 
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number) ?? 0)
+
+/** A row with every BigInt field as a number (the shape pyrmts' own parquet
+ * reader produces). */
+export function plainRow(row: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k in row) {
+    const v = row[k]
+    out[k] = typeof v === 'bigint' ? Number(v) : v
+  }
+  return out
+}

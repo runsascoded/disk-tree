@@ -55,13 +55,12 @@ export interface AgeRow {
 
 export type Granularity = 'month' | 'week' | 'day'
 
-export type ColorMode = 'tree' | 'date' | 'read' | 'user' | 'marks'
+export type ColorMode = 'tree' | 'date' | 'read' | 'user'
 
 // Key order = the "color by" button row (and ⌘K entry order): the cleanup
-// axes lead (marks is the default fill; read is the best sweep-candidate
-// signal), attribution next, chronology/structure last.
+// axis leads (read is the best deletion-candidate signal), attribution next,
+// chronology/structure last.
 export const MODE_LABELS: Record<ColorMode, string> = {
-  marks: 'marks',
   read: 'read',
   user: 'user',
   date: 'written',
