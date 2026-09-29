@@ -18,6 +18,8 @@
  * back-fills the colo cache. Values are small JSON (≤ ~350 KB); keys are the
  * SHA-256 of the cache key URL (KV keys are capped at 512 bytes). */
 
+import { PRIMARY_STORE } from './stores.js'
+
 const TTL = 86400
 const KV_TTL = 30 * 86400
 // The browser's copy is short-lived: the answer for a (scan pair, path) is
@@ -36,8 +38,13 @@ export interface CacheEnv { CACHE_KV?: KVNamespace }
 // one-sided diff nodes expand.
 export const CACHE_V = '2'
 
-export function cacheKeyFor(ns: string, parts: string): Request {
-  return new Request(`https://${ns}.cache/v${CACHE_V}/${parts}`)
+/** The cache key for `parts` under namespace `ns`. A secondary store's keys
+ * gain an `@<store>/` segment (specs/multi-store.md), so the same path in two
+ * stores can't collide; the primary's (`store` omitted or `'primary'`) are
+ * exactly what they were before stores existed — no one-time cache miss. */
+export function cacheKeyFor(ns: string, parts: string, store?: string): Request {
+  const s = store && store !== PRIMARY_STORE ? `@${store}/` : ''
+  return new Request(`https://${ns}.cache/v${CACHE_V}/${s}${parts}`)
 }
 
 const colo = () => (caches as unknown as { default: Cache }).default

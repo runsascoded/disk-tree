@@ -20,7 +20,7 @@ from pathlib import Path
 
 import duckdb
 import pandas as pd
-from click import Choice, argument, group, option
+from click import Choice, UsageError, argument, group, option
 
 from .cw_digest import REPLY_HOUR_UTC
 from .identity import IDENTITIES_ENV, load_identities
@@ -618,10 +618,11 @@ def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, thr
 @option("-m", "--mem", default="8GB", help="DuckDB memory limit")
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: over-time.parquet + over-time.scans.json")
 @option("-r", "--data-root", default=None, help="Root the D1 pointer dirs resolve against (default /gcs/<bucket>, the Batch mount; pass a local dir or gs://<bucket> otherwise)")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
 @argument("scans", nargs=-1)
-def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None, threads: int, tmp_dir: Path | None, scans: tuple[str, ...]) -> None:
+def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None, store: str, threads: int, tmp_dir: Path | None, scans: tuple[str, ...]) -> None:
     """Write the cross-scan over-time index from published scans' path-indices
     (specs/obs-axis-indexing.md Phase 1). SCANS are scan ids, oldest-first order
     not required — sorted here; each a bare `<date>` (its `path` parquet resolved
@@ -637,13 +638,13 @@ def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None,
     if scans:
         dates = sorted(set(bare) | set(explicit))
     else:
-        dates = sorted({d for d, v in synced_variants() if v == "path"})
+        dates = sorted({d for d, v in synced_variants(store=store) if v == "path"})
     pairs: list[tuple[str, str]] = []
     for d in dates:
         if d in explicit:
             pairs.append((d, explicit[d]))
             continue
-        dir_ = index_dir(d, "path")
+        dir_ = index_dir(d, "path", store=store)
         if dir_ is None:
             err(f"over-time-write: no `path` pointer for {d}, skipping")
             continue
@@ -665,6 +666,7 @@ def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None,
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Work dir for the group builds")
 @option("-p", "--publish-root", default=None, help="Where the published dirs live (default /gcs/<bucket>, the Batch mount); groups land at <root>/<layer2>/index/<gen>/")
 @option("-r", "--data-root", default=None, help="Root the D1 `path` pointer dirs resolve against (default: the publish root)")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
 def over_time_groups(
@@ -677,6 +679,7 @@ def over_time_groups(
     out_dir: Path,
     publish_root: str | None,
     data_root: str | None,
+    store: str,
     threads: int,
     tmp_dir: Path | None,
 ) -> None:
@@ -700,8 +703,8 @@ def over_time_groups(
     l2 = layer2_prefix or os.environ.get("LAYER2_PREFIX") or "cw-l2/{scan}/"
     root = publish_root or f"/gcs/{bucket}"
     data = data_root or root
-    dates = sorted({d for d, v in synced_variants() if v == "path"})
-    done = synced_groups()
+    dates = sorted({d for d, v in synced_variants(store=store) if v == "path"})
+    done = synced_groups(store=store)
     todo = [g for g in sealed_groups(dates, K) if g[-1] not in done]
     err(f"over-time-groups: {len(dates)} indexed scans → {len(sealed_groups(dates, K))} sealed groups of {K}, {len(done)} in the manifest, {len(todo)} to build")
     if dry_run:
@@ -714,7 +717,7 @@ def over_time_groups(
         gid = g[-1]
         pairs: list[tuple[str, str]] = []
         for d in g:
-            dir_ = index_dir(d, "path")
+            dir_ = index_dir(d, "path", store=store)
             if dir_ is None:
                 raise SystemExit(f"over-time-groups: no `path` pointer for {d} (group {gid})")
             pairs.append((d, f"{data}/{dir_}/path-index.parquet"))
@@ -724,8 +727,8 @@ def over_time_groups(
         dest.mkdir(parents=True, exist_ok=True)
         for f in (summ["file"], summ["scans_file"]):
             shutil.copy2(f, dest / Path(f).name)
-        n = sync_d1(gid, str(dest / Path(summ["file"]).name), variant="over-time", gen=gen, key=key)
-        sync_manifest(multiscan_row(g, written_at_ms=int(time.time() * 1000)))
+        n = sync_d1(gid, str(dest / Path(summ["file"]).name), variant="over-time", gen=gen, key=key, store=store)
+        sync_manifest(multiscan_row(g, written_at_ms=int(time.time() * 1000), store=store))
         err(f"over-time-groups: sealed {gid} ({g[0]}..{gid}, {len(g)} scans, {summ['rows']:,} intervals, {n} row groups) → {key}")
         built.append(gid)
     print(json.dumps({"groups": built}))
@@ -740,6 +743,7 @@ def over_time_groups(
 @option("-g", "--gen", required=True, help="Generation stamp these files belong to (the run's GEN; `legacy` for the pre-generation listing/<date>/ layout)")
 @option("-k", "--key", default=None, help="Bucket-relative dir the parquets live under — what the site reads (default: listing/<date>/index/<gen>; listing/<date> for gen `legacy`)")
 @option("-L", "--local", is_flag=True, help="Write to the local wrangler D1 instead of --remote")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @option("-v", "--variant", "variants", multiple=True, type=Choice(list(INDEX_VARIANTS)), help="Only sync these variants (default: all)")
 @argument("date")
 def index_sync(
@@ -751,6 +755,7 @@ def index_sync(
     gen: str,
     key: str | None,
     local: bool,
+    store: str,
     variants: tuple[str, ...],
     date: str,
 ) -> None:
@@ -759,8 +764,17 @@ def index_sync(
     Per variant the row groups land first, tagged with the generation, and the
     pointer (gen, dir) flips last, so the site moves from the previous complete
     generation to this one with no window (specs/view-serving.md). Needs
-    CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the env."""
-    from .index_footer import sync_d1
+    CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the env. `--store` files
+    the rows under a secondary store (variants recorded as
+    `<store>:<variant>`, the `store` column set — needs the store migration;
+    specs/multi-store.md). The default, the primary, writes exactly the
+    pre-stores SQL."""
+    from .index_footer import check_store, sync_d1
+
+    try:
+        check_store(store)
+    except ValueError as e:
+        raise UsageError(str(e)) from None
 
     key = key or (f"listing/{date}" if gen == "legacy" else f"listing/{date}/index/{gen}")
     base = listing_dir or f"{bucket}/{key}"
@@ -772,38 +786,40 @@ def index_sync(
     if age_only:
         todo = tuple(v for v in todo if v.startswith("age-pyramid"))
     for variant in todo:
-        n = sync_d1(date, f"{base}/{INDEX_VARIANTS[variant]}", variant=variant, gen=gen, key=key, remote=not local)
-        err(f"index-sync: {date} [{variant}] gen {gen} @ {key} — {n} row groups ({'local' if local else 'remote'})")
+        n = sync_d1(date, f"{base}/{INDEX_VARIANTS[variant]}", variant=variant, gen=gen, key=key, remote=not local, store=store)
+        err(f"index-sync: {'' if store == 'primary' else f'[{store}] '}{date} [{variant}] gen {gen} @ {key} — {n} row groups ({'local' if local else 'remote'})")
 
 
 @main.command("index-gc")
 @option("-r", "--retain", type=int, default=None, help="Retention: also retire the floor-free variants' row groups of every scan older than the newest N (their pointers stay; the reader falls back to the parquet footer)")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @argument("dates", nargs=-1)
-def index_gc(retain: int | None, dates: tuple[str, ...]) -> None:
+def index_gc(retain: int | None, store: str, dates: tuple[str, ...]) -> None:
     """Delete row groups of index generations no pointer names — a REPROC's
     previous generation, or a sync that died before flipping. All synced
     scans by default; DATES to restrict. With -r, the retention pass too."""
     from .index_footer import gc_d1, retire_d1, synced_variants
 
-    todo = dates or sorted({d for d, _ in synced_variants()})
+    todo = dates or sorted({d for d, _ in synced_variants(store=store)})
     for d in todo:
-        n = gc_d1(d)
+        n = gc_d1(d, store=store)
         err(f"index-gc: {d} — {n} stale row groups deleted")
     if retain is not None:
-        for d, v, n in retire_d1(retain):
+        for d, v, n in retire_d1(retain, store=store):
             err(f"index-gc: retired {d} [{v}] — {n} row groups (footer path serves it now)")
 
 
 @main.command("index-dir")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @option("-v", "--variant", default="path", type=Choice(list(INDEX_VARIANTS)), help="Which variant's dir")
 @argument("date")
-def index_dir_cmd(variant: str, date: str) -> None:
+def index_dir_cmd(store: str, variant: str, date: str) -> None:
     """Print the bucket-relative dir holding a scan's index variant (the D1
     pointer). Exits 1, printing nothing, when that (date, variant) was never
     synced."""
     from .index_footer import index_dir
 
-    d = index_dir(date, variant)
+    d = index_dir(date, variant, store=store)
     if d is None:
         raise SystemExit(1)
     print(d)

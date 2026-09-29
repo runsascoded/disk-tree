@@ -14,8 +14,17 @@ import type { Env } from './auth.js'
 import { openIndex, readPoint } from './index.js'
 import { type Dim, type Metric, type MultiScan, type MultiScanIndexEntry, type Pyramid, seriesAcrossGroups } from 'pyrmts'
 import { MultiScanD1Index } from 'pyrmts-cfw'
+import { PRIMARY_STORE, storeKey } from './stores.js'
 
 const COLS = ['depth', 'path', 'b', 'o', '__scan_lo', '__scan_hi']
+
+/** The store's manifest dataset: `over-time` for the primary, `<store>:over-time`
+ * for a secondary store (pyrmts owns `pyramid_multiscans`, whose `(dataset,
+ * key)` PK already namespaces it; `dt_cloud.overtime.multiscan_dataset`). */
+export const overTimeDataset = (env: Env): string => {
+  const s = storeKey(env)
+  return s === PRIMARY_STORE ? 'over-time' : `${s}:over-time`
+}
 
 // cw's over-time shape as a pyrmts logical schema: key `(depth, path)`, state
 // `(b, o)` (mirrors `over_time_pyramid()` in the producer).
@@ -42,7 +51,7 @@ export async function readOverTime(env: Env, path: string): Promise<OverTime | n
   if (!env.DB) return null
   let entries: MultiScanIndexEntry[]
   try {
-    entries = await new MultiScanD1Index(env.DB).listMultiScans('over-time')
+    entries = await new MultiScanD1Index(env.DB).listMultiScans(overTimeDataset(env))
   } catch {
     return null // manifest table absent (not migrated) → fallback
   }

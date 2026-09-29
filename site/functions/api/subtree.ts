@@ -18,9 +18,13 @@ import { parseOwner, parseQuery, classKey, parseClasses } from '../_lib/scope.js
 import { hasExtras } from '../_lib/extras.js'
 import { ATTEN_DEFAULT, buildView, LensUnavailable, MIN_AREA_DEFAULT, NotFound, QUANT } from '../_lib/view.js'
 import { cacheKeyFor, cacheMatch, cacheStore, serverTiming } from '../_lib/edgeCache.js'
+import { LENS_PRIMARY_ONLY, storeKey, withStore } from '../_lib/stores.js'
 
 
-export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> => {
+export const onRequestGet = async (ctx0: { request: Request; env: Env; waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> => {
+  // `store=<key>`: a secondary store's env overlay (none = the primary, as is).
+  const ctx = withStore(ctx0)
+  if (ctx instanceof Response) return ctx
   const st = serverTiming()
   if (!storeReady(ctx.env)) {
     return new Response('subtree API not configured (missing index store creds)', { status: 503 })
@@ -40,6 +44,7 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   const lensRaw = url.searchParams.get('lens')
   let lens: Lens | undefined
   if (lensRaw) {
+    if (ctx.env.STORE_KEY) return new Response(LENS_PRIMARY_ONLY, { status: 400 })
     const m = /^user:(.+)$/.exec(lensRaw)
     if (!m) return new Response('bad lens (want user:<id>)', { status: 400 })
     lens = { key: m[1] }
@@ -70,6 +75,7 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
     const cacheKey = cacheKeyFor('subtree',
       `${date}/${encodeURIComponent(path)}?w=${w}&h=${h}&a=${minArea}&t=${atten}&l=${lensRaw ?? ''}` +
         `&o=${rawOwner ?? ''}&b=${by ?? ''}&D=${depth ?? ''}&cl=${classKey(classes)}&x=${xtra ? 1 : 0}&F=${query && !full ? 0 : 1}&q=${encodeURIComponent(query ? qRaw : '')}&head=${head}`,
+      storeKey(ctx.env),
     )
     const hit = await st.time('match', cacheMatch(ctx.env, cacheKey))
     if (hit) return hit

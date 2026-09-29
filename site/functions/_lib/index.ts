@@ -27,6 +27,7 @@ import { S3Store } from '@rdub/file-tree/stores/s3'
 import { parquetMetadataAsync, parquetReadObjects } from 'hyparquet'
 import type { Env } from './auth.js'
 import { shared } from './shared.js'
+import { d1Variant, isPrimary, PRIMARY_STORE, storeKey } from './stores.js'
 
 /** A leaf of the stored parquet schema (`index_schema.schema_json`). */
 interface SchemaElement { type: string; name: string; repetition_type: string; converted_type?: string }
@@ -184,8 +185,26 @@ export function indexKey(dir: string, variant: string): string {
  * outside the D1 row-group path. */
 export async function indexDir(env: Env, date: string, variant = 'path'): Promise<string | null> {
   if (!env.DB) return null
-  const r = await env.DB.prepare('SELECT dir FROM index_schema WHERE date = ? AND variant = ?').bind(date, variant).first<{ dir: string | null }>()
+  const r = await schemaRow<{ dir: string | null }>(env, 'dir', date, variant)
   return r?.dir ?? null
+}
+
+/** One `index_schema` pointer row of the env's store. The primary's query is
+ * exactly the pre-stores one (runs on an un-migrated D1); a secondary store's
+ * names `store` and its namespaced variant (`d1Variant`). */
+export function schemaRow<T>(env: Env, cols: string, date: string, variant: string): Promise<T | null> {
+  return isPrimary(env)
+    ? env.DB!.prepare(`SELECT ${cols} FROM index_schema WHERE date = ? AND variant = ?`).bind(date, variant).first<T>()
+    : env.DB!.prepare(`SELECT ${cols} FROM index_schema WHERE store = ? AND date = ? AND variant = ?`).bind(storeKey(env), date, d1Variant(env, variant)).first<T>()
+}
+
+/** Every scan of the env's store with a synced floor-free (`path`) index —
+ * the primary's query as it always was, a secondary store's scoped. */
+export function pathScans(env: Env, order: boolean): Promise<{ results: { date: string }[] }> {
+  const by = order ? ' ORDER BY date' : ''
+  return isPrimary(env)
+    ? env.DB!.prepare(`SELECT DISTINCT date FROM index_schema WHERE variant = 'path'${by}`).all<{ date: string }>()
+    : env.DB!.prepare(`SELECT DISTINCT date FROM index_schema WHERE store = ? AND variant = ?${by}`).bind(storeKey(env), d1Variant(env, 'path')).all<{ date: string }>()
 }
 
 function fileFor(env: Env, dir: string, variant: string): FileSlice {
@@ -218,7 +237,7 @@ const handles = new Map<string, Promise<IndexHandle>>()
 const handleAt = new Map<string, number>()
 
 export async function openIndex(env: Env, date: string, variant = 'path'): Promise<IndexHandle> {
-  const ck = `${date}:${variant}`
+  const ck = `${storeKey(env)}:${date}:${variant}`
   const at = handleAt.get(ck)
   if (at == null || Date.now() - at >= HANDLE_TTL) {
     handles.delete(ck)
@@ -226,13 +245,13 @@ export async function openIndex(env: Env, date: string, variant = 'path'): Promi
   }
   return shared(handles, ck, async (): Promise<IndexHandle> => {
     if (!env.DB) throw new Error('index reader not configured (DB)')
-    const s = await env.DB.prepare('SELECT version, schema_json, floor_bytes, gen, dir FROM index_schema WHERE date = ? AND variant = ?').bind(date, variant).first<{ version: number; schema_json: string; floor_bytes: number | null; gen: string | null; dir: string | null }>()
+    const s = await schemaRow<{ version: number; schema_json: string; floor_bytes: number | null; gen: string | null; dir: string | null }>(env, 'version, schema_json, floor_bytes, gen, dir', date, variant)
     if (!s || !s.gen || !s.dir) throw new Error(`index variant '${variant}' not synced for ${date}`)
     // A pointer whose row groups were retired (`index-gc -r`) still names
     // the generation dir: open the tier's group-manifest blob there instead.
     // (Parsing the parquet footer itself is not an option — a floor-free
     // tier's ~27k-group footer exceeds the Worker's memory.)
-    const any = await env.DB.prepare('SELECT 1 AS x FROM index_row_groups WHERE date = ? AND variant = ? AND gen = ? LIMIT 1').bind(date, variant, s.gen).first<{ x: number }>()
+    const any = await env.DB.prepare('SELECT 1 AS x FROM index_row_groups WHERE date = ? AND variant = ? AND gen = ? LIMIT 1').bind(date, d1Variant(env, variant), s.gen).first<{ x: number }>()
     if (!any) return openBlob(env, date, variant, s.gen, s.dir)
     return { mode: 'd1', file: fileFor(env, s.dir, variant), env, date, variant, gen: s.gen, schema: JSON.parse(s.schema_json), version: s.version, floor: s.floor_bytes == null ? null : num(s.floor_bytes) }
   }, 30_000) // a blob open is a ~15 MB fetch + parse
@@ -255,7 +274,9 @@ export const blobKey = (dir: string, variant: string): string => indexKey(dir, v
 async function openBlob(env: Env, date: string, variant: string, gen: string, dir: string): Promise<BlobHandle> {
   const key = blobKey(dir, variant)
   const cache = (caches as unknown as { default: Cache }).default
-  const ck = new Request(`https://index-blob.cache/${key}`)
+  // A secondary store's bucket may hold the same key: its entries get their own segment.
+  const st = storeKey(env)
+  const ck = new Request(`https://index-blob.cache/${st === PRIMARY_STORE ? '' : `@${st}/`}${key}`)
   let text: string
   const hit = await cache.match(ck)
   if (hit) text = await hit.text()
@@ -358,7 +379,7 @@ const groupCache = new Map<string, Row[]>()
 let groupCacheBytes = 0
 
 async function readGroupCached(h: IndexHandle, rg: number, rgJson: string): Promise<Row[]> {
-  const k = `${h.date}|${h.variant}|${h.gen}|${rg}`
+  const k = `${storeKey(h.env)}|${h.date}|${h.variant}|${h.gen}|${rg}`
   const hit = groupCache.get(k)
   if (hit) {
     groupCache.delete(k)
@@ -447,7 +468,7 @@ async function selectSpans(h: IndexHandle, rects: Rect[], cap = 4000, bMin = 0, 
   const bFloor = bMin > 0 ? ' AND b_max >= ?' : ''
   const sql = `SELECT rg, d_min, d_max, p_min, p_max, b_max, row_start, row_end FROM index_row_groups WHERE date = ? AND variant = ? AND gen = ? AND (${where.join(' OR ')})${bFloor} ORDER BY rg LIMIT ${cap + 1}`
   if (bMin > 0) binds.push(Math.floor(bMin))
-  const res = await h.env.DB!.prepare(sql).bind(h.date, h.variant, h.gen, ...binds).all<{ rg: number; d_min: number; d_max: number; p_min: string; p_max: string; b_max: number; row_start: number; row_end: number }>()
+  const res = await h.env.DB!.prepare(sql).bind(h.date, d1Variant(h.env, h.variant), h.gen, ...binds).all<{ rg: number; d_min: number; d_max: number; p_min: string; p_max: string; b_max: number; row_start: number; row_end: number }>()
   if (res.results.length > cap) throw new Error(`query too wide: >${cap} row groups (drill deeper or raise minArea)`)
   return res.results.map(r => ({ rg: r.rg, dMin: num(r.d_min), dMax: num(r.d_max), pMin: r.p_min, pMax: r.p_max, bMax: num(r.b_max), rowStart: num(r.row_start), rowEnd: num(r.row_end) }))
 }
@@ -463,7 +484,7 @@ async function fetchGroupJson(h: IndexHandle, rgs: number[]): Promise<Map<number
   for (let i = 0; i < rgs.length; i += 80) {
     const chunk = rgs.slice(i, i + 80)
     const sql = `SELECT rg, rg_json FROM index_row_groups WHERE date = ? AND variant = ? AND gen = ? AND rg IN (${chunk.map(() => '?').join(',')})`
-    const res = await h.env.DB!.prepare(sql).bind(h.date, h.variant, h.gen, ...chunk).all<{ rg: number; rg_json: string }>()
+    const res = await h.env.DB!.prepare(sql).bind(h.date, d1Variant(h.env, h.variant), h.gen, ...chunk).all<{ rg: number; rg_json: string }>()
     for (const r of res.results) out.set(r.rg, r.rg_json)
   }
   return out

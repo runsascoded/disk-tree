@@ -12,12 +12,16 @@
  * FE should pass the chart's actual time domain to get useful granularity.
  */
 import { type Env, requireViewer } from '../_lib/auth.js'
+import { withStore } from '../_lib/stores.js'
 import { num, openIndex, readPoint, storeReady } from '../_lib/index.js'
 import { AGE_TIERS, planAge } from '../_lib/agePyramid.js'
 
 const COLS = ['path', 'depth', 'binstart', 'b', 'o']
 
-export const onRequestGet = async (ctx: { request: Request; env: Env }): Promise<Response> => {
+export const onRequestGet = async (ctx0: { request: Request; env: Env }): Promise<Response> => {
+  // `store=<key>`: a secondary store's env overlay (none = the primary, as is).
+  const ctx = withStore(ctx0)
+  if (ctx instanceof Response) return ctx
   if (!storeReady(ctx.env)) {
     return new Response('age-pyramid API not configured (missing index store creds)', { status: 503 })
   }

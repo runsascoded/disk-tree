@@ -20,12 +20,16 @@
 // bare GET would mean buffering the whole multi-GB file and is refused with
 // a pointer to Range requests instead.
 import { S3Store } from '@rdub/file-tree/stores/s3'
+import { withStore } from '../_lib/stores.js'
 import { type Env, requireViewer } from '../_lib/auth.js'
 import { indexDir, storeCreds, storePrefixes, storeReady, storeTarget } from '../_lib/index.js'
 
 const MAX_RANGE = 64 * 1024 * 1024 // 64MB per request — plenty for parquet pages
 
-export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Response> => {
+export const onRequest = async (ctx0: { request: Request; env: Env }): Promise<Response> => {
+  // `store=<key>`: a secondary store's env overlay (none = the primary, as is).
+  const ctx = withStore(ctx0)
+  if (ctx instanceof Response) return ctx
   const { request, env } = ctx
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return new Response('method not allowed', { status: 405, headers: { allow: 'GET, HEAD' } })
