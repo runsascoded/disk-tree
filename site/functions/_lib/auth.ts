@@ -124,8 +124,8 @@ async function adminRow(env: Env, email: string): Promise<boolean> {
  */
 export const scopesFor = (env: Env) => async (raw: string): Promise<string[] | null> => {
   const email = raw.toLowerCase()
-  if (email.endsWith(`@${staffDomain(env)}`)) return [GCS_SCOPE, CW_SCOPE, ADMIN_SCOPE, REQUESTS_SCOPE]
   const base = baseScope(env)
+  if (email.endsWith(`@${staffDomain(env)}`)) return allScopes(env)
   if (!env.DB) return [base]
   const admitted = viewerDomains(env).some(d => email.endsWith(`@${d}`))
     || !!(await env.DB.prepare('SELECT email FROM allowed_emails WHERE email = ?').bind(email).first())
@@ -168,9 +168,11 @@ function authIdentity(auth: Auth): Identity {
   return withAdmin({ email: auth.grant.email ?? null, name: auth.grant.name ?? null, scopes: auth.scopes, via: 'grant' })
 }
 
-/** All app scopes — granted to the local-dev identity so `/data` etc. work
- *  without a minted session. */
-const DEV_SCOPES = [GCS_SCOPE, CW_SCOPE, ADMIN_SCOPE, REQUESTS_SCOPE]
+/** All app scopes (staff, and the local-dev identity so `/data` etc. work
+ *  without a minted session): the deployment's base scope — which a store
+ *  other than gcs/cw (e.g. `laptop`) names itself — plus the fixed ones. */
+const allScopes = (env: Env): string[] =>
+  [...new Set([GCS_SCOPE, CW_SCOPE, ADMIN_SCOPE, REQUESTS_SCOPE, baseScope(env)])]
 
 export async function identify(ctx: Ctx): Promise<Identity | null> {
   // Local dev has no minted session, so `wrangler pages
@@ -181,7 +183,7 @@ export async function identify(ctx: Ctx): Promise<Identity | null> {
   // gcs.oa.dev request's URL host is never `localhost`/`127.0.0.1`.
   const host = new URL(ctx.request.url).hostname
   if (host === 'localhost' || host === '127.0.0.1') {
-    return withAdmin({ email: ctx.env.DEV_EMAIL ?? 'dev@example.test', name: null, scopes: DEV_SCOPES, via: 'session' })
+    return withAdmin({ email: ctx.env.DEV_EMAIL ?? 'dev@example.test', name: null, scopes: allScopes(ctx.env), via: 'session' })
   }
   const gate = gateFor(ctx.env)
   if (!gate) return null
