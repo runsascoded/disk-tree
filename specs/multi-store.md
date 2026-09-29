@@ -1,6 +1,6 @@
 # Multi-store deploys: secondary stores at their own URL paths (first user: a `/meta` self-scan)
 
-Status: **proposed** (2026-09-29, from the cw-s3 session; Ryan: "(a) multi-store base sg … yes spec it, this is a good direction").
+Status: **phase 1 implemented on the base** (2026-09-29; not yet deployed or migrated anywhere); phases 2–3 open. Proposed 2026-09-29 from the cw-s3 session (Ryan: "(a) multi-store base sg … yes spec it, this is a good direction").
 
 ## Motivation
 
@@ -34,7 +34,36 @@ That spec's phase 2 is a **union** of N locations into one Map. This one is its 
 3. **Meta store for cw:** the job targets, scheduler, first scan, `wrangler.toml` config, then CIC `cw-s3.oa.dev/meta`.
 4. **(later)** Converge with `federated-scans.md` phase 2: a store may be a union of locations.
 
+## Phase 1 as built
+
+**D1** (`site/migrations/cw/0006_store_scoped_index.sql`, `site/migrations/gcs/0030_store_scoped_index.sql`, identical DDL):
+
+- The primary's rows are `store = 'primary'`, a fixed sentinel, not the deploy's `STORE` key: the cw lineage serves both cw-s3 and the r2 demo, so a per-deploy default can't live in a shared migration. `'primary'` is reserved (not a valid `STORES_JSON` key); `store=primary` is accepted as a synonym for no param.
+- `index_schema` is rebuilt (create / copy / drop / rename) with PK `(store, date, variant)`. It's small, and nothing `REFERENCES` it, so the rebuild can't trip D1's FK enforcement.
+- `index_row_groups` is **not** rebuilt (deviation from design item 3). It's the multi-GB table: gcs's DROP COLUMN on it ran past D1's statement limit (gcs `0019`). It gets `store TEXT NOT NULL DEFAULT 'primary'` in place, an O(1) change, and its PK stays `(date, variant, gen, rg)`. Uniqueness across stores comes from the writer: `index-sync --store S` records a secondary store's generation as `S:<gen>` (`dt_cloud.index_footer.d1_gen`), in both the row groups and the pointer. The reader reaches row groups only through the store-scoped pointer's `gen`, so the hot row-group queries are unchanged. The writer's gc / retention / compact passes filter on `store`.
+- `pyramid_multiscans` gets **no** column (deviation). pyrmts owns its DDL (`CREATE TABLE IF NOT EXISTS` at first sync; the gcs lineage never created it, so an `ALTER` there would fail on a fresh DB) and its read query (`MultiScanD1Index.listMultiScans(dataset)`). Its `(dataset, key)` PK already namespaces it: a secondary store's groups are dataset `<store>:over-time`, and the primary's stay `over-time` (`overTimeDataset` in `_lib/overTime.ts`, `multiscan_dataset` in `dt_cloud.overtime`).
+- `owner_totals` (gcs; per-scan ownership cache) is left alone: the ownership surfaces are primary-only (below).
+- Verified: `storeMigration.test.ts` applies each lineage from scratch with `PRAGMA foreign_keys=ON` (`sqliteD1(lineage, {before})`), seeds `plans` / `plan_items` / index rows, applies the migration, and asserts the exact rows, `foreign_key_check = []`, `integrity_check = ok`, the new PK columns, and that a second store's scan fits under the same id while a duplicate is refused. Both files were also applied with `wrangler d1 migrations apply --local` (miniflare's D1) over a seeded pre-migration DB, which enforces FKs as D1 does. Rows came through as `primary`, `foreign_key_check` was empty, and `foreign_keys` was 1.
+
+**Rollout order** (each D1: gcs, cw-s3, the r2 demo and its dev twin): apply the migration **before** deploying the new Functions or running a job image with the new `dt-cloud`. Both now name `store` in their SQL, and the pre-migration schema has no such column.
+
+**Functions** (`site/functions/_lib/stores.ts`):
+
+- `withStore(ctx)`: no `store=` (or `store=primary`, or empty) returns the context object itself, so the primary's behaviour and responses are unchanged. Its D1 reads now say `store = 'primary'`, which returns the same rows once migrated. `store=<key>` returns a copy with an `Env` overlay. A malformed key gets 400, an unknown one 404, and a bad `STORES_JSON` 500.
+- `STORES_JSON = {"<key>": {"scope"?, "vars"?, "secrets"?}}`. `vars` may set only the per-store vars: `ROOT_LABEL`, `SNAPSHOTS_SUBDIR`, `STORE_SCHEME`, `STORE_BUCKETS`, `STORE_PREFIXES`, `STORE_BUCKET`, `STORE_ENDPOINT`, `STORE_REGION`, `STORE_ACCESS_KEY_ID`, `STORE_SECRET_ACCESS_KEY`. `secrets` maps one of those vars to the **name** of the Pages secret holding its value. The overlay first clears all of them, plus the `GCS_HMAC_*` fallback, so nothing of the primary's leaks into a secondary store. Unknown fields or vars are refused.
+- `BASE_SCOPE` stays deploy-wide (deviation from design item 2's var list). It's the identity policy's grant (`scopesFor`), so overlaying it would hand every allow-listed viewer the secondary store's scope. A store's `scope` is instead an **extra** scope that `requireViewer` demands on top of the viewer scope: `STORE_SCOPE` on the overlay, 401 for anonymous and 403 for signed-in.
+- Wired into `/api/{subtree,diff,series,age,age-pyramid,path-index,bench,store}`, `/data/*` and `/v1/files/*`. On a secondary store, `/data/*` reads only `snapshotsPrefix(env)` (its own `snapshots/<sub>/`, never `rules.json`). `/v1/files?store=` is gated by `requireViewer` like the store's data; the primary's proxy keeps no gate of its own, unchanged (see open questions).
+- Primary-only: `/api/{owners,estate,assignments,claims,actions}` return 404 for any other store, and `lens=user:` on subtree/diff/series returns 400. The ownership ledger and identity registry are the primary's. `slack/actions`' "latest scan" reads the primary's rows.
+- Caches: `cacheKeyFor(ns, parts, store)` inserts `@<store>/` only for a secondary store. The primary's keys are byte-identical to before, so there is no one-time miss. The index-blob colo cache and the per-isolate memos (`openIndex` handles, the row-group LRU, the extras index) are keyed by store too.
+- Tests: `stores.test.ts` (15 cases). Config parsing and refusals; the exact overlay; `withStore` returns the same object for the primary; the error bodies; cache keys and over-time datasets; D1 isolation (one scan id in two stores: `indexDir` / `openIndex` each see only their own pointer); and handler-level 404 / 400 / scope-gate responses.
+
+**`dt-cloud`**: `-s/--store` (default `primary`) on `index-sync`, `index-gc`, `index-dir`, `over-time-groups` and `over-time-write`. Every index-writer statement names its store.
+
+**Not done in phase 1**: the dev-stack diff of `/api/series` / `/api/subtree` / `/api/diff` before vs after. It needs a migrated D1, and every dev stack here points at a prod D1. The byte-identity argument rests on `withStore` returning the untouched context, unchanged primary cache keys, and `store = 'primary'` selecting every pre-existing row. `warm-cache` has no `--store` yet (phase 3).
+
 ## Open questions
 
 - Route shape for secondary-store APIs: a `store=` param (proposed; minimal churn) vs a path prefix (`/meta/api/...`).
 - Whether the meta store should also cover the D1 database size and KV namespace sizes (not objects, but part of "our storage"), shown as synthetic roots.
+- `/v1/files` (the primary's) calls no `requireViewer`: it dates from the CF Access era, and both deployments are now off Zero Trust. Is it meant to be open? Phase 1 leaves the primary as it was and gates only `?store=`.
+- Should `index_row_groups` eventually carry `store` in its PK, e.g. via a new table filled a `(date, variant)` at a time the way `index_groups` was retired? The gen namespacing makes that unnecessary for correctness.
