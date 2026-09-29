@@ -65,7 +65,15 @@ export async function readOverTime(env: Env, path: string): Promise<OverTime | n
   }
   let pts: Awaited<ReturnType<typeof seriesAcrossGroups>>
   try {
-    pts = await seriesAcrossGroups(entries, SCHEMA, { depth, path }, load)
+    // `seriesAcrossGroups` awaits each group's `load` in turn (it only needs
+    // them in span order); start every group's read up front so the ⌈N/K⌉
+    // D1 + range round trips overlap instead of stacking.
+    const loaded = new Map(entries.map(e => {
+      const p = load(e.key)
+      p.catch(() => {}) // still rejects where awaited; just not "unhandled" before then
+      return [e.key, p] as const
+    }))
+    pts = await seriesAcrossGroups(entries, SCHEMA, { depth, path }, key => loaded.get(key) ?? load(key))
   } catch (e) {
     // A broken or half-published group must degrade to the per-scan reads,
     // never fail the chart.
