@@ -22,6 +22,23 @@ For serving, the second is strictly better. The first stays as the laptop's writ
 
 ## Plan
 
+### Where the ingest runs: AWS Batch in the RAC account
+The laptop runs only the walk: `disk-tree capture` streams layer-1 listing shards to `r2://disk-tree/captures/…` with bounded memory and no local disk. Everything after that (path index, snapshot, D1 footer sync, generation GC) is a Batch job in the `r` profile's account (006196295121, us-east-1), which already runs `pyrmts-engine`, `nj-crashes` and `jct` on Fargate Spot. Reasons:
+- reproducibility (a pinned image, not the laptop's venv);
+- no memory pressure on the laptop;
+- private CloudWatch logs; the repo is public, so GHA logs would be world-readable;
+- room to grow up to 16 vCPU / 120 GB.
+
+R2 egress is free, so reading the capture from AWS costs nothing extra. Pieces:
+- ECR repo `disk-tree`: an image with `disk-tree` + `dt-cloud`.
+- A Fargate Spot compute environment plus queue.
+- Job definition `disk-tree-ingest`. Start at 4 vCPU / 16 GB, ephemeral storage sized after the spike.
+- Secrets Manager entries: the R2 RW keypair for the `disk-tree` bucket, and a CF token for D1.
+- Terraform: extend `iac/aws/`, which already declares a Fargate compute environment, queue and job definition for the delete executor and has never been applied.
+- The laptop agent: `capture` → `aws batch submit-job`.
+
+GHA (the `reduce.yml` precedent) stays the fallback.
+
 ### Phase 0: spike (does a 7.4M-row home scan fit `site/`'s model?)
 1. Publish scan 136 (`/Users/ryan`, `c69fe255`, R2) into the snapshot model:
    - a listing from the blob's files, or a fresh `disk-tree capture /Users/ryan -t r2://disk-tree/captures`;
