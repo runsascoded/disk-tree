@@ -19,7 +19,15 @@ UA = "gcs-usage-cli/1.0"
 
 
 class SiteError(Exception):
-    """A caller-fixable problem (no token, the server refused or is unreachable)."""
+    """A caller-fixable problem (no token, the server refused or is unreachable).
+
+    ``status`` is the HTTP status of a refusal (``None``: unreachable), so a
+    caller can tell a legitimate "not found" from an auth or server failure.
+    """
+
+    def __init__(self, msg: str, status: int | None = None):
+        super().__init__(msg)
+        self.status = status
 
 
 def creds(token: str | None, url: str | None) -> tuple[str, str | None]:
@@ -28,7 +36,7 @@ def creds(token: str | None, url: str | None) -> tuple[str, str | None]:
     return (url or os.environ.get("GCS_USAGE_URL") or DEFAULT_URL), secret(token, "GCS_USAGE_TOKEN")
 
 
-def get_json(url: str, token: str, endpoint_path: str, params: dict | None = None, timeout: int = 30) -> dict:
+def get_json(url: str, token: str, endpoint_path: str, params: dict | None = None, timeout: int = 30) -> dict | list:
     """GET ``<url><endpoint_path>?<params>`` as an authenticated JSON call.
 
     Surfaces the server's own error string on a non-2xx rather than a raw
@@ -46,6 +54,6 @@ def get_json(url: str, token: str, endpoint_path: str, params: dict | None = Non
             msg = json.loads(body).get("error", body)
         except ValueError:
             msg = body
-        raise SiteError(f"{endpoint} → HTTP {e.code}: {msg}") from e
+        raise SiteError(f"{endpoint} → HTTP {e.code}: {msg}", status=e.code) from e
     except URLError as e:
         raise SiteError(f"{endpoint} unreachable: {e.reason}") from e
