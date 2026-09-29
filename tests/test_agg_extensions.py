@@ -12,6 +12,7 @@ from pathlib import Path
 import duckdb
 import numpy as np
 import pandas as pd
+from disk_tree.blobfs import read_parquet as read_listing
 import pytest
 
 from disk_tree.find.agg_ext import PIVOT_MAX
@@ -74,11 +75,11 @@ def _all_engines(tmp_path: Path, listing: str) -> dict[str, pd.DataFrame]:
         prepare_listing(con, (listing,)),
         bucket='b1', scheme='gcs', out_parquet=ddb, con=con, **kw,
     )
-    out['duckdb'] = pd.read_parquet(ddb)
+    out['duckdb'] = read_listing(ddb)
 
     stream = str(tmp_path / 'stream.parquet')
     aggregate_stream((listing,), bucket='b1', scheme='gcs', out_parquet=stream, **kw)
-    out['stream'] = pd.read_parquet(stream)
+    out['stream'] = read_listing(stream)
     return out
 
 
@@ -186,7 +187,7 @@ def test_extensions_with_dirty_keys(tmp_path: Path):
     got_pandas = import_listing((str(listing),), bucket='b1', scheme='gcs', **kw).df
     out = str(tmp_path / 's.parquet')
     aggregate_stream((str(listing),), bucket='b1', scheme='gcs', out_parquet=out, **kw)
-    got_stream = pd.read_parquet(out)
+    got_stream = read_listing(out)
 
     cols = ['sum_storage_class_id_1', 'sum_storage_class_id_2', 'mtime_mean']
     norm = lambda d: pd.concat(
@@ -213,14 +214,14 @@ def test_mean_mtime_exact_at_scale_boundary(tmp_path: Path):
     got_pandas = import_listing((str(listing),), bucket='b1', scheme='gcs', **kw).df
     out = str(tmp_path / 's.parquet')
     aggregate_stream((str(listing),), bucket='b1', scheme='gcs', out_parquet=out, **kw)
-    got_stream = pd.read_parquet(out)
+    got_stream = read_listing(out)
     con = duckdb.connect()
     ddb = str(tmp_path / 'd.parquet')
     aggregate_listing_to_parquet(
         prepare_listing(con, (str(listing),)),
         bucket='b1', scheme='gcs', out_parquet=ddb, con=con, **kw,
     )
-    got_duckdb = pd.read_parquet(ddb)
+    got_duckdb = read_listing(ddb)
 
     e10, e20 = int(_ts(10).timestamp()), int(_ts(20).timestamp())
     expect = float(e10 * big + e20 * 1) / float(big + 1)
@@ -262,8 +263,8 @@ def test_mtime_mean_hugeint_rounding(tmp_path):
         prepare_listing(con, (listing,)), bucket='b1', scheme='s3',
         out_parquet=out_d, con=con, mean_mtime=True,
     )
-    ds = pd.read_parquet(out_s).set_index('path')['mtime_mean']
-    dd = pd.read_parquet(out_d).set_index('path')['mtime_mean']
+    ds = read_listing(out_s).set_index('path')['mtime_mean']
+    dd = read_listing(out_d).set_index('path')['mtime_mean']
     assert ds['d'] == exact
     assert dd['d'] == exact
 
@@ -284,7 +285,7 @@ def test_extensions_survive_partitioned_cascade(tmp_path: Path, depth: int):
         prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=part, con=con,
         partition_depth=depth, **kw,
     )
-    pd.testing.assert_frame_equal(_normalize(pd.read_parquet(base)), _normalize(pd.read_parquet(part)))
+    pd.testing.assert_frame_equal(_normalize(read_listing(base)), _normalize(read_listing(part)))
 
 
 # ---------- Attribution slices as cascade group keys (spec mgu-scale-unification.md, item B) ----------
@@ -311,7 +312,7 @@ def _run_labeled(tmp_path: Path, listing: str, labels: str | None, name: str, **
         prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=out, con=con,
         pivot_sums=('storage_class_id',), mean_mtime=True, label=labels, **kw,
     )
-    return pd.read_parquet(out)
+    return read_listing(out)
 
 
 def _slices(df: pd.DataFrame) -> list[tuple]:
@@ -464,7 +465,7 @@ def _run_side(tmp_path: Path, listing: str, side: str | None, name: str, max_col
         prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=out, con=con,
         pivot_sums=('storage_class_id',), mean_mtime=True, side=side, max_cols=max_cols, **kw,
     )
-    return pd.read_parquet(out)
+    return read_listing(out)
 
 
 def test_side_max_col_is_subtree_max(tmp_path: Path):
@@ -605,7 +606,7 @@ def test_size_hist_matches_direct_computation(tmp_path: Path):
         prepare_listing(con, (str(listing),)), bucket='b1', scheme='gcs', out_parquet=out, con=con,
         size_hist=True, pivot_sums=('storage_class_id',),
     )
-    df = pd.read_parquet(out)
+    df = read_listing(out)
     assert list(df.columns) == [
         'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
         'sum_storage_class_id_1', 'size_hist_n', 'size_hist_bytes', 'uri', 'depth',
@@ -629,7 +630,7 @@ def test_size_hist_matches_direct_computation(tmp_path: Path):
     aggregate_listing_to_parquet(
         prepare_listing(con, (str(listing),)), bucket='b1', scheme='gcs', out_parquet=plain, con=con,
     )
-    assert [c for c in pd.read_parquet(plain).columns if c.startswith('size_hist')] == []
+    assert [c for c in read_listing(plain).columns if c.startswith('size_hist')] == []
 
 
 def test_size_hist_under_labels_and_partitions(tmp_path: Path):
@@ -643,7 +644,7 @@ def test_size_hist_under_labels_and_partitions(tmp_path: Path):
             prepare_listing(con, (listing,)), bucket='b1', scheme='gcs', out_parquet=out, con=con,
             size_hist=True, mean_mtime=True, label=labels, **kw,
         )
-        return pd.read_parquet(out)
+        return read_listing(out)
 
     one = run('one')
     for k in (1, 2):

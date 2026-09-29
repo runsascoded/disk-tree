@@ -205,7 +205,28 @@ def read_table(path: str, columns: list[str] | None = None, filters=None) -> pa.
 def read_parquet(path: str, filters=None, columns: list[str] | None = None) -> pd.DataFrame:
     """`pd.read_parquet`, URL-aware. Predicate pushdown works the same remotely:
     row-group min/max stats are read from the footer and only overlapping groups
-    are fetched (range GETs)."""
+    are fetched (range GETs).
+
+    A v2 layer-2 listing (spec `listing-slim.md`) comes back in its v1 shape:
+    `uri` and the implied pivot columns are derived (:func:`listing_format.restore`),
+    so every blob reader sees one format. Asking for `uri` (or an implied
+    column) by name works on either format."""
+    from . import listing_format as lf
+    path = os.fspath(path)
+    fmt = lf.parse(read_schema(path).metadata)
+    if columns is not None and fmt.version >= 2:
+        want = list(columns)
+        derived = {'uri': 'path', **fmt.implied}
+        read = [c for c in want if c not in derived]
+        for c in want:
+            if c in derived and derived[c] not in read:
+                read.append(derived[c])
+        df = _read_parquet(path, filters, read)
+        return lf.restore(df, fmt)[want]
+    return lf.restore(_read_parquet(path, filters, columns), fmt)
+
+
+def _read_parquet(path: str, filters, columns: list[str] | None) -> pd.DataFrame:
     import pandas as pd
     if not is_url(path):
         return pd.read_parquet(path, filters=filters, columns=columns)
@@ -236,6 +257,16 @@ def row_group_sizes(path: str) -> list[int]:
     return [md.row_group(i).num_rows for i in range(md.num_row_groups)]
 
 
+def _codec_of(pf) -> dict:
+    """`ParquetWriter` kwargs reproducing an existing file's codec (first column
+    chunk; our writers use one codec per file). Empty file → the writer default."""
+    md = pf.metadata
+    if not md.num_row_groups or not md.num_columns:
+        return {}
+    c = md.row_group(0).column(0).compression.lower()
+    return {'compression': 'none' if c == 'uncompressed' else c}
+
+
 def rewrite_row_groups(path: str, rows: int) -> None:
     """Rewrite a parquet file in place into ≤``rows``-row groups, streaming
     (one batch resident at a time, so a 130 MiB remote chunk never lands in
@@ -244,14 +275,17 @@ def rewrite_row_groups(path: str, rows: int) -> None:
     tmp = path + '.rg.tmp'
     if not is_url(path):
         src = pq.ParquetFile(path)
-        with pq.ParquetWriter(tmp, src.schema_arrow) as w:
+        # `schema_arrow` carries the key-value metadata; the codec stays the file's own.
+        kw = _codec_of(src)
+        with pq.ParquetWriter(tmp, src.schema_arrow, **kw) as w:
             for batch in src.iter_batches(batch_size=rows):
                 w.write_batch(batch, row_group_size=rows)
         os.replace(tmp, path)
         return
     fs, p = fs_for(path)
     src = pq.ParquetFile(p, filesystem=fs)
-    with pq.ParquetWriter(p + '.rg.tmp', src.schema_arrow, filesystem=fs) as w:
+    kw = _codec_of(src)
+    with pq.ParquetWriter(p + '.rg.tmp', src.schema_arrow, filesystem=fs, **kw) as w:
         for batch in src.iter_batches(batch_size=rows):
             w.write_batch(batch, row_group_size=rows)
     fs.mv(p + '.rg.tmp', p)

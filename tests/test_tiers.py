@@ -35,6 +35,14 @@ _LISTING = [
 ]
 
 
+#: A tier inherits its v2 layer-2's listing-format metadata (spec `listing-slim.md`).
+V2_KV = {
+    'disk_tree.listing_format': '2',
+    'disk_tree.scan_root': 'gcs://b1',
+    'disk_tree.columns': '["path","size","mtime","n_desc","n_files","n_children","kind","parent","uri","depth"]',
+}
+
+
 def _layer2(tmp_path: Path, labels: str | None = None) -> str:
     listing = tmp_path / 'l.parquet'
     pd.DataFrame({
@@ -127,10 +135,11 @@ def test_tiers_are_the_layer2_rows_sorted_and_bounded(tmp_path: Path):
     assert kv == {
         'tier': 'coarse', 'sort': 'depth,path',
         'floor_bytes': str(floor), 'coarse_exp': '4', 'total_size': str(total), 'floor_source': 'derived',
+        **V2_KV,
     }
     kv = {k.decode(): v.decode() for k, v in pq.read_metadata(f'{stem}.objects.parquet').metadata.items()
           if k != b'ARROW:schema'}
-    assert kv == {'tier': 'objects', 'sort': 'path'}
+    assert kv == {'tier': 'objects', 'sort': 'path', **V2_KV}
 
 
 def test_row_groups_are_bounded(tmp_path: Path):
@@ -278,6 +287,7 @@ def test_explicit_coarse_floor(tmp_path: Path):
         'tier': 'coarse', 'sort': 'depth,path',
         'floor_bytes': str(floor), 'coarse_exp': str(DEFAULT_COARSE_EXP), 'total_size': str(total),
         'floor_source': 'explicit',
+        **V2_KV,
     }
     with pytest.raises(ValueError, match='coarse_floor_bytes must be >= 0; got -1'):
         write_tiers(layer2, stem, tiers=('coarse',), coarse_floor_bytes=-1)

@@ -28,6 +28,7 @@ import { parquetMetadataAsync, parquetReadObjects } from 'hyparquet'
 import type { Env } from './auth.js'
 import { shared } from './shared.js'
 import { d1Variant, isPrimary, PRIMARY_STORE, storeKey } from './stores.js'
+import { compressors } from './zstd.js'
 
 /** A leaf of the stored parquet schema (`index_schema.schema_json`). */
 interface SchemaElement { type: string; name: string; repetition_type: string; converted_type?: string }
@@ -352,7 +353,7 @@ async function readGroupRaw(h: IndexHandle, rgJson: string, columns?: string[]):
     ? { byteLength: h.file.byteLength, slice: async (s, e) => { const t0 = now(); try { return await h.file.slice(s, e) } finally { trace('fetch', now() - t0) } } }
     : h.file
   const t0 = now()
-  const rows = (await parquetReadObjects({ file, metadata, columns })) as Record<string, unknown>[]
+  const rows = (await parquetReadObjects({ file, metadata, columns, compressors })) as Record<string, unknown>[]
   trace?.('group', now() - t0)
   return rows
 }

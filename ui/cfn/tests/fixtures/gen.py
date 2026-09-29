@@ -34,6 +34,22 @@ NODES = [
 ]
 
 
+def write_v2(df: pd.DataFrame, out: str) -> None:
+    """The same rows as a v2 listing (spec `listing-slim.md`): no `uri`, zstd,
+    the scan root + v1 column order in the key-value metadata — what the
+    duckdb/stream engines now write. `parquet.test.ts` reads both alike."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    tbl = pa.Table.from_pandas(df.drop(columns=['uri']), preserve_index=False)
+    kv = {
+        'disk_tree.listing_format': '2',
+        'disk_tree.scan_root': ROOT,
+        'disk_tree.columns': json.dumps(list(df.columns), separators=(',', ':')),
+    }
+    tbl = tbl.replace_schema_metadata({**(tbl.schema.metadata or {}), **kv})
+    pq.write_table(tbl, out, row_group_size=4, compression='zstd', compression_level=3)
+
+
 def main() -> None:
     here = dirname(__file__)
     rows = []
@@ -47,6 +63,7 @@ def main() -> None:
         })
     df = pd.DataFrame(rows).sort_values(['depth', 'path']).reset_index(drop=True)
     df.to_parquet(join(here, 'fixture.parquet'), index=False, row_group_size=4)
+    write_v2(df, join(here, 'fixture-v2.parquet'))
     manifest = {
         'format': 'disk-tree-scan', 'version': 1, 'time': '2026-01-02T03:04:05',
         'path': ROOT, 'blob': 'fixture.parquet', 'size': 3600, 'n_children': 4, 'n_desc': 11,

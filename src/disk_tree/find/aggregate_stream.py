@@ -255,7 +255,9 @@ def _scan_shard(
         if pc.any(_dirty_mask(names)).as_py():
             dirty = True
         for i, col in enumerate(pivot_sums):
-            vals = pc.unique(pc.drop_null(batch.column(col).filter(mask)))
+            # NULL is recorded too (as `None`): a pivot is only left implied
+            # (== `size`) when its column holds one value and no NULLs.
+            vals = pc.unique(batch.column(col).filter(mask))
             distinct[i].update(vals.to_pylist())
     entry = None
     if starts:
@@ -272,8 +274,8 @@ def _scan_names(
 ) -> tuple[int, set[str], list[list], dict[str, tuple[list[int], list[str], list[str]]], dict[str, list[tuple[int, str, int]]]]:
     """Pass 1: names scan across shards (in parallel when an executor is
     given). Returns (total rows for bucket, shards with dirty keys, sorted
-    distinct non-null values per pivot column, per-shard runs, per-shard
-    checkpoints)."""
+    distinct values per pivot column — `None` last when the column has
+    NULLs — per-shard runs, per-shard checkpoints)."""
     n_rows = 0
     dirty_shards: set[str] = set()
     distinct: list[set] = [set() for _ in pivot_sums]
@@ -301,7 +303,7 @@ def _scan_names(
                 f"more than {_MAX_RUNS:,} sorted runs across listing shards — "
                 f"input is essentially unsorted; use `-e duckdb`"
             )
-    return n_rows, dirty_shards, [sorted(s) for s in distinct], runs, ckpts
+    return n_rows, dirty_shards, [[*sorted(v for v in s if v is not None), *([None] if None in s else [])] for s in distinct], runs, ckpts
 
 
 def _collect_dirty(
@@ -1255,11 +1257,21 @@ def _finalize_parts(
     # between `parent` and `uri`) — the published layer-2 must be column-order
     # identical across engines so file-level diffs and positional set ops
     # (EXCEPT) work.
+    from disk_tree import listing_format as lf
     canonical_cols = [
         'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
         *pivot_names, *([MTIME_MEAN] if mean_mtime else []),
         'uri', 'depth',
     ]
+    if 'scan_root' in manifest:
+        fmt = lf.slim(manifest['scan_root'], [
+            'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
+            *manifest['all_pivot_names'], *([MTIME_MEAN] if mean_mtime else []),
+            'uri', 'depth',
+        ], manifest['implied'])
+        canonical_cols = lf.written_columns(fmt)
+    else:
+        fmt = lf.V1
     fields = []
     for c in canonical_cols:
         if c in ('path', 'kind', 'parent', 'uri'):
@@ -1268,7 +1280,7 @@ def _finalize_parts(
             fields.append((c, pa.float64()))
         else:
             fields.append((c, pa.int64()))
-    schema = pa.schema(fields)
+    schema = lf.with_kv(pa.schema(fields), fmt)
 
     by_depth: dict[int, dict[str, list[dict]]] = {}
     for part in manifest['parts']:
@@ -1296,7 +1308,7 @@ def _finalize_parts(
         unit = (part['depth'], part['w'] if partitioned else 0)
         by_unit.setdefault(unit, {}).setdefault(part['kind'], []).append(part)
 
-    writer = pq.ParquetWriter(out_parquet, schema)
+    writer = pq.ParquetWriter(out_parquet, schema, **lf.pyarrow_codec())
     buf: list = []
     buf_rows = 0
 
@@ -1514,6 +1526,23 @@ def aggregate_stream(
             f"across {len(runs)} shard(s), {len(dirty_shards)} dirty shard(s)"
         )
 
+        # A pivot holding one value and no NULLs equals `size` on every row:
+        # it is left implied (spec `listing-slim.md`) — named in the output's
+        # metadata, never computed. The rest pivot as before.
+        all_pivot_names: list[str] = []
+        implied: dict[str, str] = {}
+        kept: list[tuple[str, list]] = []
+        for col, seen in zip(pivot_sums, distinct):
+            vals = check_pivot_values(col, [v for v in seen if v is not None])
+            if len(vals) == 1 and len(seen) == 1:
+                all_pivot_names.append(pivot_col(col, vals[0]))
+                implied[pivot_col(col, vals[0])] = 'size'
+            else:
+                all_pivot_names.extend(pivot_col(col, v) for v in vals)
+                kept.append((col, vals))
+        pivot_sums = tuple(col for col, _ in kept)
+        distinct = [vals for _, vals in kept]
+
         dirty = _collect_dirty(sorted(dirty_shards), bucket, pivot_sums) if dirty_shards else []
         if dirty_shards:
             _stage(f"collected {len(dirty):,} dirty row(s)")
@@ -1523,7 +1552,6 @@ def aggregate_stream(
         pivot_names: list[str] = []
         pivot_maps: list[dict] = []
         for col, vals in zip(pivot_sums, distinct):
-            check_pivot_values(col, vals)
             pivot_maps.append({v: len(pivot_names) + i for i, v in enumerate(vals)})
             pivot_names.extend(pivot_col(col, v) for v in vals)
 
@@ -1602,6 +1630,11 @@ def aggregate_stream(
         max_open = max(r['max_open'] for r in results)
         manifest = {
             'pivot_names': pivot_names,
+            # v2 output (spec `listing-slim.md`); a resumed manifest without
+            # these keys finalizes the v1 shape its parts were built for.
+            'scan_root': scan_root,
+            'all_pivot_names': all_pivot_names,
+            'implied': implied,
             'mean_mtime': mean_mtime,
             'rows': n_rows_total,
             'files': n_files_total,
