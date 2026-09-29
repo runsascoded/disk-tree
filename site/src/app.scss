@@ -1709,12 +1709,16 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
 // reach on a long list, and centered — it appears below the rows, never
 // shifting the row just clicked.
 .children-tbl .sel-bar-dock {
-  position: sticky; bottom: 8px; z-index: 6;
+  // Below the sticky topbar (z 5), and click-through except for the bar itself:
+  // once the table scrolls up under the topbar, this sticky slot rides its
+  // bottom edge there, and an empty 30 px strip above the topbar swallowed
+  // clicks on the filter box.
+  position: sticky; bottom: 8px; z-index: 4; pointer-events: none;
   display: flex; justify-content: center; margin-top: 8px;
   // Reserve the bar's height even when empty, so selecting / deselecting fills
   // (or clears) this slot instead of pushing the rest of the page up and down.
   min-height: 30px;
-  .sel-bar { margin-left: 0; box-shadow: 0 6px 18px rgb(0 0 0 / 0.25); }
+  .sel-bar { margin-left: 0; box-shadow: 0 6px 18px rgb(0 0 0 / 0.25); pointer-events: auto; }
 }
 .children-tbl .pager {
   display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 6px 0; font-size: 12px; color: var(--ink-2);
