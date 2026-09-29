@@ -40,6 +40,12 @@ The point of a cleanup session is the disk is often already tight, and **x6 (the
 - **No external? Stream to cloud.** `disk-tree index /path --to r2://disk-tree/…` (or `capture PATH -t r2://disk-tree/…` for the bounded-memory, zero-local-disk split pipeline) writes the blob straight to the **dedicated private R2 `disk-tree` bucket** and reads it back through the same search path. Listing metadata is small; a laptop capture never has to touch the near-full boot disk.
 - The store itself is a cleanup target: `~/.config/disk-tree/` holds the blobs + a ~0.8 GB `scans.duckdb` — `disk-tree scans -g` GCs old scans, `disk-tree scans move` relocates blobs off-boot.
 
+## The deployment: disk.rbw.sh + two LaunchAgents
+
+- **disk.rbw.sh** (also `disk-tree.pages.dev`): the Pages project `disk-tree`, deployed from *this* worktree's `ui/` (no CI; `cloud`'s CI deploys `site/` to `disk-tree-demo` instead). It serves the SPA plus the read subset of `/api/*` over the R2 `disk-tree` bucket, gated by `@open-athena/auth` (spec `specs/done/pages-auth.md`: an email allowlist with SSO through a Cloudflare Access app on `/auth/sso` only, named share links, and an access log; D1 `disk-tree-auth`). Deploy: `pnpm -C ui build`, then `direnv exec . bash -c 'export CLOUDFLARE_API_TOKEN="$CF_TOKEN"; cd ui && npx wrangler pages deploy dist --project-name disk-tree --branch main'`. Apply D1 migrations first (`wrangler d1 migrations apply disk-tree-auth --remote`).
+- **`com.runsascoded.disk-tree.index`** (`~/Library/LaunchAgents/`): every 12 h runs `disk-tree index -C -D --no-progress --to r2://disk-tree/scans /Users/ryan` from this worktree's venv, with the R2 env inline (the `cf` profile's keys are in `~/.aws/credentials`). Logs go to `~/Library/Logs/disk-tree/index.*.log`. No external drive needed.
+- **`com.runsascoded.disk-tree.drain`** (KeepAlive): `disk-tree dispatch -s`, run through `direnv exec` on this worktree so the plist holds no secrets. It polls the site's D1 for deletion runs queued from the browser (`POST /api/dispatch`, admin only) and executes them here; local paths go through `LocalBackend`, so a delete from the phone really removes laptop files. Logs go to `~/Library/Logs/disk-tree/drain.*.log`.
+
 ## Cleanup log
 
 Keep `log.md` as the running record — each pass: date, what was scanned (free space before/after), what was deleted, and the **measured** bytes freed. It makes cleanup auditable and repeatable, and feeds the next pass (what refilled, what stayed gone).
