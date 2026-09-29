@@ -23,5 +23,7 @@ COPY cloud/pyproject.toml cloud/uv.lock ./cloud/
 COPY cloud/src ./cloud/src
 RUN cd cloud && uv sync --frozen --no-dev
 
+# chmod: the source zip (Pulumi `AssetArchive`) doesn't carry file modes.
 COPY aws/ingest.sh /ingest.sh
+RUN chmod 755 /ingest.sh
 ENTRYPOINT ["/ingest.sh"]

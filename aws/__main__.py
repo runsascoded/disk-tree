@@ -1,7 +1,8 @@
 """m3's AWS Batch ingest (RAC account; specs/m3-site.md).
 
 The laptop only walks (`disk-tree capture` → layer-1 shards in R2); this
-stack owns what runs after: an arm64 image built from this worktree, a
+stack owns what runs after: an arm64 image built on CodeBuild from this
+worktree's sources (no local Docker), a
 Fargate Spot queue, and the `disk-tree-m3-ingest` job definition, whose
 container reads/writes R2 with keys injected from Secrets Manager. Pattern
 and naming follow `hccs/crashes/batch/infra` (nj-crashes).
@@ -9,12 +10,13 @@ and naming follow `hccs/crashes/batch/infra` (nj-crashes).
 Secrets are created empty; `aws/put-secrets` fills them from `.envrc`, so
 values never enter Pulumi state.
 """
+import hashlib
 import json
 from pathlib import Path
 
 import pulumi
 import pulumi_aws as aws
-import pulumi_docker_build as docker_build
+import pulumi_command as command
 
 cfg = pulumi.Config()
 REGION = aws.config.region or "us-east-1"
@@ -84,21 +86,114 @@ aws.ecr.LifecyclePolicy(
         "action": {"type": "expire"},
     }]}),
 )
-ecr_auth = aws.ecr.get_authorization_token_output(registry_id=repo.registry_id)
 
-image = docker_build.Image(
-    "image",
-    context=docker_build.BuildContextArgs(location=str(REPO_ROOT)),
-    dockerfile=docker_build.DockerfileArgs(location=str(REPO_ROOT / "aws" / "Dockerfile")),
-    platforms=[docker_build.Platform.LINUX_ARM64],
-    tags=[repo.repository_url.apply(lambda url: f"{url}:latest")],
-    push=True,
-    registries=[docker_build.RegistryArgs(
-        address=repo.repository_url,
-        username=ecr_auth.user_name,
-        password=ecr_auth.password,
+# --- The image, built on CodeBuild (not the laptop's Docker): Pulumi zips the
+#     files the Dockerfile needs (content-hashed), uploads them, and
+#     `aws/build-image` runs one build per new hash, printing the pinned digest. ---
+SOURCES = ["pyproject.toml", "uv.lock", "README.md", "src", "cloud/pyproject.toml", "cloud/uv.lock", "cloud/src", "aws/Dockerfile", "aws/ingest.sh"]
+
+
+def _source_files() -> list[Path]:
+    files = []
+    for rel in SOURCES:
+        p = REPO_ROOT / rel
+        files += sorted(f for f in p.rglob("*") if f.is_file() and "__pycache__" not in f.parts) if p.is_dir() else [p]
+    return files
+
+
+def _source_hash(files: list[Path]) -> str:
+    h = hashlib.sha256()
+    for f in files:
+        h.update(str(f.relative_to(REPO_ROOT)).encode() + b"\0" + f.read_bytes() + b"\0")
+    return h.hexdigest()[:16]
+
+
+files = _source_files()
+SRC_HASH = _source_hash(files)
+
+build_bucket = aws.s3.Bucket("build-src", bucket=f"{PREFIX}-build-src-{aws.get_caller_identity().account_id}", force_destroy=True)
+aws.s3.BucketLifecycleConfiguration(
+    "build-src-lifecycle",
+    bucket=build_bucket.id,
+    rules=[aws.s3.BucketLifecycleConfigurationRuleArgs(
+        id="expire-sources", status="Enabled",
+        filter=aws.s3.BucketLifecycleConfigurationRuleFilterArgs(prefix="src/"),
+        expiration=aws.s3.BucketLifecycleConfigurationRuleExpirationArgs(days=30),
     )],
 )
+src_key = f"src/{SRC_HASH}.zip"
+src_obj = aws.s3.BucketObjectv2(
+    "build-src-zip",
+    bucket=build_bucket.id,
+    key=src_key,
+    source=pulumi.AssetArchive({str(f.relative_to(REPO_ROOT)): pulumi.FileAsset(str(f)) for f in files}),
+)
+
+codebuild_role = aws.iam.Role("codebuild-role", name=f"{PREFIX}-codebuild", assume_role_policy=json.dumps({
+    "Version": "2012-10-17",
+    "Statement": [{"Effect": "Allow", "Principal": {"Service": "codebuild.amazonaws.com"}, "Action": "sts:AssumeRole"}],
+}))
+aws.iam.RolePolicy(
+    "codebuild-policy",
+    role=codebuild_role.id,
+    policy=pulumi.Output.all(build_bucket.arn, repo.arn).apply(lambda a: json.dumps({
+        "Version": "2012-10-17",
+        "Statement": [
+            {"Effect": "Allow", "Action": ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], "Resource": "*"},
+            {"Effect": "Allow", "Action": ["s3:GetObject", "s3:GetObjectVersion"], "Resource": f"{a[0]}/*"},
+            {"Effect": "Allow", "Action": "ecr:GetAuthorizationToken", "Resource": "*"},
+            {"Effect": "Allow", "Action": [
+                "ecr:BatchCheckLayerAvailability", "ecr:BatchGetImage", "ecr:CompleteLayerUpload",
+                "ecr:GetDownloadUrlForLayer", "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
+            ], "Resource": a[1]},
+        ],
+    })),
+)
+BUILDSPEC = """version: 0.2
+phases:
+  pre_build:
+    commands:
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${REPO_URL%%/*}
+  build:
+    commands:
+      - docker build -f aws/Dockerfile -t $REPO_URL:$TAG .
+  post_build:
+    commands:
+      - docker push $REPO_URL:$TAG
+"""
+codebuild_logs = aws.cloudwatch.LogGroup("codebuild-logs", name=f"/{PREFIX}/codebuild", retention_in_days=30)
+project = aws.codebuild.Project(
+    "image-build",
+    name=f"{PREFIX}-image",
+    service_role=codebuild_role.arn,
+    build_timeout=30,
+    artifacts=aws.codebuild.ProjectArtifactsArgs(type="NO_ARTIFACTS"),
+    environment=aws.codebuild.ProjectEnvironmentArgs(
+        type="ARM_CONTAINER",
+        image="aws/codebuild/amazonlinux-aarch64-standard:3.0",
+        compute_type="BUILD_GENERAL1_SMALL",
+        privileged_mode=True,
+        environment_variables=[aws.codebuild.ProjectEnvironmentEnvironmentVariableArgs(name="REPO_URL", value=repo.repository_url)],
+    ),
+    source=aws.codebuild.ProjectSourceArgs(
+        type="S3",
+        location=pulumi.Output.concat(build_bucket.bucket, "/", src_key),
+        buildspec=BUILDSPEC,
+    ),
+    logs_config=aws.codebuild.ProjectLogsConfigArgs(
+        cloudwatch_logs=aws.codebuild.ProjectLogsConfigCloudwatchLogsArgs(group_name=codebuild_logs.name),
+    ),
+)
+build = command.local.Command(
+    "image-build-run",
+    create=pulumi.Output.concat(
+        "python3 aws/build-image ", project.name, " ", build_bucket.bucket, "/", src_key, " ", repo.name, " ", SRC_HASH,
+    ),
+    dir=str(REPO_ROOT),
+    triggers=[SRC_HASH],
+    opts=pulumi.ResourceOptions(depends_on=[src_obj, project]),
+)
+image_ref = build.stdout
 
 compute_env = aws.batch.ComputeEnvironment(
     "spot",
@@ -156,7 +251,7 @@ job_def = aws.batch.JobDefinition(
     ),
     timeout=aws.batch.JobDefinitionTimeoutArgs(attempt_duration_seconds=2 * 3600),
     container_properties=pulumi.Output.all(
-        image=image.ref,
+        image=image_ref,
         secrets=pulumi.Output.all(**secret_arns),
         log_group=log_group.name,
         exec_arn=execution_role.arn,
@@ -166,5 +261,5 @@ job_def = aws.batch.JobDefinition(
 
 pulumi.export("queue", queue.name)
 pulumi.export("job_definition", job_def.name)
-pulumi.export("image", image.ref)
+pulumi.export("image", image_ref)
 pulumi.export("log_group", log_group.name)
