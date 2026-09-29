@@ -29,5 +29,10 @@ SNAPSHOTS_SUBDIR = "laptop"      # snapshots/laptop/ (_lib/shared.ts)
 INDEX_VARIANTS = "path"          # no ownership → no by-user tiers
 STORE_BUCKET = "disk-tree"
 STORE_REGION = "auto"
+# Staged deletes: plan prefixes are `file:///Users/…/` (the treemap's paths
+# start at `Users`), executed by the laptop's drainer (`_lib/laptopDispatch.ts`).
+EXECUTOR = "laptop"
+STORE_SCHEME = "file:///"
+STORE_BUCKETS = "Users"
 # Secrets (Pages secrets at deploy; `.dev.vars` locally): STORE_ENDPOINT,
 # STORE_ACCESS_KEY_ID, STORE_SECRET_ACCESS_KEY, SESSION_SECRET.

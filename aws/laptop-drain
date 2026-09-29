@@ -1,0 +1,43 @@
+#!/usr/bin/env python3
+"""The laptop delete runner (LaunchAgent `com.runsascoded.disk-tree.drain`;
+specs/m3-site.md Phase 3): `disk-tree dispatch -s` over the deployments' D1s.
+
+A Python entry run as the venv's `python` for the same reason as
+`laptop-scan`: it renames deleted paths into `~/.Trash/disk-tree/`, and macOS
+TCC attributes that to the launchd root process, which needs Full Disk Access.
+Secrets stay out of the plist: `CF_TOKEN` is read from the worktree's `.envrc`
+through `direnv export json`.
+
+Polls both the `site/` D1 (`disk-tree-m3-db`, the `laptop` executor's runs) and
+`ui/`'s (`disk-tree-auth`, until disk.rbw.sh cuts over). Real runs trash (the
+7-day TTL empties them); after one, a fresh capture → Batch so the map
+reflects the freed bytes.
+"""
+import json
+import os
+import subprocess
+from pathlib import Path
+
+M3 = Path(__file__).resolve().parent.parent
+BIN = M3 / '.venv' / 'bin'
+SITE_D1 = 'e5288564-a010-4177-9f3c-77e25fad9f72'   # disk-tree-m3-db (cf/)
+UI_D1 = 'c17a63c1-1d6f-443c-9d35-f1e9c5e674ac'     # disk-tree-auth (ui/'s)
+
+
+def main() -> None:
+    envrc = json.loads(subprocess.run(['/opt/homebrew/bin/direnv', 'export', 'json'], cwd=M3, check=True, capture_output=True, text=True).stdout or '{}')
+    env = {
+        **os.environ, **envrc,
+        'CLOUDFLARE_API_TOKEN': envrc['CF_TOKEN'],
+        'AWS_PROFILE': 'm3',
+        'DISK_TREE_R2_ENDPOINT_URL': 'https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com',
+        'DISK_TREE_SCAN_DIRS': 'r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans',
+    }
+    after = f'{BIN}/python {M3}/aws/laptop-scan --capture-only'
+    os.execve(str(BIN / 'disk-tree'), [
+        'disk-tree', 'dispatch', '-s', '--d1', SITE_D1, '--d1', UI_D1, '--trash', '--ttl', '7d', '-a', after, '-H', 'm3',
+    ], env)
+
+
+if __name__ == '__main__':
+    main()

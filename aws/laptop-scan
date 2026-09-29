@@ -38,9 +38,12 @@ def run(*cmd: str, profile: str, capture: bool = False, **env: str) -> str:
 
 
 def main() -> None:
-    log('index')
-    run(str(BIN / 'disk-tree'), 'index', '-C', '-D', '--no-progress', '--to', 'r2://disk-tree/scans', '/Users/ryan',
-        profile='m3', DISK_TREE_SCAN_DIRS='r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans')
+    # `--capture-only`: skip the `ui/` scan blob (the drainer's post-delete
+    # refresh only needs the `site/` index to move).
+    if '--capture-only' not in sys.argv[1:]:
+        log('index')
+        run(str(BIN / 'disk-tree'), 'index', '-C', '-D', '--no-progress', '--to', 'r2://disk-tree/scans', '/Users/ryan',
+            profile='m3', DISK_TREE_SCAN_DIRS='r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans')
     log('capture')
     out = run(str(BIN / 'disk-tree'), 'capture', '-q', '-t', 'r2://disk-tree/captures', '/Users/ryan', profile='m3', capture=True, DISK_TREE_HOST=HOST)
     capture = out.splitlines()[-1]
