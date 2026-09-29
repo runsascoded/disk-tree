@@ -257,17 +257,26 @@ def row_group_sizes(path: str) -> list[int]:
     return [md.row_group(i).num_rows for i in range(md.num_row_groups)]
 
 
+def _codec_of(pf) -> dict:
+    """`ParquetWriter` kwargs reproducing an existing file's codec (first column
+    chunk; our writers use one codec per file). Empty file → the writer default."""
+    md = pf.metadata
+    if not md.num_row_groups or not md.num_columns:
+        return {}
+    c = md.row_group(0).column(0).compression.lower()
+    return {'compression': 'none' if c == 'uncompressed' else c}
+
+
 def rewrite_row_groups(path: str, rows: int) -> None:
     """Rewrite a parquet file in place into ≤``rows``-row groups, streaming
     (one batch resident at a time, so a 130 MiB remote chunk never lands in
     memory whole) via a `.rg.tmp` sibling moved into place at the end."""
     import pyarrow.parquet as pq
-    from . import listing_format as lf
     tmp = path + '.rg.tmp'
     if not is_url(path):
         src = pq.ParquetFile(path)
-        # `schema_arrow` carries the key-value metadata; a v2 listing keeps zstd.
-        kw = lf.pyarrow_write_kwargs(lf.parse(src.schema_arrow.metadata))
+        # `schema_arrow` carries the key-value metadata; the codec stays the file's own.
+        kw = _codec_of(src)
         with pq.ParquetWriter(tmp, src.schema_arrow, **kw) as w:
             for batch in src.iter_batches(batch_size=rows):
                 w.write_batch(batch, row_group_size=rows)
@@ -275,7 +284,7 @@ def rewrite_row_groups(path: str, rows: int) -> None:
         return
     fs, p = fs_for(path)
     src = pq.ParquetFile(p, filesystem=fs)
-    kw = lf.pyarrow_write_kwargs(lf.parse(src.schema_arrow.metadata))
+    kw = _codec_of(src)
     with pq.ParquetWriter(p + '.rg.tmp', src.schema_arrow, filesystem=fs, **kw) as w:
         for batch in src.iter_batches(batch_size=rows):
             w.write_batch(batch, row_group_size=rows)

@@ -1,7 +1,8 @@
 """Spec `listing-slim.md` phase 1: everything the overlay builds from a layer-2
 listing comes out the same from a v1 listing (`uri` + every pivot column,
 Snappy, no format metadata — what the engine wrote before) and from the v2
-listing of the same input (no `uri`, single-valued pivots implied, zstd).
+listing of the same input (no `uri`, single-valued pivots implied), under
+both `$DISK_TREE_PARQUET_CODEC` values (snappy default, zstd opt-in).
 
 The v1 file is the v2 file's restored v1 view (`blobfs.read_parquet`) written
 the way the old writer did (DuckDB COPY, Snappy, 64K-row groups); the engine
@@ -39,6 +40,14 @@ OBJECTS = [
 ]
 
 
+@pytest.fixture(params=['snappy', 'zstd'])
+def codec(request, monkeypatch) -> str:
+    """Every check runs under both `$DISK_TREE_PARQUET_CODEC` values; returns
+    the parquet footer's codec name."""
+    monkeypatch.setenv('DISK_TREE_PARQUET_CODEC', request.param)
+    return request.param.upper()
+
+
 def _listing(path: Path) -> str:
     pd.DataFrame({
         "bucket": [BUCKET] * len(OBJECTS),
@@ -51,7 +60,7 @@ def _listing(path: Path) -> str:
 
 
 @pytest.fixture
-def layer2(tmp_path: Path) -> tuple[str, str]:
+def layer2(tmp_path: Path, codec) -> tuple[str, str]:
     """(v1, v2) layer-2 listings of the same objects, labeled `usr` (the a2a shape)."""
     listing = _listing(tmp_path / "listing.parquet")
     labels = tmp_path / "labels.parquet"
@@ -68,7 +77,7 @@ def layer2(tmp_path: Path) -> tuple[str, str]:
     return v1, v2
 
 
-def test_the_two_formats(layer2):
+def test_the_two_formats(layer2, codec):
     v1, v2 = layer2
     base = ["path", "usr", "size", "mtime", "n_desc", "n_files", "n_children", "kind", "parent"]
     assert pq.read_schema(v1).names == [*base, "sum_storage_class_id_2", "mtime_mean", "uri", "depth"]
@@ -81,13 +90,13 @@ def test_the_two_formats(layer2):
         "disk_tree.columns": json.dumps([*base, "sum_storage_class_id_2", "mtime_mean", "uri", "depth"], separators=(",", ":")),
     }
     codecs = {md.row_group(g).column(c).compression for g in range(md.num_row_groups) for c in range(md.num_columns)}
-    assert codecs == {"ZSTD"}
+    assert codecs == {codec}
     assert pq.read_metadata(v1).metadata is None
     # Either file reads back as the same v1 frame.
     pd.testing.assert_frame_equal(read_parquet(v1), read_parquet(v2))
 
 
-def test_indexes_are_byte_identical(layer2, tmp_path: Path):
+def test_indexes_are_byte_identical(layer2, codec, tmp_path: Path):
     """path-index, the coarse tiers and the age pyramid, from either format."""
     v1, v2 = layer2
     s1 = X.write_index([(BUCKET, v1)], tmp_path / "i1", mem="1GB", threads=1)
@@ -105,9 +114,9 @@ def test_indexes_are_byte_identical(layer2, tmp_path: Path):
     for i, src in ((1, v1), (2, v2)):
         X.write_age_index(duckdb.connect(), [(BUCKET, src)], tmp_path / f"i{i}")
     assert (tmp_path / "i1" / X.AGE_INDEX).read_bytes() == (tmp_path / "i2" / X.AGE_INDEX).read_bytes()
-    # And the index is zstd.
+    # And the index is written in the switch's codec.
     md = pq.read_metadata(tmp_path / "i2" / "path-index.parquet")
-    assert {md.row_group(0).column(c).compression for c in range(md.num_columns)} == {"ZSTD"}
+    assert {md.row_group(0).column(c).compression for c in range(md.num_columns)} == {codec}
 
 
 def test_sweep_manifests_are_byte_identical(layer2, tmp_path: Path):

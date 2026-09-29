@@ -1308,7 +1308,7 @@ def _finalize_parts(
         unit = (part['depth'], part['w'] if partitioned else 0)
         by_unit.setdefault(unit, {}).setdefault(part['kind'], []).append(part)
 
-    writer = pq.ParquetWriter(out_parquet, schema, **lf.pyarrow_write_kwargs(fmt))
+    writer = pq.ParquetWriter(out_parquet, schema, **lf.pyarrow_codec())
     buf: list = []
     buf_rows = 0
 

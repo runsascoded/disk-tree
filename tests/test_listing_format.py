@@ -1,5 +1,5 @@
 """v2 layer-2 listings (spec `listing-slim.md` phase 1): what the duckdb and
-stream engines write (no `uri`, single-valued pivots implied, zstd, format in
+stream engines write (no `uri`, single-valued pivots implied, the switch codec, format in
 the key-value metadata), and that every reader sees the v1 shape."""
 import datetime as dt
 import json
@@ -23,6 +23,14 @@ TS = dt.datetime(2026, 7, 28, tzinfo=dt.timezone.utc)
 NAMES = ['a.txt', 'sub/b.txt', 'sub/c.txt', 'sub/deep/d.txt', 'other/e.txt']
 SIZES = [100, 200, 300, 400, 50]
 BASE = ['path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent']
+
+
+@pytest.fixture(params=['snappy', 'zstd'])
+def codec(request, monkeypatch) -> str:
+    """Every check runs under both `$DISK_TREE_PARQUET_CODEC` values; returns
+    the parquet footer's codec name."""
+    monkeypatch.setenv('DISK_TREE_PARQUET_CODEC', request.param)
+    return request.param.upper()
 
 
 def _listing(path: Path, classes: list) -> str:
@@ -68,7 +76,7 @@ def _codecs(path: str) -> set[str]:
     # One class plus a NULL: the pivot misses the NULL row's bytes → written.
     ([1, 1, None, 1, 1], ['sum_storage_class_id_1'], {}),
 ])
-def test_v2_shape(tmp_path: Path, engine, classes, written, implied):
+def test_v2_shape(tmp_path: Path, codec, engine, classes, written, implied):
     out = engine(_listing(tmp_path / 'l.parquet', classes), tmp_path / 'out.parquet')
     v1_pivots = sorted({*written, *implied})
     assert pq.read_schema(out).names == [*BASE, *written, 'mtime_mean', 'depth']
@@ -78,11 +86,11 @@ def test_v2_shape(tmp_path: Path, engine, classes, written, implied):
         **({'disk_tree.implied': json.dumps(implied, separators=(',', ':'))} if implied else {}),
         'disk_tree.columns': json.dumps([*BASE, *v1_pivots, 'mtime_mean', 'uri', 'depth'], separators=(',', ':')),
     }
-    assert _codecs(out) == {'ZSTD'}
+    assert _codecs(out) == {codec}
 
 
 @pytest.mark.parametrize('classes', [[1, 1, 1, 1, 1], [1, 2, 1, 2, 1]])
-def test_restored_v2_is_the_v1_frame(tmp_path: Path, classes):
+def test_restored_v2_is_the_v1_frame(tmp_path: Path, codec, classes):
     """Both engines' v2 output reads back (`blobfs.read_parquet`) as exactly the
     pandas engine's v1 frame: `uri`, the implied pivot, the v1 column order."""
     listing = _listing(tmp_path / 'l.parquet', classes)
@@ -100,7 +108,7 @@ def test_restored_v2_is_the_v1_frame(tmp_path: Path, classes):
     ]
 
 
-def test_tiers_from_either_format(tmp_path: Path):
+def test_tiers_from_either_format(tmp_path: Path, codec):
     """Tiers cut from a v1 layer-2 and from the v2 layer-2 of the same input read
     back row-for-row identical (bytes differ: the v2 tiers carry no `uri` column
     and the v2 format keys), and both name the same bucket."""
@@ -114,7 +122,7 @@ def test_tiers_from_either_format(tmp_path: Path):
     assert list(w1.values()) == list(w2.values()) == [4, 5, 4]
     for a, b in zip(w1, w2):
         pd.testing.assert_frame_equal(read_parquet(a), read_parquet(b))
-        assert _codecs(a) == _codecs(b) == {'ZSTD'}
+        assert _codecs(a) == _codecs(b) == {codec}
         assert lf.format_of(b) == lf.format_of(v2)
     con = duckdb.connect()
     dirs1, dirs2 = str(tmp_path / 't1.dirs.parquet'), str(tmp_path / 't2.dirs.parquet')

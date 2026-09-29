@@ -132,8 +132,8 @@ def write_tiers(
 
     # A tier is the layer-2's rows, filtered: it inherits the source's listing
     # format (a v2 source's scan root / implied pivots / v1 column order ride
-    # along, so `blobfs.read_parquet` restores tiers like blobs) and is zstd
-    # either way (spec `listing-slim.md`).
+    # along, so `blobfs.read_parquet` restores tiers like blobs); the codec is
+    # `listing_format.codec()` (spec `listing-slim.md`).
     from disk_tree import listing_format as lf
     src_kv = lf.format_of(layer2).kv()
 
@@ -150,7 +150,7 @@ def write_tiers(
                 SELECT * FROM read_parquet('{layer2}')
                 WHERE {where}
                 ORDER BY {order_by}
-            ) TO '{tmp}' (FORMAT PARQUET, COMPRESSION {lf.COMPRESSION}, COMPRESSION_LEVEL {lf.ZSTD_LEVEL},
+            ) TO '{tmp}' (FORMAT PARQUET, {lf.duckdb_codec()},
                 ROW_GROUP_SIZE {row_group_rows}, KV_METADATA {{{kv_sql}}})
         """)
         os.replace(tmp, out)

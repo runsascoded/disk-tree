@@ -49,17 +49,19 @@ The plain rewrite is itself smaller than the original (≈ 24 vs ≈ 37 MiB for 
 | `disk_tree.implied` | JSON `{column: source}` for columns left out because they equal `source` on every row, e.g. `{"sum_storage_class_id_1":"size"}` (omitted when empty) |
 | `disk_tree.columns` | JSON list: the v1 column order, so a restored frame matches a v1 writer's column for column |
 
-Columns: v1 minus `uri` minus the implied pivots. zstd level 3 (`ZSTD_LEVEL`; 6/9 not measured yet).
+Columns: v1 minus `uri` minus the implied pivots.
+
+**Codec switch: zstd is opt-in, default off.** One switch, `$DISK_TREE_PARQUET_CODEC` (`snappy` by default, `zstd` opts in at level 3, `ZSTD_LEVEL`), is read in one place (`listing_format.codec()` / `duckdb_codec()` / `pyarrow_codec()`). It governs every writer phase 1 touched: the layer-2 listing (both engines), the engine tiers, and the overlay's served indexes (`dt_cloud.index.duckdb_codec`, a lazy wrapper so the CLI still imports without the engine). The column/metadata changes above do not depend on it. **The default flips to zstd once `@rdub/file-tree` can decode it** (spec `~/c/js/file-tree/specs/zstd-parquet.md`). Until then every push to `cloud` (which redeploys r2.rbw.sh) and each deployment's next index run would break `/files` on new files. Flipping needs the file-tree release pinned in `site/`; then set the env on the jobs, or change the default. `migrate-row-groups` keeps each file's own codec. Levels 6/9 are not measured yet.
 
 **"Present and non-trivial" pivots.** A `--pivot-sum` column is implied when the pivoted column holds exactly one value **and no NULLs** for the bucket: then every file row's pivot is its own size, folder placeholders likewise, synthesized dirs 0 = 0, and the cascade sums both alike, so `sum_<col>_<v> == size` on every row by construction (not checked after the fact). Such a pivot is not computed at all. With ≥ 2 values, or one value plus NULLs, every pivot column is written as before. "Absent" in a reader means "equals `size`" only when `implied` says so. A pivot missing without that entry keeps its old meaning (no bytes in that class, or no `-p`). Dropping the majority class of a multi-class bucket (derivable as `size − Σothers`) was not done.
 
-**Writers changed:** the duckdb engine (`aggregate_listing_to_parquet`, including the ranged-sort concat) and the stream engine (`aggregate_stream`'s finalize; its intermediate parts still carry `uri`, and a parts dir resumed from before this change finalizes v1). A self-check after the duckdb COPY asserts the written columns equal the v2 contract. `write_tiers` now writes zstd and copies the source's format keys onto every tier. The overlay's served index parquet is zstd-3: `index.py` (path-index, coarse tiers, age index, age pyramid), `viz.py` (gcs path-index and coarse tiers, including the by-user copies), and `overtime.py`. Intermediates (`labels-*`, `dir_stats`, `age_days`, over-time shards) and sweep manifests are unchanged.
+**Writers changed:** the duckdb engine (`aggregate_listing_to_parquet`, including the ranged-sort concat) and the stream engine (`aggregate_stream`'s finalize; its intermediate parts still carry `uri`, and a parts dir resumed from before this change finalizes v1). A self-check after the duckdb COPY asserts the written columns equal the v2 contract. `write_tiers` copies the source's format keys onto every tier. The codec switch governs these writers: the listing, the tiers, and the overlay's served index parquet in `index.py` (path-index, coarse tiers, age index, age pyramid), `viz.py` (gcs path-index and coarse tiers, including the by-user copies), and `overtime.py`. Intermediates (`labels-*`, `dir_stats`, `age_days`, over-time shards) and sweep manifests are unchanged.
 
 **Not changed (deviation):** the in-memory pandas writers (`find/index.py` local `index`, `import -e pandas`, and the hybrid backend's chunk and rewrite saves via `storage.save`) still write v1. They are local-scan and fixture-sized paths, a small share of stored bytes, and the hybrid delete rewrites load and re-save frames. Readers accept both formats, so switching them later is only a writer change.
 
 **Reader seam.** `blobfs.read_parquet` (every engine blob read: parquet and hybrid storage `load`/`get_path_stats`/delete rewrites, `shallow`, `scans show`, and now `migrate*`) returns the v1 shape for a v2 file: `uri` is derived, implied columns are restored, and the column order is v1's. `columns=['uri', …]` works on either format. The cost is one extra footer read per call on a remote blob (a local footer read is negligible). A frame read this way and saved again is a complete v1 file, so no path can drop a v2 file's scan root together with its metadata.
 
-**JS readers.** hyparquet decodes only Snappy natively (`parquet unsupported compression codec: ZSTD`). The site Functions (`_lib/index.ts`, `api/bench.ts`) and the static-deploy reader (`ui/cfn/parquet.ts`) now pass `compressors` backed by `fzstd@0.1.1`, which is pure JS (no wasm, which Workers can't compile at runtime). Deploy order: **the site must ship before any job writes zstd index parquet**, or those reads fail. The D1 footer (`index_footer.py`) already stores the codec per row group and passes it through.
+**JS readers.** hyparquet decodes only Snappy natively (`parquet unsupported compression codec: ZSTD`). The site Functions (`_lib/index.ts`, `api/bench.ts`) and the static-deploy reader (`ui/cfn/parquet.ts`) now pass `compressors` backed by `fzstd@0.1.1`, which is pure JS (no wasm, which Workers can't compile at runtime). They are ready for the flip. Snappy files decode as before. Deploy order for the flip: **the site must ship before any job writes zstd index parquet**. The D1 footer (`index_footer.py`) already stores the codec per row group and passes it through.
 
 #### Reader audit
 
@@ -72,9 +74,9 @@ Columns: v1 minus `uri` minus the implied pivots. zstd level 3 (`ZSTD_LEVEL`; 6/
 | `diff_index.load_scan_table`, `diff.py` chunk refs | `path, parent, depth, kind, size, n_desc, n_children, mtime`; `child_scan_id` | unaffected (`read_table` projection) |
 | `shallow.py`, `cli/scans.py` | whole blob / depth-1 | `blobfs.read_parquet` → restored |
 | `cli/migrate.py` (`migrate`, `migrate-hybrid`, `migrate-blobs`) | whole blob, rewritten | was `pd.read_parquet`, now `blobfs.read_parquet`, so a rewrite keeps the scan root |
-| `blobfs.rewrite_row_groups` (`migrate-row-groups`) | batches, schema metadata | metadata is kept; a v2 file stays zstd |
+| `blobfs.rewrite_row_groups` (`migrate-row-groups`) | batches, schema metadata | metadata and the file's own codec are kept |
 | `access/state.live_bucket` | root row's `uri` | v2: `disk_tree.scan_root` |
-| `find/tiers.write_tiers` | `SELECT *` | tiers inherit the v2 columns + format keys; zstd |
+| `find/tiers.write_tiers` | `SELECT *` | tiers inherit the v2 columns + format keys; switch codec |
 | `find/groups.write_groups` | footer | records the codec (`ZSTD`) |
 | `storage/sqlite.py`, `storage/duckdb.py` | `uri` column in their tables | fed in-memory v1 frames by the pandas engines, not layer-2 files: n/a |
 | `sqla/model.py`, `scan_manifest.py` | Scan rows only | n/a |
@@ -82,10 +84,10 @@ Columns: v1 minus `uri` minus the implied pivots. zstd level 3 (`ZSTD_LEVEL`; 6/
 | `cloud/index.py` path-index / coarse / age index / age pyramid | `path, depth, kind, size, n_files, mtime_mean, mtime` | unaffected: **byte-identical** outputs (test) |
 | `cloud/sweep.py` `build_manifest` / `build_expiry_manifest` (`plan-sweep-manifest`, expiry) | `path, size, mtime, kind` | unaffected: **byte-identical** manifests (test) |
 | `cloud/viz.py`, `cloud/listing.py`, `cli.py` layer-1 paths | layer-1 `storage_class_id`, not layer-2 | n/a |
-| `cloud/overtime.py` | path-index rows | n/a (now writes zstd) |
+| `cloud/overtime.py` | path-index rows | n/a (writes the switch codec) |
 | site Functions `_lib/index.ts` (path-index, tiers, age, over-time via D1 footers), `api/bench.ts` | index columns | + zstd `compressors` |
 | `ui/cfn/parquet.ts` (r2.rbw.sh static reader of scan blobs) | `BASE_COLS` (already excludes `uri`) + `mtime_mean`, `child_scan_id` | + zstd `compressors`; v2 fixture test |
-| site `/files` viewer (`FilesPage.tsx` → `@rdub/file-tree` parquet renderer) | any (generic table) | **cannot decode zstd**: file-tree's renderer has no `compressors` seam (open item) |
+| site `/files` viewer (`FilesPage.tsx` → `@rdub/file-tree` parquet renderer) | any (generic table) | **cannot decode zstd**: file-tree's renderer has no `compressors` seam. This is why zstd stays opt-in |
 | site `/v1/files` proxy | raw bytes | n/a |
 | `packages/*` | none (no parquet readers) | n/a |
 
@@ -93,6 +95,7 @@ No reader needs `uri` materialized: every one either restores it through the sea
 
 #### Verification
 
+- Both suites below run under **both codecs** (a `codec` fixture sets `$DISK_TREE_PARQUET_CODEC`, and asserts the footer codec matches).
 - `cloud/tests/test_listing_slim.py`: from a v1 listing (the v2 file's restored view written as the old writer did: DuckDB COPY, Snappy, 64K-row groups, no metadata) and from the v2 listing of the same labeled, single-class input, `write_index` (path-index, 3 coarse tiers, 8 age-pyramid bins), `write_age_index`, `build_manifest` and `build_expiry_manifest` are **byte-identical**. `cascade_a2a.compare` returns the same report (and fails without the implied-class change).
 - `tests/test_listing_format.py`: both engines write the same v2 columns, metadata and codecs (one class → implied; two classes, or one class plus NULLs → written). Both restore to exactly the pandas engine's v1 frame, including column order. Engine tiers from v1 vs v2 layer-2 read back **row-for-row** identical (their bytes differ: no `uri`, extra keys).
 - The existing engine parity suites now read outputs through `blobfs.read_parquet` (restored v1 view) and still assert pandas == duckdb == stream.
@@ -102,8 +105,7 @@ Size on a synthetic single-class fixture (200k objects in 400 runs × 10 steps �
 
 #### Open (phase 1 follow-ups)
 
-- `/files` can't render zstd listings/indexes until `@rdub/file-tree`'s parquet renderer accepts hyparquet `compressors` (a spec for file-tree). Until then, v2 listings and zstd indexes show a decode error there.
-- The site must deploy (with `fzstd`) before the index job runs this code.
+- Flip `$DISK_TREE_PARQUET_CODEC` to zstd (or change the default) once `@rdub/file-tree`'s parquet renderer accepts hyparquet `compressors` (spec `~/c/js/file-tree/specs/zstd-parquet.md`) and `site/` pins that release. The site (with `fzstd`) must deploy before any job writes zstd.
 - The pandas-engine and hybrid writers still write v1 (see above).
 - zstd 6/9 write-CPU vs size not measured. `fzstd` decode CPU per 8k-row index group in a Worker not measured.
 

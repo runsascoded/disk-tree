@@ -11,7 +11,13 @@ tiers cut from it) comes in two shapes:
   derived at read time. A pivot column that equals `size` on every row (the
   pivot column held exactly one value and no NULLs, e.g. a single-storage-class
   bucket) is not written; the metadata's `implied` map names it and the column
-  it equals, so readers restore it exactly. zstd (level `ZSTD_LEVEL`).
+  it equals, so readers restore it exactly.
+
+The codec is a separate switch (:func:`codec`, env `DISK_TREE_PARQUET_CODEC`,
+default Snappy) governing the layer-2 listing, the engine tiers and the
+overlay's served indexes: zstd flips on once every reader decodes it (the
+site's `/files` viewer, `@rdub/file-tree`, does not yet — spec
+`listing-slim.md`).
 
 Readers see the v1 shape through :func:`restore` (`blobfs.read_parquet` does
 this for every blob read), so nothing downstream needs to know which one it
@@ -34,8 +40,31 @@ IMPLIED_KEY = 'disk_tree.implied'
 COLUMNS_KEY = 'disk_tree.columns'
 
 LISTING_FORMAT = 2
-COMPRESSION = 'zstd'
+
+#: The one codec switch (see module doc): `snappy` (default) | `zstd` (opt-in).
+CODEC_VAR = 'DISK_TREE_PARQUET_CODEC'
+CODECS = ('snappy', 'zstd')
 ZSTD_LEVEL = 3
+
+
+def codec() -> str:
+    """The parquet codec the listing/tier/index writers use (`$DISK_TREE_PARQUET_CODEC`)."""
+    c = os.environ.get(CODEC_VAR, 'snappy').strip().lower() or 'snappy'
+    if c not in CODECS:
+        raise ValueError(f"${CODEC_VAR}={c!r}: expected one of {CODECS}")
+    return c
+
+
+def duckdb_codec() -> str:
+    """The codec clause for a DuckDB `COPY … (FORMAT PARQUET, <this>, …)`."""
+    c = codec()
+    return f'COMPRESSION {c}' + (f', COMPRESSION_LEVEL {ZSTD_LEVEL}' if c == 'zstd' else '')
+
+
+def pyarrow_codec() -> dict:
+    """`pq.ParquetWriter` / `write_table` kwargs for :func:`codec`."""
+    c = codec()
+    return {'compression': c, **({'compression_level': ZSTD_LEVEL} if c == 'zstd' else {})}
 
 
 @dataclass(frozen=True)
@@ -134,10 +163,8 @@ def restore(df: "pd.DataFrame", fmt: ListingFormat) -> "pd.DataFrame":
 
 
 def duckdb_copy_options(fmt: ListingFormat, row_group_size: int | None = None, extra_kv: dict | None = None) -> str:
-    """`COPY … TO` options writing `fmt` (zstd + its key-value metadata for v2)."""
-    opts = ['FORMAT PARQUET']
-    if fmt.version >= 2:
-        opts += [f'COMPRESSION {COMPRESSION}', f'COMPRESSION_LEVEL {ZSTD_LEVEL}']
+    """`COPY … TO` options writing `fmt` (the :func:`codec` + its key-value metadata)."""
+    opts = ['FORMAT PARQUET', duckdb_codec()]
     if row_group_size:
         opts.append(f'ROW_GROUP_SIZE {row_group_size}')
     kv = {**fmt.kv(), **(extra_kv or {})}
@@ -145,13 +172,6 @@ def duckdb_copy_options(fmt: ListingFormat, row_group_size: int | None = None, e
         esc = lambda s: str(s).replace("'", "''")
         opts.append('KV_METADATA {' + ', '.join(f"'{esc(k)}': '{esc(v)}'" for k, v in kv.items()) + '}')
     return f"({', '.join(opts)})"
-
-
-def pyarrow_write_kwargs(fmt: ListingFormat) -> dict:
-    """`pq.ParquetWriter` / `write_table` kwargs for `fmt`'s compression."""
-    if fmt.version >= 2:
-        return {'compression': COMPRESSION, 'compression_level': ZSTD_LEVEL}
-    return {}
 
 
 def with_kv(schema, fmt: ListingFormat):

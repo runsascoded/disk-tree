@@ -19,6 +19,8 @@ from pathlib import Path
 
 import duckdb
 
+from .index import duckdb_codec
+
 err = partial(print, file=sys.stderr)
 
 
@@ -140,7 +142,7 @@ def write_coarse_tiers(
         floors[e] = floor
         con.execute(f"CREATE TEMP TABLE coarse AS SELECT path FROM tot WHERE pb >= {floor}")
         counts[e] = con.execute("SELECT count(*) FROM coarse").fetchone()[0]
-        kv = f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE 8192, KV_METADATA {{coarse_floor: '{floor}'}})"
+        kv = f"(FORMAT parquet, {duckdb_codec()}, ROW_GROUP_SIZE 8192, KV_METADATA {{coarse_floor: '{floor}'}})"
         for suffix, order in (
             ("", "depth, path"),
             ("-by-user", "usr NULLS LAST, depth, path"),
@@ -410,7 +412,7 @@ def write_path_index(
         # and the footer (now in D1 per index-sync) is never parsed on a cold
         # isolate, so the ~27k-group count costs nothing at read time
         # (specs/path-agnostic-serving.md §2.1).
-        rg = "(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE 8192)"
+        rg = f"(FORMAT parquet, {duckdb_codec()}, ROW_GROUP_SIZE 8192)"
         con.execute(f"COPY (SELECT {cols} FROM ptu ORDER BY depth, path) TO '{path_index}' {rg}")
         err(f"path-index: wrote {path_index}")
         _rss("path-index")

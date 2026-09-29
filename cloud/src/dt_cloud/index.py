@@ -54,6 +54,14 @@ AGE_INDEX = "age-index.parquet"
 AGE_FLOOR_EXP = max(COARSE_EXPS)
 
 ROW_GROUP_SIZE = 8192
+
+
+def duckdb_codec() -> str:
+    """The `COPY` codec clause for the served index parquet: Snappy unless
+    `$DISK_TREE_PARQUET_CODEC=zstd` (spec `listing-slim.md`). The engine import
+    is lazy: the CLI must load without `disk_tree` (`test_cli_import.py`)."""
+    from disk_tree.listing_format import duckdb_codec as codec
+    return codec()
 # The index rows, in the site's column contract (`_lib/index.ts` `Row`).
 INDEX_COLS = "path, depth, usr, b, o, wts::DOUBLE AS wts, wb, c2, c3, c4, a"
 
@@ -97,7 +105,7 @@ def write_coarse_tiers(con: "duckdb.DuckDBPyConnection", path_index: Path, rows:
         floors[e] = floor
         con.execute(f"CREATE TEMP TABLE coarse AS SELECT path FROM tot WHERE pb >= {floor}")
         counts[e] = con.execute("SELECT count(*) FROM coarse").fetchone()[0]
-        kv = f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}'}})"
+        kv = f"(FORMAT parquet, {duckdb_codec()}, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}'}})"
         out = path_index.with_name(f"path-index-coarse{e}.parquet")
         con.execute(f"COPY (SELECT {INDEX_COLS} FROM {rows} r JOIN coarse USING (path) ORDER BY depth, path) TO '{out}' {kv}")
         con.execute("DROP TABLE coarse")
@@ -177,7 +185,7 @@ def write_age_index(
     kept = con.execute("SELECT count(*) FROM age_keep").fetchone()[0]
     all_paths = con.execute("SELECT count(DISTINCT path) FROM age_agg").fetchone()[0]
     out_path = out / AGE_INDEX
-    kv = f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}'}})"
+    kv = f"(FORMAT parquet, {duckdb_codec()}, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}'}})"
     n = con.execute(
         f"COPY (SELECT a.path, a.depth, a.day, a.b, a.o FROM age_agg a JOIN age_keep USING (path) "
         f"ORDER BY a.depth, a.path, a.day) TO '{out_path}' {kv}"
@@ -294,7 +302,7 @@ def write_age_pyramid(
             # re-bin the base's ms bucket start (ms // 1000 = exact seconds) up.
             rb = _binstart_ms_sql(bin, "(b.binstart // 1000)")
             sel = f"SELECT b.path, b.depth, {rb} AS binstart, sum(b.b)::BIGINT AS b, sum(b.o)::BIGINT AS o FROM pyr_base b JOIN pyr_keep USING (path) GROUP BY b.path, b.depth, {rb}"
-        kv = f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}', bin: '{bin}'}})"
+        kv = f"(FORMAT parquet, {duckdb_codec()}, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}', bin: '{bin}'}})"
         con.execute(f"COPY ({sel} ORDER BY depth, path, binstart) TO '{out_path}' {kv}")
         n = con.execute(f"SELECT count(*) FROM ({sel})").fetchone()[0]
         summ[bin] = {"rows": int(n), "file": str(out_path)}
@@ -349,7 +357,7 @@ def write_index(
         selects.append(index_rows_sql(f"getvariable('L2_{i}')", bucket))
     con.execute(f"CREATE TEMP TABLE idx AS {' UNION ALL '.join(f'({s})' for s in selects)}")
     n = con.execute("SELECT count(*) FROM idx").fetchone()[0]
-    con.execute(f"COPY (SELECT {INDEX_COLS} FROM idx ORDER BY depth, path) TO '{path_index}' (FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE})")
+    con.execute(f"COPY (SELECT {INDEX_COLS} FROM idx ORDER BY depth, path) TO '{path_index}' (FORMAT parquet, {duckdb_codec()}, ROW_GROUP_SIZE {ROW_GROUP_SIZE})")
     err(f"path-index: {n:,} rows → {path_index}")
     # Rows are descendant-inclusive already (disk-tree's dir sizes are subtree
     # sums), so a path's subtree bytes are its own `b`.
