@@ -23,6 +23,7 @@ import { type OverTime, overTimePoint, readOverTime } from '../_lib/overTime.js'
 import { parsePaths } from '../_lib/filter.js'
 import { metaRoots, rootPoints, type RootRow } from '../_lib/series.js'
 import { cacheKeyFor, cacheMatch, cacheStore, serverTiming } from '../_lib/edgeCache.js'
+import { LENS_PRIMARY_ONLY, storeKey, withStore } from '../_lib/stores.js'
 
 // The default store's snapshot dirs (`snapshots/<date>/`; other stores live in
 // a named subdir that DATE_RE keeps out), and the scan-id shape they're named by.
@@ -62,7 +63,10 @@ async function metaPoint(env: Ctx['env'], date: string): Promise<{ date: string;
   return m && typeof m.total_bytes === 'number' ? { date, b: m.total_bytes, o: m.total_objects ?? 0 } : null
 }
 
-export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> => {
+export const onRequestGet = async (ctx0: Ctx & { waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> => {
+  // `store=<key>`: a secondary store's env overlay (none = the primary, as is).
+  const ctx = withStore(ctx0)
+  if (ctx instanceof Response) return ctx
   const { env, request } = ctx
   if (!env.DB) return json({ error: 'index backend not configured (DB)' }, 503)
   if (!storeReady(env)) return json({ error: 'index reader not configured' }, 503)
@@ -80,6 +84,7 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   const lensRaw = url.searchParams.get('lens')
   let lens: Lens | undefined
   if (lensRaw) {
+    if (env.STORE_KEY) return json({ error: LENS_PRIMARY_ONLY }, 400)
     const m = /^user:(.+)$/.exec(lensRaw)
     if (!m) return json({ error: 'bad lens (want user:<id>)' }, 400)
     lens = { key: m[1] }
@@ -93,7 +98,7 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   if (split && (path || paths.length || lens || owner || classes)) return json({ error: 'split=roots is for the unscoped store root only' }, 400)
 
   // Every scan with a synced floor-free index, oldest first.
-  const rows = await st.time('scans', env.DB.prepare("SELECT DISTINCT date FROM index_schema WHERE variant = 'path' ORDER BY date").all<{ date: string }>())
+  const rows = await st.time('scans', env.DB.prepare("SELECT DISTINCT date FROM index_schema WHERE store = ? AND variant = 'path' ORDER BY date").bind(storeKey(env)).all<{ date: string }>())
   const dates = rows.results.map(r => r.date)
   // A user lens applies the live claims, so its key carries the ledger head.
   const head = lens ? await ledgerHead(env) : 0
@@ -105,7 +110,7 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   // straight into the Workers Cache API, which refuses those (413) — so every
   // chart load re-read one point per scan (≈8 rounds of D1 + range reads for
   // a 94-scan history, 5–20 s) while the diff beside it was a cache hit.
-  const cacheKey = cacheKeyFor('series', `${encodeURIComponent(path)}?P=${encodeURIComponent(paths.join(','))}&l=${lensRaw ?? ''}&o=${owner ?? ''}&cl=${classKey(classes)}&s=${split ?? ''}&d=${dates.join(',')}&x=${extra.join(',')}&head=${head}`)
+  const cacheKey = cacheKeyFor('series', `${encodeURIComponent(path)}?P=${encodeURIComponent(paths.join(','))}&l=${lensRaw ?? ''}&o=${owner ?? ''}&cl=${classKey(classes)}&s=${split ?? ''}&d=${dates.join(',')}&x=${extra.join(',')}&head=${head}`, storeKey(env))
   const hit = await st.time('cache', cacheMatch(env, cacheKey))
   if (hit) return hit
 

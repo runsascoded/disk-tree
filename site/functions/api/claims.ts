@@ -4,10 +4,14 @@
  * release a claim you hold.
  */
 import { type Ctx, json, requireViewer } from '../_lib/auth.js'
+import { primaryOnly } from '../_lib/stores.js'
 
 const PREFIX_RE = /^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/
 
 export const onRequest = async (ctx: Ctx): Promise<Response> => {
+  // The ownership ledger is the primary store's: `store=<other>` is a 404.
+  const notHere = primaryOnly(ctx)
+  if (notHere) return notHere
   const { request, env } = ctx
   if (request.method !== 'POST') return json({ error: 'method not allowed' }, 405)
   if (!env.DB) return json({ error: 'claims backend not configured (DB)' }, 503)

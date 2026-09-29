@@ -12,6 +12,8 @@
 // CORS). CF Pages serves static assets before Functions, so this only works
 // because public/data/ is no longer shipped (see the build).
 import { S3Store } from '@rdub/file-tree/stores/s3'
+import { storeKey, withStore } from '../_lib/stores.js'
+import { snapshotsPrefix } from '../_lib/shared.js'
 import { type Env, requireViewer } from '../_lib/auth.js'
 import { storeCreds, storeReady, storeTarget } from '../_lib/index.js'
 
@@ -22,7 +24,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{4})?$/
 // `private`: these responses are now auth-gated — browser caching only.
 const CACHE = 'private, max-age=300' // daily cadence — ≤5min staleness is fine
 
-export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Response> => {
+export const onRequest = async (ctx0: { request: Request; env: Env }): Promise<Response> => {
+  // `store=<key>`: a secondary store's env overlay (none = the primary, as is).
+  const ctx = withStore(ctx0)
+  if (ctx instanceof Response) return ctx
   if (!storeReady(ctx.env)) {
     return new Response('data proxy not configured (missing index store creds)', { status: 503 })
   }
@@ -33,9 +38,13 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
   if (gated instanceof Response) return gated
   // The store seam (`_lib/index.ts`): GCS by default, any S3-compatible
   // store (R2) once `STORE_*` is set — same data, same keys.
+  // A secondary store (`store=`) reads only its own snapshot dir
+  // (`snapshots/<SNAPSHOTS_SUBDIR>/`); the primary, all of `snapshots/`.
+  const own = ctx.env.STORE_KEY ? snapshotsPrefix(ctx.env) : 'snapshots/'
+  const notFound = () => new Response('not found', { status: 404 })
   const store = S3Store({
     ...storeTarget(ctx.env),
-    prefixes: ['snapshots/'], // allow-list: only the published snapshots
+    prefixes: [own], // allow-list: only the published snapshots
     ...storeCreds(ctx.env),
   })
 
@@ -48,6 +57,7 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
     const scansM = /^(?:([a-z0-9-]+)\/)?scans\.json$/.exec(rel)
     if (scansM) {
       const prefix = scansM[1] ? `snapshots/${scansM[1]}/` : 'snapshots/'
+      if (!prefix.startsWith(own)) return notFound()
       const dates: string[] = []
       let cursor: string | undefined
       do {
@@ -62,7 +72,7 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
       // snapshot with no index (pre-2026-08-26, until re-aggregated) is left
       // out of the picker rather than offered and failing on every drill.
       if (ctx.env.DB) {
-        const rows = await ctx.env.DB.prepare("SELECT DISTINCT date FROM index_schema WHERE variant = 'path'").all<{ date: string }>()
+        const rows = await ctx.env.DB.prepare("SELECT DISTINCT date FROM index_schema WHERE store = ? AND variant = 'path'").bind(storeKey(ctx.env)).all<{ date: string }>()
         const indexed = new Set(rows.results.map(r => r.date))
         for (let i = dates.length - 1; i >= 0; i--) if (!indexed.has(dates[i])) dates.splice(i, 1)
       }
@@ -73,6 +83,7 @@ export const onRequest = async (ctx: { request: Request; env: Env }): Promise<Re
     }
     // rules.json → snapshots/rules.json ; else /data/<date>/<file> → snapshots/<date>/<file>
     const key = rel === 'rules.json' ? 'snapshots/rules.json' : `snapshots/${rel}`
+    if (!key.startsWith(own)) return notFound()
     const { bytes, contentType } = await store.get(key)
     // A date-only scan id can't say *when* in that day the scan ran, and the
     // daily GCS job publishes ids without a time — but the object itself knows.

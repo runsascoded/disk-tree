@@ -9,11 +9,15 @@
  *   → { uri: "r2://idx", prefixes: ["listing/", …] }
  */
 import { type Ctx, json, requireViewer } from '../_lib/auth.js'
+import { withStore } from '../_lib/stores.js'
 import { storePrefixes, storeScheme, storeTarget } from '../_lib/index.js'
 
 export const FILES_PREFIXES = ['listing/', 'snapshots/', 'sweep/']
 
-export const onRequest = async (ctx: Ctx): Promise<Response> => {
+export const onRequest = async (ctx0: Ctx): Promise<Response> => {
+  // `store=<key>`: a secondary store's env overlay (none = the primary, as is).
+  const ctx = withStore(ctx0)
+  if (ctx instanceof Response) return ctx
   const id = await requireViewer(ctx)
   if (id instanceof Response) return id
   const target = storeTarget(ctx.env)

@@ -16,6 +16,7 @@
  * who-did-what trail.
  */
 import { type Ctx, json, requireAdmin, requireViewer } from '../_lib/auth.js'
+import { primaryOnly } from '../_lib/stores.js'
 import { canonId, loadRegistry } from '../_lib/identity.js'
 
 /** gs://marin-<suffix>/<path>/ — the six marin buckets only, dir prefixes only. */
@@ -53,6 +54,9 @@ function validate(b: ActionBody): { error: string } | {
 }
 
 export const onRequest = async (ctx: Ctx): Promise<Response> => {
+  // The ownership ledger is the primary store's: `store=<other>` is a 404.
+  const notHere = primaryOnly(ctx)
+  if (notHere) return notHere
   const { request, env } = ctx
   if (!env.DB) return json({ error: 'actions backend not configured (DB)' }, 503)
 

@@ -11,6 +11,7 @@
 import type { Env } from './auth.js'
 import { makeStore } from './index.js'
 import { shared } from './shared.js'
+import { storeKey } from './stores.js'
 
 export type Provenance = [source: string, evidence: string | null, prefix: string]
 
@@ -48,9 +49,9 @@ async function readJson(env: Env, key: string): Promise<unknown | null> {
 /** The scan's sidecar indexes (or null when the generation has none). */
 async function indexes(env: Env, date: string) {
   if (!env.DB) return null
-  const r = await env.DB.prepare('SELECT dir FROM index_schema WHERE date = ? AND variant = ?').bind(date, 'path').first<{ dir: string | null }>()
+  const r = await env.DB.prepare('SELECT dir FROM index_schema WHERE store = ? AND date = ? AND variant = ?').bind(storeKey(env), date, 'path').first<{ dir: string | null }>()
   const dir = r?.dir ?? `listing/${date}`
-  const key = `${date}|${dir}`
+  const key = `${storeKey(env)}|${date}|${dir}`
   const miss = missAt.get(key)
   if (miss != null && Date.now() - miss > MISS_TTL_MS) { idxMemo.delete(key); missAt.delete(key) }
   const got = await shared(idxMemo, key, async () => {

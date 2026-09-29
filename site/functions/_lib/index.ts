@@ -27,6 +27,7 @@ import { S3Store } from '@rdub/file-tree/stores/s3'
 import { parquetMetadataAsync, parquetReadObjects } from 'hyparquet'
 import type { Env } from './auth.js'
 import { shared } from './shared.js'
+import { PRIMARY_STORE, storeKey } from './stores.js'
 
 /** A leaf of the stored parquet schema (`index_schema.schema_json`). */
 interface SchemaElement { type: string; name: string; repetition_type: string; converted_type?: string }
@@ -184,7 +185,7 @@ export function indexKey(dir: string, variant: string): string {
  * outside the D1 row-group path. */
 export async function indexDir(env: Env, date: string, variant = 'path'): Promise<string | null> {
   if (!env.DB) return null
-  const r = await env.DB.prepare('SELECT dir FROM index_schema WHERE date = ? AND variant = ?').bind(date, variant).first<{ dir: string | null }>()
+  const r = await env.DB.prepare('SELECT dir FROM index_schema WHERE store = ? AND date = ? AND variant = ?').bind(storeKey(env), date, variant).first<{ dir: string | null }>()
   return r?.dir ?? null
 }
 
@@ -218,7 +219,7 @@ const handles = new Map<string, Promise<IndexHandle>>()
 const handleAt = new Map<string, number>()
 
 export async function openIndex(env: Env, date: string, variant = 'path'): Promise<IndexHandle> {
-  const ck = `${date}:${variant}`
+  const ck = `${storeKey(env)}:${date}:${variant}`
   const at = handleAt.get(ck)
   if (at == null || Date.now() - at >= HANDLE_TTL) {
     handles.delete(ck)
@@ -226,7 +227,7 @@ export async function openIndex(env: Env, date: string, variant = 'path'): Promi
   }
   return shared(handles, ck, async (): Promise<IndexHandle> => {
     if (!env.DB) throw new Error('index reader not configured (DB)')
-    const s = await env.DB.prepare('SELECT version, schema_json, floor_bytes, gen, dir FROM index_schema WHERE date = ? AND variant = ?').bind(date, variant).first<{ version: number; schema_json: string; floor_bytes: number | null; gen: string | null; dir: string | null }>()
+    const s = await env.DB.prepare('SELECT version, schema_json, floor_bytes, gen, dir FROM index_schema WHERE store = ? AND date = ? AND variant = ?').bind(storeKey(env), date, variant).first<{ version: number; schema_json: string; floor_bytes: number | null; gen: string | null; dir: string | null }>()
     if (!s || !s.gen || !s.dir) throw new Error(`index variant '${variant}' not synced for ${date}`)
     // A pointer whose row groups were retired (`index-gc -r`) still names
     // the generation dir: open the tier's group-manifest blob there instead.
@@ -255,7 +256,9 @@ export const blobKey = (dir: string, variant: string): string => indexKey(dir, v
 async function openBlob(env: Env, date: string, variant: string, gen: string, dir: string): Promise<BlobHandle> {
   const key = blobKey(dir, variant)
   const cache = (caches as unknown as { default: Cache }).default
-  const ck = new Request(`https://index-blob.cache/${key}`)
+  // A secondary store's bucket may hold the same key: its entries get their own segment.
+  const st = storeKey(env)
+  const ck = new Request(`https://index-blob.cache/${st === PRIMARY_STORE ? '' : `@${st}/`}${key}`)
   let text: string
   const hit = await cache.match(ck)
   if (hit) text = await hit.text()
@@ -358,7 +361,7 @@ const groupCache = new Map<string, Row[]>()
 let groupCacheBytes = 0
 
 async function readGroupCached(h: IndexHandle, rg: number, rgJson: string): Promise<Row[]> {
-  const k = `${h.date}|${h.variant}|${h.gen}|${rg}`
+  const k = `${storeKey(h.env)}|${h.date}|${h.variant}|${h.gen}|${rg}`
   const hit = groupCache.get(k)
   if (hit) {
     groupCache.delete(k)

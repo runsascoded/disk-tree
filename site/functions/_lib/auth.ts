@@ -81,6 +81,15 @@ export interface Env {
   SNAPSHOTS_SUBDIR?: string
   /** Dedicated SA key (Batch submit + actAs the job SA) for the sweep dispatch bridge. */
   GCP_SA_KEY?: string
+  /** Secondary stores served beside the primary (`_lib/stores.ts`,
+   *  specs/multi-store.md): `{<key>: {scope?, vars?, secrets?}}` as JSON. */
+  STORES_JSON?: string
+  /** Set only on a secondary store's env overlay (`withStore`): its key
+   *  (`index_schema.store`, cache keys); unset = the primary. */
+  STORE_KEY?: string
+  /** Set only on a secondary store's overlay: a scope its viewers need on top
+   *  of the deployment's viewer scope (`requireViewer`). */
+  STORE_SCOPE?: string
 }
 
 export interface Ctx {
@@ -216,8 +225,14 @@ export async function requireAnyScope(ctx: Ctx, scopes: string[]): Promise<Ident
 }
 /** Any authenticated viewer of this deployment (reads): the full viewer scope
  *  or the read-only tier. */
-export const requireViewer = (ctx: Ctx): Promise<Identity | Response> =>
-  requireAnyScope(ctx, [baseScope(ctx.env), baseReadScope(ctx.env)])
+export async function requireViewer(ctx: Ctx): Promise<Identity | Response> {
+  const id = await requireAnyScope(ctx, [baseScope(ctx.env), baseReadScope(ctx.env)])
+  // A secondary store may demand more (its `STORES_JSON` `scope`, e.g.
+  // staff-only `admin`); the identity is the deployment's either way.
+  const extra = ctx.env.STORE_SCOPE
+  if (id instanceof Response || !extra || id.scopes.includes(extra) || id.scopes.includes('*')) return id
+  return id.via === 'public' ? json({ error: 'unauthenticated' }, 401) : json({ error: 'forbidden' }, 403)
+}
 /** Staging (the opt-in trash proposal) and other non-admin writes: the full
  *  base scope — a read-only guest link can't. */
 export const requireStager = (ctx: Ctx): Promise<Identity | Response> => requireScope(ctx, baseScope(ctx.env))
