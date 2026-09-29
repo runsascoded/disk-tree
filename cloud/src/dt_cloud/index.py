@@ -97,7 +97,7 @@ def write_coarse_tiers(con: "duckdb.DuckDBPyConnection", path_index: Path, rows:
         floors[e] = floor
         con.execute(f"CREATE TEMP TABLE coarse AS SELECT path FROM tot WHERE pb >= {floor}")
         counts[e] = con.execute("SELECT count(*) FROM coarse").fetchone()[0]
-        kv = f"(FORMAT parquet, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}'}})"
+        kv = f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}'}})"
         out = path_index.with_name(f"path-index-coarse{e}.parquet")
         con.execute(f"COPY (SELECT {INDEX_COLS} FROM {rows} r JOIN coarse USING (path) ORDER BY depth, path) TO '{out}' {kv}")
         con.execute("DROP TABLE coarse")
@@ -177,7 +177,7 @@ def write_age_index(
     kept = con.execute("SELECT count(*) FROM age_keep").fetchone()[0]
     all_paths = con.execute("SELECT count(DISTINCT path) FROM age_agg").fetchone()[0]
     out_path = out / AGE_INDEX
-    kv = f"(FORMAT parquet, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}'}})"
+    kv = f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}'}})"
     n = con.execute(
         f"COPY (SELECT a.path, a.depth, a.day, a.b, a.o FROM age_agg a JOIN age_keep USING (path) "
         f"ORDER BY a.depth, a.path, a.day) TO '{out_path}' {kv}"
@@ -294,7 +294,7 @@ def write_age_pyramid(
             # re-bin the base's ms bucket start (ms // 1000 = exact seconds) up.
             rb = _binstart_ms_sql(bin, "(b.binstart // 1000)")
             sel = f"SELECT b.path, b.depth, {rb} AS binstart, sum(b.b)::BIGINT AS b, sum(b.o)::BIGINT AS o FROM pyr_base b JOIN pyr_keep USING (path) GROUP BY b.path, b.depth, {rb}"
-        kv = f"(FORMAT parquet, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}', bin: '{bin}'}})"
+        kv = f"(FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE}, KV_METADATA {{coarse_floor: '{floor}', bin: '{bin}'}})"
         con.execute(f"COPY ({sel} ORDER BY depth, path, binstart) TO '{out_path}' {kv}")
         n = con.execute(f"SELECT count(*) FROM ({sel})").fetchone()[0]
         summ[bin] = {"rows": int(n), "file": str(out_path)}
@@ -349,7 +349,7 @@ def write_index(
         selects.append(index_rows_sql(f"getvariable('L2_{i}')", bucket))
     con.execute(f"CREATE TEMP TABLE idx AS {' UNION ALL '.join(f'({s})' for s in selects)}")
     n = con.execute("SELECT count(*) FROM idx").fetchone()[0]
-    con.execute(f"COPY (SELECT {INDEX_COLS} FROM idx ORDER BY depth, path) TO '{path_index}' (FORMAT parquet, ROW_GROUP_SIZE {ROW_GROUP_SIZE})")
+    con.execute(f"COPY (SELECT {INDEX_COLS} FROM idx ORDER BY depth, path) TO '{path_index}' (FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE})")
     err(f"path-index: {n:,} rows → {path_index}")
     # Rows are descendant-inclusive already (disk-tree's dir sizes are subtree
     # sums), so a path's subtree bytes are its own `b`.

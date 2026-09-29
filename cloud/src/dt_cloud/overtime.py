@@ -126,7 +126,7 @@ def write_over_time_index(
         con.register("ms_over_time", ms.table)
         con.execute(
             f"COPY (SELECT * FROM ms_over_time ORDER BY depth, path, {SCAN_LO}) "
-            f"TO '{out_path}' (FORMAT parquet, ROW_GROUP_SIZE {ROW_GROUP_SIZE})"
+            f"TO '{out_path}' (FORMAT parquet, COMPRESSION zstd, COMPRESSION_LEVEL 3, ROW_GROUP_SIZE {ROW_GROUP_SIZE})"
         )
         con.unregister("ms_over_time")
         rows = con.execute(f"SELECT count(*) FROM read_parquet('{out_path}')").fetchone()[0]

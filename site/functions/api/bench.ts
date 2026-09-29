@@ -14,6 +14,7 @@ import { parquetMetadataAsync, parquetReadObjects } from 'hyparquet'
 import { withStore } from '../_lib/stores.js'
 import { type Env, requireViewer } from '../_lib/auth.js'
 import { makeStore, openIndex, readAsks, readRects, type Row } from '../_lib/index.js'
+import { compressors } from '../_lib/zstd.js'
 
 const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'content-type': 'application/json' } })
 
@@ -135,7 +136,7 @@ export const onRequestGet = async (ctx0: { request: Request; env: Env }): Promis
         for (const { rg } of groupsFor(p)) {
           groupsRead++
           const md = { ...metadata, row_groups: [rg], num_rows: rg.num_rows }
-          const rows = await parquetReadObjects({ file, metadata: md, filter: { path: { $eq: p } }, usePageIndex })
+          const rows = await parquetReadObjects({ file, metadata: md, filter: { path: { $eq: p } }, usePageIndex, compressors })
           found += rows.length
         }
       }
