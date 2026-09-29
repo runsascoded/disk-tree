@@ -7,8 +7,14 @@ config:
   disk-tree-m3:ephemeral_gib: "30"
   disk-tree-m3:env:
     R2_ENDPOINT_URL: https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com
+    # index-sync → the site's D1 (cf/: `disk-tree-m3-db`)
+    CLOUDFLARE_ACCOUNT_ID: 0dcad5654e9744de6616f74b8df4af63
+    D1_DB_ID: e5288564-a010-4177-9f3c-77e25fad9f72
+    D1_DB_NAME: disk-tree-m3-db
+    INDEX_VARIANTS: path
   # Created empty; values set out of band by `aws/put-secrets` (never in state).
   disk-tree-m3:secrets:
     AWS_ACCESS_KEY_ID: disk-tree-m3/r2-access-key-id
     AWS_SECRET_ACCESS_KEY: disk-tree-m3/r2-secret-access-key
+    CLOUDFLARE_API_TOKEN: disk-tree-m3/cf-d1-token
 encryptionsalt: v1:QvVtYICwoEI=:v1:siNh6SqB8PdKdjVa:KJ40inG3RlfZPPjQqOdNm2PLHq01Yw==
