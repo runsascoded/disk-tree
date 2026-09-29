@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Build + deploy m3's `site/` to Cloudflare Pages (RAC account).
+#
+#   site/deploy-m3          # production: `wrangler.toml` → project `disk-tree` (disk.rbw.sh)
+#   site/deploy-m3 --dev    # `wrangler.dev.toml` → project `disk-tree-dev` (dev.disk.rbw.sh)
+#
+# The base `site/deploy` is OA-account + push-to-GitHub specific; m3 isn't
+# pushed and deploys to RAC. Pages rejects a custom config path, so the dev
+# config is swapped in as wrangler.toml for the build (vite reads its `[vars]`
+# for STORE / AUTH_MODE) and the deploy, then restored (deploy-r2.yml's trick).
+# Auth: `CLOUDFLARE_API_TOKEN` = the worktree's `CF_TOKEN`; the account id from
+# `CLOUDFLARE_ACCOUNT_ID` (.envrc).
+set -euo pipefail
+cd "$(dirname "$0")"
+: "${CF_TOKEN:?set by .envrc}" "${CLOUDFLARE_ACCOUNT_ID:?set by .envrc}"
+export CLOUDFLARE_API_TOKEN=$CF_TOKEN
+
+config=wrangler.toml
+for a in "$@"; do case "$a" in -d|--dev) config=wrangler.dev.toml ;; *) echo "deploy-m3: unknown arg $a" >&2; exit 2 ;; esac; done
+project=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$config")
+
+restore() { [ -f tmp/wrangler.toml.deploy-bak ] && mv tmp/wrangler.toml.deploy-bak wrangler.toml; }
+if [ "$config" != wrangler.toml ]; then
+  mkdir -p tmp; cp wrangler.toml tmp/wrangler.toml.deploy-bak; trap restore EXIT
+  cp "$config" wrangler.toml
+fi
+pnpm build
+npx wrangler pages deploy dist --project-name "$project" --branch main --commit-dirty=true
