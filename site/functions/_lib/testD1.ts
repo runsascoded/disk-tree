@@ -53,11 +53,13 @@ function d1Of(raw: Sqlite): D1Database {
   return { prepare: (sql: string) => prepare(sql) } as unknown as D1Database
 }
 
-/** A fresh in-memory DB with `lineage`'s migrations applied. */
-export async function sqliteD1(lineage: typeof LINEAGES[number]): Promise<{ db: D1Database; raw: Sqlite }> {
+/** A fresh in-memory DB with `lineage`'s migrations applied — all of them,
+ * or (`before`) only those whose file name sorts before it, so a test can seed
+ * rows and then apply a migration over them. */
+export async function sqliteD1(lineage: typeof LINEAGES[number], { before }: { before?: string } = {}): Promise<{ db: D1Database; raw: Sqlite }> {
   const { DatabaseSync } = await load<{ DatabaseSync: new (path: string) => Sqlite }>('node:sqlite')
   const raw = new DatabaseSync(':memory:')
   raw.exec('PRAGMA foreign_keys = ON')
-  for (const m of await migrations(lineage)) raw.exec(m.sql)
+  for (const m of await migrations(lineage)) if (before === undefined || m.name < before) raw.exec(m.sql)
   return { db: d1Of(raw), raw }
 }
