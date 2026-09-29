@@ -145,6 +145,28 @@ const REGISTRY: Store[] = [
     // kept for the type, and for a gated build of the same store.
     wall: { restrict: 'This store is public.', signIn: 'Sign in' },
   },
+  {
+    key: 'laptop',
+    label: 'Laptop',
+    title: 'disk-tree — m3',
+    desc: 'Disk usage of one laptop, captured every 12 h — treemap, sizes over time, diffs, and staged deletes executed on the laptop.',
+    path: '/',
+    scheme: 'file:///',  // + the root sans leading slash (dt-cloud path-index strips it)
+    base: '/data/laptop',
+    ogImage: '/og.jpg',
+    prices: false,
+    staging: true,
+    owners: false,
+    executor: 'plan-sweep',
+    // Roots are scanned directories (`/Users/ryan`), not buckets.
+    buckets: [],
+    rootLabel: 'all roots',
+    objectsNote: 'Local files; created is each file’s mtime at capture time.',
+    wall: {
+      restrict: 'This laptop’s disk usage is private to its owner.',
+      signIn: 'Sign in',
+    },
+  },
 ]
 
 // A deployment serves one store, selected by VITE_STORE at build time (unset =
