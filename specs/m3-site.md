@@ -62,6 +62,12 @@ GHA (the `reduce.yml` precedent) stays the fallback.
 Verdict: **go**. The ingest is trivially small for Batch, so the job definition can drop to 1 vCPU / 4 GiB. Remaining in Phase 0: run `site/` locally over this generation.
 
 ### Phase 1: the `laptop` store
+
+**Status (2026-09-29):** done except auth (the Google client) and the deploy:
+- `laptop` store in the registry, `site/wrangler.toml` = m3's config; local `site/` renders the home scan and drills (`/Users/ryan/c`). Three `[base]` fixes it needed (staff `BASE_SCOPE`, case-sensitive `/users/*`, leading-`/` roots) are on `cloud`.
+- `cf/` (Pulumi, shared `CfnDashboard`) adopted the Pages project, domain and CNAME and created D1 `disk-tree-m3-db`; `migrations/cw` applied.
+- The Batch ingest syncs footers to that D1 (token "disky m3 batch d1", D1 Edit only); the 12 h agent runs `aws/laptop-scan` (index for `ui/`, then capture → Batch).
+
 - A `REGISTRY` entry in `site/src/stores.ts`:
   - `scheme: 'file'` and `rootLabel` `~`;
   - `prices: false`, `owners: false`, `staging: true`;

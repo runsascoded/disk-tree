@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# The 12 h scan (LaunchAgent `com.runsascoded.disk-tree.index`; specs/m3-site.md).
+#
+#   1. `disk-tree index` → a scan blob in R2: what disk.rbw.sh's `ui/` reads.
+#      Transitional — dropped at the Phase 4 cut-over to `site/`.
+#   2. `disk-tree capture` → layer-1 listing shards in R2 (bounded memory, no
+#      local disk), then `aws/submit` → the Batch ingest (path index, snapshot,
+#      D1 footers). The laptop only walks.
+#
+# R2 as `AWS_PROFILE=m3` ("disky m3 laptop": `disk-tree` only); the Batch
+# submit as `AWS_PROFILE=r` (RAC AWS).
+set -euo pipefail
+M3=/Users/ryan/c/disky/wt/m3
+BIN=$M3/.venv/bin
+export DISK_TREE_R2_ENDPOINT_URL=https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com
+ts() { date -u +%FT%TZ; }
+
+echo "[$(ts)] index"
+AWS_PROFILE=m3 DISK_TREE_SCAN_DIRS=r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans \
+  "$BIN/disk-tree" index -C -D --no-progress --to r2://disk-tree/scans /Users/ryan
+
+echo "[$(ts)] capture"
+capture=$(AWS_PROFILE=m3 "$BIN/disk-tree" capture -q -t r2://disk-tree/captures /Users/ryan | tail -1)
+echo "[$(ts)] captured $capture"
+
+job=$(AWS_PROFILE=r "$BIN/python" "$M3/aws/submit" "$capture")
+echo "[$(ts)] submitted Batch job $job"
