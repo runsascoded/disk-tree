@@ -87,7 +87,9 @@ def capture_cmd(batch_rows: int, no_progress: bool, sudo: bool, to: str, path: s
     if blobfs.is_url(to):
         blobfs.fs_for(to)  # a bad scheme / missing endpoint fails before the walk, not after
     now = datetime.now(timezone.utc)
-    host = socket.gethostname()
+    # `DISK_TREE_HOST` pins the capture dir's host segment: the same machine
+    # reports `Mac` to a shell and `mac.lan` to a launchd job.
+    host = os.environ.get('DISK_TREE_HOST') or socket.gethostname()
     out = capture_dir(to, root, host, now.strftime('%Y-%m-%dT%H-%M-%SZ'))
     if not blobfs.is_url(out):
         os.makedirs(out, exist_ok=True)
