@@ -19,7 +19,7 @@ import { type Lens, makeStore, storeReady } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { classKey, parseClasses, parseOwner } from '../_lib/scope.js'
 import { readRootAgg, readRootRows } from '../_lib/view.js'
-import { readOverTime } from '../_lib/overTime.js'
+import { type OverTime, overTimePoint, readOverTime } from '../_lib/overTime.js'
 import { parsePaths } from '../_lib/filter.js'
 import { metaRoots, rootPoints, type RootRow } from '../_lib/series.js'
 import { cacheKeyFor, cacheMatch, cacheStore } from '../_lib/edgeCache.js'
@@ -98,13 +98,16 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   const head = lens ? await ledgerHead(env) : 0
   // Unscoped whole-bucket series only: scans without tiers still have a total in meta.json.
   const extra = path === '' && !paths.length && !lens && !owner && !classes ? await unindexedScans(env, new Set(dates)) : []
-  // Fast path (specs/obs-axis-indexing.md Phase 1): the plain per-path series
-  // (no split / paths / lens / owner / class scope) reads the cross-scan
-  // over-time index once instead of one point read per scan. `point()` below
-  // takes a covered scan from here; scans newer than the index (or not in it)
-  // fall through to the per-scan read. null = index absent → all per-scan.
-  const simple = !split && !paths.length && !lens && !owner && !classes
-  const ot = simple ? await readOverTime(env, path) : null
+  // Fast path (specs/obs-axis-indexing.md Phase 1): a path's series (or a
+  // filter's, one line per match root) reads the cross-scan over-time index —
+  // ⌈scans/K⌉ pruned reads per root — instead of one point read per scan.
+  // `point()` below takes any scan the groups cover from here (absent there =
+  // absent, the groups are floor-free); only the unsealed tip falls through to
+  // the per-scan read. Lens / owner / class scopes and `split` aren't in the
+  // index. Any line unreadable → all per-scan.
+  const indexable = !split && !lens && !owner && !classes
+  const lines = indexable ? await Promise.all((paths.length ? paths : [path]).map(p => readOverTime(env, p))) : []
+  const ot: OverTime[] | null = lines.length && lines.every(Boolean) ? lines as OverTime[] : null
   // Two-tier cache (colo + KV, `_lib/edgeCache.ts`), keyed by every input
   // including the scan list and the ledger head, so an entry is immutable and
   // a new scan is a new key. This used to `cache.put` a `private` response
@@ -124,8 +127,8 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   // since a silently absent point looks like a gap in the data.
   const point = async (date: string, tries = 2): Promise<{ date: string; b: number; o: number } | null> => {
     try {
-      const covered = ot?.get(date)
-      if (covered) return { date, ...covered }
+      const covered = ot ? overTimePoint(ot, date) : undefined
+      if (covered !== undefined) return covered && { date, ...covered }
       if (split) {
         const rows = await readRootRows(env, date)
         if (!rows) return null
