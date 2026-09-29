@@ -1,15 +1,68 @@
-#!/usr/bin/env bash
-# Submit one capture to the `disk-tree-m3` Batch queue (aws/__main__.py).
-#
-#   aws/submit r2://disk-tree/captures/<host>/<root slug>/<stamp>
-#
-# Prints the job id; follow it with
-#   aws logs tail /disk-tree-m3-ingest/batch --follow
-# The account is `.envrc`'s `AWS_PROFILE` (`r`, RAC).
-set -euo pipefail
-capture=${1:?usage: aws/submit r2://<bucket>/<capture dir>}
-name=ingest-$(date -u +%Y%m%d-%H%M%S)
-aws batch submit-job --region us-east-1 \
-  --job-name "$name" --job-queue disk-tree-m3 --job-definition disk-tree-m3-ingest \
-  --container-overrides "$(jq -nc --arg c "$capture" '{command: [$c]}')" \
-  --query jobId --output text
+#!/usr/bin/env python3
+"""Submit one capture to the `disk-tree-m3` Batch queue (aws/__main__.py).
+
+  aws/submit r2://disk-tree/captures/<host>/<root slug>/<stamp>
+
+Prints the job id; `-w` also follows the job's CloudWatch log until it ends
+(exit status = the job's). The account is `.envrc`'s `AWS_PROFILE` (`r`, RAC).
+"""
+import sys
+import time
+from datetime import datetime, timezone
+
+import boto3
+from click import argument, command, option
+
+QUEUE = 'disk-tree-m3'
+JOB_DEF = 'disk-tree-m3-ingest'
+LOG_GROUP = '/disk-tree-m3-ingest/batch'
+err = lambda *a: print(*a, file=sys.stderr, flush=True)
+
+
+def follow(batch, logs, job_id: str) -> int:
+    stream, token, last_status = None, None, None
+    while True:
+        job = batch.describe_jobs(jobs=[job_id])['jobs'][0]
+        status = job['status']
+        if status != last_status:
+            err(f'[{job_id[:8]}] {status}')
+            last_status = status
+        stream = stream or job.get('container', {}).get('logStreamName')
+        if stream:
+            kw = {'logGroupName': LOG_GROUP, 'logStreamName': stream, 'startFromHead': True}
+            if token:
+                kw['nextToken'] = token
+            try:
+                r = logs.get_log_events(**kw)
+                for e in r['events']:
+                    print(e['message'], flush=True)
+                token = r['nextForwardToken']
+            except logs.exceptions.ResourceNotFoundException:
+                pass
+        if status in ('SUCCEEDED', 'FAILED'):
+            if status == 'FAILED':
+                err(f'[{job_id[:8]}] {job.get("statusReason", "")}')
+            return 0 if status == 'SUCCEEDED' else 1
+        time.sleep(15)
+
+
+@command()
+@option('-w', '--watch', is_flag=True, help='Follow the job log until it finishes')
+@argument('capture')
+def main(watch: bool, capture: str):
+    session = boto3.Session(region_name='us-east-1')
+    batch = session.client('batch')
+    name = f'ingest-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}'
+    job_id = batch.submit_job(
+        jobName=name,
+        jobQueue=QUEUE,
+        jobDefinition=JOB_DEF,
+        containerOverrides={'command': [capture]},
+    )['jobId']
+    print(job_id, flush=True)
+    if watch:
+        sys.exit(follow(batch, session.client('logs'), job_id))
+
+
+if __name__ == '__main__':
+    main()

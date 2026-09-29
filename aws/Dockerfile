@@ -11,7 +11,7 @@ FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
 # GNU time: ingest.sh reports path-index's peak RSS (the spike's question).
 RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends time ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN uv tool install awscli==1.44.* && ln -s /root/.local/bin/aws /usr/local/bin/aws
+RUN uv tool install awscli==1.44.*
 
 WORKDIR /app
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1
