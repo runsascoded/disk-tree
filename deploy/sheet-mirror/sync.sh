@@ -5,7 +5,7 @@
 #
 #   1. `dt-cloud export <source>` → the source's CSV (fixed column contract),
 #      read from the site's API with the read-only grant token.
-#   2. `dt-cloud sheet-push -k <key> -w <tab> [-D <footer>]` → cell-level,
+#   2. `dt-cloud sheet-push -c -k <key> -w <tab> [-D <footer>]` → cell-level,
 #      key-aware diff into the one named tab, so Version History shows one-row
 #      changes; a no-op run writes nothing.
 #
@@ -45,7 +45,7 @@ while IFS= read -r line <&3; do
   [[ -n $subdir ]] && export_args+=(-s "$subdir")
   [[ -n $executor ]] && export_args+=(-e "$executor")
   [[ -n $unit ]] && export_args+=(-U "$unit")
-  push_args=(-k "$key" -w "$tab")
+  push_args=(-c -k "$key" -w "$tab")
   [[ -n $footer ]] && push_args+=(-D "$footer")
   if dt-cloud export "$source" "${export_args[@]}" && dt-cloud sheet-push "${push_args[@]}" "$sheet" "$csv"; then
     echo "✓ $source → '$tab' @ $(date -u '+%Y-%m-%d %H:%M UTC')" >&2

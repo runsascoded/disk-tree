@@ -1925,6 +1925,7 @@ def export_cmd(date: str | None, executor: str | None, list_sources: bool, out: 
 
 
 @main.command("sheet-push")
+@option("-c", "--create", is_flag=True, help="create the tab if the sheet has none by that title (header row frozen + bold, columns sized to the first fill)")
 @option("-D", "--disclaimer", help="static footer text 2 rows below the table; a '; last change <ts>' stamp is appended that only advances when data changes")
 @option("-I", "--impersonate", help="service-account email to impersonate for Sheets auth (needs Token Creator); default is ambient ADC")
 @option("-k", "--key", default=None, help="stable row identity column: existing rows keep their order, new keys append, removed keys clear (compacted on an otherwise-unchanged run); default positional")
@@ -1932,7 +1933,7 @@ def export_cmd(date: str | None, executor: str | None, list_sources: bool, out: 
 @option("-w", "--worksheet", required=True, help="tab to sync, by title (never the first tab by default: the sheet may hold human-authored tabs)")
 @argument("sheet_id")
 @argument("csv_path", default="-")
-def sheet_push(disclaimer: str | None, impersonate: str | None, key: str | None, dry_run: bool, worksheet: str, sheet_id: str, csv_path: str) -> None:
+def sheet_push(create: bool, disclaimer: str | None, impersonate: str | None, key: str | None, dry_run: bool, worksheet: str, sheet_id: str, csv_path: str) -> None:
     """Push a CSV (header + rows, e.g. from `export`) into one named tab of a
     Google Sheet — the generic CSV → tab writer behind the sheet mirror.
 
@@ -1950,7 +1951,7 @@ def sheet_push(disclaimer: str | None, impersonate: str | None, key: str | None,
     Auth is Application Default Credentials: the job's GCP service account in
     Cloud Run, or your `gcloud auth application-default` locally. The sheet
     must be shared (Editor) with that identity, and the Sheets API enabled in
-    the project.
+    the project. `-c` creates a missing tab (appended last, header frozen).
 
         dt-cloud export owners -o owners.csv && dt-cloud sheet-push -k user -w 'Storage by user' <id> owners.csv
     """
@@ -1985,8 +1986,30 @@ def sheet_push(disclaimer: str | None, impersonate: str | None, key: str | None,
         )
     else:
         creds, _ = google.auth.default(scopes=scopes)
-    ws = gspread.authorize(creds).open_by_key(sheet_id).worksheet(worksheet)
+    sheet = gspread.authorize(creds).open_by_key(sheet_id)
+    created = False
+    try:
+        ws = sheet.worksheet(worksheet)
+    except gspread.WorksheetNotFound:
+        if not create:
+            raise SystemExit(f"sheet {sheet_id} has no tab {worksheet!r} (-c creates it)") from None
+        ws = sheet.add_worksheet(worksheet, rows=len(rows) + 10, cols=len(rows[0]))
+        ws.freeze(rows=1)
+        ws.format("1:1", {"textFormat": {"bold": True}})
+        created = True
+        err(f"created tab '{worksheet}'")
     plan = push(ws, rows, now, key=key, disclaimer=disclaimer, cell=gspread.Cell)
+    if created:
+        # Width from the table only (auto-resize would stretch column A to the
+        # footer); set once, so later width tweaks by people stick.
+        sheet.batch_update({"requests": [
+            {"updateDimensionProperties": {
+                "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": i, "endIndex": i + 1},
+                "properties": {"pixelSize": 7 * max(len(r[i]) for r in rows if i < len(r)) + 24},
+                "fields": "pixelSize",
+            }}
+            for i in range(len(rows[0]))
+        ]})
     verb = "changed" if plan.data_changed else ("unchanged, compacted" if plan.compacted else "unchanged")
     holes = f", {plan.holes} cleared row(s) held for compaction" if plan.holes else ""
     err(f"synced '{ws.title}': {len(plan.cells)} cell(s) written ({plan.data_rows} data rows, data {verb}{holes})")
