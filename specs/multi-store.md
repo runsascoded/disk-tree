@@ -32,6 +32,12 @@ That spec's phase 2 is a **union** of N locations into one Map. This one is its 
 1. **Schema + seam (base):** the `store` column and PKs, `store=` resolution in every data Function (default = primary, so existing deploys are byte-identical), store in cache keys, and the per-store config object. Verify: existing gcs/cw/r2 behaviour unchanged (tests plus a dev-stack diff of `/api/series`, `/api/subtree`, `/api/diff` responses).
 2. **Frontend mount:** secondary stores routed under `Store.path`, the store switcher, and the `STORES_EXTRA` build var.
 3. **Meta store for cw:** the job targets, scheduler, first scan, `wrangler.toml` config, then CIC `cw-s3.oa.dev/meta`.
+3b. **`/meta` is the one storage browser (disky + file-tree).** Ryan (2026-09-29, via cw-s3): "combining best parts of FT and DT for meta browsing".
+    - **Navigation is disky's:** treemap + children table, with totals, age, diff and over-time, over the daily meta scan (the whole bucket plus the R2 mirror).
+    - **Leaves open file-tree's viewer:** clicking a file cell or row opens `@rdub/file-tree`'s parquet viewer (schema, row-group paging, cell rendering, the byte-unit `renderCell` from `FilesPage.tsx`), reading the bytes live through the gated `/v1/files/<path>`. zstd files need file-tree's `specs/zstd-parquet.md` first (see `listing-slim.md`).
+    - **"Live" toggle:** optionally show the current bucket listing (the `/v1/files` list) under the scanned tree for the drilled prefix, since the meta scan is up to a day stale. Useful while a scan is mid-publish.
+    - **Retire the `/files` page:** `/files/<path>` redirects to `/meta/<path>`. `/v1/files` stays as the gated raw-read API (DuckDB and agent range reads, the documented examples). First audit which other site pages use it.
+    - **Scope asymmetry to resolve:** `/meta` covers the whole bucket, while `/v1/files` is `STORE_PREFIXES`-allow-listed. Leaves outside the allow-list either show size only, or the allow-list grows for staff-only meta reads (a per-store `STORE_PREFIXES` in `STORES_JSON`).
 4. **(later)** Converge with `federated-scans.md` phase 2: a store may be a union of locations.
 
 ## Phase 1 as built
