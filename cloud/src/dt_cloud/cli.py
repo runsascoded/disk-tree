@@ -1889,42 +1889,86 @@ def sii_status(buckets: tuple[str, ...]) -> None:
             print(f"    landed {day}: {len(blobs)} shards ({sum(x.size for x in blobs) / 1e9:.1f} GB, written {latest:%m-%d %H:%M}Z)")
 
 
+@main.command("export")
+@option("-d", "--date", default=None, help="Scan date YYYY-MM-DD[THHMM] (default: the newest in the store's scans.json)")
+@option("-e", "--executor", default=None, type=Choice(["sweep", "plan-sweep"]), help="`runs` only: the site's executor route family (`Store.executor`: gcs `sweep`, cw `plan-sweep`)")
+@option("-l", "--list", "list_sources", is_flag=True, help="Print the sources and their columns, and exit")
+@option("-o", "--out", default="-", help="CSV output path (default: stdout)")
+@option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ for scans.json (default: $SNAPSHOTS_SUBDIR; `cw` on cw-s3)")
+@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
+@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+@argument("source", required=False)
+def export_cmd(date: str | None, executor: str | None, list_sources: bool, out: str, subdir: str | None, token: str | None, url: str | None, source: str | None) -> None:
+    """Export one named SOURCE from the live site API as a CSV with a fixed
+    column contract (`--list` shows them) — the input `sheet-push -k` mirrors
+    into a Google Sheet tab. See specs/done/sheet-mirror.md."""
+    from .sheet_mirror import ExportArgs, export, list_sources as sources_lines, write_csv  # noqa: PLC0415
+    from .site import creds, get_json  # noqa: PLC0415
+
+    if list_sources:
+        print("\n".join(sources_lines()))
+        return
+    if not source:
+        raise SystemExit("export: SOURCE required (see `dt-cloud export --list`)")
+    base, tok = creds(token, url)
+    if not tok:
+        raise SystemExit("export: no token (-t or $GCS_USAGE_TOKEN)")
+    args = ExportArgs(date=date, executor=executor, subdir=subdir if subdir is not None else (env_secret("SNAPSHOTS_SUBDIR") or ""))
+    columns, rows = export(source, lambda path, params: get_json(base, tok, path, params), args)
+    if out == "-":
+        write_csv(columns, rows, sys.stdout)
+    else:
+        with open(out, "w", newline="") as fh:
+            write_csv(columns, rows, fh)
+    err(f"{source}: {len(rows)} rows → {out}")
+
+
 @main.command("sheet-push")
 @option("-D", "--disclaimer", help="static footer text 2 rows below the table; a '; last change <ts>' stamp is appended that only advances when data changes")
 @option("-I", "--impersonate", help="service-account email to impersonate for Sheets auth (needs Token Creator); default is ambient ADC")
+@option("-k", "--key", default=None, help="stable row identity column: existing rows keep their order, new keys append, removed keys clear (compacted on an otherwise-unchanged run); default positional")
 @option("-n", "--dry-run", is_flag=True, help="parse + summarize, don't touch the sheet")
-@option("-w", "--worksheet", default="", help="tab to replace, by title (default: the first tab)")
+@option("-w", "--worksheet", required=True, help="tab to sync, by title (never the first tab by default: the sheet may hold human-authored tabs)")
 @argument("sheet_id")
 @argument("csv_path", default="-")
-def sheet_push(disclaimer: str | None, impersonate: str | None, dry_run: bool, worksheet: str, sheet_id: str, csv_path: str) -> None:
-    """Push a mark-status CSV (from `report`) to a Google Sheet.
+def sheet_push(disclaimer: str | None, impersonate: str | None, key: str | None, dry_run: bool, worksheet: str, sheet_id: str, csv_path: str) -> None:
+    """Push a CSV (header + rows, e.g. from `export`) into one named tab of a
+    Google Sheet — the generic CSV → tab writer behind the sheet mirror.
 
-    Syncs ONE named tab in place (the site's `/users` mirror). Target it by
-    `-w <title>` — the sheet may hold other, human-authored tabs (derived
-    views), so never blindly overwrite the first. Writes only the cells whose
-    value actually changed (diffing the tab's current contents), so Google's
-    version history highlights just the real deltas instead of the whole range
-    — and formatting / frozen rows survive untouched. `-D` writes an
-    "auto-synced" footer two rows below the table (with a "last change"
-    stamp that only advances when data actually moves, so no-op runs write
-    nothing). Idempotent.
+    Syncs ONE named tab in place (`-w <title>`); other tabs (derived views
+    people add) are untouched. Writes only the cells whose value actually
+    changed (diffing the tab's current contents, numerically where possible),
+    so Google's Version History highlights just the real deltas — and
+    formatting / frozen rows survive. With `-k <column>` the diff is by key,
+    not position: an added row is one new row at the end, a removed row one
+    cleared row (holes are compacted on a later run whose data is otherwise
+    unchanged). `-D` writes an "auto-synced" footer two rows below the table,
+    whose "last change" stamp only advances when data moves — so a no-op run
+    writes nothing. Idempotent.
 
     Auth is Application Default Credentials: the job's GCP service account in
-    Cloud Run / Batch, or your `gcloud auth application-default` locally. The
-    sheet must be shared (Editor) with that identity, and the Sheets API enabled
-    in the project. See specs/gsheet-mark-status-sync.md.
+    Cloud Run, or your `gcloud auth application-default` locally. The sheet
+    must be shared (Editor) with that identity, and the Sheets API enabled in
+    the project.
 
-    Pipe straight from `report`:  dt-cloud report -a … | dt-cloud sheet-push <id>
+        dt-cloud export owners -o owners.csv && dt-cloud sheet-push -k user -w 'Storage by user' <id> owners.csv
     """
     import csv
+    import datetime
     import io as _io
+
+    from .sheet_mirror import plan_sheet, push  # noqa: PLC0415
 
     text = sys.stdin.read() if csv_path == "-" else Path(csv_path).read_text()
     rows = [r for r in csv.reader(_io.StringIO(text)) if r]
-    if len(rows) < 2:
-        raise SystemExit(f"expected a header + ≥1 data row, got {len(rows)}")
-    err(f"{len(rows) - 1} rows → sheet {sheet_id} tab '{worksheet or '(first)'}'")
+    if not rows:
+        raise SystemExit("expected a CSV with at least a header row, got nothing")
+    if key and key not in rows[0]:
+        raise SystemExit(f"-k {key!r} is not a column of {rows[0]}")
+    err(f"{len(rows) - 1} rows → sheet {sheet_id} tab '{worksheet}'{f' by {key!r}' if key else ''}")
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     if dry_run:
+        plan_sheet([], rows, now, key=key, disclaimer=disclaimer)  # validates keys (dupes/empties)
         err("dry-run — not writing")
         return
 
@@ -1940,64 +1984,38 @@ def sheet_push(disclaimer: str | None, impersonate: str | None, dry_run: bool, w
         )
     else:
         creds, _ = google.auth.default(scopes=scopes)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
-    ws = sh.worksheet(worksheet) if worksheet else sh.get_worksheet(0)
+    ws = gspread.authorize(creds).open_by_key(sheet_id).worksheet(worksheet)
+    plan = push(ws, rows, now, key=key, disclaimer=disclaimer, cell=gspread.Cell)
+    verb = "changed" if plan.data_changed else ("unchanged, compacted" if plan.compacted else "unchanged")
+    holes = f", {plan.holes} cleared row(s) held for compaction" if plan.holes else ""
+    err(f"synced '{ws.title}': {len(plan.cells)} cell(s) written ({plan.data_rows} data rows, data {verb}{holes})")
 
-    # Cell-level diff against what's already there, so version history shows the
-    # real deltas (not a full-range rewrite) and we never clear()/re-write
-    # unchanged cells. Compare numerically where possible: RAW-writing "0.0"
-    # makes Sheets store 0 (displayed "0"), so a string compare would flag every
-    # "0.0" cell as changed on every run.
-    existing = ws.get_all_values()
 
-    def at(grid: list[list[str]], r: int, c: int) -> str:
-        return grid[r][c] if r < len(grid) and c < len(grid[r]) else ""
+@main.group("sheet-mirror")
+def sheet_mirror() -> None:
+    """A deployment's `sheet-mirror.yml` → what `deploy/sheet-mirror/` runs."""
 
-    def norm(v: str) -> tuple[str, object]:
-        v = (v or "").strip()
-        try:
-            return ("n", float(v))
-        except ValueError:
-            return ("s", v)
 
-    # Did any DATA cell (the header+data block) change? Compared in isolation so
-    # the footer's own timestamp never counts as a data change.
-    data_cols = max((len(r) for r in rows), default=0)
-    data_changed = any(
-        norm(at(rows, r, c)) != norm(at(existing, r, c))
-        for r in range(len(rows))
-        for c in range(data_cols)
-    )
+@sheet_mirror.command("env")
+@argument("config")
+def sheet_mirror_env(config: str) -> None:
+    """Print the deploy variables (SITE, TOKEN_SECRET, SCHEDULE, PROJECT,
+    REGION, SA, JOB, TRIGGER, IMAGE) as shell-quoted `KEY=value` lines, for
+    `build.sh` / `deploy.sh` to `eval`. CONFIG is a path, or `-` for stdin."""
+    from .sheet_mirror import env_lines, read_config  # noqa: PLC0415
 
-    # Target grid: header + data at A1, then a blank separator row and the
-    # optional footer at row N+2 (col A). The footer's "last change" stamp only
-    # advances when data actually moved (parsed back from the prior footer
-    # otherwise) — so a no-op hourly run rewrites nothing: no cell churn, no new
-    # version. First run seeds it (old footer has no parseable stamp).
-    target: list[list[str]] = [list(r) for r in rows]
-    if disclaimer:
-        import datetime  # noqa: PLC0415
-        import re  # noqa: PLC0415
-        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        pat = re.compile(r"last change (\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC)")
-        prior = next((m.group(1) for row in existing for cell in row if (m := pat.search(cell or ""))), None)
-        stamp = now if (data_changed or prior is None) else prior
-        target.append([])
-        target.append([f"{disclaimer}; last change {stamp}"])
+    print("\n".join(env_lines(read_config(config))))
 
-    n_rows = max(len(target), len(existing))
-    n_cols = max((len(r) for r in (*target, *existing)), default=0)
-    changed = [
-        gspread.Cell(r + 1, c + 1, at(target, r, c))
-        for r in range(n_rows)
-        for c in range(n_cols)
-        if norm(at(target, r, c)) != norm(at(existing, r, c))
-    ]
-    if changed:
-        ws.update_cells(changed, value_input_option="RAW")
-    verb = "changed" if data_changed else "unchanged"
-    err(f"synced '{ws.title}': {len(changed)} cell(s) written ({len(rows) - 1} data rows, data {verb})")
+
+@sheet_mirror.command("plan")
+@argument("config")
+def sheet_mirror_plan(config: str) -> None:
+    """Validate CONFIG and print one line per mirror — shell-quoted
+    `source= site= subdir= sheet= tab= key= footer= executor=` assignments —
+    for `sync.sh` to `eval` in its loop. CONFIG is a path, or `-` for stdin."""
+    from .sheet_mirror import plan_lines, read_config  # noqa: PLC0415
+
+    print("\n".join(plan_lines(read_config(config))))
 
 
 @main.command("cascade-a2a")
