@@ -25,7 +25,7 @@ err = partial(print, file=sys.stderr)
 def prefix_labels(
     con: "duckdb.DuckDBPyConnection",
     attributions: tuple[str, ...],
-    identities_path: "Path | None",
+    identities_path: "str | Path | None",
     listing_src: str,
 ) -> "pd.DataFrame":
     """The attribution prefix map as rows ``(key, user, depth)`` — ``key`` is
@@ -41,10 +41,12 @@ def prefix_labels(
     truncated prefix would over-attribute whole parent dirs, so they go."""
     import pandas as pd
 
-    from .identity import DEFAULT_IDENTITIES, load_identities
+    from .identity import load_identities
     from .prefixes import load_prefix_map
 
-    identities = load_identities(identities_path or DEFAULT_IDENTITIES)
+    if identities_path is None:
+        raise ValueError("attribution needs the deployment's identity map (-i / $DT_CLOUD_IDENTITIES)")
+    identities = load_identities(identities_path)
     by_prefix = load_prefix_map(con, attributions, identities, listing_src)
     pfx_df = pd.DataFrame(
         [{"key": k.removeprefix("gs://").rstrip("/"), "user": u, "source": source} for k, (u, source) in by_prefix.items()],
@@ -63,7 +65,7 @@ def write_labels(
     con: "duckdb.DuckDBPyConnection",
     listings: tuple[str, ...],
     attributions: tuple[str, ...],
-    identities_path: "Path | None",
+    identities_path: "str | Path | None",
     out_dir: "Path",
 ) -> dict[str, int]:
     """DT's label tables (``import --label``, spec mgu-scale-unification.md
@@ -155,7 +157,7 @@ def write_path_index(
     out_dir: Path,
     asof: str,
     attributions: tuple[str, ...] = (),
-    identities_path: Path | None = None,
+    identities_path: str | Path | None = None,
     access: tuple[str, ...] = (),
     dir_cache: Path | None = None,
     path_index: Path | None = None,

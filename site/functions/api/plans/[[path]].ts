@@ -18,8 +18,10 @@
 import type { D1Database } from "@cloudflare/workers-types"
 import { type Ctx, type Env as AuthEnv, json, requireAdmin, requireStager, requireViewer } from "../../_lib/auth.js"
 import { audit, canonicalPrefix, openPlanId, planDetail, type PlanRow, type PrefixShape, prefixShape, stageItems } from "../../_lib/plans.js"
+import { notifyPlan, stageEvent, type NotifyEnv } from "../../_lib/stagedSlack.js"
 
-type Env = AuthEnv & { DB?: D1Database }
+type Env = AuthEnv & NotifyEnv & { DB?: D1Database }
+type Bg = (p: Promise<unknown>) => void
 
 const now = (): number => Math.floor(Date.now() / 1000)
 
@@ -108,7 +110,9 @@ async function editItems(
   return json({ id, [add ? "added" : "removed"]: prefixes })
 }
 
-export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
+const background = (ctx: { waitUntil?: Bg }, p: Promise<unknown>): void => { if (ctx.waitUntil) ctx.waitUntil(p); else void p }
+
+export const onRequest = async (ctx: Ctx & { env: Env; waitUntil?: Bg }): Promise<Response> => {
   if (!ctx.env.DB) return json({ error: "plans store not configured (no D1 binding)" }, 503)
   const db = ctx.env.DB
   const shape = prefixShape(ctx.env)
@@ -146,8 +150,17 @@ export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
       ? (body.prefixes as unknown[]).filter((x): x is string => typeof x === "string")
       : []
     const note = typeof body.note === "string" ? body.note : null
-    const res = await stageItems(db, prefixes, gated.email ?? gated.name ?? "guest", note, shape)
-    return "error" in res ? json(res, 400) : json(res, 201)
+    const by = gated.email ?? gated.name ?? "guest"
+    const res = await stageItems(db, prefixes, by, note, shape)
+    if ("error" in res) return json(res, 400)
+    // Announce the batch in the plan's Slack thread (specs/done/staged-slack.md),
+    // after the response — a Slack hiccup never fails the gesture.
+    if (res.staged.length) {
+      const siteUrl = new URL(ctx.request.url).origin
+      background(ctx, notifyPlan(ctx.env, db, res.plan_id, siteUrl,
+        stageEvent({ planId: res.plan_id, batchId: res.batch_id, by, prefixes: res.staged, covered: res.covered.length, note, siteUrl })))
+    }
+    return json(res, 201)
   }
 
   const id = Number(segs[0])
@@ -171,7 +184,16 @@ export const onRequest = async (ctx: Ctx & { env: Env }): Promise<Response> => {
   if (segs.length === 2 && segs[1] === "items" && (method === "POST" || method === "DELETE")) {
     const gated = await (staging && method === "DELETE" ? requireStager(ctx) : requireAdmin(ctx))
     if (gated instanceof Response) return gated
-    return editItems(db, (gated.email ?? gated.name ?? 'guest'), id, method === "POST", await readBody(ctx.request), shape, !gated.admin)
+    const who = gated.email ?? gated.name ?? 'guest'
+    const res = await editItems(db, who, id, method === "POST", await readBody(ctx.request), shape, !gated.admin)
+    if (res.ok) {
+      const body = (await res.clone().json()) as { added?: string[]; removed?: string[] }
+      const n = (body.added ?? body.removed ?? []).length
+      const verb = body.added ? "added" : "unstaged"
+      background(ctx, notifyPlan(ctx.env, db, id, new URL(ctx.request.url).origin,
+        { text: `:leftwards_arrow_with_hook: ${who.replace(/@.*$/, "")} ${verb} ${n} ${n === 1 ? "prefix" : "prefixes"}` }))
+    }
+    return res
   }
 
   return json({ error: "not found" }, 404)

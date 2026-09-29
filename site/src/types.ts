@@ -110,6 +110,8 @@ export const fmtUsd = (x: number): string =>
 export interface RuleUser {
   u: string
   aliases: string[]
+  name?: string
+  github?: string
   note?: string
 }
 

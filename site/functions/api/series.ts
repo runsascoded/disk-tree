@@ -19,10 +19,10 @@ import { type Lens, makeStore, storeReady } from '../_lib/index.js'
 import { ledgerHead } from '../_lib/ledger.js'
 import { classKey, parseClasses, parseOwner } from '../_lib/scope.js'
 import { readRootAgg, readRootRows } from '../_lib/view.js'
-import { readOverTime } from '../_lib/overTime.js'
+import { type OverTime, overTimePoint, readOverTime } from '../_lib/overTime.js'
 import { parsePaths } from '../_lib/filter.js'
 import { metaRoots, rootPoints, type RootRow } from '../_lib/series.js'
-import { cacheKeyFor, cacheMatch, cacheStore } from '../_lib/edgeCache.js'
+import { cacheKeyFor, cacheMatch, cacheStore, serverTiming } from '../_lib/edgeCache.js'
 
 // The default store's snapshot dirs (`snapshots/<date>/`; other stores live in
 // a named subdir that DATE_RE keeps out), and the scan-id shape they're named by.
@@ -66,7 +66,8 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   const { env, request } = ctx
   if (!env.DB) return json({ error: 'index backend not configured (DB)' }, 503)
   if (!storeReady(env)) return json({ error: 'index reader not configured' }, 503)
-  const gated = await requireViewer(ctx)
+  const st = serverTiming()
+  const gated = await st.time('auth', requireViewer(ctx))
   if (gated instanceof Response) return gated
   const url = new URL(request.url)
   const path = (url.searchParams.get('path') ?? '').replace(/\/+$/, '')
@@ -92,19 +93,12 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   if (split && (path || paths.length || lens || owner || classes)) return json({ error: 'split=roots is for the unscoped store root only' }, 400)
 
   // Every scan with a synced floor-free index, oldest first.
-  const rows = await env.DB.prepare("SELECT DISTINCT date FROM index_schema WHERE variant = 'path' ORDER BY date").all<{ date: string }>()
+  const rows = await st.time('scans', env.DB.prepare("SELECT DISTINCT date FROM index_schema WHERE variant = 'path' ORDER BY date").all<{ date: string }>())
   const dates = rows.results.map(r => r.date)
   // A user lens applies the live claims, so its key carries the ledger head.
   const head = lens ? await ledgerHead(env) : 0
   // Unscoped whole-bucket series only: scans without tiers still have a total in meta.json.
-  const extra = path === '' && !paths.length && !lens && !owner && !classes ? await unindexedScans(env, new Set(dates)) : []
-  // Fast path (specs/obs-axis-indexing.md Phase 1): the plain per-path series
-  // (no split / paths / lens / owner / class scope) reads the cross-scan
-  // over-time index once instead of one point read per scan. `point()` below
-  // takes a covered scan from here; scans newer than the index (or not in it)
-  // fall through to the per-scan read. null = index absent → all per-scan.
-  const simple = !split && !paths.length && !lens && !owner && !classes
-  const ot = simple ? await readOverTime(env, path) : null
+  const extra = path === '' && !paths.length && !lens && !owner && !classes ? await st.time('unindexed', unindexedScans(env, new Set(dates))) : []
   // Two-tier cache (colo + KV, `_lib/edgeCache.ts`), keyed by every input
   // including the scan list and the ledger head, so an entry is immutable and
   // a new scan is a new key. This used to `cache.put` a `private` response
@@ -112,8 +106,20 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   // chart load re-read one point per scan (≈8 rounds of D1 + range reads for
   // a 94-scan history, 5–20 s) while the diff beside it was a cache hit.
   const cacheKey = cacheKeyFor('series', `${encodeURIComponent(path)}?P=${encodeURIComponent(paths.join(','))}&l=${lensRaw ?? ''}&o=${owner ?? ''}&cl=${classKey(classes)}&s=${split ?? ''}&d=${dates.join(',')}&x=${extra.join(',')}&head=${head}`)
-  const hit = await cacheMatch(env, cacheKey)
+  const hit = await st.time('cache', cacheMatch(env, cacheKey))
   if (hit) return hit
+
+  // Fast path (specs/obs-axis-indexing.md Phase 1): a path's series (or a
+  // filter's, one line per match root) reads the cross-scan over-time index —
+  // ⌈scans/K⌉ pruned reads per root — instead of one point read per scan.
+  // Read only on a cache miss (it used to precede the check: ~1.2 s per hit).
+  // `point()` below takes any scan the groups cover from here (absent there =
+  // absent, the groups are floor-free); only the unsealed tip falls through to
+  // the per-scan read. Lens / owner / class scopes and `split` aren't in the
+  // index. Any line unreadable → all per-scan.
+  const indexable = !split && !lens && !owner && !classes
+  const lines = indexable ? await st.time('overtime', Promise.all((paths.length ? paths : [path]).map(p => readOverTime(env, p)))) : []
+  const ot: OverTime[] | null = lines.length && lines.every(Boolean) ? lines as OverTime[] : null
 
   const points: { date: string; b: number; o: number }[] = []
   // split=roots: each scan's depth-1 rows (the total is their sum), and for
@@ -124,8 +130,8 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   // since a silently absent point looks like a gap in the data.
   const point = async (date: string, tries = 2): Promise<{ date: string; b: number; o: number } | null> => {
     try {
-      const covered = ot?.get(date)
-      if (covered) return { date, ...covered }
+      const covered = ot ? overTimePoint(ot, date) : undefined
+      if (covered !== undefined) return covered && { date, ...covered }
       if (split) {
         const rows = await readRootRows(env, date)
         if (!rows) return null
@@ -151,7 +157,7 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   // Scans are independent reads (each a few D1 round trips and one range
   // GET); a dozen at a time keeps a 40-scan history to ~4 rounds.
   for (let i = 0; i < dates.length; i += 12) {
-    const got = await Promise.all(dates.slice(i, i + 12).map(d => point(d)))
+    const got = await st.time('points', Promise.all(dates.slice(i, i + 12).map(d => point(d))))
     for (const g of got) if (g) points.push(g)
   }
   // A single-bucket store's tier-less history belongs to its sole root: the
@@ -171,5 +177,5 @@ export const onRequestGet = async (ctx: Ctx & { waitUntil?: (p: Promise<unknown>
   }
   points.sort((a, b) => a.date.localeCompare(b.date))
   const body = JSON.stringify({ path, ...(paths.length ? { paths } : {}), ...(lensRaw ? { lens: lensRaw } : {}), ...(owner ? { owner } : {}), points, ...(split ? { roots: rootPoints(rootsByDate) } : {}) })
-  return cacheStore(env, cacheKey, body, {}, ctx.waitUntil?.bind(ctx))
+  return cacheStore(env, cacheKey, body, { 'server-timing': st.header() }, ctx.waitUntil?.bind(ctx))
 }

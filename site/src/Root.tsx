@@ -11,6 +11,7 @@ import { StagedPage } from './StagedPage'
 import { OgPage } from './OgPage'
 import { UserOgPage, UserPage, UsersOgPage, UsersPage } from './UserPage'
 import { DEFAULT_STORE, STORES } from './stores'
+import { useLoadIdentities } from './identities'
 
 // `/files/*` → scan browser; `<store>/og` → redacted fixed-size treemap for that
 // store's og:image screenshot (public, ungated — it's what unfurl crawlers
@@ -20,6 +21,7 @@ import { DEFAULT_STORE, STORES } from './stores'
 // One hotkey/omnibar registry for the whole site (SiteKbd renders the chrome
 // on each page; pages register their own actions on top of the shared ones).
 export default function Root() {
+  useLoadIdentities()
   return (
     <HotkeysProvider config={{ storageKey: 'gcs-usage' }}>
     <HelpProvider>

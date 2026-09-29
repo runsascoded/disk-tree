@@ -27,8 +27,9 @@ export const secretRef = (name: string): string =>
 
 /** The standard cw-sweep Batch job spec (mirrors job/cw-batch-submit.sh): the cw
  * image running `bash -c <script>`, the data bucket FUSE-mounted at /gcs/<bucket>,
- * and the CAIOS S3 creds from Secret Manager. `env` merges in per-job variables. */
-export function sweepBatchSpec(script: string, env: Record<string, string> = {}): unknown {
+ * and the CAIOS S3 creds from Secret Manager. `env` merges in per-job variables,
+ * `secrets` per-job Secret Manager refs. */
+export function sweepBatchSpec(script: string, env: Record<string, string> = {}, secrets: Record<string, string> = {}): unknown {
   return {
     taskGroups: [{
       taskCount: 1,
@@ -60,6 +61,7 @@ export function sweepBatchSpec(script: string, env: Record<string, string> = {})
           secretVariables: {
             AWS_ACCESS_KEY_ID: secretRef("cw-s3-access-key-id"),
             AWS_SECRET_ACCESS_KEY: secretRef("cw-s3-secret-access-key"),
+            ...secrets,
           },
         },
       },

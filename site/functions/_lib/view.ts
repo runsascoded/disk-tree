@@ -25,6 +25,7 @@ import { filterThreshold, looseThreshold, matchRoots, pickTier, rebasedThreshold
 import { ownerClaims } from './ownerTotals.js'
 import { shared } from './shared.js'
 import { extrasFor } from './extras.js'
+import { loadRegistry } from './identity.js'
 
 export const MIN_AREA_DEFAULT = 12 // px² of the smallest legible cell (~3×4)
 // Each nesting level below the query root loses canvas to chrome (title bars,
@@ -257,7 +258,7 @@ async function ownerLensFor(env: Env, date: string, lens: Lens, by?: string): Pr
     const emap = await assignerMap(env)
     claims = claims.filter(c => c.who != null && (emap.get(c.who.toLowerCase()) ?? c.who) === by)
   }
-  return ownerLens(claims, lens.key)
+  return ownerLens(claims, lens.key, await loadRegistry(env))
 }
 
 /** A node under a user lens once claims apply: U's bytes there (`ol.value`),

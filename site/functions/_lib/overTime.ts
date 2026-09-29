@@ -26,11 +26,19 @@ const SCHEMA: Schema = {
   metrics: [{ name: 'b', monoid: 'count' } as Metric, { name: 'o', monoid: 'count' } as Metric],
 }
 
-/** A path's `scan → {b,o}` line from the over-time group manifest, or null when
- * no groups are synced or the path is absent everywhere (caller falls back to
- * per-scan reads). Each group is a footer-pruned point read; absent (monoid-
- * identity `0/0`) scans are dropped so the chart keeps gap semantics. */
-export async function readOverTime(env: Env, path: string): Promise<Map<string, { b: number; o: number }> | null> {
+/** A path's line from the over-time groups: `points` (scan → {b,o}, absent
+ * scans dropped so the chart keeps gap semantics) and `covered`, every scan the
+ * sealed groups span. The groups are built from the floor-free path index, so a
+ * covered scan missing from `points` is a *known* absence — not a reason to
+ * re-read that scan (which made a path newer than most of the history pay one
+ * per-scan read per old scan: 23 s cold for an absent path, 1.2 min for a
+ * five-root filter). null = no groups synced / unreadable → per-scan reads. */
+export interface OverTime {
+  points: Map<string, { b: number; o: number }>
+  covered: Set<string>
+}
+
+export async function readOverTime(env: Env, path: string): Promise<OverTime | null> {
   if (!env.DB) return null
   let entries: MultiScanIndexEntry[]
   try {
@@ -57,20 +65,42 @@ export async function readOverTime(env: Env, path: string): Promise<Map<string, 
   }
   let pts: Awaited<ReturnType<typeof seriesAcrossGroups>>
   try {
-    pts = await seriesAcrossGroups(entries, SCHEMA, { depth, path }, load)
+    // `seriesAcrossGroups` awaits each group's `load` in turn (it only needs
+    // them in span order); start every group's read up front so the ⌈N/K⌉
+    // D1 + range round trips overlap instead of stacking.
+    const loaded = new Map(entries.map(e => {
+      const p = load(e.key)
+      p.catch(() => {}) // still rejects where awaited; just not "unhandled" before then
+      return [e.key, p] as const
+    }))
+    pts = await seriesAcrossGroups(entries, SCHEMA, { depth, path }, key => loaded.get(key) ?? load(key))
   } catch (e) {
     // A broken or half-published group must degrade to the per-scan reads,
     // never fail the chart.
     console.log(`over-time: falling back to per-scan reads for ${path || '/'}: ${(e as Error).message}`)
     return null
   }
-  const out = new Map<string, { b: number; o: number }>()
+  const points = new Map<string, { b: number; o: number }>()
   for (const p of pts) {
     const b = num(p.state.b)
     const o = num(p.state.o)
-    if (b !== 0 || o !== 0) out.set(p.scan, { b, o })
+    if (b !== 0 || o !== 0) points.set(p.scan, { b, o })
   }
-  return out.size ? out : null
+  return { points, covered: new Set(entries.flatMap(e => e.scans)) }
+}
+
+/** One scan's point summed over `lines` (one per match root; a plain path is a
+ * single line): `undefined` when any line's groups don't cover the scan (the
+ * caller reads it per scan), `null` for a covered scan where every root is
+ * absent, else the sum. */
+export function overTimePoint(lines: OverTime[], date: string): { b: number; o: number } | null | undefined {
+  if (!lines.length || !lines.every(l => l.covered.has(date))) return undefined
+  let b = 0, o = 0, any = false
+  for (const l of lines) {
+    const pt = l.points.get(date)
+    if (pt) { b += pt.b; o += pt.o; any = true }
+  }
+  return any ? { b, o } : null
 }
 
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number) ?? 0)

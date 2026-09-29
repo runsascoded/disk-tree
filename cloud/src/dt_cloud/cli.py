@@ -23,7 +23,7 @@ import pandas as pd
 from click import Choice, argument, group, option
 
 from .cw_digest import REPLY_HOUR_UTC
-from .identity import DEFAULT_IDENTITIES, load_identities
+from .identity import IDENTITIES_ENV, load_identities
 from .site import DEFAULT_URL as SITE_DEFAULT_URL
 from .secrets import env_secret, secret
 from .index_footer import INDEX_VARIANTS
@@ -70,13 +70,13 @@ err = partial(print, file=sys.stderr)
 
 
 @main.command()
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", required=True, type=Path, help="Output parquet path for the attribution table")
 @option("-R", "--no-records", is_flag=True, help="Skip artifact-record mining (no GETs; path signals only)")
 @option("-w", "--workers", default=16, help="Concurrent record reads")
 def build(
-    identities_path: Path,
+    identities_path: str,
     listings: tuple[str, ...],
     out: Path,
     no_records: bool,
@@ -140,13 +140,13 @@ def executor_mine(listings: tuple[str, ...], out_path: Path, workers: int) -> No
 
 
 @main.command("wandb-attr")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", required=True, type=Path, help="Output parquet path for wandb attribution rows")
 @option("-r", "--runs", "runs_path", required=True, type=Path, help="wandb-mine output parquet")
 @option("-x", "--executor-infos", "executor_path", type=Path, default=None, help="executor-mine output parquet (adds executor-wandb rows)")
 def wandb_attr(
-    identities_path: Path,
+    identities_path: str,
     listings: tuple[str, ...],
     out: Path,
     runs_path: Path,
@@ -197,13 +197,13 @@ def wandb_attr(
 
 @main.command("attr-report")
 @option("-a", "--attribution", "attributions", required=True, multiple=True, help="Attribution parquet(s); repeatable, concatenated")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-n", "--top", default=30, help="Rows in the per-user table")
 @option("-u", "--user", "claim_user", default=None, help="Print this user's prefixes (inferred ownership, by bytes)")
 def attr_report(
     attributions: tuple[str, ...],
-    identities_path: Path,
+    identities_path: str,
     listings: tuple[str, ...],
     top: int,
     claim_user: str | None,
@@ -290,13 +290,13 @@ def attr_report(
 @main.command()
 @option("-a", "--attribution", "attributions", required=True, multiple=True, help="Attribution parquet(s); repeatable, concatenated")
 @option("-d", "--depth", default=2, help="Prefix depth for the gap rollup (name components after bucket)")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-n", "--top", default=40, help="Rows in the gap table")
 def gaps(
     attributions: tuple[str, ...],
     depth: int,
-    identities_path: Path,
+    identities_path: str,
     listings: tuple[str, ...],
     top: int,
 ) -> None:
@@ -452,7 +452,7 @@ def wandb_mine(
 @option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s); adds per-node user overlays")
 @option("-c", "--dir-cache", "dir_cache", type=Path, default=None, help="Layer-2 cache dir (dir-stats/age-days parquet): attribution-independent rollups reused by re-attribution runs — see specs/dir-agg-cache.md")
 @option("-d", "--asof", required=True, help="Scan date the listing came from (YYYY-MM-DD)")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, default=None, help=f"identities.yaml path or URL, needed with -a (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Output dir for JSON files [default: site/public/data/<asof>]")
 @option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the complete floor-free path index parquet here (pixel-budget subtree API; specs/path-index-lazy-drill.md)")
@@ -461,7 +461,7 @@ def build_path_index(
     attributions: tuple[str, ...],
     dir_cache: Path | None,
     asof: str,
-    identities_path: Path,
+    identities_path: str | None,
     listings: tuple[str, ...],
     out_dir: Path | None,
     path_index: Path | None,
@@ -512,9 +512,9 @@ def stage(out_root: Path, workers: int, globs: tuple[str, ...]) -> None:
 
 
 @main.command()
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-o", "--out", type=Path, default=None, help="Write rules JSON (users/aliases/prefix_owners + notes) for the site")
-def rules(identities_path: Path, out: Path | None) -> None:
+def rules(identities_path: str, out: Path | None) -> None:
     """Validate identities.yaml; optionally export it as site JSON.
 
     Checks alias collisions/shadowing and prefix_owners rows
@@ -836,10 +836,10 @@ def index_tiers(mem: str, path_index: Path, threads: int, tmp_dir: Path | None, 
 
 @main.command("labels")
 @option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s) (as `path-index -a`)")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, default=None, help=f"identities.yaml path or URL, needed with -a (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s) — path-glob rules expand against their dirs")
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: one labels-<bucket>.parquet per bucket")
-def labels(attributions: tuple[str, ...], identities_path: Path, listings: tuple[str, ...], out_dir: Path) -> None:
+def labels(attributions: tuple[str, ...], identities_path: str | None, listings: tuple[str, ...], out_dir: Path) -> None:
     """Export mgu's attribution as DT label tables — `(prefix, usr)` per bucket,
     prefix relative to the bucket — for `disk-tree import -e duckdb -L
     labels-<bucket>.parquet -c usr` (spec mgu-scale-unification.md §B): the
@@ -879,11 +879,11 @@ def index_blob(bucket: str, listing_dir: str | None, gen: str, key: str | None, 
 
 @main.command("index-extras")
 @option("-a", "--attribution", "attributions", multiple=True, required=True, help="Attribution parquet(s) (as `path-index -a`)")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Where to write attr.tsv (default: beside the index)")
 @option("-P", "--path-index", "path_index", type=Path, required=True, help="Floor-free path-index.parquet of the scan (every dir is a row)")
 @argument("date")
-def index_extras(attributions: tuple[str, ...], identities_path: Path, out_dir: Path | None, path_index: Path, date: str) -> None:
+def index_extras(attributions: tuple[str, ...], identities_path: str, out_dir: Path | None, path_index: Path, date: str) -> None:
     """Backfill a scan's provenance sidecar (`attr.tsv`) from its floor-free
     path index + attribution parquets: each attributing prefix's user /
     source / evidence. `path-index` writes the same file for a fresh scan."""
@@ -1889,42 +1889,88 @@ def sii_status(buckets: tuple[str, ...]) -> None:
             print(f"    landed {day}: {len(blobs)} shards ({sum(x.size for x in blobs) / 1e9:.1f} GB, written {latest:%m-%d %H:%M}Z)")
 
 
+@main.command("export")
+@option("-d", "--date", default=None, help="Scan date YYYY-MM-DD[THHMM] (default: the newest in the store's scans.json)")
+@option("-e", "--executor", default=None, type=Choice(["sweep", "plan-sweep"]), help="`runs` only: the site's executor route family (`Store.executor`: gcs `sweep`, cw `plan-sweep`)")
+@option("-l", "--list", "list_sources", is_flag=True, help="Print the sources and their columns, and exit")
+@option("-o", "--out", default="-", help="CSV output path (default: stdout)")
+@option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ for scans.json (default: $SNAPSHOTS_SUBDIR; `cw` on cw-s3)")
+@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
+@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+@option("-U", "--unit", default="B", type=Choice(["B", "GiB", "TiB"]), help="Byte columns as raw bytes (default) or rounded GiB / TiB, header `<col> (<unit>)`")
+@argument("source", required=False)
+def export_cmd(date: str | None, executor: str | None, list_sources: bool, out: str, subdir: str | None, token: str | None, url: str | None, unit: str, source: str | None) -> None:
+    """Export one named SOURCE from the live site API as a CSV with a fixed
+    column contract (`--list` shows them) — the input `sheet-push -k` mirrors
+    into a Google Sheet tab. See specs/done/sheet-mirror.md."""
+    from .sheet_mirror import ExportArgs, export, list_sources as sources_lines, write_csv  # noqa: PLC0415
+    from .site import creds, get_json  # noqa: PLC0415
+
+    if list_sources:
+        print("\n".join(sources_lines()))
+        return
+    if not source:
+        raise SystemExit("export: SOURCE required (see `dt-cloud export --list`)")
+    base, tok = creds(token, url)
+    if not tok:
+        raise SystemExit("export: no token (-t or $GCS_USAGE_TOKEN)")
+    args = ExportArgs(date=date, executor=executor, subdir=subdir if subdir is not None else (env_secret("SNAPSHOTS_SUBDIR") or ""), unit=unit)
+    columns, rows = export(source, lambda path, params: get_json(base, tok, path, params), args)
+    if out == "-":
+        write_csv(columns, rows, sys.stdout)
+    else:
+        with open(out, "w", newline="") as fh:
+            write_csv(columns, rows, fh)
+    err(f"{source}: {len(rows)} rows → {out}")
+
+
 @main.command("sheet-push")
+@option("-c", "--create", is_flag=True, help="create the tab if the sheet has none by that title (header row frozen + bold, columns sized to the first fill)")
 @option("-D", "--disclaimer", help="static footer text 2 rows below the table; a '; last change <ts>' stamp is appended that only advances when data changes")
 @option("-I", "--impersonate", help="service-account email to impersonate for Sheets auth (needs Token Creator); default is ambient ADC")
+@option("-k", "--key", default=None, help="stable row identity column: existing rows keep their order, new keys append, removed keys clear (compacted on an otherwise-unchanged run); default positional")
 @option("-n", "--dry-run", is_flag=True, help="parse + summarize, don't touch the sheet")
-@option("-w", "--worksheet", default="", help="tab to replace, by title (default: the first tab)")
+@option("-w", "--worksheet", required=True, help="tab to sync, by title (never the first tab by default: the sheet may hold human-authored tabs)")
 @argument("sheet_id")
 @argument("csv_path", default="-")
-def sheet_push(disclaimer: str | None, impersonate: str | None, dry_run: bool, worksheet: str, sheet_id: str, csv_path: str) -> None:
-    """Push a mark-status CSV (from `report`) to a Google Sheet.
+def sheet_push(create: bool, disclaimer: str | None, impersonate: str | None, key: str | None, dry_run: bool, worksheet: str, sheet_id: str, csv_path: str) -> None:
+    """Push a CSV (header + rows, e.g. from `export`) into one named tab of a
+    Google Sheet — the generic CSV → tab writer behind the sheet mirror.
 
-    Syncs ONE named tab in place (the site's `/users` mirror). Target it by
-    `-w <title>` — the sheet may hold other, human-authored tabs (derived
-    views), so never blindly overwrite the first. Writes only the cells whose
-    value actually changed (diffing the tab's current contents), so Google's
-    version history highlights just the real deltas instead of the whole range
-    — and formatting / frozen rows survive untouched. `-D` writes an
-    "auto-synced" footer two rows below the table (with a "last change"
-    stamp that only advances when data actually moves, so no-op runs write
-    nothing). Idempotent.
+    Syncs ONE named tab in place (`-w <title>`); other tabs (derived views
+    people add) are untouched. Writes only the cells whose value actually
+    changed (diffing the tab's current contents, numerically where possible),
+    so Google's Version History highlights just the real deltas — and
+    formatting / frozen rows survive. With `-k <column>` the diff is by key,
+    not position: an added row is one new row at the end, a removed row one
+    cleared row (holes are compacted on a later run whose data is otherwise
+    unchanged). `-D` writes an "auto-synced" footer two rows below the table,
+    whose "last change" stamp only advances when data moves — so a no-op run
+    writes nothing. Idempotent.
 
     Auth is Application Default Credentials: the job's GCP service account in
-    Cloud Run / Batch, or your `gcloud auth application-default` locally. The
-    sheet must be shared (Editor) with that identity, and the Sheets API enabled
-    in the project. See specs/gsheet-mark-status-sync.md.
+    Cloud Run, or your `gcloud auth application-default` locally. The sheet
+    must be shared (Editor) with that identity, and the Sheets API enabled in
+    the project. `-c` creates a missing tab (appended last, header frozen).
 
-    Pipe straight from `report`:  dt-cloud report -a … | dt-cloud sheet-push <id>
+        dt-cloud export owners -o owners.csv && dt-cloud sheet-push -k user -w 'Storage by user' <id> owners.csv
     """
     import csv
+    import datetime
     import io as _io
+
+    from .sheet_mirror import plan_sheet, push  # noqa: PLC0415
 
     text = sys.stdin.read() if csv_path == "-" else Path(csv_path).read_text()
     rows = [r for r in csv.reader(_io.StringIO(text)) if r]
-    if len(rows) < 2:
-        raise SystemExit(f"expected a header + ≥1 data row, got {len(rows)}")
-    err(f"{len(rows) - 1} rows → sheet {sheet_id} tab '{worksheet or '(first)'}'")
+    if not rows:
+        raise SystemExit("expected a CSV with at least a header row, got nothing")
+    if key and key not in rows[0]:
+        raise SystemExit(f"-k {key!r} is not a column of {rows[0]}")
+    err(f"{len(rows) - 1} rows → sheet {sheet_id} tab '{worksheet}'{f' by {key!r}' if key else ''}")
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     if dry_run:
+        plan_sheet([], rows, now, key=key, disclaimer=disclaimer)  # validates keys (dupes/empties)
         err("dry-run — not writing")
         return
 
@@ -1940,64 +1986,71 @@ def sheet_push(disclaimer: str | None, impersonate: str | None, dry_run: bool, w
         )
     else:
         creds, _ = google.auth.default(scopes=scopes)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(sheet_id)
-    ws = sh.worksheet(worksheet) if worksheet else sh.get_worksheet(0)
+    sheet = gspread.authorize(creds).open_by_key(sheet_id)
+    created = False
+    try:
+        ws = sheet.worksheet(worksheet)
+    except gspread.WorksheetNotFound:
+        if not create:
+            raise SystemExit(f"sheet {sheet_id} has no tab {worksheet!r} (-c creates it)") from None
+        ws = sheet.add_worksheet(worksheet, rows=len(rows) + 10, cols=len(rows[0]))
+        ws.freeze(rows=1)
+        ws.format("1:1", {"textFormat": {"bold": True}})
+        created = True
+        err(f"created tab '{worksheet}'")
+    plan = push(ws, rows, now, key=key, disclaimer=disclaimer, cell=gspread.Cell)
+    if created:
+        # Width from the table only (auto-resize would stretch column A to the
+        # footer); set once, so later width tweaks by people stick.
+        sheet.batch_update({"requests": [
+            {"updateDimensionProperties": {
+                "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": i, "endIndex": i + 1},
+                "properties": {"pixelSize": 7 * max(len(r[i]) for r in rows if i < len(r)) + 24},
+                "fields": "pixelSize",
+            }}
+            for i in range(len(rows[0]))
+        ]})
+    verb = "changed" if plan.data_changed else ("unchanged, compacted" if plan.compacted else "unchanged")
+    holes = f", {plan.holes} cleared row(s) held for compaction" if plan.holes else ""
+    err(f"synced '{ws.title}': {len(plan.cells)} cell(s) written ({plan.data_rows} data rows, data {verb}{holes})")
 
-    # Cell-level diff against what's already there, so version history shows the
-    # real deltas (not a full-range rewrite) and we never clear()/re-write
-    # unchanged cells. Compare numerically where possible: RAW-writing "0.0"
-    # makes Sheets store 0 (displayed "0"), so a string compare would flag every
-    # "0.0" cell as changed on every run.
-    existing = ws.get_all_values()
 
-    def at(grid: list[list[str]], r: int, c: int) -> str:
-        return grid[r][c] if r < len(grid) and c < len(grid[r]) else ""
+@main.group("sheet-mirror")
+def sheet_mirror() -> None:
+    """A deployment's `sheet-mirror.yml` → what `deploy/sheet-mirror/` runs."""
 
-    def norm(v: str) -> tuple[str, object]:
-        v = (v or "").strip()
-        try:
-            return ("n", float(v))
-        except ValueError:
-            return ("s", v)
 
-    # Did any DATA cell (the header+data block) change? Compared in isolation so
-    # the footer's own timestamp never counts as a data change.
-    data_cols = max((len(r) for r in rows), default=0)
-    data_changed = any(
-        norm(at(rows, r, c)) != norm(at(existing, r, c))
-        for r in range(len(rows))
-        for c in range(data_cols)
-    )
+@sheet_mirror.command("env")
+@argument("config")
+def sheet_mirror_env(config: str) -> None:
+    """Print the deploy variables (SITE, TOKEN_SECRET, SCHEDULE, PROJECT,
+    REGION, SA, JOB, TRIGGER, IMAGE) as shell-quoted `KEY=value` lines, for
+    `build.sh` / `deploy.sh` to `eval`. CONFIG is a path, or `-` for stdin."""
+    from .sheet_mirror import env_lines, read_config  # noqa: PLC0415
 
-    # Target grid: header + data at A1, then a blank separator row and the
-    # optional footer at row N+2 (col A). The footer's "last change" stamp only
-    # advances when data actually moved (parsed back from the prior footer
-    # otherwise) — so a no-op hourly run rewrites nothing: no cell churn, no new
-    # version. First run seeds it (old footer has no parseable stamp).
-    target: list[list[str]] = [list(r) for r in rows]
-    if disclaimer:
-        import datetime  # noqa: PLC0415
-        import re  # noqa: PLC0415
-        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        pat = re.compile(r"last change (\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC)")
-        prior = next((m.group(1) for row in existing for cell in row if (m := pat.search(cell or ""))), None)
-        stamp = now if (data_changed or prior is None) else prior
-        target.append([])
-        target.append([f"{disclaimer}; last change {stamp}"])
+    print("\n".join(env_lines(read_config(config))))
 
-    n_rows = max(len(target), len(existing))
-    n_cols = max((len(r) for r in (*target, *existing)), default=0)
-    changed = [
-        gspread.Cell(r + 1, c + 1, at(target, r, c))
-        for r in range(n_rows)
-        for c in range(n_cols)
-        if norm(at(target, r, c)) != norm(at(existing, r, c))
-    ]
-    if changed:
-        ws.update_cells(changed, value_input_option="RAW")
-    verb = "changed" if data_changed else "unchanged"
-    err(f"synced '{ws.title}': {len(changed)} cell(s) written ({len(rows) - 1} data rows, data {verb})")
+
+@sheet_mirror.command("render")
+@argument("config")
+def sheet_mirror_render(config: str) -> None:
+    """Print CONFIG with every `${NAME}` substituted from the environment, as
+    YAML — validated first; an unset NAME is an error. `deploy.sh` bakes this
+    into the job, so an id kept out of the repo (e.g. `sheet: ${GCS_SHEET_ID}`,
+    set in an untracked `.envrc`) reaches the job but never git."""
+    from .sheet_mirror import render_config  # noqa: PLC0415
+    print(render_config(sys.stdin.read() if config == "-" else Path(config).read_text()), end="")
+
+
+@sheet_mirror.command("plan")
+@argument("config")
+def sheet_mirror_plan(config: str) -> None:
+    """Validate CONFIG and print one line per mirror — shell-quoted
+    `source= site= subdir= sheet= tab= key= footer= executor= unit=` assignments —
+    for `sync.sh` to `eval` in its loop. CONFIG is a path, or `-` for stdin."""
+    from .sheet_mirror import plan_lines, read_config  # noqa: PLC0415
+
+    print("\n".join(plan_lines(read_config(config))))
 
 
 @main.command("cascade-a2a")

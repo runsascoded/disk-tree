@@ -3,7 +3,7 @@
 # anonymous (no CF Access, no app gate): `PUBLIC_READ` grants the base viewer
 # scope to everyone (reads open, mutations still closed — see _lib/auth.ts).
 #
-# Deploy:  CLOUDFLARE_API_TOKEN=$CF_TOKEN wrangler pages deploy dist --project-name disk-tree-demo
+# Deploy:  wrangler pages deploy dist --project-name disk-tree-demo
 # (Build with the r2 store + public auth — these are BUILD-time Vite vars, not
 #  wrangler [vars]:  VITE_STORE=r2 VITE_AUTH_MODE=public pnpm build)
 # r2.rbw.sh IS the existing `disk-tree-demo` Pages project (was the ui/ static

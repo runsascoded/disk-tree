@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { Treemap as DtTreemap, divergingColor, divergingInk } from '@disk-tree/react'
 import { stringParam, useUrlState } from 'use-prms'
+import { useRenderer, useTiling } from './prefs'
 import { useUnits } from './units'
 
 const { abs, max, min, sign } = Math
@@ -371,10 +372,13 @@ export function DiffTreemap({ model, onDrill }: {
   onDrill?: (segs: string[]) => void
 }) {
   const { root, areaMode, label, fmtBytes, fmtDelta, fmtN, fmtNDelta } = model
+  // The main map's renderer / tiling prefs apply here too.
+  const [tiling] = useTiling()
+  const [renderer] = useRenderer()
 
   // Rect seams like the main map: a fat gutter at the top level, a clear line
   // one down, hairlines below — so nested cells read as nested, not as one flat
-  // mosaic. Colours come from `edge` in colorForCell.
+  // mosaic. Colours: the treemap's contrast half-stroke (blue for first-scanned).
   const borderWidth = (depth: number, { w, h }: { w: number; h: number }): number => {
     const base = depth === 0 ? 3 : depth === 1 ? 2 : 1
     return min(base, max(1, min(w, h) / 16))
@@ -407,6 +411,8 @@ export function DiffTreemap({ model, onDrill }: {
         depthFade={1}
         rootFade={1}
         borderWidth={borderWidth}
+        tiling={tiling}
+        renderer={renderer}
         colorForCell={n => {
           // First-scanned: the bucket and its whole subtree read blue. A
           // container gets a neutral fill with a blue frame (the borders draw
@@ -417,18 +423,17 @@ export function DiffTreemap({ model, onDrill }: {
               ? { bg: 'color-mix(in oklab, var(--s1) 28%, var(--panel))', ink: 'var(--ink)', edge: FIRST_SCANNED }
               : { bg: FIRST_SCANNED, ink: '#fff', edge: FIRST_SCANNED }
           }
-          // The seam colour: page-ground blended into the fill (skipped for
-          // gradient fills, which paint their own band over bg).
-          const edgeOf = (bg: string): string | undefined =>
-            bg.includes('gradient') ? undefined : `color-mix(in oklab, ${bg} 55%, var(--surface))`
+          // No `edge` below: the treemap's adaptive contrast half-stroke (dark on
+          // light fills, light on dark) draws the seams, as on the main map — a
+          // fill-tinted edge left green-on-green cells without a visible border.
           if (areaMode === 'max') {
             if (n.children?.length) {
               const t = n.weight === 0 ? 0 : n.delta / n.weight
               const bg = deltaColor(t)
-              return { bg, ink: divergingInk(t), edge: edgeOf(bg) }
+              return { bg, ink: divergingInk(t) }
             }
             const f = n.weight === 0 ? 0 : min(1, abs(n.delta) / n.weight)
-            if (f === 0) return { bg: UNCHANGED_GREY, ink: divergingInk(0), edge: edgeOf(UNCHANGED_GREY) }
+            if (f === 0) return { bg: UNCHANGED_GREY, ink: divergingInk(0) }
             const pct = `${(f * 100).toFixed(2)}%`
             const band = deltaColor(sign(n.delta))
             return {
@@ -443,7 +448,7 @@ export function DiffTreemap({ model, onDrill }: {
           const base = max(n.size_old, n.size_new)
           const t = base === 0 ? 0 : n.delta / base
           const bg = deltaColor(t)
-          return { bg, ink: divergingInk(t), edge: edgeOf(bg) }
+          return { bg, ink: divergingInk(t) }
         }}
         renderCellExtra={areaMode === 'max' ? (n, _path, { w, h }) => {
           if (n.fs || n.children?.length || w < 56) return null
