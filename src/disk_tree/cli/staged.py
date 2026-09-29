@@ -279,7 +279,14 @@ def _serve(
     def local(uri: str) -> str:
         return trash_mod.local_path(uri) if uri.startswith("file://") else uri
 
-    size_fn = lambda uri: _size_fn(local(uri))  # noqa: E731
+    def size_fn(uri: str) -> tuple[int, int]:
+        path = local(uri)
+        nbytes, nobjs = _size_fn(path)
+        # A local path no scan covers (staged since the last one): size it now.
+        if not nobjs and uri.startswith("file://") and os.path.lexists(path):
+            return trash_mod.du(path)
+        return nbytes, nobjs
+
     delete_fn = lambda uri: _delete_fn(local(uri))  # noqa: E731
     trash_fn = (lambda uri, run_id: trash_mod.trash(local(uri), run_id)) if trash_on else None
 

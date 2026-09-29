@@ -63,7 +63,7 @@ def test_drain_executes_enqueued_run_records_bands_and_finishes(db):
     )
     assert deleted == ["r2://b/a", "r2://b/c"]
     assert out == [{
-        "run_id": "1-x", "plan_id": 1, "actor": "ryan", "mode": "real", "items": 2,
+        "run_id": "1-x", "plan_id": 1, "actor": "ryan", "mode": "real", "items": 2, "deleted_paths": 2,
         "deleted_bytes": 200, "deleted_objects": 4, "errors": [], "submitted": False, "finished_ts": 200, "trashed": False,
     }]
     assert announced == out

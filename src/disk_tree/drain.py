@@ -127,11 +127,11 @@ def execute_run(
         db.query("UPDATE deletion_runs SET batch_job = ? WHERE run_id = ?", [job, run["run_id"]])
         return {
             "run_id": run["run_id"], "plan_id": run["plan_id"], "actor": run.get("actor"), "mode": run.get("mode"),
-            "items": len(uris), "deleted_bytes": 0, "deleted_objects": 0, "errors": [],
+            "items": len(uris), "deleted_paths": 0, "deleted_bytes": 0, "deleted_objects": 0, "errors": [],
             "submitted": True, "batch_job": job, "trashed": False,
         }
 
-    deleted_bytes = deleted_objects = 0
+    deleted_bytes = deleted_objects = deleted_paths = 0
     errors: list[tuple[str, str]] = []
     trashed = not dry and trash_fn is not None
     for uri, nbytes, nobjs in sized:
@@ -143,6 +143,7 @@ def execute_run(
                 else:
                     delete_fn(uri)
             deleted = 0 if dry else 1
+            deleted_paths += deleted
             deleted_bytes += nbytes
             deleted_objects += nobjs
         except Exception as e:  # one URI failing must not strand the rest of the run
@@ -161,15 +162,17 @@ def execute_run(
                 [run["run_id"], uri, nbytes, nobjs],
             )
     finished = now()
+    # `deleted_paths` (what actually went), not the scan's object count, keys
+    # the undo state and the hold: a path no scan covers sizes as 0.
     sets = "finished_ts = ?, deleted_bytes = ?, deleted_objects = ?, undo_state = ?"
-    params: list[Any] = [finished, deleted_bytes, deleted_objects, undo_state if (deleted_objects and not dry) else "none"]
-    if schema.hold and trashed and deleted_objects:
+    params: list[Any] = [finished, deleted_bytes, deleted_objects, undo_state if deleted_paths else "none"]
+    if schema.hold and trashed and deleted_paths:
         sets += ", undo_deadline = ?, purge_state = 'pending'"
         params.append(finished + hold_s if hold_s is not None else None)
     db.query(f"UPDATE deletion_runs SET {sets} WHERE run_id = ?", [*params, run["run_id"]])
     return {
         "run_id": run["run_id"], "plan_id": run["plan_id"], "actor": run.get("actor"), "mode": run.get("mode"),
-        "items": len(uris), "deleted_bytes": deleted_bytes, "deleted_objects": deleted_objects,
+        "items": len(uris), "deleted_paths": deleted_paths, "deleted_bytes": deleted_bytes, "deleted_objects": deleted_objects,
         "errors": errors, "submitted": False, "finished_ts": finished, "trashed": trashed,
     }
 
@@ -205,6 +208,6 @@ def drain_once(
         out.append(summary)
         if announce:
             announce(summary)
-        if after and summary["mode"] != "dry" and summary["deleted_objects"] and not summary["submitted"]:
+        if after and not summary["submitted"] and summary["deleted_paths"]:
             after(summary)
     return out
