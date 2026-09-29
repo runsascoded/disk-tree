@@ -8,7 +8,7 @@
 # date (a re-run lands a fresh generation and flips the pointer).
 #
 # Creds come from .envrc via direnv (R2_HCCS_RO_* for HCCS ctbk/crashes,
-# R2_RO_* for RAC jc-taxes, R2_RW_* to write disk-tree-demo, CF_TOKEN +
+# R2_RO_* for RAC jc-taxes, R2_RW_* to write disk-tree-demo, CLOUDFLARE_API_TOKEN +
 # CLOUDFLARE_ACCOUNT_ID for D1). The HCCS account endpoint stays out of this
 # public repo — read from the untracked ~/.config/disk-tree/buckets.yml.
 set -euo pipefail
@@ -45,7 +45,7 @@ put() { AWS_ACCESS_KEY_ID="$R2_RW_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_RW_S
 put "$WORK/index/" "listing/$DATE/index/$GEN/"
 put "$WORK/snap/"  "snapshots/r2/$DATE/"
 
-( cd cloud && CLOUDFLARE_API_TOKEN="$CF_TOKEN" D1_DB_ID="$D1_ID" D1_DB_NAME="$BUCKET-db" INDEX_VARIANTS=path \
+( cd cloud && D1_DB_ID="$D1_ID" D1_DB_NAME="$BUCKET-db" INDEX_VARIANTS=path \
     uv run dt-cloud index-sync "$DATE" -g "$GEN" -b "$BUCKET" -k "listing/$DATE/index/$GEN" \
       -d "$WORK/index" -v path -v coarse16 -v coarse20 -v coarse24 )
 

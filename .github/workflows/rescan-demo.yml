@@ -10,10 +10,10 @@
 #   HCCS 2363642879f18d37d52dca114059937e — crashes, ctbk (public sources)
 #
 # Needs, in this repo's settings (secrets):
-#   R2_RW_ACCESS_KEY_ID / R2_RW_SECRET_ACCESS_KEY            (token "disk-tree-demo RW", RAC)
+#   R2_DEMO_RW_ACCESS_KEY_ID / R2_DEMO_RW_SECRET_ACCESS_KEY  (token "disk-tree-demo-ingest RW", RAC; CI-only)
 #   R2_HCCS_RO_ACCESS_KEY_ID / R2_HCCS_RO_SECRET_ACCESS_KEY  (token "hccs …RO", HCCS)
 # (jc-taxes, the one RAC *source*, is pending a working read token — see the
-#  scan loop below. It rejoins the loop once R2_RO_* secrets are added.)
+#  scan loop below. It rejoins the loop via R2_DEMO_SRC_RO_*.)
 #
 # `index --to` drops a `<uuid>.parquet` blob + its `.scan.json` manifest under
 # `scans/`; the Pages Functions list newest-per-path and expose history, so each
@@ -69,8 +69,8 @@ jobs:
         # bucket to its endpoint + profile. Secrets are injected via env so they
         # never appear literally in the workflow file; GH masks them in logs.
         env:
-          RW_ID: ${{ secrets.R2_RW_ACCESS_KEY_ID }}
-          RW_SECRET: ${{ secrets.R2_RW_SECRET_ACCESS_KEY }}
+          RW_ID: ${{ secrets.R2_DEMO_RW_ACCESS_KEY_ID }}
+          RW_SECRET: ${{ secrets.R2_DEMO_RW_SECRET_ACCESS_KEY }}
           HCCS_ID: ${{ secrets.R2_HCCS_RO_ACCESS_KEY_ID }}
           HCCS_SECRET: ${{ secrets.R2_HCCS_RO_SECRET_ACCESS_KEY }}
         run: |
