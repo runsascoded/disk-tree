@@ -1,6 +1,6 @@
 """Canonical identity map for storage attribution.
 
-Loads ``identities.yaml`` and resolves raw username spellings (Iris job
+Loads a deployment's ``identities.yaml`` and resolves raw username spellings (Iris job
 owners, provenance ``built_by``, ``users/<seg>/`` path segments) to canonical
 user ids. The canonical spelling is
 :func:`dt_cloud.usernames.sanitize_username` output, so a raw spelling that
@@ -21,7 +21,21 @@ import yaml
 
 from .usernames import sanitize_username
 
-DEFAULT_IDENTITIES = Path(__file__).resolve().parent / "identities.yaml"
+# The roster is deployment data (people's handles and aliases), never part of
+# the base: each deployment keeps its map outside the repo — a local path or an
+# fsspec URL (`gs://…`, `r2://…`) — and points `-i` or this variable at it.
+IDENTITIES_ENV = "DT_CLOUD_IDENTITIES"
+
+
+def read_identities(src: str | Path) -> str:
+    """The identity map's YAML text, from a local path or an fsspec URL."""
+    s = str(src)
+    if "://" not in s:
+        return Path(s).read_text()
+    import fsspec
+
+    with fsspec.open(s, "r") as f:
+        return f.read()
 
 
 @dataclass(frozen=True)
@@ -54,10 +68,9 @@ class IdentityMap:
         return user in self.users
 
 
-def load_identities(path: Path = DEFAULT_IDENTITIES) -> IdentityMap:
+def load_identities(src: str | Path) -> IdentityMap:
     """Load and validate the identity map; raises ``ValueError`` on a bad map."""
-    with open(path) as f:
-        doc = yaml.safe_load(f)
+    doc = yaml.safe_load(read_identities(src))
     users: set[str] = set()
     alias_to_user: dict[str, str] = {}
     for user in (doc.get("users") or {}):

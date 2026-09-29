@@ -1,10 +1,10 @@
 import { useState } from 'react'
 
 // User avatars. We show a real photo ONLY when we have an explicit GitHub handle
-// (github.com/<handle>.png) — curated in identities.yaml. We deliberately do NOT
+// (github.com/<handle>.png) — curated in the deployment's identity map. We deliberately do NOT
 // guess the handle from the email local-part: a guess that resolves to a
 // different person's GitHub would paint the wrong face. No handle → colored
-// initial. See identities.gen.ts / specs/avatar-sources.md.
+// initial. See identityRegistry.ts / specs/avatar-sources.md.
 
 export const avatarHue = (s: string): number => {
   let h = 0
@@ -12,13 +12,7 @@ export const avatarHue = (s: string): number => {
   return h
 }
 
-/**
- * Email or display string → canonical-id-shaped slug: the local part, sanitized
- * like rigging's `sanitize_username` (lowercase; runs of non-`[a-z0-9_-]` → '-').
- * So `will.held@openathena.ai` → `will-held` = the canonical id (the registry key).
- */
-export const whoToHandle = (who: string): string =>
-  who.split('@')[0].toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+export { whoToHandle } from './identityRegistry'
 
 // `github` → github.com/<handle>.png (curated, never guessed). `src` → an
 // explicit image URL (a share link's `subject.avatar` — Slack/arbitrary, chosen

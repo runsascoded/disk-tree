@@ -17,6 +17,8 @@ from pathlib import Path
 
 import yaml
 
+from .identity import read_identities
+
 err = partial(print, file=sys.stderr)
 
 
@@ -79,9 +81,9 @@ def check_rules(doc: dict) -> list[str]:
     return findings
 
 
-def export_rules(identities_path: Path) -> tuple[dict, list[str]]:
+def export_rules(identities_path: str | Path) -> tuple[dict, list[str]]:
     """(site JSON payload, findings) for identities.yaml."""
-    text = identities_path.read_text()
+    text = read_identities(identities_path)
     doc = yaml.safe_load(text)
     user_notes, prefix_notes = parse_notes(text)
     findings = check_rules(doc)
@@ -89,6 +91,8 @@ def export_rules(identities_path: Path) -> tuple[dict, list[str]]:
         {
             "u": user,
             "aliases": (row or {}).get("aliases") or [],
+            **({"name": row["name"]} if (row or {}).get("name") else {}),
+            **({"github": row["github"]} if (row or {}).get("github") else {}),
             **({"note": user_notes[user]} if user in user_notes else {}),
         }
         for user, row in (doc.get("users") or {}).items()

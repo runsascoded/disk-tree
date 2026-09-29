@@ -21,7 +21,7 @@ import { Link, useLocation } from 'react-router-dom'
 import { AboutModal } from './About'
 import { Avatar } from './Avatar'
 import { AUTH_MODE, signInUrl, useCanAssign, useIdent, useSignOut } from './auth'
-import { IDENTITIES } from './identities.gen'
+import { useRegistry } from './identities'
 import { REPO_URL } from './SiteKbd'
 import { useMyUser, useUserEmails } from './owners'
 import TokenModal from './TokenModal'
@@ -274,7 +274,8 @@ function GuestCard({ name, avatar, email }: { name: string; avatar?: string; ema
 // which sign-in email this session is, the user's other aliases and sign-in
 // emails, or a warning when the email maps to no user.
 function SessionLines({ email, user, emails }: { email: string; user: string | null; emails?: Record<string, string> }) {
-  const aliases = user ? Object.keys(IDENTITIES).filter(k => k !== user && IDENTITIES[k].u === user) : []
+  const reg = useRegistry()
+  const aliases = user ? Object.keys(reg).filter(k => k !== user && reg[k].u === user) : []
   const others = user && emails ? Object.keys(emails).filter(e => emails[e] === user && e !== email.toLowerCase()) : []
   return (
     <div className="uc-session">

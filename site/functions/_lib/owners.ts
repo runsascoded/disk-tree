@@ -26,6 +26,7 @@
  * scan attributes to others (`regions`) — a by-path read of those ranges
  * gives all(·) for every path inside. */
 import { canonId } from './identity.js'
+import type { Registry } from '../../src/identityRegistry.js'
 import type { ClaimRow } from './claims.js'
 import { idxKey } from './claims.js'
 
@@ -65,16 +66,16 @@ interface Claim {
 
 /** null when the ledger holds no claims at all — the lens is then the
  * scan's attribution, untouched. */
-export function ownerLens(claims: ClaimRow[], user: string): OwnerLens | null {
+export function ownerLens(claims: ClaimRow[], user: string, reg: Registry = {}): OwnerLens | null {
   if (!claims.length) return null
-  const u = canonId(user)
+  const u = canonId(user, reg)
   const share = (us: Record<string, number>): number => {
     let b = 0
-    for (const [k, v] of Object.entries(us)) if (canonId(k) === u) b += v
+    for (const [k, v] of Object.entries(us)) if (canonId(k, reg) === u) b += v
     return b
   }
   const all: Claim[] = claims
-    .map(c => ({ path: idxKey(c.prefix).path, ts: c.ts, action_id: c.action_id, who: c.owner == null ? null : canonId(c.owner), all: c.bytes, mine: share(c.us), objects: c.objects }))
+    .map(c => ({ path: idxKey(c.prefix).path, ts: c.ts, action_id: c.action_id, who: c.owner == null ? null : canonId(c.owner, reg), all: c.bytes, mine: share(c.us), objects: c.objects }))
     .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
   const byPath = new Map(all.map(c => [c.path, c]))
   const parentOf = (p: string): string => {

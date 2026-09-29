@@ -3,8 +3,8 @@
 // Run against the local dev stack (`./dev`, port 3253 — DEV identity, and
 // sync local D1 from prod first if the ledger matters; see tmp/d1sync).
 // `functions/user/[id].ts` serves these when present, falling back to the
-// shared /og-users.jpg. Rerun after notable mark churn; like og.jpg, these
-// are static and go stale gracefully.
+// shared /og-users.jpg, then /og.jpg. Rerun after ownership churn; the output
+// is the deployment's own (untracked: `public/.gitignore`), never the base's.
 //
 // Usage: node scripts/shoot-user-ogs.mjs [id ...]   (default: all meta users)
 import { execFileSync } from 'node:child_process'

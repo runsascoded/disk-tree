@@ -14,11 +14,12 @@ import {
 } from '@floating-ui/react'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Avatar, whoToHandle } from './Avatar'
-import { IDENTITIES } from './identities.gen'
+import { Avatar } from './Avatar'
+import { registry } from './identities'
+import { canonIn, defaultName } from './identityRegistry'
 
 // Canonical display for an actor. Assignments carry `who` as an email or a raw
-// id; canonicalize it, then read the bundled registry (short name + GitHub
+// id; canonicalize it, then read the deployment's registry (short name + GitHub
 // avatar). Everything shows the *short name*, never the raw email — with a
 // GitHub-style hover card (interactive: you can move into it and click the link).
 
@@ -31,32 +32,29 @@ export const shortUserKey = (id: string): string => {
   // `kaiyue-wen`) — a first name reads as the person in a URL; an unrelated
   // handle-derived alias (`when`) reads as a word.
   let best = id
-  for (const [k, rec] of Object.entries(IDENTITIES)) {
+  for (const [k, rec] of Object.entries(registry())) {
     if (rec.u === id && id.startsWith(k) && k.length < best.length) best = k
   }
   return best
 }
 
-export const canonId = (who: string): string => {
-  const h = whoToHandle(who)
-  return IDENTITIES[h]?.u ?? h
-}
+export const canonId = (who: string): string => canonIn(registry(), who)
 
 /** Short display name — registry `name`, else the capitalized first id segment. */
 export const shortName = (who: string): string => {
   const id = canonId(who)
-  const rec = IDENTITIES[id]
+  const rec = registry()[id]
   if (rec) return rec.name
-  if (id) return id.split('-')[0].replace(/^./, c => c.toUpperCase())
+  if (id) return defaultName(id)
   return who
 }
 
 /** Explicit GitHub handle for the real avatar, or undefined (never guessed). */
-export const ghHandle = (who: string): string | undefined => IDENTITIES[canonId(who)]?.github
+export const ghHandle = (who: string): string | undefined => registry()[canonId(who)]?.github
 
 /** All known users (canonical id + short name), sorted by name — for pickers. */
 export const allUsers = (): { id: string; name: string }[] =>
-  Object.entries(IDENTITIES)
+  Object.entries(registry())
     .map(([id, rec]) => ({ id, name: rec.name }))
     .sort((a, b) => a.name.localeCompare(b.name))
 

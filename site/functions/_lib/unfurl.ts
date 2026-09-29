@@ -45,3 +45,17 @@ export async function unfurlShell(
     })
     .transform(shell)
 }
+
+/** `path`'s absolute URL when the deployment ships that image, else null.
+ * People-specific cards (`/og-users.jpg`, `/og-user/<id>.jpg`) are generated
+ * per deployment (`scripts/shoot-user-ogs.mjs`), never tracked in the base.
+ * A missing asset comes back as the SPA shell (200, text/html) — only a real
+ * image counts. */
+export async function assetImage(
+  ctx: { request: Request; env: { ASSETS: { fetch: (req: Request) => Promise<Response> } } },
+  path: string,
+): Promise<string | null> {
+  const url = `${new URL(ctx.request.url).origin}${path}`
+  const probe = await ctx.env.ASSETS.fetch(new Request(url, { method: 'HEAD' })).catch(() => null)
+  return probe?.ok && (probe.headers.get('content-type') ?? '').startsWith('image/') ? url : null
+}

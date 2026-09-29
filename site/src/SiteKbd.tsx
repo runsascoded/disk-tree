@@ -3,7 +3,7 @@ import { MdBrightnessAuto, MdDarkMode, MdHelpOutline, MdLightMode } from 'react-
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Omnibar, ShortcutsModal, SpeedDial, useActions, type SpeedDialAction } from 'use-kbd'
 import { SpeedDialTip } from './Tooltip'
-import { IDENTITIES } from './identities.gen'
+import { useRegistry } from './identities'
 import { useHelpPref } from './prefs'
 import { useTheme } from './theme'
 import { useUnits } from './units'
@@ -18,8 +18,6 @@ const PAGES: [string, string][] = [
   ['/users', 'Users — storage by owner'],
 ]
 
-// Every distinct attribution user in the registry (aliases collapse onto `u`).
-const USERS = [...new Set(Object.values(IDENTITIES).map(i => i.u))].sort()
 
 /**
  * The keyboard/omnibar chrome every page shares: the lower-right SpeedDial
@@ -39,6 +37,9 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
   const { units, suffixB, toggleUnits, toggleSuffixB } = useUnits()
   const [help, setHelp] = useHelpPref()
   const toggleHelp = () => setHelp(help === 'on' ? 'off' : 'on')
+  // Every distinct attribution user in the registry (aliases collapse onto `u`).
+  const reg = useRegistry()
+  const USERS = [...new Set(Object.values(reg).map(i => i.u))].sort()
   useActions({
     'help:toggle': {
       label: `Help line: ${help} (toggle)`,

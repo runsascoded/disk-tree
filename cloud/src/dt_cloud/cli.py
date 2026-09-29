@@ -23,7 +23,7 @@ import pandas as pd
 from click import Choice, argument, group, option
 
 from .cw_digest import REPLY_HOUR_UTC
-from .identity import DEFAULT_IDENTITIES, load_identities
+from .identity import IDENTITIES_ENV, load_identities
 from .site import DEFAULT_URL as SITE_DEFAULT_URL
 from .secrets import env_secret, secret
 from .index_footer import INDEX_VARIANTS
@@ -70,13 +70,13 @@ err = partial(print, file=sys.stderr)
 
 
 @main.command()
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", required=True, type=Path, help="Output parquet path for the attribution table")
 @option("-R", "--no-records", is_flag=True, help="Skip artifact-record mining (no GETs; path signals only)")
 @option("-w", "--workers", default=16, help="Concurrent record reads")
 def build(
-    identities_path: Path,
+    identities_path: str,
     listings: tuple[str, ...],
     out: Path,
     no_records: bool,
@@ -140,13 +140,13 @@ def executor_mine(listings: tuple[str, ...], out_path: Path, workers: int) -> No
 
 
 @main.command("wandb-attr")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", required=True, type=Path, help="Output parquet path for wandb attribution rows")
 @option("-r", "--runs", "runs_path", required=True, type=Path, help="wandb-mine output parquet")
 @option("-x", "--executor-infos", "executor_path", type=Path, default=None, help="executor-mine output parquet (adds executor-wandb rows)")
 def wandb_attr(
-    identities_path: Path,
+    identities_path: str,
     listings: tuple[str, ...],
     out: Path,
     runs_path: Path,
@@ -197,13 +197,13 @@ def wandb_attr(
 
 @main.command("attr-report")
 @option("-a", "--attribution", "attributions", required=True, multiple=True, help="Attribution parquet(s); repeatable, concatenated")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-n", "--top", default=30, help="Rows in the per-user table")
 @option("-u", "--user", "claim_user", default=None, help="Print this user's prefixes (inferred ownership, by bytes)")
 def attr_report(
     attributions: tuple[str, ...],
-    identities_path: Path,
+    identities_path: str,
     listings: tuple[str, ...],
     top: int,
     claim_user: str | None,
@@ -290,13 +290,13 @@ def attr_report(
 @main.command()
 @option("-a", "--attribution", "attributions", required=True, multiple=True, help="Attribution parquet(s); repeatable, concatenated")
 @option("-d", "--depth", default=2, help="Prefix depth for the gap rollup (name components after bucket)")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-n", "--top", default=40, help="Rows in the gap table")
 def gaps(
     attributions: tuple[str, ...],
     depth: int,
-    identities_path: Path,
+    identities_path: str,
     listings: tuple[str, ...],
     top: int,
 ) -> None:
@@ -452,7 +452,7 @@ def wandb_mine(
 @option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s); adds per-node user overlays")
 @option("-c", "--dir-cache", "dir_cache", type=Path, default=None, help="Layer-2 cache dir (dir-stats/age-days parquet): attribution-independent rollups reused by re-attribution runs — see specs/dir-agg-cache.md")
 @option("-d", "--asof", required=True, help="Scan date the listing came from (YYYY-MM-DD)")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, default=None, help=f"identities.yaml path or URL, needed with -a (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Output dir for JSON files [default: site/public/data/<asof>]")
 @option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the complete floor-free path index parquet here (pixel-budget subtree API; specs/path-index-lazy-drill.md)")
@@ -461,7 +461,7 @@ def build_path_index(
     attributions: tuple[str, ...],
     dir_cache: Path | None,
     asof: str,
-    identities_path: Path,
+    identities_path: str | None,
     listings: tuple[str, ...],
     out_dir: Path | None,
     path_index: Path | None,
@@ -512,9 +512,9 @@ def stage(out_root: Path, workers: int, globs: tuple[str, ...]) -> None:
 
 
 @main.command()
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-o", "--out", type=Path, default=None, help="Write rules JSON (users/aliases/prefix_owners + notes) for the site")
-def rules(identities_path: Path, out: Path | None) -> None:
+def rules(identities_path: str, out: Path | None) -> None:
     """Validate identities.yaml; optionally export it as site JSON.
 
     Checks alias collisions/shadowing and prefix_owners rows
@@ -836,10 +836,10 @@ def index_tiers(mem: str, path_index: Path, threads: int, tmp_dir: Path | None, 
 
 @main.command("labels")
 @option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s) (as `path-index -a`)")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, default=None, help=f"identities.yaml path or URL, needed with -a (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s) — path-glob rules expand against their dirs")
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: one labels-<bucket>.parquet per bucket")
-def labels(attributions: tuple[str, ...], identities_path: Path, listings: tuple[str, ...], out_dir: Path) -> None:
+def labels(attributions: tuple[str, ...], identities_path: str | None, listings: tuple[str, ...], out_dir: Path) -> None:
     """Export mgu's attribution as DT label tables — `(prefix, usr)` per bucket,
     prefix relative to the bucket — for `disk-tree import -e duckdb -L
     labels-<bucket>.parquet -c usr` (spec mgu-scale-unification.md §B): the
@@ -879,11 +879,11 @@ def index_blob(bucket: str, listing_dir: str | None, gen: str, key: str | None, 
 
 @main.command("index-extras")
 @option("-a", "--attribution", "attributions", multiple=True, required=True, help="Attribution parquet(s) (as `path-index -a`)")
-@option("-i", "--identities", "identities_path", type=Path, default=DEFAULT_IDENTITIES, help="identities.yaml path")
+@option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, required=True, help=f"identities.yaml path or URL (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Where to write attr.tsv (default: beside the index)")
 @option("-P", "--path-index", "path_index", type=Path, required=True, help="Floor-free path-index.parquet of the scan (every dir is a row)")
 @argument("date")
-def index_extras(attributions: tuple[str, ...], identities_path: Path, out_dir: Path | None, path_index: Path, date: str) -> None:
+def index_extras(attributions: tuple[str, ...], identities_path: str, out_dir: Path | None, path_index: Path, date: str) -> None:
     """Backfill a scan's provenance sidecar (`attr.tsv`) from its floor-free
     path index + attribution parquets: each attributing prefix's user /
     source / evidence. `path-index` writes the same file for a fresh scan."""

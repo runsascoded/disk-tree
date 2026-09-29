@@ -10,10 +10,12 @@ YAML = """\
 users:
   ryan-williams:
     aliases: [rw]
+    github: ryan-williams
   russell-power:
     aliases: [rpower]  # observed as built_by
   larry-dial:
     aliases: []  # TODO confirm identity
+    name: Larry D
   data-team: {}
 prefix_owners:
   - prefix: gs://b1/datasets/
@@ -44,9 +46,9 @@ def test_export_rules_clean(yaml_path: Path):
     assert findings == []
     assert payload == {
         "users": [
-            {"u": "ryan-williams", "aliases": ["rw"]},
+            {"u": "ryan-williams", "aliases": ["rw"], "github": "ryan-williams"},
             {"u": "russell-power", "aliases": ["rpower"], "note": "observed as built_by"},
-            {"u": "larry-dial", "aliases": [], "note": "TODO confirm identity"},
+            {"u": "larry-dial", "aliases": [], "name": "Larry D", "note": "TODO confirm identity"},
             {"u": "data-team", "aliases": []},
         ],
         "prefix_owners": [

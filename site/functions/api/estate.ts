@@ -12,7 +12,7 @@
  * - `claims`: their live owner claims, sized from the index.
  */
 import { type Ctx, json, requireViewer } from '../_lib/auth.js'
-import { canonId } from '../_lib/identity.js'
+import { canonId, loadRegistry } from '../_lib/identity.js'
 import { ownerTotals } from '../_lib/ownerTotals.js'
 import { storeReady } from '../_lib/index.js'
 
@@ -29,8 +29,8 @@ export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
   if (!/^[a-z0-9_-]+$/.test(user)) return json({ error: 'user=<canonical id> required' }, 400)
 
   try {
-    const totals = await ownerTotals(env, date)
-    const mine = (who: string | null | undefined) => !!who && canonId(who) === user
+    const [totals, reg] = await Promise.all([ownerTotals(env, date), loadRegistry(env)])
+    const mine = (who: string | null | undefined) => !!who && canonId(who, reg) === user
     // The body keys users by the index's usr (a canonical id) or a claimant
     // (an email) — canonicalize both.
     const owned = Object.entries(totals.users).find(([k]) => mine(k))?.[1] ?? null
