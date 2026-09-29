@@ -50,6 +50,17 @@ GHA (the `reduce.yml` precedent) stays the fallback.
 3. Run `site/` locally over it: `site/./dev --local-db` with a `laptop` store stub. CIC `/`, `~/c`, `~/Library` at phone width.
 4. Go/no-go. The main risk is path-index build memory on the laptop. The fallback is to reduce in the cloud (`.github/workflows/reduce.yml`, or node `mgu`).
 
+**Phase 0 results (2026-09-29).** Capture `2026-09-29T16-26-51Z` of `/Users/ryan`, then Batch job `88feb8f2` on the `disk-tree-m3-ingest` job definition:
+
+| step | where | wall | peak RSS | output |
+|---|---|---|---|---|
+| `disk-tree capture` | laptop | 197 s | 423 MiB | 33 shards, 145 MiB in R2, 0 local disk |
+| fetch shards | Batch | 3 s | | |
+| `dt-cloud path-index` | Batch | 6 s | 1.51 GiB | index 70 MiB (823,733 paths, 6,596,020 objects), snapshot 192 KiB |
+| upload | Batch | 4 s | | `listing/laptop/2026-09-29/index/202609291811/`, `snapshots/laptop/2026-09-29/` |
+
+Verdict: **go**. The ingest is trivially small for Batch, so the job definition can drop to 1 vCPU / 4 GiB. Remaining in Phase 0: run `site/` locally over this generation.
+
 ### Phase 1: the `laptop` store
 - A `REGISTRY` entry in `site/src/stores.ts`:
   - `scheme: 'file'` and `rootLabel` `~`;
