@@ -21,6 +21,7 @@ import { listBatchJobs, reflectRuns } from './runReflect.js'
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}(?:T\d{4})?$/
 
 async function prepare(env: ExecEnv, db: D1Database, req: DispatchReq): Promise<Prepared | ReturnType<typeof refuse>> {
+  if (!env.GCP_SA_KEY) return refuse(503, 'dispatch not configured (GCP_SA_KEY secret missing)')
   let snapshot: Awaited<ReturnType<typeof snapshotPlan>>
   try {
     snapshot = await snapshotPlan(db, req.planId)

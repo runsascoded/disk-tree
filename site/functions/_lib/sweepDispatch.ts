@@ -64,6 +64,7 @@ const CF_ACCOUNT_ID = '74981a43be0de7712369306c7b19133d'
 const SECRET = (name: string) => `projects/${GCP_PROJECT}/secrets/${name}/versions/latest`
 
 async function prepare(env: ExecEnv, db: D1Database, req: DispatchReq): Promise<Prepared | ReturnType<typeof refuse>> {
+  if (!env.GCP_SA_KEY) return refuse(503, 'dispatch not configured (GCP_SA_KEY secret missing)')
   const requested = req.buckets ?? []
   if (requested.some(b => !/^marin-[a-z0-9-]+$/.test(b))) return refuse(400, 'bad bucket name')
   const shape = prefixShape(env)

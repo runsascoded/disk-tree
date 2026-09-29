@@ -53,7 +53,7 @@ export interface Store {
   /** Which executor route family `/staged` dispatches to: cw's plan-first
    *  Batch bridge (`/api/plan-sweep/*`, one bucket per run, undo + purge) or
    *  gcs's sweep bridge (`/api/sweep/*`, a plan may span buckets). */
-  executor: 'plan-sweep' | 'sweep'
+  executor: 'plan-sweep' | 'sweep' | 'laptop'
   /** Set when the scan job snapshots the buckets' lifecycle rules
    *  (`<base>/<scan>/lifecycle.json`): the home-page fold, and how this
    *  store's snapshots read. Unset = no fold. */
@@ -157,7 +157,8 @@ const REGISTRY: Store[] = [
     prices: false,
     staging: true,
     owners: false,
-    executor: 'plan-sweep',
+    // The laptop's own drainer executes runs (`_lib/laptopDispatch.ts`).
+    executor: 'laptop',
     // Roots are scanned directories (`/Users/ryan`), not buckets.
     buckets: [],
     rootLabel: 'all roots',

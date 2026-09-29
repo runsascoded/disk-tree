@@ -5,7 +5,7 @@
 // run needs a finished dry-run of exactly the current item set, on its scan.
 // A dispatch is announced in the plan's Slack thread (specs/done/staged-slack.md).
 import { type Ctx, type Env as AuthEnv, json, requireAdmin } from "../../_lib/auth.js"
-import { dispatchBody, dispatchPlan, type ExecEnv, notifyDispatched } from "../../_lib/executor.js"
+import { dispatchBody, dispatchPlan, type ExecEnv, notifyDispatched, planFirstKind } from "../../_lib/executor.js"
 
 type Env = AuthEnv & ExecEnv
 
@@ -19,7 +19,7 @@ export const onRequestPost = async (ctx: Ctx & { env: Env; waitUntil?: (p: Promi
   if (mode !== "dry" && mode !== "real") return json({ error: "mode must be 'dry' or 'real'" }, 400)
   const siteUrl = new URL(ctx.request.url).origin
   const actor = gated.email ?? gated.name ?? "admin"
-  const r = await dispatchPlan(ctx.env, { planId: planId!, mode, date: body?.date, actor, siteUrl }, "plan-sweep")
+  const r = await dispatchPlan(ctx.env, { planId: planId!, mode, date: body?.date, actor, siteUrl }, planFirstKind(ctx.env))
   if (r.ok) {
     const p = notifyDispatched(ctx.env, r, "www", siteUrl)
     if (ctx.waitUntil) ctx.waitUntil(p)

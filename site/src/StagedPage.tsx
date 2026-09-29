@@ -49,7 +49,9 @@ export function StagedPage() {
   const ident = useIdent()
   const admin = useIsAdmin()
   const canStage = useCanStage()
-  const planFirst = DEFAULT_STORE.executor === 'plan-sweep'
+  // Plan-first executors (cw's Batch bridge, the laptop drainer) share the
+  // `/api/plan-sweep/*` console routes; gcs's `sweep` has its own.
+  const planFirst = DEFAULT_STORE.executor !== 'sweep'
 
   const [live, setLive] = useState(false)
   const staged = useStagedPlan(live)
