@@ -205,7 +205,28 @@ def read_table(path: str, columns: list[str] | None = None, filters=None) -> pa.
 def read_parquet(path: str, filters=None, columns: list[str] | None = None) -> pd.DataFrame:
     """`pd.read_parquet`, URL-aware. Predicate pushdown works the same remotely:
     row-group min/max stats are read from the footer and only overlapping groups
-    are fetched (range GETs)."""
+    are fetched (range GETs).
+
+    A v2 layer-2 listing (spec `listing-slim.md`) comes back in its v1 shape:
+    `uri` and the implied pivot columns are derived (:func:`listing_format.restore`),
+    so every blob reader sees one format. Asking for `uri` (or an implied
+    column) by name works on either format."""
+    from . import listing_format as lf
+    path = os.fspath(path)
+    fmt = lf.parse(read_schema(path).metadata)
+    if columns is not None and fmt.version >= 2:
+        want = list(columns)
+        derived = {'uri': 'path', **fmt.implied}
+        read = [c for c in want if c not in derived]
+        for c in want:
+            if c in derived and derived[c] not in read:
+                read.append(derived[c])
+        df = _read_parquet(path, filters, read)
+        return lf.restore(df, fmt)[want]
+    return lf.restore(_read_parquet(path, filters, columns), fmt)
+
+
+def _read_parquet(path: str, filters, columns: list[str] | None) -> pd.DataFrame:
     import pandas as pd
     if not is_url(path):
         return pd.read_parquet(path, filters=filters, columns=columns)
@@ -241,17 +262,21 @@ def rewrite_row_groups(path: str, rows: int) -> None:
     (one batch resident at a time, so a 130 MiB remote chunk never lands in
     memory whole) via a `.rg.tmp` sibling moved into place at the end."""
     import pyarrow.parquet as pq
+    from . import listing_format as lf
     tmp = path + '.rg.tmp'
     if not is_url(path):
         src = pq.ParquetFile(path)
-        with pq.ParquetWriter(tmp, src.schema_arrow) as w:
+        # `schema_arrow` carries the key-value metadata; a v2 listing keeps zstd.
+        kw = lf.pyarrow_write_kwargs(lf.parse(src.schema_arrow.metadata))
+        with pq.ParquetWriter(tmp, src.schema_arrow, **kw) as w:
             for batch in src.iter_batches(batch_size=rows):
                 w.write_batch(batch, row_group_size=rows)
         os.replace(tmp, path)
         return
     fs, p = fs_for(path)
     src = pq.ParquetFile(p, filesystem=fs)
-    with pq.ParquetWriter(p + '.rg.tmp', src.schema_arrow, filesystem=fs) as w:
+    kw = lf.pyarrow_write_kwargs(lf.parse(src.schema_arrow.metadata))
+    with pq.ParquetWriter(p + '.rg.tmp', src.schema_arrow, filesystem=fs, **kw) as w:
         for batch in src.iter_batches(batch_size=rows):
             w.write_batch(batch, row_group_size=rows)
     fs.mv(p + '.rg.tmp', p)
