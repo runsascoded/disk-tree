@@ -4,6 +4,8 @@ Staged deletions (the table's trash gesture, `/staged`) announce themselves in a
 
 Built on cw-s3 (`c3d592a`), brought onto the base (`cloud`) generic over both executors: cw's plan-first Batch bridge (`plan-sweep`) and gcs's (`sweep`).
 
+**Status (2026-09-28): done on the base** (branch `staged-slack`): cw's generic pieces verbatim, the executor seam, the digest gate on both executors and both dispatch surfaces, both lineages' migrations. Verified by `pnpm -C site build` and the site's vitest suite (the gate over the real cw schema, gcs reflection over the gcs schema, both lineages applied with FKs on). Nothing has called Slack, GCP or production; each deployment turns it on per [Per-deployment setup](#per-deployment-setup).
+
 ## Shape
 
 - **One thread per staged plan.** The parent message is re-rendered on every event: item and batch counts, who staged, the latest dry-run's result and whether it still matches the plan (or that it ended without a result), the last real run. Every event is a reply: a stage batch (who, count, memo, the first prefixes), an unstage, a batch rejected, a run dispatched (www or Slack), a run finished (totals; for a real run, the undo deadline) or ended without a result.

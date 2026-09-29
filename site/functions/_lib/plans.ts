@@ -251,7 +251,7 @@ export async function snapshotPlan(db: D1Database, planId: number): Promise<
   return { plan_id: planId, name: plan.name, bucket, sweep }
 }
 
-// ── The real-deletion gate (specs/staged-slack.md) ─────────────────────────
+// ── The real-deletion gate (specs/done/staged-slack.md) ─────────────────────────
 
 const hex = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")
 

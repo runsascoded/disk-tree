@@ -153,7 +153,7 @@ export const onRequest = async (ctx: Ctx & { env: Env; waitUntil?: Bg }): Promis
     const by = gated.email ?? gated.name ?? "guest"
     const res = await stageItems(db, prefixes, by, note, shape)
     if ("error" in res) return json(res, 400)
-    // Announce the batch in the plan's Slack thread (specs/staged-slack.md),
+    // Announce the batch in the plan's Slack thread (specs/done/staged-slack.md),
     // after the response — a Slack hiccup never fails the gesture.
     if (res.staged.length) {
       const siteUrl = new URL(ctx.request.url).origin

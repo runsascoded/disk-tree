@@ -1,4 +1,4 @@
-// The `sweep` executor's reflection (gcs; specs/staged-slack.md). gcs's
+// The `sweep` executor's reflection (gcs; specs/done/staged-slack.md). gcs's
 // executor records its own `deletion_runs` row from inside Batch (start, then
 // totals at the end), so there are no totals to copy here. What the site adds:
 //

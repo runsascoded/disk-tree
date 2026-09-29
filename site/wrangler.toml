@@ -52,7 +52,7 @@ ADMIN_EMAILS = "1"
 # domains get the `cw` scope with no `allowed_emails` row. Inert behind the
 # edge (edge identities are already authorized).
 VIEWER_DOMAINS = "coreweave.com"
-# Staged-plan review in Slack (specs/staged-slack.md): one thread per staged
+# Staged-plan review in Slack (specs/done/staged-slack.md): one thread per staged
 # plan in the deployment's admin channel, with Dry-run / Delete-for-real /
 # Reject-batch buttons (`/slack/actions`). Inert until set; each deployment
 # sets its own channel id:

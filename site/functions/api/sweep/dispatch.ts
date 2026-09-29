@@ -6,7 +6,7 @@
 // Admin scope only. The work is the `sweep` executor (`_lib/sweepDispatch.ts`)
 // behind `_lib/executor.ts` (shared with `/slack/actions`): a real run needs a
 // finished dry-run of exactly the item set it would act on, on its scan. A
-// dispatch is announced in the plan's Slack thread (specs/staged-slack.md).
+// dispatch is announced in the plan's Slack thread (specs/done/staged-slack.md).
 import { ADMIN_SCOPE, type Env as AuthEnv, json, requireScope } from '../../_lib/auth.js'
 import { dispatchBody, dispatchPlan, type ExecEnv, notifyDispatched } from '../../_lib/executor.js'
 

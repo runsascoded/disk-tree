@@ -1,5 +1,5 @@
 /**
- * The staged-deletion review loop in Slack (specs/staged-slack.md): one thread
+ * The staged-deletion review loop in Slack (specs/done/staged-slack.md): one thread
  * per staged plan in the deployment's admin channel. The parent message is
  * re-rendered on every event (counts, the latest dry-run, whether it still
  * matches the plan, the action buttons); each event is a reply. The pure parts

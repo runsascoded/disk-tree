@@ -3,7 +3,7 @@
 // mode: 'dry' | 'real', date: <scan id> }. The work is the `plan-sweep`
 // executor behind `_lib/executor.ts` (shared with `/slack/actions`): a real
 // run needs a finished dry-run of exactly the current item set, on its scan.
-// A dispatch is announced in the plan's Slack thread (specs/staged-slack.md).
+// A dispatch is announced in the plan's Slack thread (specs/done/staged-slack.md).
 import { type Ctx, type Env as AuthEnv, json, requireAdmin } from "../../_lib/auth.js"
 import { dispatchBody, dispatchPlan, type ExecEnv, notifyDispatched } from "../../_lib/executor.js"
 

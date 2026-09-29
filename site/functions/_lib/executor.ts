@@ -1,5 +1,5 @@
 /**
- * The dispatch seam (specs/staged-slack.md): one code path per executor,
+ * The dispatch seam (specs/done/staged-slack.md): one code path per executor,
  * shared by the /staged console's HTTP routes (`api/plan-sweep/dispatch`,
  * `api/sweep/dispatch`) and `/slack/actions`. The deployment names its
  * executor with the `[vars]` `EXECUTOR` (= its `Store.executor` in

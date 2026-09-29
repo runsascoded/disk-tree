@@ -1,6 +1,6 @@
 /**
  * The `plan-sweep` executor (cw's plan-first bridge; `_lib/executor.ts` is
- * the seam, specs/staged-slack.md). A dispatch snapshots the plan into
+ * the seam, specs/done/staged-slack.md). A dispatch snapshots the plan into
  * plan.json on GCS, submits the Batch job, and records an in-progress
  * `deletion_runs` row carrying the digest of the plan's item set (what a
  * later real run is gated on). One bucket per run: a plan naming several is

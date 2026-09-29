@@ -1,6 +1,6 @@
 /**
  * The executor contract behind the dispatch seam (`_lib/executor.ts`,
- * specs/staged-slack.md). Each implementation (`planDispatch.planSweep`,
+ * specs/done/staged-slack.md). Each implementation (`planDispatch.planSweep`,
  * `sweepDispatch.sweep`) depends only on this module, so the seam can import
  * them without a cycle.
  */

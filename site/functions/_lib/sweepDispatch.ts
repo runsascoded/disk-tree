@@ -1,5 +1,5 @@
 // The `sweep` executor (gcs's bridge; `_lib/executor.ts` is the seam,
-// specs/staged-slack.md), and its pure parts: the run dir, the `-b` cut a plan
+// specs/done/staged-slack.md), and its pure parts: the run dir, the `-b` cut a plan
 // allows, and the executor script over the staged set (`sweep manifest
 // --plan`: specs/staged-delete.md).
 //

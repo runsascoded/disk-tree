@@ -1,6 +1,6 @@
 /**
  * POST /slack/actions — Slack interactivity for the staged-deletion thread
- * (specs/staged-slack.md). Buttons on the plan's parent message: Dry-run,
+ * (specs/done/staged-slack.md). Buttons on the plan's parent message: Dry-run,
  * Delete for real; on each batch reply: Reject batch. ("Open in www" is a URL
  * button; Slack still calls here, and it's acked.)
  *

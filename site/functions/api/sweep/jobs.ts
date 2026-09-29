@@ -7,7 +7,7 @@
 //
 // Reading also reflects finished runs (`_lib/sweepReflect.ts`: the run's item
 // digest, or closing a run whose job died) and posts each newly finished run's
-// result to its plan's Slack thread (specs/staged-slack.md). The Batch job's
+// result to its plan's Slack thread (specs/done/staged-slack.md). The Batch job's
 // exit trap calls this with the job's read grant, so that happens as the run
 // ends.
 import { type Env as AuthEnv, json, requireViewer } from '../../_lib/auth.js'

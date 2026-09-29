@@ -1,6 +1,6 @@
 /**
  * Reflect cw plan-first sweep runs into D1 (moved from api/plan-sweep/jobs.ts
- * so `/slack/actions` shares it; specs/staged-slack.md). The Batch job writes
+ * so `/slack/actions` shares it; specs/done/staged-slack.md). The Batch job writes
  * only gs:// artifacts; a run's `<mode>-summary.json` fills in its
  * `deletion_runs` totals + `deletion_bands` (idempotent — only while
  * finished_ts IS NULL). A run is reflected as soon as its summary exists, even

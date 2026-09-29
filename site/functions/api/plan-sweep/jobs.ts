@@ -3,7 +3,7 @@
 // authenticated viewer may read; the payload holds no bucket data. Reading
 // also reflects finished runs into D1 (`_lib/runReflect.ts`) and posts each
 // newly finished run's result to its plan's Slack thread
-// (specs/staged-slack.md) — the Batch job's exit trap calls this with the
+// (specs/done/staged-slack.md) — the Batch job's exit trap calls this with the
 // job's read grant, so that happens as the run ends.
 import type { D1Database } from "@cloudflare/workers-types"
 import { type Ctx, type Env as AuthEnv, json, requireViewer } from "../../_lib/auth.js"

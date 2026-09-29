@@ -1,6 +1,6 @@
 /**
  * Slack Web API + request verification for the staged-deletion review loop
- * (specs/staged-slack.md). Pure fetch — no SDK. The bot token is the
+ * (specs/done/staged-slack.md). Pure fetch — no SDK. The bot token is the
  * deployment's Slack app ("CoreWeave Usage Bot" on cw); the signing secret
  * authenticates interactivity callbacks (`/slack/actions`).
  */
