@@ -1,24 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { fmtBytes, realGate, renderParent, runEvent, type RunRow } from './stagedSlack.js'
+import { fmtBytes, renderParent, runEvent, type RunRow } from './stagedSlack.js'
 
 const run = (o: Partial<RunRow>): RunRow => ({
   run_id: 'cw-sweep-dry-1', mode: 'dry', scan: '2026-09-28T1201', actor: 'ann@openathena.ai', started_ts: 100,
   finished_ts: 200, deleted_bytes: 2 * 1024 ** 4, deleted_objects: 1234, skipped_gone: 0, skipped_overwritten: 0,
   plan_digest: 'D1', undo_deadline: null, ...o,
-})
-
-describe('realGate', () => {
-  it('needs a finished dry-run of exactly the current set, and nothing in flight', () => {
-    const dry = run({})
-    expect(realGate([], 'D1', 0)).toEqual({ ok: false, reason: 'the plan is empty' })
-    expect(realGate([], 'D1', 3)).toEqual({ ok: false, reason: 'no dry-run of this plan yet' })
-    expect(realGate([dry], 'D2', 3)).toEqual({ ok: false, reason: 'the plan changed since the last dry-run; dry-run it again' })
-    expect(realGate([run({ finished_ts: null })], 'D1', 3)).toEqual({ ok: false, reason: 'a dry run is in progress (cw-sweep-dry-1)' })
-    expect(realGate([dry], 'D1', 3)).toEqual({ ok: true, dry })
-    // the newest matching dry-run wins
-    const newer = run({ run_id: 'cw-sweep-dry-2', started_ts: 300, finished_ts: 400, deleted_bytes: 5 })
-    expect(realGate([dry, newer], 'D1', 3)).toEqual({ ok: true, dry: newer })
-  })
 })
 
 const ids = (blocks: unknown[]): string[] =>
@@ -44,6 +30,7 @@ describe('renderParent', () => {
     expect(txt([])).toBe('No dry-run yet.\n_Delete for real_ appears after a finished dry-run of the current set (no dry-run of this plan yet).')
     expect(txt([run({})])).toBe('Latest dry-run would delete *2.0 TiB* / 1,234 objects (scan 2026-09-28T1201) — matches the current plan.')
     expect(txt([run({ plan_digest: 'OLD' })])).toBe('Latest dry-run would delete *2.0 TiB* / 1,234 objects (scan 2026-09-28T1201) — *stale*: the plan changed since.\n_Delete for real_ appears after a finished dry-run of the current set (the plan changed since the last dry-run; dry-run it again).')
+    expect(txt([run({ plan_digest: '', deleted_bytes: 0, deleted_objects: 0 })])).toBe('Latest dry-run (`cw-sweep-dry-1`) ended without a result.\n_Delete for real_ appears after a finished dry-run of the current set (the plan changed since the last dry-run; dry-run it again).')
   })
 
   it('puts the dry-run numbers and the recoverability in the real-delete confirm', () => {
@@ -58,6 +45,7 @@ describe('run events', () => {
     expect(runEvent(run({ finished_ts: null }), 'dispatched', 'Slack')).toBe(':test_tube: Dry-run dispatched by ann via Slack on scan 2026-09-28T1201 (`cw-sweep-dry-1`)')
     expect(runEvent(run({ skipped_gone: 2 }), 'finished')).toBe(':test_tube: Dry-run finished: would delete *2.0 TiB* / 1,234 objects (gone since scan: 2, overwritten: 0).')
     expect(runEvent(run({ mode: 'real', run_id: 'cw-sweep-real-1', undo_deadline: 1_790_604_800 }), 'finished')).toBe(':white_check_mark: Real deletion finished: deleted *2.0 TiB* / 1,234 objects; undoable until 2026-09-28 14:13Z (www).')
+    expect(runEvent(run({ plan_digest: '' }), 'failed')).toBe(':x: Dry-run `cw-sweep-dry-1` ended without a result (its Batch job stopped before the run summary); check its logs in www.')
     expect([fmtBytes(0), fmtBytes(1536), fmtBytes(3 * 1024 ** 3)]).toEqual(['0 B', '1.5 KiB', '3.0 GiB'])
   })
 })

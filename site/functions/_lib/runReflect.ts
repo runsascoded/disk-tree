@@ -10,6 +10,7 @@
 import type { D1Database } from "@cloudflare/workers-types"
 import { batchJobsUrl, BATCH_REGION } from "./gcp.js"
 import { CW_BUCKET, DATA_BUCKET } from "./cwBatch.js"
+import type { FinishedRun } from "./plans.js"
 
 const HOLD_SECS = 7 * 24 * 3600 // undo window before purge (matches gcs's ≥7d soft-delete)
 export const TERMINAL = new Set(["SUCCEEDED", "FAILED", "CANCELLED"])
@@ -82,10 +83,12 @@ export const sweepJobs = (jobs: BatchJob[]): BatchJob[] => jobs.filter(j => /\/j
 export const jobIdOf = (j: BatchJob): string => j.name.slice(j.name.lastIndexOf("/") + 1)
 
 /** Reflect every in-progress run that has finished (summary present, or Batch
- * terminal without one) plus terminal undo/purge ops. Returns the run ids this
- * call finished — the caller announces them. */
-export async function reflectRuns(db: D1Database, token: string, jobs: BatchJob[]): Promise<string[]> {
-  const done: string[] = []
+ * terminal without one) plus terminal undo/purge ops. Returns the runs this
+ * call finished — the caller announces them. A run that ended without a
+ * summary reviewed nothing: its `plan_digest` becomes the empty digest, so a
+ * failed dry-run never opens the real gate. */
+export async function reflectRuns(db: D1Database, token: string, jobs: BatchJob[]): Promise<FinishedRun[]> {
+  const done: FinishedRun[] = []
   const pending = new Set(
     (await db.prepare("SELECT run_id FROM deletion_runs WHERE finished_ts IS NULL").all<{ run_id: string }>())
       .results.map(x => x.run_id),
@@ -98,11 +101,11 @@ export async function reflectRuns(db: D1Database, token: string, jobs: BatchJob[
     const summary = await readSummary(token, jobId, mode)
     if (summary) {
       await reflect(db, jobId, mode, summary)
-      done.push(jobId)
+      done.push({ run_id: jobId, ok: true })
     } else if (terminal) {
-      const r = await db.prepare("UPDATE deletion_runs SET finished_ts = ? WHERE run_id = ? AND finished_ts IS NULL")
+      const r = await db.prepare("UPDATE deletion_runs SET finished_ts = ?, plan_digest = '' WHERE run_id = ? AND finished_ts IS NULL")
         .bind(Math.floor(Date.now() / 1000), jobId).run()
-      if (r.meta.changes) done.push(jobId)
+      if (r.meta.changes) done.push({ run_id: jobId, ok: false })
     }
   }
   // Reflect terminal undo/purge ops onto their target run (state guards keep it

@@ -35,9 +35,12 @@ describe('bucketCut — the run\'s -b cut from a plan\'s buckets', () => {
 
 describe('sweepScript — the Batch container\'s bash', () => {
   const jobId = 'gcs-sweep-dry-20260928-1200z'
+  // on exit, ping the site so the finished run is reflected (and posted to Slack) at once
+  const trap = `trap 'curl -fsS -m 60 -o /dev/null -H "Authorization: Bearer $GCS_USAGE_TOKEN" "$SITE_URL/api/sweep/jobs" || true' EXIT`
   it('dry, one bucket: `manifest --plan <run>/plan.json` then execute', () => {
     expect(sweepScript({ mode: 'dry', jobId, buckets: [E1], plan: planJsonPath(jobId) })).toBe([
       'set -euo pipefail',
+      trap,
       `dt-cloud sweep manifest -d "$SWEEP_DATE" --plan "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}/plan.json" -b ${E1} -o "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
       `dt-cloud sweep execute -b ${E1} "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
     ].join('\n'))
@@ -45,6 +48,7 @@ describe('sweepScript — the Batch container\'s bash', () => {
   it('real, the cut is the plan\'s buckets', () => {
     expect(sweepScript({ mode: 'real', jobId, buckets: [W4, E1], plan: planJsonPath(jobId) })).toBe([
       'set -euo pipefail',
+      trap,
       `dt-cloud sweep manifest -d "$SWEEP_DATE" --plan "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}/plan.json" -b ${W4} -b ${E1} -o "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
       `dt-cloud sweep execute -b ${W4} -b ${E1} --for-real "gs://oa-gcs-usage-dvx/sweep/runs/${jobId}"`,
     ].join('\n'))

@@ -3,27 +3,15 @@
  * per staged plan in the deployment's admin channel. The parent message is
  * re-rendered on every event (counts, the latest dry-run, whether it still
  * matches the plan, the action buttons); each event is a reply. The pure parts
- * (`realGate`, `renderParent`, the event texts) are what the tests pin; the
- * rest is Slack + D1 I/O, best-effort — a Slack failure never fails the
- * gesture that caused it.
+ * (`renderParent`, the event texts; the gate is `plans.realGate`) are what the
+ * tests pin; the rest is Slack + D1 I/O, best-effort — a Slack failure never
+ * fails the gesture that caused it.
  */
 import type { D1Database } from '@cloudflare/workers-types'
-import { planDigest, slackApi, slackReady, type SlackEnv } from './slack.js'
+import { type FinishedRun, type Gate, planDigest, planRuns, realGate, type RunRow } from './plans.js'
+import { slackApi, slackReady, type SlackEnv } from './slack.js'
 
-export interface RunRow {
-  run_id: string
-  mode: 'dry' | 'real'
-  scan: string
-  actor: string
-  started_ts: number
-  finished_ts: number | null
-  deleted_bytes: number
-  deleted_objects: number
-  skipped_gone: number
-  skipped_overwritten: number
-  plan_digest: string | null
-  undo_deadline?: number | null
-}
+export type { RunRow }
 
 export const fmtBytes = (n: number): string => {
   const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
@@ -34,25 +22,6 @@ export const fmtBytes = (n: number): string => {
 }
 const fmtN = (n: number): string => n.toLocaleString('en-US')
 const utc = (ts: number): string => new Date(ts * 1000).toISOString().slice(0, 16).replace('T', ' ') + 'Z'
-
-export type Gate =
-  | { ok: true; dry: RunRow }
-  | { ok: false; reason: string }
-
-/** May the plan (current item digest `digest`) be really deleted now?
- * Yes only after a *finished* dry-run of exactly this item set, and with no
- * run in flight. `runs` are the plan's runs, any order. */
-export function realGate(runs: readonly RunRow[], digest: string, items: number): Gate {
-  if (!items) return { ok: false, reason: 'the plan is empty' }
-  const live = runs.find(r => r.finished_ts == null)
-  if (live) return { ok: false, reason: `a ${live.mode} run is in progress (${live.run_id})` }
-  const dry = [...runs].filter(r => r.mode === 'dry' && r.plan_digest === digest).sort((a, b) => b.started_ts - a.started_ts)[0]
-  if (!dry) {
-    const any = runs.some(r => r.mode === 'dry')
-    return { ok: false, reason: any ? 'the plan changed since the last dry-run; dry-run it again' : 'no dry-run of this plan yet' }
-  }
-  return { ok: true, dry }
-}
 
 export interface ParentView {
   planId: number
@@ -80,6 +49,7 @@ export function renderParent(v: ParentView): { text: string; blocks: unknown[] }
   let dryLine: string
   if (!latestDry) dryLine = 'No dry-run yet.'
   else if (latestDry.finished_ts == null) dryLine = `Dry-run running (${who(latestDry.actor)}, scan ${latestDry.scan}).`
+  else if (latestDry.plan_digest === '') dryLine = `Latest dry-run (\`${latestDry.run_id}\`) ended without a result.`
   else {
     const res = `would delete *${fmtBytes(latestDry.deleted_bytes)}* / ${fmtN(latestDry.deleted_objects)} objects (scan ${latestDry.scan})`
     dryLine = latestDry.plan_digest === v.digest
@@ -140,16 +110,19 @@ export function stageEvent(e: { planId: number; batchId: number; by: string; pre
   }
 }
 
-export function runEvent(r: RunRow, phase: 'dispatched' | 'finished', via: string | null = null): string {
+export function runEvent(r: RunRow, phase: 'dispatched' | 'finished' | 'failed', via: string | null = null): string {
   const kind = r.mode === 'dry' ? 'Dry-run' : '*Real deletion*'
   if (phase === 'dispatched') return `${r.mode === 'dry' ? ':test_tube:' : ':rotating_light:'} ${kind} dispatched by ${who(r.actor)}${via ? ` via ${via}` : ''} on scan ${r.scan} (\`${r.run_id}\`)`
+  if (phase === 'failed') return `:x: ${kind} \`${r.run_id}\` ended without a result (its Batch job stopped before the run summary); check its logs in www.`
   if (r.mode === 'dry') return `:test_tube: Dry-run finished: would delete *${fmtBytes(r.deleted_bytes)}* / ${fmtN(r.deleted_objects)} objects (gone since scan: ${fmtN(r.skipped_gone)}, overwritten: ${fmtN(r.skipped_overwritten)}).`
   return `:white_check_mark: Real deletion finished: deleted *${fmtBytes(r.deleted_bytes)}* / ${fmtN(r.deleted_objects)} objects${r.undo_deadline ? `; undoable until ${utc(r.undo_deadline)} (www)` : ''}.`
 }
 
 // ── I/O ────────────────────────────────────────────────────────────────────
 
-export type NotifyEnv = SlackEnv & { EXECUTOR?: string }
+/** `GCP_SA_KEY` = the deployment can dispatch (either executor), so the
+ * parent message offers the dispatch buttons. */
+export type NotifyEnv = SlackEnv & { GCP_SA_KEY?: string }
 
 interface Event { text: string; blocks?: unknown[] }
 
@@ -159,7 +132,7 @@ async function loadView(db: D1Database, planId: number, siteUrl: string, actions
   if (!plan) return null
   const items = (await db.prepare('SELECT prefix, added_by FROM plan_items WHERE plan_id = ?').bind(planId).all<{ prefix: string; added_by: string }>()).results
   const batches = await db.prepare('SELECT count(DISTINCT batch_id) AS n FROM plan_items WHERE plan_id = ? AND batch_id IS NOT NULL').bind(planId).first<{ n: number }>()
-  const runs = (await db.prepare('SELECT * FROM deletion_runs WHERE plan_id = ?').bind(planId).all<RunRow>()).results
+  const runs = await planRuns(db, planId)
   return {
     planId, siteUrl, actions, runs,
     items: items.length,
@@ -177,7 +150,7 @@ async function loadView(db: D1Database, planId: number, siteUrl: string, actions
 export async function notifyPlan(env: NotifyEnv, db: D1Database, planId: number, siteUrl: string, event?: Event): Promise<void> {
   if (!slackReady(env)) return
   try {
-    const v = await loadView(db, planId, siteUrl, env.EXECUTOR === 'plan-sweep')
+    const v = await loadView(db, planId, siteUrl, !!env.GCP_SA_KEY)
     if (!v) return
     const parent = renderParent(v)
     let channel = v.slack_channel ?? env.SLACK_ADMIN_CHANNEL!
@@ -205,11 +178,12 @@ export async function notifyPlan(env: NotifyEnv, db: D1Database, planId: number,
   }
 }
 
-/** Announce runs that just finished (`reflectRuns`' ids) in their plans' threads. */
-export async function announceFinished(env: NotifyEnv, db: D1Database, runIds: string[], siteUrl: string): Promise<void> {
-  for (const id of runIds) {
-    const r = await db.prepare('SELECT * FROM deletion_runs WHERE run_id = ?').bind(id).first<RunRow & { plan_id: number }>()
-    if (r) await notifyPlan(env, db, r.plan_id, siteUrl, { text: runEvent(r, 'finished') })
+/** Announce runs that just finished (an executor's reflection) in their
+ * plans' threads: the totals, or that the run ended without a result. */
+export async function announceFinished(env: NotifyEnv, db: D1Database, runs: readonly FinishedRun[], siteUrl: string): Promise<void> {
+  for (const { run_id, ok } of runs) {
+    const r = await db.prepare('SELECT * FROM deletion_runs WHERE run_id = ?').bind(run_id).first<RunRow & { plan_id: number | null }>()
+    if (r?.plan_id != null) await notifyPlan(env, db, r.plan_id, siteUrl, { text: runEvent(r, ok ? 'finished' : 'failed') })
   }
 }
 

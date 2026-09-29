@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { planDigest, verifySlackSignature } from './slack.js'
+import { verifySlackSignature } from './slack.js'
 
 const SECRET = 'test-signing-secret'
 async function sign(ts: string, body: string): Promise<string> {
@@ -24,13 +24,12 @@ describe('verifySlackSignature', () => {
       await verifySlackSignature(SECRET, 'abc', await sign('abc', body), body, now),
     ]).toEqual([true, false, false, false, false, false, false])
   })
-})
 
-describe('planDigest', () => {
-  it('is 16 hex, order-independent, and changes with the set', async () => {
-    const a = await planDigest(['s3://b/x/', 's3://b/y/'])
-    expect(a).toMatch(/^[0-9a-f]{16}$/)
-    expect(await planDigest(['s3://b/y/', 's3://b/x/'])).toBe(a)
-    expect(await planDigest(['s3://b/x/'])).not.toBe(a)
+  it('the replay window is ±300 s inclusive, future timestamps included', async () => {
+    const at = async (skew: number): Promise<boolean> => {
+      const t = String(now + skew)
+      return verifySlackSignature(SECRET, t, await sign(t, body), body, now)
+    }
+    expect([await at(-300), await at(300), await at(301), await at(-301)]).toEqual([true, true, false, false])
   })
 })

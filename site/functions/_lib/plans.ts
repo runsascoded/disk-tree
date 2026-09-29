@@ -250,3 +250,61 @@ export async function snapshotPlan(db: D1Database, planId: number): Promise<
   const { bucket, sweep } = planBucket(items.results.map(r => r.prefix))
   return { plan_id: planId, name: plan.name, bucket, sweep }
 }
+
+// ── The real-deletion gate (specs/staged-slack.md) ─────────────────────────
+
+const hex = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("")
+
+/** A run's item set as a short digest: sha-256 of the sorted canonical
+ * prefixes joined by `\n`, first 16 hex; order-independent. Every executor
+ * records it on the runs it starts (`deletion_runs.plan_digest`). */
+export async function planDigest(prefixes: readonly string[]): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode([...prefixes].sort().join("\n")))
+  return hex(buf).slice(0, 16)
+}
+
+/** The `deletion_runs` columns the gate and the Slack thread read. */
+export interface RunRow {
+  run_id: string
+  mode: "dry" | "real"
+  scan: string
+  actor: string
+  started_ts: number
+  finished_ts: number | null
+  deleted_bytes: number
+  deleted_objects: number
+  skipped_gone: number
+  skipped_overwritten: number
+  plan_digest: string | null
+  undo_deadline?: number | null
+}
+
+export type Gate =
+  | { ok: true; dry: RunRow }
+  | { ok: false; reason: string }
+
+/** May the item set with digest `digest` (`items` prefixes) be really deleted
+ * now? Yes only after a *finished* dry-run of exactly this set, and with no
+ * run of the plan in flight. `runs` are the plan's, any order. A run with no
+ * digest (NULL: from before digests, or not yet reflected) or the empty one
+ * (it ended without a result) never opens the gate. */
+export function realGate(runs: readonly RunRow[], digest: string, items: number): Gate {
+  if (!items) return { ok: false, reason: "the plan is empty" }
+  const live = runs.find(r => r.finished_ts == null)
+  if (live) return { ok: false, reason: `a ${live.mode} run is in progress (${live.run_id})` }
+  const dry = [...runs].filter(r => r.mode === "dry" && !!r.plan_digest && r.plan_digest === digest).sort((a, b) => b.started_ts - a.started_ts)[0]
+  if (!dry) {
+    const any = runs.some(r => r.mode === "dry")
+    return { ok: false, reason: any ? "the plan changed since the last dry-run; dry-run it again" : "no dry-run of this plan yet" }
+  }
+  return { ok: true, dry }
+}
+
+/** A run an executor's reflection just closed: `ok` = with its result
+ * (totals); not ok = it ended without one (its Batch job stopped first). */
+export interface FinishedRun { run_id: string; ok: boolean }
+
+/** A plan's runs, as the gate reads them. */
+export async function planRuns(db: D1Database, planId: number): Promise<RunRow[]> {
+  return (await db.prepare("SELECT * FROM deletion_runs WHERE plan_id = ?").bind(planId).all<RunRow>()).results
+}

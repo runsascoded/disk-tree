@@ -8,22 +8,22 @@
  * app's signing secret, the clicking user is mapped to their email
  * (`users.info`), and the same rules as www apply — dispatch needs `admin`
  * (staff domain or an `admin_emails` row); rejecting a batch needs admin or
- * being the one who staged it. A real deletion additionally needs a finished
- * dry-run of exactly the current item set, and runs against that dry-run's
- * scan. Slack wants an answer within 3 s, so this acks at once and does the
- * work after the response; outcomes go to the thread (everyone) or back to
- * the clicker ephemerally (refusals, errors).
+ * being the one who staged it. Dispatch goes through the deployment's
+ * executor (`EXECUTOR`, `_lib/executor.ts`) — the same code path as /staged,
+ * so a real deletion needs a finished dry-run of exactly the current item
+ * set and runs against that dry-run's scan. Slack wants an answer within 3 s,
+ * so this acks at once and does the work after the response; outcomes go to
+ * the thread (everyone) or back to the clicker ephemerally (refusals, errors).
+ * Unconfigured (no signing secret or D1) it answers 503 and does nothing.
  */
 import type { D1Database } from '@cloudflare/workers-types'
 import { type Env as AuthEnv, isAdmin } from '../_lib/auth.js'
-import { gcpToken } from '../_lib/gcp.js'
+import { dispatchPlan, type ExecEnv, executorOf, notifyDispatched } from '../_lib/executor.js'
 import { audit } from '../_lib/plans.js'
-import { dispatchPlanSweep } from '../_lib/planDispatch.js'
-import { listBatchJobs, reflectRuns } from '../_lib/runReflect.js'
 import { slackUserEmail, verifySlackSignature } from '../_lib/slack.js'
-import { announceFinished, notifyPlan, planGate, runEvent, type NotifyEnv, type RunRow } from '../_lib/stagedSlack.js'
+import { notifyPlan, planGate } from '../_lib/stagedSlack.js'
 
-type Env = AuthEnv & NotifyEnv & { DB?: D1Database; GCP_SA_KEY?: string }
+type Env = AuthEnv & ExecEnv
 interface PagesCtx { request: Request; env: Env; waitUntil: (p: Promise<unknown>) => void }
 
 interface BlockActions {
@@ -37,16 +37,6 @@ async function tell(url: string | undefined, text: string): Promise<void> {
   if (!url) return
   await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response_type: 'ephemeral', replace_original: false, text }) })
     .catch(() => undefined)
-}
-
-/** Bring runs up to date before judging a gate (a dry-run may have just ended). */
-async function refreshRuns(env: Env, db: D1Database, siteUrl: string): Promise<void> {
-  if (!env.GCP_SA_KEY) return
-  const token = await gcpToken(env.GCP_SA_KEY)
-  const jobs = await listBatchJobs(token)
-  if (!Array.isArray(jobs)) return
-  const done = await reflectRuns(db, token, jobs)
-  if (done.length) await announceFinished(env, db, done, siteUrl)
 }
 
 async function latestScan(db: D1Database): Promise<string | null> {
@@ -77,32 +67,31 @@ async function handle(env: Env, p: BlockActions, siteUrl: string): Promise<void>
   }
 
   if (a.action_id !== 'staged_dry' && a.action_id !== 'staged_real') return
-  if (env.EXECUTOR !== 'plan-sweep') return tell(p.response_url, 'Dispatch from Slack is not wired for this deployment; use www.')
+  if (!env.GCP_SA_KEY) return tell(p.response_url, 'Dispatch is not configured for this deployment; use www.')
   if (!admin) return tell(p.response_url, 'Only admins can dispatch runs.')
+  const kind = executorOf(env)
   const [planId, clickedDigest] = (a.value ?? '').split(':')
   const id = Number(planId)
   if (!Number.isInteger(id)) return tell(p.response_url, 'Bad button value.')
-  await refreshRuns(env, db, siteUrl)
   const g = await planGate(db, id)
   if (!g) return tell(p.response_url, 'That plan no longer exists.')
   if (g.closed) return tell(p.response_url, 'That plan is closed.')
 
   let mode: 'dry' | 'real'
-  let date: string | null
+  let date: string | undefined
   if (a.action_id === 'staged_dry') {
     mode = 'dry'
-    date = await latestScan(db)
+    date = (await latestScan(db)) ?? undefined
     if (!date) return tell(p.response_url, 'No indexed scan to run against.')
   } else {
     mode = 'real'
-    if (!g.gate.ok) return tell(p.response_url, `Not deleting: ${g.gate.reason}.`)
+    // The gate itself (and the dry-run's scan) is the executor seam's; this
+    // only refuses a button drawn for an older item set.
     if (clickedDigest !== g.digest) return tell(p.response_url, 'Not deleting: the plan changed after that button was drawn. Check the updated message.')
-    date = g.gate.dry.scan
   }
-  const r = await dispatchPlanSweep(env, { planId: id, mode, date, actor: email, siteUrl })
-  if (!r.ok) return tell(p.response_url, `Dispatch failed: ${r.error}`)
-  const row = await db.prepare('SELECT * FROM deletion_runs WHERE run_id = ?').bind(r.job_id).first<RunRow>()
-  if (row) await notifyPlan(env, db, id, siteUrl, { text: runEvent(row, 'dispatched', 'Slack') })
+  const r = await dispatchPlan(env, { planId: id, mode, date, actor: email, siteUrl }, kind)
+  if (!r.ok) return tell(p.response_url, `Dispatch refused: ${r.error}`)
+  await notifyDispatched(env, r, 'Slack', siteUrl)
 }
 
 export const onRequestPost = async (ctx: PagesCtx): Promise<Response> => {

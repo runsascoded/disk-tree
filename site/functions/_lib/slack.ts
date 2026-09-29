@@ -63,10 +63,3 @@ export async function verifySlackSignature(
   for (let i = 0; i < want.length; i++) diff |= want.charCodeAt(i) ^ signature.charCodeAt(i)
   return diff === 0
 }
-
-/** The plan's exact item set as a short digest: sha-256 of the sorted
- * canonical prefixes joined by `\n`, first 16 hex. */
-export async function planDigest(prefixes: readonly string[]): Promise<string> {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode([...prefixes].sort().join('\n')))
-  return hex(buf).slice(0, 16)
-}

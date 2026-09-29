@@ -13,5 +13,7 @@ ALTER TABLE plans ADD COLUMN slack_ts TEXT;
 -- "you reviewed exactly this set" — so a batch staged after the dry-run forces
 -- a fresh one. On gcs the executor writes `deletion_runs` from inside Batch;
 -- the site fills this column in from the job's `PLAN_DIGEST` env once the run
--- has finished (functions/_lib/sweepReflect.ts). NULL = never gate-opening.
+-- has finished (functions/_lib/sweepReflect.ts). NULL (not yet reflected, or
+-- from before digests) and '' (the run ended without a result) never open
+-- the gate.
 ALTER TABLE deletion_runs ADD COLUMN plan_digest TEXT;
