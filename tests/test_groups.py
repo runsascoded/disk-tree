@@ -111,7 +111,7 @@ def test_group_rows_span_the_sorted_objects_tier(tmp_path: Path):
     # `rg_json` = [num_rows, codec, per-column [data_page_offset, total_compressed_size, dictionary_page_offset|0]].
     triples = _chunk_triples(tier)
     assert [json.loads(r['rg_json']) for r in rows] == [
-        [b - a, 'SNAPPY', triples[g]] for g, (a, b) in enumerate(spans)
+        [b - a, 'ZSTD', triples[g]] for g, (a, b) in enumerate(spans)
     ]
     assert all(len(t) == pq.read_metadata(tier).num_columns for t in triples)
 

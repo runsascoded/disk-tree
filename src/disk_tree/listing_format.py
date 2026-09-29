@@ -21,6 +21,7 @@ column-for-column the frame a v1 writer would have produced.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -95,10 +96,10 @@ def parse(metadata: dict | None) -> ListingFormat:
     )
 
 
-def format_of(path: str) -> ListingFormat:
+def format_of(path: "str | os.PathLike") -> ListingFormat:
     """The format of the parquet at `path` (local or URL) — a footer read."""
     from . import blobfs
-    return parse(blobfs.read_schema(path).metadata)
+    return parse(blobfs.read_schema(os.fspath(path)).metadata)
 
 
 def uri_sql(scan_root: str, col: str = 'path') -> str:

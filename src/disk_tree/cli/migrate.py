@@ -6,6 +6,7 @@ import pandas as pd
 from click import argument, command, option
 from utz import err
 
+from disk_tree.blobfs import read_parquet  # v2 listings come back in the v1 shape (spec `listing-slim.md`)
 from disk_tree.cli.base import cli
 from disk_tree.config import SCANS_DIR, SQLITE_PATH as DB_PATH
 from disk_tree.storage.base import BLOB_ROW_GROUP_SIZE
@@ -79,7 +80,7 @@ def migrate():
             continue
 
         try:
-            df = pd.read_parquet(blob_path)
+            df = read_parquet(blob_path)
             # Try 'parent == ""' first (local scans), fallback to 'path == "."' (S3 scans)
             root_rows = df[df['parent'] == '']
             if root_rows.empty:
@@ -142,7 +143,7 @@ def migrate_depth():
             schema = pq.read_schema(blob_path)
             has_depth = 'depth' in schema.names
 
-            df = pd.read_parquet(blob_path)
+            df = read_parquet(blob_path)
 
             # Add depth column if missing
             if not has_depth:
@@ -206,7 +207,7 @@ def migrate_hybrid(dry_run: bool):
             continue
 
         try:
-            df = pd.read_parquet(old_blob)
+            df = read_parquet(old_blob)
             n_rows = len(df)
 
             # Check if already has child_scan_id (already hybrid)
@@ -323,7 +324,7 @@ def _normalize_parquet_chunks(blob_path: str, dry_run: bool, counts: dict) -> No
         counts['errors'] += 1
         return
     try:
-        df = pd.read_parquet(blob_path)
+        df = read_parquet(blob_path)
     except Exception as e:
         err(f"  Error reading {blob_path}: {e}")
         counts['errors'] += 1
