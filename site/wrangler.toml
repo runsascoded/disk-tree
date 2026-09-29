@@ -52,6 +52,15 @@ ADMIN_EMAILS = "1"
 # domains get the `cw` scope with no `allowed_emails` row. Inert behind the
 # edge (edge identities are already authorized).
 VIEWER_DOMAINS = "coreweave.com"
+# Staged-plan review in Slack (specs/staged-slack.md): one thread per staged
+# plan in the deployment's admin channel, with Dry-run / Delete-for-real /
+# Reject-batch buttons (`/slack/actions`). Inert until set; each deployment
+# sets its own channel id:
+#   SLACK_ADMIN_CHANNEL = "<channel id>"
+# `EXECUTOR` = the deployment's `Store.executor` (`site/src/stores.ts`): the
+# executor `/slack/actions` dispatches to. Default `plan-sweep` (cw, r2); gcs
+# MUST set "sweep". Secrets: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET (below).
+#   EXECUTOR = "plan-sweep"
 
 # Global cache tier for the index reader's JSON (`functions/_lib/edgeCache.ts`:
 # colo cache → KV; gcs binds `CACHE_KV`). Optional — the code runs without it
@@ -70,3 +79,6 @@ VIEWER_DOMAINS = "coreweave.com"
 #   GCS_HMAC_KEY_ID / GCS_HMAC_SECRET — read-only GCS proxy creds (data + /files)
 #   GCP_SA_KEY — JSON key for `gcs-usage-dispatch@oa-internal-450019` (Batch
 #     submit/cancel for /api/sweep/*; `batch.jobsEditor` + actAs `gcs-usage-job`)
+#   SLACK_BOT_TOKEN — the deployment's Slack app bot token (`chat:write`,
+#     `users:read`, `users:read.email`); unset = no staged-plan threads
+#   SLACK_SIGNING_SECRET — that app's signing secret; unset = `/slack/actions` 503s
