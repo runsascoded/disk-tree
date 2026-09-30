@@ -18,6 +18,7 @@ import type { ColorMode, Pricing, TreeNode } from './types'
 import { CLASS_NAMES, classMix, fmtN, fmtUsd, ratePerByte, unclaimedBytes } from './types'
 import { SettingsMenu, useRenderer, useTiling } from './prefs'
 import { useUnits } from './units'
+import { usePerfCommit } from './perf'
 
 // Legend rows inline only the metrics toggled on (swatch + name always show).
 // URL param `?li=` — a subset of "spc" (size / percent / cost); absent = "s"
@@ -196,6 +197,7 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
   path?: TreeNode[]
   onPathChange?: (p: TreeNode[]) => void
 }) {
+  usePerfCommit('treemap')
   const { fmtBytes, fmtBytesLike } = useUnits()
   const [liP, setLiP] = useUrlState('li', stringParam('s'))
   const liMetrics = useMemo(() => new Set([...(liP ?? 's')].filter((m): m is LiMetric => m === 's' || m === 'p' || m === 'c')), [liP])

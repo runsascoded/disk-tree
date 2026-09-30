@@ -14,6 +14,7 @@ import { bandCallouts, pickAnnotations, relativeSeries, stackSeries, unitTicks, 
 import { DAY, fmtScan } from './scan'
 import type { Band } from './series'
 import { stringParam } from 'use-prms'
+import { perf, usePerfCommit } from './perf'
 
 // Stored bytes over the historical scans, scoped exactly like the map: the
 // drilled prefix, a user, or an owner pool (`/api/series` — one row read per
@@ -202,11 +203,15 @@ export function SizeOverTime({ scans, prefix, user, pool, onPickDate, onBrush, w
     enabled: scans.length > 1 && !(filterLabel && !paths?.length),
     staleTime: 5 * 60_000,
     queryFn: async () => {
-      const r = await sfetch(`/api/series?path=${encodeURIComponent(prefix)}${scope}`, { credentials: 'include' })
-      if (!r.ok) throw new Error(`series: ${r.status}`)
-      return r.json()
+      const pf = perf.start('series', `${prefix || '/'}${scope}|n${scans.length}`)
+      const r = await pf.track(sfetch(`/api/series?path=${encodeURIComponent(prefix)}${scope}`, { credentials: 'include' }))
+      if (!r.ok) { pf.fail(); throw new Error(`series: ${r.status}`) }
+      const j = await r.json() as Series
+      pf.decoded()
+      return j
     },
   })
+  usePerfCommit('series')
 
   const label = user ? shortName(user) : pool ?? (prefix || 'total')
   // The x-range cut: points on or after (latest − N days). Applied to every

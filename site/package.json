@@ -13,7 +13,9 @@
     "clean": "rm -rf node_modules/.vite dist",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:list": "playwright test --list"
+    "test:e2e:list": "playwright test --list",
+    "bench": "node bench/bench.ts",
+    "bench:diff": "node bench/diff.ts"
   },
   "dependencies": {
     "@disk-tree/react": "workspace:*",
@@ -37,6 +39,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260820.1",
     "@playwright/test": "^1.56.0",
+    "@types/node": "24.13.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.5.0",

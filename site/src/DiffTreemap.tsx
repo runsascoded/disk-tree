@@ -7,6 +7,7 @@ import { useRenderer, useTiling } from './prefs'
 import { useUnits } from './units'
 import { buildTree } from './diffModel'
 import type { AreaMode, DiffData, DiffNode } from './diffModel'
+import { usePerfCommit } from './perf'
 
 const { abs, max, min, sign } = Math
 
@@ -212,6 +213,7 @@ export function DiffTreemap({ model, onDrill }: {
    *  never holds a drill of its own. */
   onDrill?: (segs: string[]) => void
 }) {
+  usePerfCommit('dtm')
   const { root, areaMode, label, fmtBytes, fmtDelta, fmtN, fmtNDelta } = model
   // The main map's renderer / tiling prefs apply here too.
   const [tiling] = useTiling()

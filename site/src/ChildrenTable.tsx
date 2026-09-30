@@ -17,6 +17,7 @@ import { useStage } from './plans'
 import type { TreeNode } from './types'
 import { fmtN } from './types'
 import { useUnits } from './units'
+import { usePerfCommit } from './perf'
 
 // Sortable, paged listing of the treemap's current node's children — the
 // tabular twin of the map above it (same drill: clicking a row opens it).
@@ -44,6 +45,7 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
   onPickUser?: (u: string) => void
   onOpen: (segs: string[]) => void
 }) {
+  usePerfCommit('table')
   const { fmtBytes } = useUnits()
   const canAssign = useCanAssign()
   const [sort, setSort] = useState<{ k: SortKey; asc: boolean }>({ k: 'b', asc: false })

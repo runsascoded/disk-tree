@@ -13,6 +13,11 @@ import { UserOgPage, UserPage, UsersOgPage, UsersPage } from './UserPage'
 import { StoreProvider } from './store'
 import { DEFAULT_STORE, STORES } from './stores'
 import { useLoadIdentities } from './identities'
+import { PerfOverlay } from './dev/PerfOverlay'
+
+// `?perf=1` at load: the time-to-render panel (specs/render-bench.md). The
+// marks themselves are always on (`perf.ts`); only the panel is opt-in.
+const PERF = typeof location !== 'undefined' && new URLSearchParams(location.search).get('perf') === '1'
 
 // `/files/*` → scan browser; `<store>/og` → redacted fixed-size treemap for that
 // store's og:image screenshot (public, ungated — it's what unfurl crawlers
@@ -72,6 +77,7 @@ export default function Root() {
       <Route path="*" element={<AuthGate><App /></AuthGate>} />
     </Routes>
     <HelpCard />
+    {PERF && <PerfOverlay />}
     </HelpProvider>
     </HotkeysProvider>
   )

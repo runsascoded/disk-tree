@@ -4,6 +4,7 @@ import type { UserIndexEntry } from './colors'
 import type { AgeRow, ColorMode, Granularity } from './types'
 import { MODE_LABELS } from './types'
 import { useUnits } from './units'
+import { usePerfCommit } from './perf'
 
 const SLOTS = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8']
 
@@ -50,6 +51,7 @@ export function AgeChart({ rows, baseRows, diffLabels, catOrder, mode, onMode, m
   userIdx: Map<string, UserIndexEntry>
   readRange?: { min: number; max: number } | null
 }) {
+  usePerfCommit('age')
   const { fmtBytes } = useUnits()
   // Default to the finest granularity that still fits on screen: the most
   // bars we'll draw is MAX (≈8px each across the 900-unit viewBox), and finer

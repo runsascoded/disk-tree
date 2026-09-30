@@ -6,6 +6,7 @@ import type { DiffModel } from './DiffTreemap'
 import { defaultAsc, diffTableRows, fmtPct, sortDiffRows } from './diffRows'
 import type { DiffTableRow, SortKey } from './diffRows'
 import { Tooltip } from './Tooltip'
+import { usePerfCommit } from './perf'
 
 // The diff map's tabular twin (like ChildrenTable under the main map): one
 // row per cell of the drilled node — before / after / Δ bytes and objects,
@@ -30,6 +31,7 @@ export function DiffTable({ model, scheme, segs, onDrill }: {
    *  (the map's `onDrill` contract). */
   onDrill: (segs: string[]) => void
 }) {
+  usePerfCommit('dtable')
   const { root, data, fmtBytes, fmtDelta, fmtN, fmtNDelta } = model
   const [sort, setSort] = useState<{ k: SortKey; asc: boolean }>({ k: 'delta', asc: false })
   const [page, setPage] = useState(0)
