@@ -10,7 +10,8 @@ import { canonId, shortName, shortUserKey } from './UserChip'
 import { signInUrl, useCanAssign, useIdent as useIdentity } from './auth'
 import { AttributionRules } from './AttributionRules'
 import { DiffTreemap, DiffHeader, useDiffModel } from './DiffTreemap'
-import type { DiffData } from './DiffTreemap'
+import { DiffTable } from './DiffTable'
+import type { DiffData } from './diffModel'
 import { ScanCombobox } from './ScanCombobox'
 import { buildUserIndex, epochDaysToDate } from './colors'
 import { ChildrenTable } from './ChildrenTable'
@@ -1208,6 +1209,9 @@ function AppContent() {
                   the chart follow, and the diff itself re-reads at the new
                   prefix (its rows are relative to the drilled path). */}
               <DiffTreemap model={diffModel} onDrill={rel => drillTo([...segs, ...rel])} />
+              {/* The map's tabular twin: the same cells as rows, sortable; a
+                  row's name drills like its cell (and scrolls the maps up). */}
+              <DiffTable model={diffModel} scheme={store.scheme} segs={segs} onDrill={rel => openPath([...segs, ...rel])} />
               {diffStaleOther
                 ? <Busy label={`aligning ${fmtScan(diffPrev)} → ${fmtScan(asof)}…`} />
                 : diffRefining
