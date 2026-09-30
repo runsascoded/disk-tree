@@ -62,7 +62,7 @@ jobs:
         run: mkdir -p ui/dist
 
       - name: Install disk-tree (+ R2 driver)
-        run: uv sync --extra r2
+        run: uv sync --frozen --extra r2
 
       - name: Configure R2 credential profiles + bucket registry
         # Two named profiles (one per account) + a buckets.yml mapping each

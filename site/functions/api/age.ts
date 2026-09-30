@@ -12,9 +12,13 @@
  * the chart notes it's too small to stratify.
  */
 import { type Env, requireViewer } from '../_lib/auth.js'
+import { withStore } from '../_lib/stores.js'
 import { num, openIndex, readPoint, storeReady } from '../_lib/index.js'
 
-export const onRequestGet = async (ctx: { request: Request; env: Env }): Promise<Response> => {
+export const onRequestGet = async (ctx0: { request: Request; env: Env }): Promise<Response> => {
+  // `store=<key>`: a secondary store's env overlay (none = the primary, as is).
+  const ctx = withStore(ctx0)
+  if (ctx instanceof Response) return ctx
   if (!storeReady(ctx.env)) {
     return new Response('age API not configured (missing index store creds)', { status: 503 })
   }

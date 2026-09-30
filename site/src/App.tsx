@@ -10,7 +10,8 @@ import { canonId, shortName, shortUserKey } from './UserChip'
 import { signInUrl, useCanAssign, useIdent as useIdentity } from './auth'
 import { AttributionRules } from './AttributionRules'
 import { DiffTreemap, DiffHeader, useDiffModel } from './DiffTreemap'
-import type { DiffData } from './DiffTreemap'
+import { DiffTable } from './DiffTable'
+import type { DiffData } from './diffModel'
 import { ScanCombobox } from './ScanCombobox'
 import { buildUserIndex, epochDaysToDate } from './colors'
 import { ChildrenTable } from './ChildrenTable'
@@ -33,7 +34,8 @@ import { SiteNav, topbarH } from './SiteNav'
 import type { MenuEntry } from './SiteNav'
 import { DAY, encodeScan, fmtScan, nearestScan, noScansYet, scanTime, useScan } from './scan'
 import { SizeOverTime } from './SizeOverTime'
-import { DEFAULT_STORE, STORES, storeForPath } from './stores'
+import { useStore, useStoreFetch } from './store'
+import { perf } from './perf'
 import { useDocTitle } from './title'
 import { TypedPrefixModal } from './TypedPrefix'
 import type { AgeRow, ColorMode, Meta, Pricing, Rules, TreeNode } from './types'
@@ -113,11 +115,14 @@ const LEGACY_ANCHORS: Record<string, string> = {
 }
 
 function AppContent() {
-  // Which object store to render comes from the path (one store today; the
-  // abstraction stays so a second cloud store is a `STORES` row + data).
+  // Which object store to render: the subtree's <StoreProvider> (Root mounts
+  // one per configured store under its path; the primary is the default).
+  // Every data request goes through `sfetch`, which carries `store=<key>` for
+  // a secondary store and is the global fetch for the primary.
   const { pathname, search, hash } = useLocation()
   const navigate = useNavigate()
-  const store = storeForPath(pathname)
+  const store = useStore()
+  const sfetch = useStoreFetch()
   // Legacy `?path=<prefix>` links (cw-s3 drilled by query param until the
   // union): forward to the URL-path form, keeping the other params.
   useEffect(() => {
@@ -159,7 +164,7 @@ function AppContent() {
   useEffect(() => setCurrentScan(asof ?? undefined), [asof])
   const scanQuery = <T,>(name: string) => ({
     queryKey: [name, store.key, asof],
-    queryFn: () => fetch(`${store.base}/${asof}/${name}.json`).then(r => r.json() as Promise<T>),
+    queryFn: () => sfetch(`${store.base}/${asof}/${name}.json`).then(r => r.json() as Promise<T>),
     enabled: !!asof,
     staleTime: Infinity,
   })
@@ -323,13 +328,16 @@ function AppContent() {
   // and a cold deep link fans the whole chain out in parallel.
   const graftPath = pathname.slice((store.path === '/' ? '' : store.path).length).replace(/^\/+/, '')
   const canW = Math.ceil((typeof window === 'undefined' ? 1280 : window.innerWidth) / 128) * 128
+  // Perf-mark keys (`perf.ts`): what tells one load of a widget from another
+  // on this page — path, scan(s), canvas width, scope.
+  const viewKey = (p: string, d: string | null | undefined, extra = '') => `${p || '/'}@${d}|w${canW}${scopeQs}${extra}`
   const subtreePaths = useMemo(() => {
     const segs = graftPath.split('/').filter(Boolean)
     return ['', ...segs.map((_, i) => segs.slice(0, i + 1).join('/'))]
   }, [graftPath])
   const subtreeQs = useQueries({
     queries: subtreePaths.map(p => ({
-      queryKey: ['subtree', asof, p, canW, scopeQs],
+      queryKey: ['subtree', store.key, asof, p, canW, scopeQs],
       enabled: !!asof,
       staleTime: Infinity,
       // Retry transient failures, but not the deterministic ones (409: no
@@ -339,12 +347,15 @@ function AppContent() {
       // With a filter the full read plans each match root's tier (`full=1`);
       // the companion below paints the coarsest-tier forest first.
       queryFn: async ({ signal }: { signal?: AbortSignal }) => {
-        const r = await fetch(
+        const pf = perf.start('treemap', viewKey(p, asof, fq ? '|full' : ''), ['table'])
+        const r = await pf.track(sfetch(
           `/api/subtree?cv=${API_CV}&date=${asof}&path=${encodeURIComponent(p)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}${fq ? '&full=1' : ''}`,
           { credentials: 'include', signal },
-        )
-        if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`)
-        return r.json() as Promise<{ tree: TreeNode; matches?: string[]; matched?: { path: string; b: number; o: number }[]; threshold?: number }>
+        ))
+        if (!r.ok) { pf.fail(); throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`) }
+        const j = await r.json() as { tree: TreeNode; matches?: string[]; matched?: { path: string; b: number; o: number }[]; threshold?: number }
+        pf.decoded()
+        return j
       },
     })),
   })
@@ -357,7 +368,7 @@ function AppContent() {
   // so a scope change never downgrades a held full tree to a coarse one.
   const coarseQs = useQueries({
     queries: subtreePaths.map((p, i) => ({
-      queryKey: ['subtree', asof, p, canW, scopeQs, 'depth1'],
+      queryKey: ['subtree', store.key, asof, p, canW, scopeQs, 'depth1'],
       // Deepest path only — see `dataFor`; ancestors never use it.
       enabled: !!asof && i === subtreePaths.length - 1,
       staleTime: Infinity,
@@ -366,12 +377,15 @@ function AppContent() {
       // coarsest tier (`partial`, milliseconds) — the fast first paint of
       // specs/filter-views.md, replaced by the planned-tier read above.
       queryFn: async ({ signal }: { signal?: AbortSignal }) => {
-        const r = await fetch(
+        const pf = perf.start('treemap', viewKey(p, asof, fq ? '|coarse' : '|d1'), ['table'])
+        const r = await pf.track(sfetch(
           `/api/subtree?cv=${API_CV}&date=${asof}&path=${encodeURIComponent(p)}&w=${canW}&h=${Math.round(canW * 0.6)}${fq ? '' : '&depth=1'}${scopeQs}`,
           { credentials: 'include', signal },
-        )
-        if (!r.ok) throw new Error(`${r.status}`)
-        return r.json() as Promise<{ tree: TreeNode }>
+        ))
+        if (!r.ok) { pf.fail(); throw new Error(`${r.status}`) }
+        const j = await r.json() as { tree: TreeNode }
+        pf.decoded()
+        return j
       },
     })),
   })
@@ -483,9 +497,16 @@ function AppContent() {
   const ageBudget = Math.max(64, Math.min(1024, Math.round(canW / 2)))
   const ageQ = useQuery({
     queryKey: ['age', store.key, asof, drillPath, ageBudget],
-    queryFn: () =>
-      fetch(`/api/age-pyramid?date=${asof}&path=${encodeURIComponent(drillPath)}&bin_budget=${ageBudget}`, { credentials: 'include' })
-        .then(r => { if (!r.ok) throw new Error(`age ${r.status}`); return r.json() as Promise<{ records: { dt: number; b: number; o: number }[] }> }),
+    queryFn: async () => {
+      const pf = perf.start('age', `${drillPath || '/'}@${asof}|b${ageBudget}`)
+      const r = await pf.track(sfetch(`/api/age-pyramid?date=${asof}&path=${encodeURIComponent(drillPath)}&bin_budget=${ageBudget}`, { credentials: 'include' }))
+      if (!r.ok) { pf.fail(); throw new Error(`age ${r.status}`) }
+      const j = await r.json() as { records: { dt: number; b: number; o: number }[] }
+      // No rows (no age tier for this deploy, or a prefix below the index
+      // floor): the chart never mounts, so the load closes here.
+      if (j.records.length) pf.decoded(); else pf.empty()
+      return j
+    },
     enabled: !!asof,
     staleTime: Infinity,
   })
@@ -497,9 +518,14 @@ function AppContent() {
   // (per-vintage grew/shrank). Only fetched when a diff window exists.
   const ageBaseQ = useQuery({
     queryKey: ['age', store.key, diffPrev, drillPath, ageBudget],
-    queryFn: () =>
-      fetch(`/api/age-pyramid?date=${diffPrev}&path=${encodeURIComponent(drillPath)}&bin_budget=${ageBudget}`, { credentials: 'include' })
-        .then(r => { if (!r.ok) throw new Error(`age ${r.status}`); return r.json() as Promise<{ records: { dt: number; b: number; o: number }[] }> }),
+    queryFn: async () => {
+      const pf = perf.start('age', `${drillPath || '/'}@${diffPrev}|b${ageBudget}`)
+      const r = await pf.track(sfetch(`/api/age-pyramid?date=${diffPrev}&path=${encodeURIComponent(drillPath)}&bin_budget=${ageBudget}`, { credentials: 'include' }))
+      if (!r.ok) { pf.fail(); throw new Error(`age ${r.status}`) }
+      const j = await r.json() as { records: { dt: number; b: number; o: number }[] }
+      if (j.records.length) pf.decoded(); else pf.empty()
+      return j
+    },
     enabled: !!diffPrev,
     staleTime: Infinity,
   })
@@ -560,17 +586,21 @@ function AppContent() {
   // one level of lookups, ~2 s cold) stands in for the full walk while it
   // aligns, so the map shows the shape of the change before its detail.
   const diffQ1 = useQuery<DiffData, Error>({
-    queryKey: ['diff', diffPrev, asof, graftPath, canW, scopeQs, 'l1'],
+    queryKey: ['diff', store.key, diffPrev, asof, graftPath, canW, scopeQs, 'l1'],
     enabled: !!asof && !!diffPrev,
     staleTime: Infinity,
     retry: false,
     queryFn: async ({ signal }: { signal?: AbortSignal }) => {
-      const r = await fetch(
+      const pf = perf.start('dtm', viewKey(graftPath, `${diffPrev}→${asof}`, '|d1'), ['dtable'])
+      const r = await pf.track(sfetch(
         `/api/diff?cv=${API_CV}&from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}&depth=1`,
         { credentials: 'include', signal },
-      )
-      if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`)
-      return r.json() as Promise<DiffData>
+      ))
+      if (!r.ok) { pf.fail(); throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`) }
+      const j = await r.json() as DiffData
+      // No rows: the section says "no changes" and the map never mounts.
+      if (j.rows.length) pf.decoded(); else pf.empty()
+      return j
     },
   })
   const diffL1 = diffQ1.data
@@ -579,7 +609,7 @@ function AppContent() {
   const diffSlotRef = useRef<HTMLDivElement>(null)
   const diffSlotH = useRef(0)
   const diffQ = useQuery<DiffData, Error>({
-    queryKey: ['diff', diffPrev, asof, graftPath, canW, scopeQs],
+    queryKey: ['diff', store.key, diffPrev, asof, graftPath, canW, scopeQs],
     enabled: !!asof && !!diffPrev,
     // While the full walk aligns: the bucket-level diff of the SAME pair once
     // it lands, else the last pair's diff — drawn dimmed either way, so the
@@ -589,23 +619,27 @@ function AppContent() {
     retry: (n: number, e: Error) => !/^4\d\d/.test(e.message) && n < 3,
     retryDelay: (n: number) => 400 * 2 ** n,
     queryFn: async ({ signal }: { signal?: AbortSignal }) => {
-      const r = await fetch(
+      const pf = perf.start('dtm', viewKey(graftPath, `${diffPrev}→${asof}`), ['dtable'])
+      const r = await pf.track(sfetch(
         `/api/diff?cv=${API_CV}&from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}`,
         { credentials: 'include', signal },
-      )
-      if (!r.ok) throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`)
-      return r.json() as Promise<DiffData>
+      ))
+      if (!r.ok) { pf.fail(); throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`) }
+      const j = await r.json() as DiffData
+      // No rows: the section says "no changes" and the map never mounts.
+      if (j.rows.length) pf.decoded(); else pf.empty()
+      return j
     },
   })
   // The headline first: the same pair's totals without the row walk land in
   // a second or two, so the +X / Δobjects line shows while the rows align.
   const diffSumQ = useQuery<DiffData, Error>({
-    queryKey: ['diff', diffPrev, asof, graftPath, canW, scopeQs, 'summary'],
+    queryKey: ['diff', store.key, diffPrev, asof, graftPath, canW, scopeQs, 'summary'],
     enabled: !!asof && !!diffPrev,
     staleTime: Infinity,
     retry: false,
     queryFn: async ({ signal }: { signal?: AbortSignal }) => {
-      const r = await fetch(
+      const r = await sfetch(
         `/api/diff?cv=${API_CV}&from=${diffPrev}&to=${asof}&path=${encodeURIComponent(graftPath)}&w=${canW}&h=${Math.round(canW * 0.6)}${scopeQs}&summary=1`,
         { credentials: 'include', signal },
       )
@@ -758,16 +792,6 @@ function AppContent() {
         },
       ]),
     ),
-    ...Object.fromEntries(
-      STORES.map(s => [
-        `store:${s.key}`,
-        {
-          label: `Store: ${s.label}`,
-          group: 'Stores',
-          handler: () => navigate({ pathname: s.path, search }),
-        },
-      ]),
-    ),
   })
 
   const dateRange = useMemo((): DateRange | null => {
@@ -830,7 +854,7 @@ function AppContent() {
         <SiteNav />
         <p className="err">
           404 — <code>/{drillPath}</code> is not a bucket or page here.{' '}
-          <Link to="/">home</Link>{DEFAULT_STORE.staging && <> · <Link to="/staged">staged</Link></>}{DEFAULT_STORE.owners && <> · <Link to="/users">users</Link></>}
+          <Link to={store.path}>home</Link>{store.staging && <> · <Link to="/staged">staged</Link></>}{store.owners && <> · <Link to="/users">users</Link></>}
         </p>
       </main>
     )
@@ -1215,6 +1239,9 @@ function AppContent() {
                   the chart follow, and the diff itself re-reads at the new
                   prefix (its rows are relative to the drilled path). */}
               <DiffTreemap model={diffModel} onDrill={rel => drillTo([...segs, ...rel])} />
+              {/* The map's tabular twin: the same cells as rows, sortable; a
+                  row's name drills like its cell (and scrolls the maps up). */}
+              <DiffTable model={diffModel} scheme={store.scheme} segs={segs} onDrill={rel => openPath([...segs, ...rel])} />
               {diffStaleOther
                 ? <Busy label={`aligning ${fmtScan(diffPrev)} → ${fmtScan(asof)}…`} />
                 : diffRefining

@@ -10,12 +10,16 @@
  * Phase 2 — and are not in this matrix yet.
  */
 import { type Ctx, json, requireViewer } from '../_lib/auth.js'
+import { primaryOnly } from '../_lib/stores.js'
 import { ownerTotals } from '../_lib/ownerTotals.js'
 import { storeReady } from '../_lib/index.js'
 
 interface Cell { by: string; to: string; bytes: number; objects: number; prefixes: string[] }
 
 export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
+  // The ownership ledger is the primary store's: `store=<other>` is a 404.
+  const notHere = primaryOnly(ctx)
+  if (notHere) return notHere
   const { env, request } = ctx
   if (!env.DB) return json({ error: 'ledger backend not configured (DB)' }, 503)
   if (!storeReady(env)) return json({ error: 'index reader not configured' }, 503)

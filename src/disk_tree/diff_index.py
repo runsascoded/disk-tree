@@ -107,12 +107,15 @@ def _rebase(child: pa.Table, prefix: str) -> pa.Table:
     """Chunk coordinates → parent coordinates: `.` is the pointer row (drop),
     `x` → `prefix/x`, parent `.` → `prefix`."""
     child = child.filter(pc.not_equal(child['path'], '.'))
-    pfx = pa.scalar(prefix)
-    path = pc.binary_join_element_wise(pfx, child['path'], '/')
+    # Scalars typed like the column: a pandas-3-written blob holds `large_string`
+    # paths, and the join kernel has no mixed `(large_string, string)` form.
+    t = child['path'].type
+    pfx, sep = pa.scalar(prefix, type=t), pa.scalar('/', type=t)
+    path = pc.binary_join_element_wise(pfx, child['path'], sep)
     parent = pc.if_else(
         pc.equal(child['parent'], '.'),
         pfx,
-        pc.binary_join_element_wise(pfx, child['parent'], '/'),
+        pc.binary_join_element_wise(pfx, pc.cast(child['parent'], t), sep),
     )
     depth = pc.add(child['depth'], pa.scalar(prefix.count('/') + 1, pa.int32()))
     return child.set_column(0, 'path', path).set_column(1, 'parent', parent).set_column(2, 'depth', pc.cast(depth, pa.int32()))

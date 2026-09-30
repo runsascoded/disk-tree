@@ -11,16 +11,26 @@ import { AssignmentsPage } from './AssignmentsPage'
 import { StagedPage } from './StagedPage'
 import { OgPage } from './OgPage'
 import { UserOgPage, UserPage, UsersOgPage, UsersPage } from './UserPage'
+import { StoreProvider } from './store'
 import { DEFAULT_STORE, STORES } from './stores'
 import { useLoadIdentities } from './identities'
+import { PerfOverlay } from './dev/PerfOverlay'
+
+// `?perf=1` at load: the time-to-render panel (specs/render-bench.md). The
+// marks themselves are always on (`perf.ts`); only the panel is opt-in.
+const PERF = typeof location !== 'undefined' && new URLSearchParams(location.search).get('perf') === '1'
 
 // `/files/*` → scan browser; `<store>/og` → redacted fixed-size treemap for that
 // store's og:image screenshot (public, ungated — it's what unfurl crawlers
-// render); every other path → the treemap app, which picks its store from the
-// path. The two data-backed routes sit behind
-// <AuthGate>, which shows a login wall when there's no CF Access session.
-// One hotkey/omnibar registry for the whole site (SiteKbd renders the chrome
-// on each page; pages register their own actions on top of the shared ones).
+// render); every other path → the treemap app for the primary store. A
+// secondary store (`VITE_STORES_EXTRA`, specs/multi-store.md phase 2) gets the
+// same app and scan browser under its own path (`/meta/*`, `/meta/files/*`),
+// inside a <StoreProvider> so every data request carries its `store=`; the
+// primary's routes are exactly the single-store build's. The data-backed
+// routes sit behind <AuthGate>, which shows a login wall when there's no
+// session. One hotkey/omnibar registry for the whole site (SiteKbd renders
+// the chrome on each page; pages register their own actions on top of the
+// shared ones).
 export default function Root() {
   useLoadIdentities()
   return (
@@ -56,9 +66,20 @@ export default function Root() {
       <Route path="/sweep" element={<Navigate to="/staged" replace />} />
       <Route path="/marks" element={<Navigate to="/" replace />} />
       <Route path="/mark" element={<Navigate to="/" replace />} />
+      {/* Secondary stores: the map (drill paths below it) and the scan browser,
+          each under the store's path. No ownership, staging or executor pages —
+          those are the primary's (their Functions 404 for any other store). */}
+      {STORES.slice(1).map(s => {
+        const base = s.path.replace(/\/$/, '')
+        return [
+          <Route key={`${s.key}:files`} path={`${base}/files/*`} element={<AuthGate><StoreProvider store={s}><FilesPage /></StoreProvider></AuthGate>} />,
+          <Route key={s.key} path={`${base}/*`} element={<AuthGate><StoreProvider store={s}><App /></StoreProvider></AuthGate>} />,
+        ]
+      })}
       <Route path="*" element={<AuthGate><App /></AuthGate>} />
     </Routes>
     <HelpCard />
+    {PERF && <PerfOverlay />}
     </HelpProvider>
     </HotkeysProvider>
   )

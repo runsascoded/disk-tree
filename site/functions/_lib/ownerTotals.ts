@@ -8,12 +8,13 @@
  * head at a time). A new assignment invalidates by changing the head; the
  * recompute happens on the next request. */
 import type { Env } from './auth.js'
-import { openIndex, readAsks, type Ask, type Row } from './index.js'
+import { columnsFor, openIndex, readAsks, type Ask, type Row } from './index.js'
 import { loadLedger } from './ledger.js'
 import { shared } from './shared.js'
 import { addAgg, computeOwners, foldLatest, idxKey, newAgg, type ClaimRow, type OwnerRow, type OwnerTotals, type PathAgg } from './claims.js'
 
-const COLUMNS = ['path', 'depth', 'usr', 'b', 'o', 'c2', 'c3', 'c4']
+/** The `Row` fields a total needs; `columnsFor` names them per generation. */
+const FIELDS: (keyof Row)[] = ['path', 'depth', 'usr', 'size', 'n_files', 'cls2', 'cls3', 'cls4']
 const MAX_GROUPS = 400
 
 /** Bump when the body's shape changes: cached bodies with another version are recomputed. */
@@ -46,7 +47,7 @@ async function compute(env: Env, date: string, owners: Map<string, OwnerRow>, he
     idx,
     asks,
     r => isRoot(r) || want.get(r.path) === r.depth,
-    { columns: COLUMNS, maxGroups: MAX_GROUPS },
+    { columns: columnsFor(idx, FIELDS), maxGroups: MAX_GROUPS },
   )
   const aggs = new Map<string, PathAgg>()
   const buckets = new Set<string>()

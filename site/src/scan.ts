@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useQuery, type UseQueryResult } from '@tanstack/react-query'
 import { useUrlState } from 'use-prms'
-import type { Store } from './stores'
+import { storeUrl, type Store } from './stores'
 
 // How often an unpinned tab re-checks for newly published scans.
 export const SCANS_POLL_MS = 5 * 60_000
@@ -192,7 +192,7 @@ export function useScans(store: Store): UseQueryResult<string[]> {
     // downstream — `scans` then stays `[]` and the error surfaces as a sign-in
     // prompt rather than crashing `scans.map`.
     queryFn: async () => {
-      const r = await fetch(`${store.base}/scans.json`)
+      const r = await fetch(storeUrl(`${store.base}/scans.json`, store))
       if (!r.ok) throw Object.assign(new Error(`scans: ${r.status}`), { status: r.status })
       return r.json()
     },

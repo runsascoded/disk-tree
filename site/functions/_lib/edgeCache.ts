@@ -18,6 +18,8 @@
  * back-fills the colo cache. Values are small JSON (≤ ~350 KB); keys are the
  * SHA-256 of the cache key URL (KV keys are capped at 512 bytes). */
 
+import { PRIMARY_STORE } from './stores.js'
+
 const TTL = 86400
 const KV_TTL = 30 * 86400
 // The browser's copy is short-lived: the answer for a (scan pair, path) is
@@ -36,8 +38,13 @@ export interface CacheEnv { CACHE_KV?: KVNamespace }
 // one-sided diff nodes expand.
 export const CACHE_V = '2'
 
-export function cacheKeyFor(ns: string, parts: string): Request {
-  return new Request(`https://${ns}.cache/v${CACHE_V}/${parts}`)
+/** The cache key for `parts` under namespace `ns`. A secondary store's keys
+ * gain an `@<store>/` segment (specs/multi-store.md), so the same path in two
+ * stores can't collide; the primary's (`store` omitted or `'primary'`) are
+ * exactly what they were before stores existed — no one-time cache miss. */
+export function cacheKeyFor(ns: string, parts: string, store?: string): Request {
+  const s = store && store !== PRIMARY_STORE ? `@${store}/` : ''
+  return new Request(`https://${ns}.cache/v${CACHE_V}/${s}${parts}`)
 }
 
 const colo = () => (caches as unknown as { default: Cache }).default
@@ -87,13 +94,21 @@ export async function cacheStore(env: CacheEnv, key: Request, body: string, head
 
 /** A `Trace` sink plus its `Server-Timing` rendering (`fetch;dur=812,…`;
  * counts ride as `dur` too — DevTools shows them the same way). */
-export function serverTiming(): { trace: (name: string, ms: number) => void; time: <T>(name: string, p: Promise<T>) => Promise<T>; header: () => string } {
+export function serverTiming(): { trace: (name: string, ms: number, desc?: string) => void; time: <T>(name: string, p: Promise<T>) => Promise<T>; header: () => string } {
   const t: Record<string, number> = {}
+  // A phase's `desc`: the distinct labels its calls carried (the index sort
+  // that answered a read — `bysize`, `path`, …), in first-seen order, so a
+  // request that read both says `bysize+path`.
+  const d: Record<string, string[]> = {}
   const t0 = performance.now()
-  const trace = (name: string, ms: number) => { t[name] = (t[name] ?? 0) + ms }
+  const trace = (name: string, ms: number, desc?: string) => {
+    t[name] = (t[name] ?? 0) + ms
+    if (desc && !(d[name] ??= []).includes(desc)) d[name].push(desc)
+  }
   return {
     trace,
     time: async (name, p) => { const s = performance.now(); try { return await p } finally { trace(name, performance.now() - s) } },
-    header: () => [...Object.entries(t), ['total', performance.now() - t0] as [string, number]].map(([k, v]) => `${k};dur=${Math.round(v)}`).join(', '),
+    header: () => [...Object.entries(t), ['total', performance.now() - t0] as [string, number]]
+      .map(([k, v]) => `${k};dur=${Math.round(v)}${d[k] ? `;desc="${d[k].join('+')}"` : ''}`).join(', '),
   }
 }

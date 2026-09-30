@@ -9,6 +9,7 @@
  *  as `<scan root>/<path>` by the caller, as the engines derive it. */
 import { parquetMetadataAsync, parquetReadObjects } from 'hyparquet'
 import type { AsyncBuffer, FileMetaData } from 'hyparquet'
+import { compressors } from './zstd.js'
 
 /** A scan row as stored (`storage/base.py` columns, minus `uri`). */
 export interface TreeRow {
@@ -115,7 +116,7 @@ export async function readRows(file: AsyncBuffer, q: Query, metadata?: FileMetaD
   const [lo, hi] = q.prefix ? prefixBounds(q.prefix) : [null, null]
   const out: TreeRow[] = []
   for (const { rowStart, rowEnd } of selectRuns(meta, q)) {
-    const rows = await parquetReadObjects({ file, metadata: meta, columns, rowStart, rowEnd })
+    const rows = await parquetReadObjects({ file, metadata: meta, columns, rowStart, rowEnd, compressors })
     for (const r of rows) {
       const depth = Number(r.depth)
       if (depth > q.maxDepth) continue
@@ -150,7 +151,7 @@ export async function readChunkPointers(file: AsyncBuffer, metadata?: FileMetaDa
   const out = new Map<string, string>()
   if (!hasColumn(meta, 'child_scan_id')) return out
   for (const { rowStart, rowEnd } of selectRuns(meta, { maxDepth: 1 })) {
-    const rows = await parquetReadObjects({ file, metadata: meta, columns: ['path', 'child_scan_id', 'depth'], rowStart, rowEnd })
+    const rows = await parquetReadObjects({ file, metadata: meta, columns: ['path', 'child_scan_id', 'depth'], rowStart, rowEnd, compressors })
     for (const r of rows) {
       if (Number(r.depth) !== 1) continue
       const ref = str(r.child_scan_id)

@@ -5,18 +5,13 @@ import { Omnibar, ShortcutsModal, SpeedDial, useActions, type SpeedDialAction } 
 import { SpeedDialTip } from './Tooltip'
 import { useRegistry } from './identities'
 import { useHelpPref } from './prefs'
+import { useStore } from './store'
+import { STORES } from './stores'
 import { useTheme } from './theme'
 import { useUnits } from './units'
 
 export const REPO_URL = 'https://github.com/Open-Athena/marin-gcs-usage'
 const CW_URL = 'https://cw-s3.oa.dev/'
-
-// Site-wide pages, in nav order — the omnibar's "Pages" group on every route.
-const PAGES: [string, string][] = [
-  ['/', 'Map (home)'],
-  ['/files', 'Browse scans'],
-  ['/users', 'Users — storage by owner'],
-]
 
 
 /**
@@ -40,6 +35,17 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
   // Every distinct attribution user in the registry (aliases collapse onto `u`).
   const reg = useRegistry()
   const USERS = [...new Set(Object.values(reg).map(i => i.u))].sort()
+  // Site-wide pages, in nav order — the omnibar's "Pages" group on every
+  // route. The map and the scan browser are the subtree's store's (`/meta`,
+  // `/meta/files` on a secondary store); the other configured stores follow
+  // as switches (a single-store build has none).
+  const store = useStore()
+  const base = store.path === '/' ? '' : store.path
+  const PAGES: [string, string][] = [
+    [store.path, 'Map (home)'],
+    [`${base}/files`, 'Browse scans'],
+    ['/users', 'Users — storage by owner'],
+  ]
   useActions({
     'help:toggle': {
       label: `Help line: ${help} (toggle)`,
@@ -51,6 +57,12 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
       PAGES.filter(([to]) => to !== pathname).map(([to, label]) => [
         `page:${to}`,
         { label, group: 'Pages', handler: () => navigate(to) },
+      ]),
+    ),
+    ...Object.fromEntries(
+      STORES.filter(s => s.key !== store.key).map(s => [
+        `store:${s.key}`,
+        { label: `${s.label} store (${s.path})`, group: 'Pages', handler: () => navigate(s.path) },
       ]),
     ),
     'page:cw': { label: 'CoreWeave usage ↗ (cw-s3.oa.dev)', group: 'Pages', handler: () => window.open(CW_URL, '_blank', 'noreferrer') },

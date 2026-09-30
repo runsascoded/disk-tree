@@ -12,11 +12,15 @@
  * - `claims`: their live owner claims, sized from the index.
  */
 import { type Ctx, json, requireViewer } from '../_lib/auth.js'
+import { primaryOnly } from '../_lib/stores.js'
 import { canonId, loadRegistry } from '../_lib/identity.js'
 import { ownerTotals } from '../_lib/ownerTotals.js'
 import { storeReady } from '../_lib/index.js'
 
 export const onRequestGet = async (ctx: Ctx): Promise<Response> => {
+  // The ownership ledger is the primary store's: `store=<other>` is a 404.
+  const notHere = primaryOnly(ctx)
+  if (notHere) return notHere
   const { env, request } = ctx
   if (!env.DB) return json({ error: 'ledger backend not configured (DB)' }, 503)
   if (!storeReady(env)) return json({ error: 'index reader not configured' }, 503)

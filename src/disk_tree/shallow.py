@@ -22,6 +22,7 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from . import blobfs
+from .listing_format import readable_columns
 
 SHALLOW_SUFFIX = '.shallow.parquet'
 CHUNK_REF = 'chunk_ref'
@@ -91,7 +92,8 @@ def _sidecar(path: str, stamp: tuple) -> pd.DataFrame:
 def _chunk_top(path: str, stamp: tuple, columns: tuple[str, ...] | None) -> pd.DataFrame:
     cols = None
     if columns is not None:
-        names = blobfs.read_schema(path).names
+        # A v2 chunk has no `uri` column, but the read derives it.
+        names = readable_columns(blobfs.read_schema(path))
         cols = [c for c in columns if c in names]
     return blobfs.read_parquet(path, filters=_DEPTH1, columns=cols)
 

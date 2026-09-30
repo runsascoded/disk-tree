@@ -28,6 +28,7 @@
     "@rdub/treemap": "workspace:*",
     "@resvg/resvg-wasm": "^2.6.2",
     "@tanstack/react-query": "^5.90.12",
+    "fzstd": "0.1.1",
     "hyparquet": "^1.30.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

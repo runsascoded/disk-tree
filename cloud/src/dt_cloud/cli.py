@@ -20,14 +20,13 @@ from pathlib import Path
 
 import duckdb
 import pandas as pd
-from click import Choice, argument, group, option
+from click import Choice, UsageError, argument, group, option
 
 from .cw_digest import REPLY_HOUR_UTC
 from .identity import IDENTITIES_ENV, load_identities
 from .site import DEFAULT_URL as SITE_DEFAULT_URL
 from .secrets import env_secret, secret
 from .index_footer import INDEX_VARIANTS
-from .viz import COARSE_EXPS
 from .listing import prepare_listing
 from .prefixes import load_prefix_map
 from .records import mine_record_rows
@@ -455,7 +454,7 @@ def wandb_mine(
 @option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, default=None, help=f"identities.yaml path or URL, needed with -a (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Output dir for JSON files [default: site/public/data/<asof>]")
-@option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the complete floor-free path index parquet here (pixel-budget subtree API; specs/path-index-lazy-drill.md)")
+@option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the path store here (`<dir>/path-index.parquet`, the `path` sort; `path-index-bysize.parquet` and the by-user copies land beside it — specs/path-store.md §4.3)")
 @option("-x", "--access", "access", multiple=True, help="Access-log layer-2a agg parquet glob(s); adds per-node last-read ('a') for the read-recency lens")
 def build_path_index(
     attributions: tuple[str, ...],
@@ -588,28 +587,33 @@ def bucket_sources(specs: tuple[str, ...], default_bucket: str) -> list[tuple[st
 
 
 @main.command("index-write")
-@option("-A", "--age-only", is_flag=True, help="Only the age pyramid — skip the path-index + coarse recompute (a ladder-only backfill; sync with `index-sync -A`, other variants keep their pointer)")
+@option("-A", "--age-only", is_flag=True, help="Only the age pyramid — skip the store's sorts (a ladder-only backfill; sync with `index-sync -A`, the sort pointers keep their generation)")
 @option("-b", "--bucket", default=None, help="Bucket a bare (no `<bucket>=`) layer-2 argument describes (default $CW_BUCKET)")
 @option("-m", "--mem", default="8GB", help="DuckDB memory limit")
-@option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-coarse<E>.parquet")
+@option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-bysize.parquet (+ .groups.json sidecars) + age-pyramid-*.parquet")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
 @argument("sources", nargs=-1, required=True)
 def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
-    """Write the scan's index tiers from its layer-2 parquet(s) — SOURCES are
+    """Write the scan's path store from its layer-2 parquet(s) — SOURCES are
     `<bucket>=<l2.parquet>` pairs, one per bucket of the scan (a bare path is
-    `-b`'s bucket): the floor-free `path-index.parquet` (dir rows,
-    bucket-prefixed, sorted (depth, path), 8k-row groups, the site's column
-    contract) and the coarse tiers, floors in their parquet metadata.
-    `index-sync` then publishes their footers to D1."""
+    `-b`'s bucket): every row (objects and dirs), bucket-prefixed, in the
+    layer-2's column names, cut by the engine into the `path` sort
+    (`path-index.parquet`, `(depth, path)`) and the `bysize` sort
+    (`path-index-bysize.parquet`, `(⌊log2 size⌋ desc, path)`), 8k-row groups,
+    footer sidecars beside them, plus the age pyramid (specs/path-store.md
+    §4.2). `index-sync` then publishes their footers to D1."""
     from .index import write_index
     from .sweep import CW_BUCKET
 
-    s = write_index(bucket_sources(sources, bucket or CW_BUCKET), out_dir, mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only)
+    s = write_index(
+        bucket_sources(sources, bucket or CW_BUCKET), out_dir,
+        mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only,
+    )
     if age_only:
         err(f"index-write: age pyramid only — floor {s['pyramid']['floor']}, {len(s['pyramid']['bins'])} tiers over {s['buckets']}")
     else:
-        err(f"index-write: {s['rows']:,} rows over {s['buckets']}; floors {s['floors']}; kept {s['paths']}")
+        err(f"index-write: {s['rows']:,} rows over {s['buckets']}; sorts {s['sorts']}")
     print(json.dumps(s))
 
 
@@ -618,10 +622,11 @@ def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, thr
 @option("-m", "--mem", default="8GB", help="DuckDB memory limit")
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: over-time.parquet + over-time.scans.json")
 @option("-r", "--data-root", default=None, help="Root the D1 pointer dirs resolve against (default /gcs/<bucket>, the Batch mount; pass a local dir or gs://<bucket> otherwise)")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
 @argument("scans", nargs=-1)
-def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None, threads: int, tmp_dir: Path | None, scans: tuple[str, ...]) -> None:
+def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None, store: str, threads: int, tmp_dir: Path | None, scans: tuple[str, ...]) -> None:
     """Write the cross-scan over-time index from published scans' path-indices
     (specs/obs-axis-indexing.md Phase 1). SCANS are scan ids, oldest-first order
     not required — sorted here; each a bare `<date>` (its `path` parquet resolved
@@ -637,13 +642,13 @@ def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None,
     if scans:
         dates = sorted(set(bare) | set(explicit))
     else:
-        dates = sorted({d for d, v in synced_variants() if v == "path"})
+        dates = sorted({d for d, v in synced_variants(store=store) if v == "path"})
     pairs: list[tuple[str, str]] = []
     for d in dates:
         if d in explicit:
             pairs.append((d, explicit[d]))
             continue
-        dir_ = index_dir(d, "path")
+        dir_ = index_dir(d, "path", store=store)
         if dir_ is None:
             err(f"over-time-write: no `path` pointer for {d}, skipping")
             continue
@@ -665,6 +670,7 @@ def over_time_write(bucket: str, mem: str, out_dir: Path, data_root: str | None,
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Work dir for the group builds")
 @option("-p", "--publish-root", default=None, help="Where the published dirs live (default /gcs/<bucket>, the Batch mount); groups land at <root>/<layer2>/index/<gen>/")
 @option("-r", "--data-root", default=None, help="Root the D1 `path` pointer dirs resolve against (default: the publish root)")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
 def over_time_groups(
@@ -677,6 +683,7 @@ def over_time_groups(
     out_dir: Path,
     publish_root: str | None,
     data_root: str | None,
+    store: str,
     threads: int,
     tmp_dir: Path | None,
 ) -> None:
@@ -700,8 +707,8 @@ def over_time_groups(
     l2 = layer2_prefix or os.environ.get("LAYER2_PREFIX") or "cw-l2/{scan}/"
     root = publish_root or f"/gcs/{bucket}"
     data = data_root or root
-    dates = sorted({d for d, v in synced_variants() if v == "path"})
-    done = synced_groups()
+    dates = sorted({d for d, v in synced_variants(store=store) if v == "path"})
+    done = synced_groups(store=store)
     todo = [g for g in sealed_groups(dates, K) if g[-1] not in done]
     err(f"over-time-groups: {len(dates)} indexed scans → {len(sealed_groups(dates, K))} sealed groups of {K}, {len(done)} in the manifest, {len(todo)} to build")
     if dry_run:
@@ -714,7 +721,7 @@ def over_time_groups(
         gid = g[-1]
         pairs: list[tuple[str, str]] = []
         for d in g:
-            dir_ = index_dir(d, "path")
+            dir_ = index_dir(d, "path", store=store)
             if dir_ is None:
                 raise SystemExit(f"over-time-groups: no `path` pointer for {d} (group {gid})")
             pairs.append((d, f"{data}/{dir_}/path-index.parquet"))
@@ -724,8 +731,8 @@ def over_time_groups(
         dest.mkdir(parents=True, exist_ok=True)
         for f in (summ["file"], summ["scans_file"]):
             shutil.copy2(f, dest / Path(f).name)
-        n = sync_d1(gid, str(dest / Path(summ["file"]).name), variant="over-time", gen=gen, key=key)
-        sync_manifest(multiscan_row(g, written_at_ms=int(time.time() * 1000)))
+        n = sync_d1(gid, str(dest / Path(summ["file"]).name), variant="over-time", gen=gen, key=key, store=store)
+        sync_manifest(multiscan_row(g, written_at_ms=int(time.time() * 1000), store=store))
         err(f"over-time-groups: sealed {gid} ({g[0]}..{gid}, {len(g)} scans, {summ['rows']:,} intervals, {n} row groups) → {key}")
         built.append(gid)
     print(json.dumps({"groups": built}))
@@ -734,23 +741,23 @@ def over_time_groups(
 @main.command("index-sync")
 @option("-A", "--age-only", is_flag=True, help="Only the age-pyramid variants (a ladder-only backfill; the other variants keep their pointer)")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
-@option("-C", "--coarse-only", is_flag=True, help="Only the coarse tiers (a backfill; the floor-free variants keep their pointer)")
 @option("-d", "--dir", "listing_dir", default=None, help="Local/mounted dir holding the parquets (default: <bucket>/<key>)")
-@option("-F", "--floor-free-only", is_flag=True, help="Only the floor-free variants (path, user)")
+@option("-F", "--sorts-only", is_flag=True, help="Only the store's sorts (path, bysize, and their by-user copies where written)")
 @option("-g", "--gen", required=True, help="Generation stamp these files belong to (the run's GEN; `legacy` for the pre-generation listing/<date>/ layout)")
 @option("-k", "--key", default=None, help="Bucket-relative dir the parquets live under — what the site reads (default: listing/<date>/index/<gen>; listing/<date> for gen `legacy`)")
 @option("-L", "--local", is_flag=True, help="Write to the local wrangler D1 instead of --remote")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @option("-v", "--variant", "variants", multiple=True, type=Choice(list(INDEX_VARIANTS)), help="Only sync these variants (default: all)")
 @argument("date")
 def index_sync(
     age_only: bool,
     bucket: str,
-    coarse_only: bool,
     listing_dir: str | None,
-    floor_free_only: bool,
+    sorts_only: bool,
     gen: str,
     key: str | None,
     local: bool,
+    store: str,
     variants: tuple[str, ...],
     date: str,
 ) -> None:
@@ -759,79 +766,77 @@ def index_sync(
     Per variant the row groups land first, tagged with the generation, and the
     pointer (gen, dir) flips last, so the site moves from the previous complete
     generation to this one with no window (specs/view-serving.md). Needs
-    CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the env."""
-    from .index_footer import sync_d1
+    CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the env. `--store` files
+    the rows under a secondary store (variants recorded as
+    `<store>:<variant>`, the `store` column set — needs the store migration;
+    specs/multi-store.md). The default, the primary, writes exactly the
+    pre-stores SQL."""
+    from .index_footer import SORT_VARIANTS, check_store, exists, sync_d1
+
+    try:
+        check_store(store)
+    except ValueError as e:
+        raise UsageError(str(e)) from None
 
     key = key or (f"listing/{date}" if gen == "legacy" else f"listing/{date}/index/{gen}")
     base = listing_dir or f"{bucket}/{key}"
     todo = variants or tuple(INDEX_VARIANTS)
-    if coarse_only:
-        todo = tuple(v for v in todo if v.startswith("coarse"))
-    if floor_free_only:
-        todo = tuple(v for v in todo if not v.startswith("coarse"))
+    if sorts_only:
+        todo = tuple(v for v in todo if v in SORT_VARIANTS)
     if age_only:
         todo = tuple(v for v in todo if v.startswith("age-pyramid"))
+    # A deployment produces only some variants (gcs's `path-index` writes no
+    # age pyramid or over-time tier; a generation before the store has no
+    # `bysize`); an absent file is skipped, not fatal — otherwise every variant
+    # after it in `INDEX_VARIANTS` order went unsynced.
+    skipped = []
     for variant in todo:
-        n = sync_d1(date, f"{base}/{INDEX_VARIANTS[variant]}", variant=variant, gen=gen, key=key, remote=not local)
-        err(f"index-sync: {date} [{variant}] gen {gen} @ {key} — {n} row groups ({'local' if local else 'remote'})")
+        path = f"{base}/{INDEX_VARIANTS[variant]}"
+        if not exists(path):
+            skipped.append(variant)
+            continue
+        n = sync_d1(date, path, variant=variant, gen=gen, key=key, remote=not local, store=store)
+        err(f"index-sync: {'' if store == 'primary' else f'[{store}] '}{date} [{variant}] gen {gen} @ {key} — {n} row groups ({'local' if local else 'remote'})")
+    if skipped:
+        err(f"index-sync: {date} gen {gen} @ {key} — skipped {len(skipped)} absent variant(s): {', '.join(skipped)}")
+    if len(skipped) == len(todo):
+        err(f"index-sync: no variant file under {base}")
+        raise SystemExit(1)
 
 
 @main.command("index-gc")
-@option("-r", "--retain", type=int, default=None, help="Retention: also retire the floor-free variants' row groups of every scan older than the newest N (their pointers stay; the reader falls back to the parquet footer)")
+@option("-r", "--retain", type=int, default=None, help="Retention: also retire the store sorts' row groups of every scan older than the newest N (their pointers stay; the reader opens the .groups.json blob instead)")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @argument("dates", nargs=-1)
-def index_gc(retain: int | None, dates: tuple[str, ...]) -> None:
+def index_gc(retain: int | None, store: str, dates: tuple[str, ...]) -> None:
     """Delete row groups of index generations no pointer names — a REPROC's
     previous generation, or a sync that died before flipping. All synced
     scans by default; DATES to restrict. With -r, the retention pass too."""
     from .index_footer import gc_d1, retire_d1, synced_variants
 
-    todo = dates or sorted({d for d, _ in synced_variants()})
+    todo = dates or sorted({d for d, _ in synced_variants(store=store)})
     for d in todo:
-        n = gc_d1(d)
+        n = gc_d1(d, store=store)
         err(f"index-gc: {d} — {n} stale row groups deleted")
     if retain is not None:
-        for d, v, n in retire_d1(retain):
+        for d, v, n in retire_d1(retain, store=store):
             err(f"index-gc: retired {d} [{v}] — {n} row groups (footer path serves it now)")
 
 
 @main.command("index-dir")
+@option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @option("-v", "--variant", default="path", type=Choice(list(INDEX_VARIANTS)), help="Which variant's dir")
 @argument("date")
-def index_dir_cmd(variant: str, date: str) -> None:
+def index_dir_cmd(store: str, variant: str, date: str) -> None:
     """Print the bucket-relative dir holding a scan's index variant (the D1
     pointer). Exits 1, printing nothing, when that (date, variant) was never
     synced."""
     from .index_footer import index_dir
 
-    d = index_dir(date, variant)
+    d = index_dir(date, variant, store=store)
     if d is None:
         raise SystemExit(1)
     print(d)
-
-
-@main.command("index-tiers")
-@option("-m", "--mem", default="48GB", help="DuckDB memory limit")
-@option("-P", "--path-index", "path_index", type=Path, required=True, help="Local floor-free path-index.parquet; the coarse tiers are written beside it")
-@option("-t", "--threads", default=8, type=int, help="DuckDB threads")
-@option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: beside the index)")
-@argument("date")
-def index_tiers(mem: str, path_index: Path, threads: int, tmp_dir: Path | None, date: str) -> None:
-    """Backfill the coarse index tiers for an archived scan from its floor-free
-    path index (specs/view-serving.md §1): the per-path subtree totals, then one
-    parquet per E in COARSE_EXPS × {by-path, by-user}, floors in the KV metadata.
-    Same code path `path-index` runs on a fresh scan; `index-sync` records the
-    floors in D1. An old index's `team` column is dropped on the way."""
-    import duckdb
-
-    from .viz import write_coarse_tiers
-
-    con = duckdb.connect()
-    con.execute(f"SET memory_limit='{mem}'; SET threads={threads}")
-    con.execute(f"SET temp_directory='{tmp_dir or path_index.parent / '.duckdb-tmp'}'")
-    src = f"read_parquet('{path_index}')"
-    con.execute(f"CREATE TEMP TABLE tot AS SELECT path, sum(b) AS pb FROM {src} GROUP BY path")
-    floors, counts = write_coarse_tiers(con, path_index, rows=src)
-    err(f"index-tiers {date}: {json.dumps({str(e): {'floor': floors[e], 'paths': counts[e]} for e in floors})}")
 
 
 @main.command("labels")
@@ -1012,8 +1017,9 @@ def _lc_buckets(buckets: tuple[str, ...]) -> tuple[str, ...]:
 
 @lifecycle.command("pull")
 @_LC_BUCKET
+@option("-k", "--keep-going", is_flag=True, help="A bucket whose rules can't be read (e.g. no `storage.buckets.get`) is reported and left out, instead of failing the whole pull — for the job's fleet snapshot")
 @option("-o", "--out", type=Path, help="Write here instead of stdout")
-def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
+def lifecycle_pull(buckets: tuple[str, ...], keep_going: bool, out: Path | None) -> None:
     """One bucket → the bare rule list; several → `{<bucket>: rules}` in this order."""
     from .lifecycle import dump, dump_map, pull_any, pull_many
 
@@ -1022,7 +1028,7 @@ def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
     if len(buckets) == 1:
         text = dump(pull_any(buckets[0], s3=s3, gcs=gcs), bucket=buckets[0])
     else:
-        text = dump_map(pull_many(list(buckets), s3=s3, gcs=gcs))
+        text = dump_map(pull_many(list(buckets), s3=s3, gcs=gcs, keep_going=keep_going))
     if out is None:
         sys.stdout.write(text)
     else:
@@ -2420,7 +2426,7 @@ def discord_webhook(bot_token: str | None, channel: str, guild: str | None, name
 def weekly(date: str | None, top: int, dry_run: bool, prior: str | None, root: str | None, threshold_gib: int, site_url: str | None, webhook: str | None) -> None:
     """Post the weekly storage report to Marin's #internal-discuss: totals vs a
     week ago, what the sweep removed, and the biggest movers with owners, from
-    the two scans' coarse index tiers. See specs/weekly-discord-report.md."""
+    the two scans' `path` sorts (dir rows to depth 5). See specs/weekly-discord-report.md."""
     from . import weekly as wk
     from .site import creds
 
@@ -2467,12 +2473,13 @@ def weekly(date: str | None, top: int, dry_run: bool, prior: str | None, root: s
 @main.command("publish-r2")
 @option("-b", "--bucket", "src_bucket", default=None, help="Source GCS scan store (default $DATA_BUCKET)")
 @option("-l", "--layer2", default=None, help="Layer-2 dir template, `{scan}` = the scan id (default $LAYER2_PREFIX, else listing/{scan}/index/; cw: cw-l2/{scan}/)")
+@option("-L", "--no-listings", is_flag=True, help="Leave the canonical per-bucket listings (`<layer-2 dir>/<bucket>.parquet`) in GCS only; copy the tiers + snapshot JSONs")
 @option("-n", "--dry-run", is_flag=True, help="List the keys that would be copied; copy nothing")
 @option("-p", "--prefix", "prefixes", multiple=True, help="Key prefix to publish (repeatable; default: the scan's served subset — snapshots/<subdir>/<scan>/ + the layer-2 dir)")
 @option("-s", "--subdir", default=None, help="Snapshots subdir of this store (default $SNAPSHOTS_SUBDIR, else none)")
 @option("-w", "--workers", default=8, type=int, help="Concurrent HEADs/uploads (default 8)")
 @argument("scan")
-def publish_r2(src_bucket: str | None, layer2: str | None, dry_run: bool, prefixes: tuple[str, ...], subdir: str | None, workers: int, scan: str) -> None:
+def publish_r2(src_bucket: str | None, layer2: str | None, no_listings: bool, dry_run: bool, prefixes: tuple[str, ...], subdir: str | None, workers: int, scan: str) -> None:
     """Copy one scan's served artifacts GCS → R2.
 
     The final "publish to the serving cloud" stage of an ingest that builds
@@ -2492,7 +2499,27 @@ def publish_r2(src_bucket: str | None, layer2: str | None, dry_run: bool, prefix
         layer2=layer2 or pub.LAYER2_PREFIX,
         dry_run=dry_run,
         workers=workers,
+        listings=not no_listings,
     )
+
+
+@main.command("prune-r2-listings")
+@option("-b", "--bucket", "src_bucket", default=None, help="Source GCS scan store (default $DATA_BUCKET)")
+@option("-l", "--layer2", default=None, help="Layer-2 dir template, `{scan}` = the scan id (default $LAYER2_PREFIX; cw: cw-l2/{scan}/)")
+@option("-n", "--dry-run", is_flag=True, help="Print the keys that would be deleted; delete nothing")
+@option("-w", "--workers", default=8, type=int, help="Concurrent HEADs (default 8)")
+@argument("scans", nargs=-1, required=True)
+def prune_r2_listings(src_bucket: str | None, layer2: str | None, dry_run: bool, workers: int, scans: tuple[str, ...]) -> None:
+    """Delete scans' canonical per-bucket listings from R2 — the mirror copies
+    `publish-r2 -L` no longer makes — each only when GCS still holds the
+    identical object (same size + md5). Run BEFORE recompressing the GCS
+    copies: a rewritten listing no longer matches and its R2 copy is kept.
+    Reversible: `publish-r2` (without `-L`) copies them back.
+    """
+    from . import publish as pub
+
+    for scan in scans:
+        pub.prune_listings(scan, src_bucket=src_bucket or pub.DATA_BUCKET, layer2=layer2 or pub.LAYER2_PREFIX, dry_run=dry_run, workers=workers)
 
 
 @main.command("stamp-published")

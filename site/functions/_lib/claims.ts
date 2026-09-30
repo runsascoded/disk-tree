@@ -22,11 +22,11 @@ export interface OwnerRow extends LedgerRow { owner: string | null; who?: string
  * non-STANDARD class bytes ("2" NL, "3" CL, "4" AR; STANDARD = b − Σ). */
 export interface PathAgg { b: number; o: number; us: Record<string, number>; cb: Record<string, number> }
 export const newAgg = (): PathAgg => ({ b: 0, o: 0, us: {}, cb: {} })
-export const addAgg = (a: PathAgg, r: { b: number; o: number; usr: string | null; c2: number; c3: number; c4: number }): void => {
-  a.b += r.b
-  a.o += r.o
-  if (r.usr) a.us[r.usr] = (a.us[r.usr] ?? 0) + r.b
-  for (const [k, v] of [['2', r.c2], ['3', r.c3], ['4', r.c4]] as [string, number][]) if (v) a.cb[k] = (a.cb[k] ?? 0) + v
+export const addAgg = (a: PathAgg, r: { size: number; n_files: number; usr: string | null; cls2: number; cls3: number; cls4: number }): void => {
+  a.b += r.size
+  a.o += r.n_files
+  if (r.usr) a.us[r.usr] = (a.us[r.usr] ?? 0) + r.size
+  for (const [k, v] of [['2', r.cls2], ['3', r.cls3], ['4', r.cls4]] as [string, number][]) if (v) a.cb[k] = (a.cb[k] ?? 0) + v
 }
 const subAgg = (a: PathAgg, kids: PathAgg[]): PathAgg => {
   const out: PathAgg = { b: a.b, o: a.o, us: { ...a.us }, cb: { ...a.cb } }

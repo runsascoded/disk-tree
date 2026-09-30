@@ -7,12 +7,14 @@ import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { boolParam, useUrlState } from 'use-prms'
 import { shortName } from './UserChip'
+import { useStore, useStoreFetch } from './store'
 import { useUnits } from './units'
 import { Skeleton } from './Busy'
 import { bandCallouts, pickAnnotations, relativeSeries, stackSeries, unitTicks, youngestGenesis } from './series'
 import { DAY, fmtScan } from './scan'
 import type { Band } from './series'
 import { stringParam } from 'use-prms'
+import { perf, usePerfCommit } from './perf'
 
 // Stored bytes over the historical scans, scoped exactly like the map: the
 // drilled prefix, a user, or an owner pool (`/api/series` — one row read per
@@ -190,18 +192,26 @@ export function SizeOverTime({ scans, prefix, user, pool, onPickDate, onBrush, w
   // The store root, unscoped: one trace per root (specs/root-geneses.md §2).
   const split = !prefix && !user && !pool && !paths?.length && !filterLabel
   const scope = (user ? `&lens=user:${encodeURIComponent(user)}` : pool ? `&o=${pool}` : '') + (paths?.length ? `&paths=${encodeURIComponent(paths.join(','))}` : '') + (split ? '&split=roots' : '')
+  // The subtree's store: its key in the query key (two mounted stores may
+  // share a prefix spelling), its `store=` on the request.
+  const store = useStore()
+  const sfetch = useStoreFetch()
   const seriesQ = useQuery<Series>({
-    queryKey: ['series', prefix, scope, scans.length],
+    queryKey: ['series', store.key, prefix, scope, scans.length],
     // Under a filter, wait for its match roots: the whole-store series is not
     // what the page asked for.
     enabled: scans.length > 1 && !(filterLabel && !paths?.length),
     staleTime: 5 * 60_000,
     queryFn: async () => {
-      const r = await fetch(`/api/series?path=${encodeURIComponent(prefix)}${scope}`, { credentials: 'include' })
-      if (!r.ok) throw new Error(`series: ${r.status}`)
-      return r.json()
+      const pf = perf.start('series', `${prefix || '/'}${scope}|n${scans.length}`)
+      const r = await pf.track(sfetch(`/api/series?path=${encodeURIComponent(prefix)}${scope}`, { credentials: 'include' }))
+      if (!r.ok) { pf.fail(); throw new Error(`series: ${r.status}`) }
+      const j = await r.json() as Series
+      pf.decoded()
+      return j
     },
   })
+  usePerfCommit('series')
 
   const label = user ? shortName(user) : pool ?? (prefix || 'total')
   // The x-range cut: points on or after (latest − N days). Applied to every

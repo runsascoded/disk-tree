@@ -80,6 +80,26 @@ def test_multi_source_bucket_priority(sii: str, scan: str):
     ]
 
 
+def test_updated_passes_through_where_the_listing_has_it(tmp_path: Path, scan: str, sii: str):
+    """`updated` (GCS's second stamp) is a canonical column: verbatim from a
+    listing that carries it, NULL from one that doesn't — every source
+    exposes it, so a multi-source union lines up."""
+    path = tmp_path / "scan-updated.parquet"
+    pd.DataFrame(
+        {
+            "bucket": ["d3"], "name": ["w.bin"], "size_bytes": [5], "created": [TS1], "storage_class_id": [1], "updated": [TS2],
+        }
+    ).to_parquet(path)
+    con = duckdb.connect()
+    q = "SELECT bucket, name, epoch(created)::BIGINT, epoch(updated)::BIGINT FROM {src} ORDER BY bucket, name"
+    assert con.execute(q.format(src=prepare_listing(con, (str(path), sii, scan)))).fetchall() == [
+        ("b1", "x/fresh.bin", int(TS2.timestamp()), None),
+        ("b1", "z/cold.bin", int(TS2.timestamp()), None),
+        ("c2", "y/c2.bin", int(TS1.timestamp()), None),
+        ("d3", "w.bin", int(TS1.timestamp()), int(TS2.timestamp())),
+    ]
+
+
 def test_unrecognized_schema_raises(tmp_path: Path):
     path = tmp_path / "junk.parquet"
     pd.DataFrame({"foo": [1]}).to_parquet(path)

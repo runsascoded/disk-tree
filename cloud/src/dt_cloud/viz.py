@@ -1,15 +1,15 @@
 """Data extracts for the web viz (``dt-cloud path-index``).
 
-Everything here is laptop-scale DuckDB over the deduped listing parquet:
-a nested prefix tree for the treemap, created-day age strata, and a
-small meta blob. Output is plain JSON consumed by ``site/``.
+DuckDB over the deduped listing parquet: the path store's sorts (dir rows
+rolled up per owner slice + the listing's object rows; specs/path-store.md
+§4.3), created-day age strata, and a small meta blob. The JSON outputs are
+consumed by ``site/``; the sorts are what ``index-sync`` publishes.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import json
-import math
 import os
 import resource
 import sys
@@ -18,6 +18,8 @@ from functools import partial
 from pathlib import Path
 
 import duckdb
+
+from .index import STORE_L2, duckdb_codec, store_columns
 
 err = partial(print, file=sys.stderr)
 
@@ -97,59 +99,130 @@ def _rss(tag: str) -> None:
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     err(f"[rss] {tag}: peak {peak / (1024**2 if sys.platform == 'linux' else 1024**3):.1f} GB")
 
-# Coarse index tiers: one per exponent E, keeping paths whose subtree clears
-# F_E = 2^(round(log2 fleet_bytes) - E). At a 3 PiB fleet: E=16 → 48 GiB
-# (~40k paths, a root view's row groups), E=20 → 3 GiB, E=24 → 256 MiB
-# (~2M of 220M paths). The reader serves each query from the coarsest tier
-# whose floor is under the query's pixel threshold. specs/view-serving.md §1.
-COARSE_EXPS = (16, 20, 24)
-# Aggregate bounds on the kept set — parent-relative alone is unbounded (the
-# fleet has >100M dirs; 0.02%-of-parent keeps every child of an evenly-split
-# parent, recursively — OOM-killed the 8/26 attempt-4 REPROC). Values chosen
-# from the 8/26 full-listing estimate (see specs/dir-agg-cache.md).
+# The gcs store's columns (specs/path-store.md §1.1) in the engine's layer-2
+# order — `usr` (the owner slice) right after `path` as the label block, the
+# storage-class pivots the listing carries, `created` / `last_read` (the access
+# log's last-read day).
+STORE_L2_SHAPE = (
+    ["path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
+     "sum_storage_class_id_2", "sum_storage_class_id_3", "sum_storage_class_id_4"],
+    {},
+)
+# The per-dir rollup cache's columns (`dir-stats.parquet`): a cache written
+# before the store (no `mtime_max` / `created_max`) is rebuilt, not read.
+DIR_STATS_COLS = ("bucket", "dir", "fp", "b", "o", "wts", "wb", "c2", "c3", "c4", "mtime_max", "created_max")
 
 
-def write_coarse_tiers(
+def _write_store(
     con: "duckdb.DuckDBPyConnection",
+    src: str,
     path_index: Path,
-    rows: str,
-) -> tuple[dict[int, int], dict[int, int]]:
-    """Write the coarse index tiers beside ``path_index`` (specs/view-serving.md §1).
+    *,
+    attr: bool,
+    fp_dir: str,
+    maxseg: int,
+) -> dict[str, dict]:
+    """The store's sorts beside ``path_index`` (specs/path-store.md §4.3) from
+    the rolled-up dir slices (``ptu``, ``dir_stats``, ``dir_attr`` when
+    attributing) and the listing's object rows (``src``): one layer-2 shaped
+    union (`index.STORE_L2`, streamed to disk, removed after) cut by the
+    engine into `path` + `bysize` (+ `-by-user` when attributing). Returns
+    `index.write_sorts`'s summary.
 
-    ``rows`` is a table/relation holding the floor-free index rows
-    (``path, depth, usr, b, o, wts, wb, c2, c3, c4, a``) — ``ptu`` inside
-    ``path-index``, or ``read_parquet(...)`` of an archived path-index for a
-    backfill (``dt-cloud index-tiers``). A temp table ``tot`` (``path, pb`` =
-    per-path subtree bytes) must exist; the caller builds it since ``path-index``
-    reuses it for the fold.
+    Structural counts are per path, from the dir set itself (cheap: dirs, not
+    objects × depth): `n_children` = the dir's own objects + its direct
+    subdirs; `n_desc` = own objects + Σ over subdirs of (`n_desc` + 1), folded
+    bottom-up one depth at a time."""
+    from .index import write_sorts
 
-    Each tier E keeps the SAME rows, restricted to paths whose subtree clears
-    F_E = 2^(round(log2 fleet) - E), in the same two sort orders as the
-    floor-free tier. A tier, not a loss: every kept row's sums are exact, and
-    the reader only serves a query from a tier whose floor is <= the query's
-    threshold (then the tier's rows are a superset of what the query keeps).
-    F rides in the parquet key-value metadata so index-sync can record it
-    beside the footer. Returns ({E: floor}, {E: kept paths})."""
-    floors: dict[int, int] = {}
-    counts: dict[int, int] = {}
-    fleet = int(con.execute("SELECT coalesce(sum(pb), 0) FROM tot WHERE path NOT LIKE '%/%'").fetchone()[0])
-    n_paths = con.execute("SELECT count(*) FROM tot").fetchone()[0]
-    cols = "path, depth, usr, b, o, wts::DOUBLE AS wts, wb, c2, c3, c4, a"
-    for e in COARSE_EXPS:
-        floor = 2 ** (round(math.log2(fleet)) - e) if fleet > 0 else 1
-        floors[e] = floor
-        con.execute(f"CREATE TEMP TABLE coarse AS SELECT path FROM tot WHERE pb >= {floor}")
-        counts[e] = con.execute("SELECT count(*) FROM coarse").fetchone()[0]
-        kv = f"(FORMAT parquet, ROW_GROUP_SIZE 8192, KV_METADATA {{coarse_floor: '{floor}'}})"
-        for suffix, order in (
-            ("", "depth, path"),
-            ("-by-user", "usr NULLS LAST, depth, path"),
-        ):
-            out = path_index.with_name(f"path-index-coarse{e}{suffix}.parquet")
-            con.execute(f"COPY (SELECT {cols} FROM {rows} r JOIN coarse USING (path) ORDER BY {order}) TO '{out}' {kv}")
-        con.execute("DROP TABLE coarse")
-        err(f"coarse tier E={e}: floor {floor:,} B, {counts[e]:,} of {n_paths:,} paths")
-    return floors, counts
+    if path_index.name != "path-index.parquet":
+        raise ValueError(f"the store's `path` sort is served as path-index.parquet; got {path_index}")
+    path_index.parent.mkdir(parents=True, exist_ok=True)
+    parent = "regexp_replace(path, '/[^/]*$', '')"
+    con.execute("CREATE TEMP TABLE dirs AS SELECT DISTINCT path, depth FROM ptu")
+    con.execute(
+        f"""
+        CREATE TEMP TABLE dstruct AS
+        SELECT d.path, d.depth,
+          coalesce(s.o, 0)::BIGINT AS own_o,
+          coalesce(c.n, 0)::BIGINT AS n_subdirs
+        FROM dirs d
+        LEFT JOIN (SELECT fp, sum(o) AS o FROM dir_stats GROUP BY fp) s ON s.fp = d.path
+        LEFT JOIN (SELECT {parent} AS parent, count(*) AS n FROM dirs WHERE depth > 1 GROUP BY 1) c ON c.parent = d.path
+        """
+    )
+    con.execute("CREATE TEMP TABLE nd (path VARCHAR, n_desc BIGINT)")
+    for k in range(maxseg, 0, -1):
+        con.execute(
+            f"""
+            INSERT INTO nd
+            SELECT d.path, d.own_o + coalesce(ch.s, 0)
+            FROM dstruct d
+            LEFT JOIN (
+              SELECT {parent.replace('path', 'c.path')} AS parent, sum(n.n_desc + 1) AS s
+              FROM dstruct c JOIN nd n USING (path) WHERE c.depth = {k + 1} GROUP BY 1
+            ) ch ON ch.parent = d.path
+            WHERE d.depth = {k}
+            """
+        )
+    _rss("dstruct")
+    columns = store_columns([STORE_L2_SHAPE])
+    dir_exprs = {
+        "path": "p.path", "usr": "p.usr", "size": "p.b::BIGINT", "depth": "p.depth::INTEGER", "kind": "'dir'",
+        "n_files": "p.o::BIGINT", "n_children": "(d.own_o + d.n_subdirs)::BIGINT", "n_desc": "n.n_desc::BIGINT",
+        "mtime": "coalesce(p.mtime, 0)::BIGINT",
+        "mtime_mean": "(CASE WHEN p.wb > 0 THEN p.wts / p.wb END)::DOUBLE",
+        "created": "p.created::BIGINT", "last_read": "p.a::INTEGER",
+        "sum_storage_class_id_2": "coalesce(p.c2, 0)::BIGINT",
+        "sum_storage_class_id_3": "coalesce(p.c3, 0)::BIGINT",
+        "sum_storage_class_id_4": "coalesce(p.c4, 0)::BIGINT",
+    }
+    # An object is attributed to its dir's owner (the same deepest-prefix join
+    # `dir_attr` resolved per dir; a leaf needs no explosion). The access log is
+    # per dir, so `last_read` is NULL on object rows.
+    obj_dir = fp_dir.replace("name", "x.name")
+    attr_join = f"LEFT JOIN dir_attr t ON t.bucket = x.bucket AND t.dir = ({obj_dir})" if attr else ""
+    obj_exprs = {
+        "path": "x.bucket || '/' || x.name", "usr": 't."user"' if attr else "NULL::VARCHAR",
+        "size": "x.size_bytes::BIGINT", "depth": "(len(string_split(x.name, '/')) + 1)::INTEGER", "kind": "'file'",
+        "n_files": "1::BIGINT", "n_children": "0::BIGINT", "n_desc": "0::BIGINT",
+        "mtime": "coalesce(floor(epoch(coalesce(x.updated, x.created))), 0)::BIGINT",
+        "mtime_mean": "floor(epoch(x.created))::DOUBLE",
+        "created": "floor(epoch(x.created))::BIGINT", "last_read": "NULL::INTEGER",
+        **{f"sum_storage_class_id_{c}": f"(CASE WHEN x.storage_class_id = {c} THEN x.size_bytes ELSE 0 END)::BIGINT" for c in (2, 3, 4)},
+    }
+    sel = lambda exprs: ", ".join(f"{exprs[c]} AS {c}" for c in columns)  # noqa: E731
+    store = path_index.with_name(STORE_L2)
+    con.execute(
+        f"""
+        COPY (
+          SELECT {sel(dir_exprs)} FROM ptu p JOIN dstruct d USING (path) JOIN nd n USING (path)
+          UNION ALL
+          SELECT {sel(obj_exprs)} FROM {src} x {attr_join}
+        ) TO '{store}' (FORMAT parquet, {duckdb_codec()}, ROW_GROUP_SIZE 65536)
+        """
+    )
+    for t in ("nd", "dstruct", "dirs"):
+        con.execute(f"DROP TABLE {t}")
+    _rss("store-l2")
+    try:
+        return write_sorts(con, str(store), path_index.parent, sort_variants=((("usr",),) if attr else ()))
+    finally:
+        store.unlink()
+
+
+def _cache_hit(con: "duckdb.DuckDBPyConnection", pq_path: Path, cols: tuple[str, ...]) -> bool:
+    """Whether ``pq_path`` exists with (at least) ``cols`` — an older cache
+    schema is a miss, so a re-attribution run after a writer change rebuilds
+    the rollup instead of failing mid-query."""
+    if not pq_path.exists():
+        return False
+    have = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{pq_path}') LIMIT 0").fetchall()}
+    missing = [c for c in cols if c not in have]
+    if missing:
+        err(f"{pq_path.name}: cache predates the store (no {missing}); rebuilding")
+        return False
+    return True
 
 
 def write_path_index(
@@ -162,13 +235,21 @@ def write_path_index(
     dir_cache: Path | None = None,
     path_index: Path | None = None,
 ) -> dict:
-    """Write age.json / meta.json under ``out_dir`` (+ the path index and its
-    tiers at ``path_index``); returns meta.
+    """Write age.json / meta.json under ``out_dir`` (+ the path store's sorts
+    beside ``path_index``); returns meta.
 
-    ``path_index`` writes the complete floor-free rolled-up path index
-    (every ancestor path × attribution, sorted ``(depth, path)``) — the
-    artifact the pixel-budget subtree API serves
-    (specs/path-index-lazy-drill.md).
+    ``path_index`` (``<dir>/path-index.parquet``) writes the store
+    (specs/path-store.md §4.3): every dir row — every ancestor path ×
+    attribution slice, descendant-inclusive — and every object row from the
+    listing, attributed to its dir's owner (the same deepest-prefix join;
+    objects are leaves, so no ancestor explosion), with ``created`` / ``mtime``
+    from the listing's ``created`` / ``updated``. The union is cut by the
+    engine's ``write_tiers`` into the ``path`` and ``bysize`` sorts (+ the
+    ``-by-user`` copies of both when attributing), under the served names
+    (`index.write_sorts`). Structural counts (``n_children``, ``n_desc``) are
+    per path and repeat on each owner slice of it — a slice partitions bytes
+    and objects, not the tree — so sum ``size`` / ``n_files`` over slices,
+    never those.
 
     ``dir_cache`` names a directory for the layer-2 rollups (``dir-stats`` /
     ``age-days`` parquet) — attribution-independent per-dir aggregates, cached
@@ -214,7 +295,7 @@ def write_path_index(
     fp = f"CASE WHEN ({fp_dir}) = '' THEN bucket ELSE bucket || '/' || ({fp_dir}) END"
     stats_pq = dir_cache / "dir-stats.parquet" if dir_cache else None
     age_pq = dir_cache / "age-days.parquet" if dir_cache else None
-    if stats_pq is not None and stats_pq.exists():
+    if stats_pq is not None and _cache_hit(con, stats_pq, DIR_STATS_COLS):
         con.execute(f"CREATE TEMP VIEW dir_stats AS SELECT * FROM read_parquet('{stats_pq}')")
         err(f"dir-stats: cache hit ({stats_pq})")
     else:
@@ -222,7 +303,7 @@ def write_path_index(
             f"""
             CREATE TEMP TABLE dir_stats AS
             WITH obj AS (
-              SELECT bucket, {fp_dir} AS dir, size_bytes, created, storage_class_id, {fp} AS fp
+              SELECT bucket, {fp_dir} AS dir, size_bytes, created, updated, storage_class_id, {fp} AS fp
               FROM {src}
             )
             SELECT bucket, dir, fp,
@@ -235,7 +316,12 @@ def write_path_index(
               sum(CASE WHEN created IS NOT NULL THEN size_bytes END)::BIGINT AS wb,
               sum(CASE WHEN storage_class_id = 2 THEN size_bytes END)::BIGINT AS c2,
               sum(CASE WHEN storage_class_id = 3 THEN size_bytes END)::BIGINT AS c3,
-              sum(CASE WHEN storage_class_id = 4 THEN size_bytes END)::BIGINT AS c4
+              sum(CASE WHEN storage_class_id = 4 THEN size_bytes END)::BIGINT AS c4,
+              -- the store's two native stamps (path-store.md §1.1), max over the
+              -- dir's own objects: `mtime` = `updated` where the platform has it
+              -- (GCS), else `created` (S3/R2's LastModified lands there)
+              max(floor(epoch(coalesce(updated, created))))::BIGINT AS mtime_max,
+              max(floor(epoch(created)))::BIGINT AS created_max
             FROM obj GROUP BY bucket, dir, fp
             """
         )
@@ -350,7 +436,7 @@ def write_path_index(
         f"""
         CREATE TEMP TABLE dir_agg AS
         SELECT s.fp, {user_sel} AS usr,
-          s.b, s.o, s.wts, s.wb, s.c2, s.c3, s.c4, xa.aday AS a
+          s.b, s.o, s.wts, s.wb, s.c2, s.c3, s.c4, xa.aday AS a, s.mtime_max, s.created_max
         FROM dir_stats s {attr_join_s}
         LEFT JOIN access_agg xa ON xa.bucket = s.bucket AND xa.dir = s.dir
         """
@@ -373,10 +459,8 @@ def write_path_index(
             user_bytes[usr] += int(b)
 
     # The full rolled-up (path, user) relation — every ancestor path,
-    # descendant-inclusive, attributed, NO floor. Materialized because three
-    # consumers share it: the coarse tiers, the (optional)
-    # path-index artifact, and — via that artifact — the pixel-budget subtree
-    # API (specs/path-index-lazy-drill.md).
+    # descendant-inclusive, attributed, NO floor: the store's dir rows, one per
+    # owner slice (specs/path-store.md §1.1 `usr`).
     con.execute(
         f"""
         CREATE TEMP TABLE ptu AS
@@ -387,7 +471,7 @@ def write_path_index(
         ),
         exploded AS (
           SELECT array_to_string(segs[1:r.k], '/') AS path, r.k AS depth,
-            b, o, wts, wb, c2, c3, c4, a, usr
+            b, o, wts, wb, c2, c3, c4, a, usr, mtime_max, created_max
           FROM da, range(1, {maxseg} + 1) r(k)
           WHERE len(segs) >= r.k
         )
@@ -395,49 +479,20 @@ def write_path_index(
           sum(b)::BIGINT AS b, sum(o)::BIGINT AS o,
           sum(wts)::DECIMAL(38,0) AS wts, sum(wb)::BIGINT AS wb,
           sum(c2)::BIGINT AS c2, sum(c3)::BIGINT AS c3, sum(c4)::BIGINT AS c4,
-          max(a) AS a  -- subtree-max last-read epoch day (NULL = never read)
+          max(a) AS a,  -- subtree-max last-read epoch day (NULL = never read)
+          max(mtime_max)::BIGINT AS mtime, max(created_max)::BIGINT AS created
         FROM exploded GROUP BY path, depth, usr
         """
     )
     _rss("ptu")
+    sorts: dict[str, dict] = {}
     if path_index is not None:
-        # The complete, floor-free index the subtree API serves: one row per
-        # (path, usr), sorted (depth, path) — the engine's canonical
-        # order for prefix-range + row-group pruning. Immutable per date.
-        path_index.parent.mkdir(parents=True, exist_ok=True)
-        cols = "path, depth, usr, b, o, wts::DOUBLE AS wts, wb, c2, c3, c4, a"
-        # 8k rows/group (~1 MB): a deep drill decodes ~8k rows/group, not 64k,
-        # and the footer (now in D1 per index-sync) is never parsed on a cold
-        # isolate, so the ~27k-group count costs nothing at read time
-        # (specs/path-agnostic-serving.md §2.1).
-        rg = "(FORMAT parquet, ROW_GROUP_SIZE 8192)"
-        con.execute(f"COPY (SELECT {cols} FROM ptu ORDER BY depth, path) TO '{path_index}' {rg}")
-        err(f"path-index: wrote {path_index}")
-        _rss("path-index")
-        # `by-user` copy: the SAME rows re-sorted so a user lens's row groups
-        # prune by `usr` (the `by-path` copy's stats are on `b`, useless for a
-        # lens). `b` in a usr=X row is X's bytes under `path`, so the lens read
-        # pixel-budgets on it directly. NULL usr sorts last (the unclaimed
-        # pool). specs/path-agnostic-serving.md §2.3.
-        by_user = path_index.with_name("path-index-by-user.parquet")
-        con.execute(f"COPY (SELECT {cols} FROM ptu ORDER BY usr NULLS LAST, depth, path) TO '{by_user}' {rg}")
-        err(f"path-index: wrote {by_user}")
-        _rss("path-index-variants")
+        sorts = _write_store(con, src, path_index, attr=attr, fp_dir=fp_dir, maxseg=maxseg)
+        _rss("store")
         # Provenance sidecar: the attributing prefixes' user/source/evidence.
         from .extras import write_extras
         write_extras(pfx_df if attr else None, path_index.parent)
         _rss("extras")
-
-    # Per-path subtree totals: the coarse tiers' floor test. Staged (its own
-    # statement) so the agg runs alone, not stacked under another operator.
-    con.execute("CREATE TEMP TABLE tot AS SELECT path, sum(b) AS pb FROM ptu GROUP BY path")
-    _rss("tot")
-    coarse_floors: dict[int, int] = {}
-    coarse_counts: dict[int, int] = {}
-    if path_index is not None:
-        coarse_floors, coarse_counts = write_coarse_tiers(con, path_index, rows="ptu")
-        _rss("coarse")
-    con.execute("DROP TABLE tot")
     con.execute("DROP TABLE ptu")
 
     # Age strata also carry `a` — the dir's last-read epoch day from the access
@@ -501,8 +556,8 @@ def write_path_index(
         "total_objects": total_o,
         "class_bytes": {int(c): int(b) for c, b in classes},
     }
-    if coarse_floors:
-        meta["index"] = {"coarse": {str(e): {"floor": coarse_floors[e], "paths": int(coarse_counts[e])} for e in COARSE_EXPS}}
+    if sorts:
+        meta["index"] = {"rows": sorts["path"]["rows"], "sorts": {v: {"rows": s["rows"], "groups": s["groups"]} for v, s in sorts.items()}}
     if access_window:
         # Epoch days the access logs cover — the UI's "no reads since <from>"
         # is only meaningful relative to when logging began.

@@ -50,13 +50,26 @@ def _site_dir() -> Path:
     raise FileNotFoundError("site/wrangler.toml not found (run from the repo)")
 
 
+# `index_schema.version`, per synced file. A reader keys its row shape off it
+# (specs/path-store.md §5 phase 1): 1 = the dir-only index (`b, o, wts, wb, …`
+# wire names, no `kind`); 2 = a path-store sort cut by the engine's
+# `write_tiers` — every row, objects included, `kind` on each, the layer-2's
+# column names (§1.1), and a `bysize` sibling. Told apart by the `tier`
+# key-value the engine stamps; the age pyramid / over-time tiers stay 1.
+INDEX_VERSION_LEGACY = 1
+INDEX_VERSION_STORE = 2
+#: Size column candidates, first present wins (the engine's `groups.SIZE_COLS`):
+#: a store sort's `size`, a legacy index's `b`.
+SIZE_COLS = ("size", "b")
+
+
 def _schema_json(md: "pq.FileMetaData") -> dict:
-    """hyparquet `FileMetaData.schema` (root element + one leaf per column)."""
+    """hyparquet `FileMetaData.schema` (root element + one leaf per column),
+    versioned by whether the file is a store sort (`tier` in its metadata)."""
     sch = md.schema
-    root = {"repetition_type": "REQUIRED", "name": sch.to_arrow_schema().pandas_metadata and "schema" or "schema", "num_children": md.num_columns}
     # The Arrow name of the root isn't load-bearing (reads key off leaf
     # path_in_schema); use a stable placeholder.
-    root["name"] = "schema"
+    root = {"repetition_type": "REQUIRED", "name": "schema", "num_children": md.num_columns}
     leaves = []
     for i in range(md.num_columns):
         col = sch.column(i)
@@ -65,17 +78,23 @@ def _schema_json(md: "pq.FileMetaData") -> dict:
         if ct and ct != "NONE":
             el["converted_type"] = ct
         leaves.append(el)
-    return {"version": 1, "schema": [root, *leaves]}
+    version = INDEX_VERSION_STORE if b"tier" in (md.metadata or {}) else INDEX_VERSION_LEGACY
+    return {"version": version, "schema": [root, *leaves]}
 
 
 def _group_rows(md: "pq.FileMetaData") -> list[dict]:
-    """One row per row group: pruning stats + the stripped RowGroup JSON."""
+    """One row per row group: pruning stats + the stripped RowGroup JSON.
+    `b_min` (with `b_max`, a `bysize` sort's bucket range per group) rides the
+    blob only — D1's `index_row_groups` has no column for it."""
     rows = []
     row_start = 0
     names = md.schema.names
     di = names.index("depth")
     pi = names.index("path")
-    bi = names.index("b")
+    size_col = next((c for c in SIZE_COLS if c in names), None)
+    if size_col is None:
+        raise ValueError(f"no size column ({'/'.join(SIZE_COLS)}) in {names}")
+    bi = names.index(size_col)
     # The age index (variant `age`) has no ownership column; its `u_min/u_max`
     # stay NULL, and the (depth, path) rectangle prunes it like any other tier.
     ui = names.index("usr") if "usr" in names else None
@@ -109,22 +128,39 @@ def _group_rows(md: "pq.FileMetaData") -> list[dict]:
             "u_min": u_min, "u_max": u_max,
             "row_start": row_start, "row_end": row_start + n,
             "rg_json": json.dumps([n, codecs.pop(), cols], separators=(",", ":")),
+            "b_min": int(bs.min),
         })
         row_start += n
     return rows
+
+
+def _remote(parquet_path: str) -> bool:
+    return parquet_path.startswith(("gs://", "oa-"))
+
+
+def exists(parquet_path: str) -> bool:
+    """Whether a tier file is there to sync — a deployment produces only some
+    of `INDEX_VARIANTS` (gcs's `path-index` writes no age pyramid), and
+    `index-sync` skips the rest instead of dying on the first absent one."""
+    if _remote(parquet_path):
+        import gcsfs
+
+        return gcsfs.GCSFileSystem().exists(parquet_path)
+    return os.path.exists(parquet_path)
 
 
 def extract(parquet_path: str) -> tuple[dict, list[dict]]:
     """Return (schema_meta, group_rows) from a local or fsspec-readable parquet."""
     import gcsfs
 
-    opener = gcsfs.GCSFileSystem().open if parquet_path.startswith(("gs://", "oa-")) else open
+    opener = gcsfs.GCSFileSystem().open if _remote(parquet_path) else open
     with opener(parquet_path, "rb") as f:
         md = pq.ParquetFile(f).metadata
     schema = _schema_json(md)
-    # A coarse tier records its absolute floor F in the parquet key-value
-    # metadata (viz.py COARSE_EXP); it lands in D1 beside the schema so the
-    # reader can plan tiers without touching the file (view-serving.md §1).
+    # A floored tier (the age pyramid; the retired coarse tiers before it)
+    # records its absolute floor F in the parquet key-value metadata; it lands
+    # in D1 beside the schema so the reader can plan without touching the file.
+    # The store's sorts have no floor (every byte floor is a prefix of `bysize`).
     kv = md.metadata or {}
     if b"coarse_floor" in kv:
         schema["floor_bytes"] = int(kv[b"coarse_floor"])
@@ -147,10 +183,11 @@ def groups_blob(schema: dict, rows: list[dict]) -> str:
     """The blob's JSON: what `sync_d1` puts in `index_schema` + `index_row_groups`
     for one tier, as one document — the site's fallback for a scan whose row
     groups retention retired from D1 (`_lib/index.ts` `openBlob`). Groups are
-    compact arrays in `index_row_groups` column order; `rg_json` stays the
-    string the reader revives."""
+    compact arrays in `index_row_groups` column order, then the appended
+    `b_min` (the engine's `groups.GROUP_FIELDS`; positional readers ignore
+    the tail); `rg_json` stays the string the reader revives."""
     groups = [
-        [r["rg"], r["d_min"], r["d_max"], r["p_min"], r["p_max"], r["b_max"], r["u_min"], r["u_max"], r["row_start"], r["row_end"], r["rg_json"]]
+        [r["rg"], r["d_min"], r["d_max"], r["p_min"], r["p_max"], r["b_max"], r["u_min"], r["u_max"], r["row_start"], r["row_end"], r["rg_json"], r["b_min"]]
         for r in rows
     ]
     body = {"v": GROUPS_BLOB_VERSION, "version": schema["version"], "schema": schema["schema"], "floor_bytes": schema.get("floor_bytes"), "groups": groups}
@@ -263,6 +300,31 @@ def _q(v) -> str:  # nullable string literal for SQL
     return "NULL" if v is None else f"'{_sql_escape(v)}'"
 
 
+# Multi-store deploys (specs/multi-store.md). The primary store's SQL is
+# exactly what it was before stores existed, so it runs on a D1 with or
+# without the store migration (site/migrations/{cw/0006,gcs/0030}). A
+# secondary store's rows are namespaced twice: their `variant` is
+# `<store>:<variant>` (so no primary query, which always names a bare variant,
+# can see them; and the row-group PK (date, variant, gen, rg) stays disjoint),
+# and they name the `store` column, which only exists once migrated — so a
+# secondary store fails loudly on an un-migrated D1.
+PRIMARY_STORE = "primary"
+_STORE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def check_store(store: str) -> str:
+    """``store`` if it is ``PRIMARY_STORE`` or a valid `STORES_JSON` key."""
+    if store != PRIMARY_STORE and not _STORE_RE.match(store):
+        raise ValueError(f"bad store {store!r} (want {PRIMARY_STORE!r} or [a-z0-9][a-z0-9-]*)")
+    return store
+
+
+def d1_variant(variant: str, store: str = PRIMARY_STORE) -> str:
+    """The variant as D1 records it: the primary's as-is, a secondary store's
+    as ``<store>:<variant>`` (the site's `d1Variant`)."""
+    return variant if check_store(store) == PRIMARY_STORE else f"{store}:{variant}"
+
+
 def sync_d1(
     date: str,
     parquet_path: str,
@@ -274,6 +336,7 @@ def sync_d1(
     remote: bool = True,
     insert_bytes: int = INSERT_BYTES,
     blob: bool = True,
+    store: str = PRIMARY_STORE,
 ) -> int:
     """Extract the footer of ``parquet_path`` (one tier/sort ``variant`` of
     scan ``date``, generation ``gen``, living under the bucket-relative dir
@@ -291,7 +354,16 @@ def sync_d1(
 
     The same rows also land as the group-manifest blob beside the parquet
     (``write_groups_blob``) first — the durable copy the site opens once
-    retention retires this tier's rows from D1."""
+    retention retires this tier's rows from D1.
+
+    ``store`` (default the primary, whose SQL is unchanged) files the rows
+    under a secondary store: variant ``<store>:<variant>`` and the ``store``
+    column set (which needs the store migration)."""
+    variant = d1_variant(variant, store)
+    sec = store != PRIMARY_STORE
+    st = f"store='{_sql_escape(store)}' AND " if sec else ""
+    sc = "store, " if sec else ""  # the column, in the INSERTs
+    sv = f"'{_sql_escape(store)}', " if sec else ""  # its value
     schema, rows = extract(parquet_path)
     if blob:
         write_groups_blob(parquet_path, schema, rows)
@@ -299,24 +371,24 @@ def sync_d1(
     # Leftovers from earlier flips (any gen that is neither the current pointer's
     # nor this one) go first — they are unreachable by construction.
     gc_sql = (
-        f"DELETE FROM index_row_groups WHERE date='{date}' AND variant='{variant}' AND gen <> '{_sql_escape(gen)}' "
-        f"AND gen <> COALESCE((SELECT gen FROM index_schema WHERE date='{date}' AND variant='{variant}'), '');"
+        f"DELETE FROM index_row_groups WHERE {st}date='{date}' AND variant='{variant}' AND gen <> '{_sql_escape(gen)}' "
+        f"AND gen <> COALESCE((SELECT gen FROM index_schema WHERE {st}date='{date}' AND variant='{variant}'), '');"
     )
     schema_sql = (
-        "INSERT OR REPLACE INTO index_schema (date, variant, version, schema_json, floor_bytes, gen, dir) VALUES "
-        f"('{date}', '{variant}', {schema['version']}, '{_sql_escape(json.dumps(schema['schema'], separators=(',', ':')))}', "
+        f"INSERT OR REPLACE INTO index_schema ({sc}date, variant, version, schema_json, floor_bytes, gen, dir) VALUES "
+        f"({sv}'{date}', '{variant}', {schema['version']}, '{_sql_escape(json.dumps(schema['schema'], separators=(',', ':')))}', "
         f"{'NULL' if floor is None else int(floor)}, '{_sql_escape(gen)}', '{_sql_escape(key)}');"
     )
 
     def group_values(r: dict) -> str:
         return (
-            f"('{date}', '{variant}', '{_sql_escape(gen)}', {r['rg']}, {r['d_min']}, {r['d_max']}, "
+            f"({sv}'{date}', '{variant}', '{_sql_escape(gen)}', {r['rg']}, {r['d_min']}, {r['d_max']}, "
             f"'{_sql_escape(r['p_min'])}', '{_sql_escape(r['p_max'])}', {r['b_max']}, "
             f"{_q(r['u_min'])}, {_q(r['u_max'])}, "
             f"{r['row_start']}, {r['row_end']}, '{_sql_escape(r['rg_json'])}')"
         )
 
-    cols = "(date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, u_min, u_max, row_start, row_end, rg_json)"
+    cols = f"({sc}date, variant, gen, rg, d_min, d_max, p_min, p_max, b_max, u_min, u_max, row_start, row_end, rg_json)"
     # OR REPLACE: a chunk whose request timed out may or may not have landed;
     # re-sending it must be a no-op, not a PK collision (date, variant, gen, rg).
     head = f"INSERT OR REPLACE INTO index_row_groups {cols} VALUES "
@@ -338,37 +410,46 @@ def sync_d1(
     return len(rows)
 
 
-def gc_d1(date: str, db_id: str = D1_DB_ID) -> int:
+def gc_d1(date: str, db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> int:
     """Delete every row group of ``date`` whose generation is not the one its
     variant's schema row points at (leftovers of a flip, or of a sync that
     failed before flipping). Returns rows deleted. Safe any time: readers only
     ever query the pointer's generation, and a handle outlives the pointer by
     at most its cache TTL (`_lib/index.ts`), which the end-of-job call clears."""
     tok, acct = _creds()
+    # The primary's statement (unchanged) matches each row to the pointer of its
+    # own (date, variant), so a secondary store's namespaced rows are judged by
+    # their own pointer too; `store=` restricts the sweep to that store.
+    sw = "" if check_store(store) == PRIMARY_STORE else f"store = '{_sql_escape(store)}' AND "
     rows = _d1_query(
-        "DELETE FROM index_row_groups WHERE date = '{d}' AND gen <> COALESCE("
+        "DELETE FROM index_row_groups WHERE {sw}date = '{d}' AND gen <> COALESCE("
         "(SELECT s.gen FROM index_schema s WHERE s.date = index_row_groups.date AND s.variant = index_row_groups.variant), '') "
-        "RETURNING 1 AS n;".format(d=_sql_escape(date)),
+        "RETURNING 1 AS n;".format(sw=sw, d=_sql_escape(date)),
         acct, tok, db_id,
     )
     return len(rows)
 
 
-# The floor-free (uncoarsened) tiers `index-gc -r` retires: the deployment's
-# variant set minus the coarse ones (cw has no user-sorted variant).
-FLOOR_FREE_VARIANTS = tuple(v for v in os.environ.get("INDEX_VARIANTS", "path,user").split(",") if v)
+# The path store's sorts (specs/path-store.md §1.2), variant → file under the
+# generation dir: `path` = every row sorted `(depth, path)`, `bysize` = the same
+# rows sorted `(⌊log2 size⌋ desc, path)`. Both are cut by the engine's
+# `write_tiers` (`index-write` / `path-index`); the by-user copies are the same
+# two sorts led by `usr`, where the deployment attributes (`INDEX_VARIANTS`
+# names `user`; gcs). No coarse tiers: every byte floor is a prefix of `bysize`.
+STORE_SORTS: dict[str, str] = {"path": "path-index.parquet", "bysize": "path-index-bysize.parquet"}
+USER_SORTS: dict[str, str] = {"user": "path-index-by-user.parquet", "bysize-user": "path-index-bysize-by-user.parquet"}
+# `$INDEX_VARIANTS` (the deployment's `wrangler.toml` / job env): `path`, or
+# `path,user` for a deployment that writes the by-user sorts.
+_ENV_VARIANTS = tuple(v for v in os.environ.get("INDEX_VARIANTS", "path,user").split(",") if v)
+HAS_USER_SORTS = "user" in _ENV_VARIANTS
+# The store sorts this deployment syncs — what `index-gc -r` retires for scans
+# past the retention window (their pointers stay; the reader opens the
+# `.groups.json` blob beside the parquet instead).
+SORT_VARIANTS = tuple(STORE_SORTS) + (tuple(USER_SORTS) if HAS_USER_SORTS else ())
 
-# Index variants the site reads (functions/_lib/index.ts `fileFor` mirrors this):
-# each floor-free tier (`path`, and `user` where the deployment writes it) and
-# every coarse tier (viz.py COARSE_EXPS) in the same sorts. D1 keys (date, variant).
-COARSE_EXPS = (16, 20, 24)
-INDEX_VARIANTS: dict[str, str] = {"path": "path-index.parquet"}
-if "user" in FLOOR_FREE_VARIANTS:
-    INDEX_VARIANTS["user"] = "path-index-by-user.parquet"
-for _e in COARSE_EXPS:
-    INDEX_VARIANTS[f"coarse{_e}"] = f"path-index-coarse{_e}.parquet"
-    if "user" in FLOOR_FREE_VARIANTS:
-        INDEX_VARIANTS[f"coarse{_e}-user"] = f"path-index-coarse{_e}-by-user.parquet"
+# Index variants the site reads (functions/_lib/index.ts `indexKey` mirrors
+# this). D1 keys (date, variant).
+INDEX_VARIANTS: dict[str, str] = {**STORE_SORTS, **(USER_SORTS if HAS_USER_SORTS else {})}
 # The age chart's backend: multi-scale path-major pyramid tiers, one per bin
 # (specs/age-index.md, Phase B — supersedes the single-bin `age-index.parquet`).
 # Standalone indexes, own base names; the footer's (depth, path, b) stats prune
@@ -383,21 +464,22 @@ for _b in ("1h", "3h", "6h", "12h", "1d", "2d", "4d", "8d"):
 INDEX_VARIANTS["over-time"] = "over-time.parquet"
 
 
-def retire_d1(retain: int, db_id: str = D1_DB_ID) -> list[tuple[str, str, int]]:
-    """Retention (specs/view-serving.md follow-ups): drop the floor-free
-    variants' row groups for every synced scan older than the newest
-    ``retain`` — they are 95 % of D1's index bytes (~27k groups per variant per
-    scan) and a deep drill into an old scan is rare. The pointer stays, so the
-    reader serves those from the parquet footer (slow path); the coarse tiers,
-    which answer everything above the floor, are kept for every scan. Returns
-    (date, variant, rows deleted) per retired variant."""
+def retire_d1(retain: int, db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> list[tuple[str, str, int]]:
+    """Retention (specs/view-serving.md follow-ups): drop the store sorts'
+    row groups (`SORT_VARIANTS`) for every synced scan older than the newest
+    ``retain`` — they are 95 % of D1's index bytes (thousands of groups per
+    sort per scan) and a deep drill into an old scan is rare. The pointer
+    stays, so the reader opens the `.groups.json` blob beside the parquet
+    instead; the age pyramid and over-time tiers are kept for every scan.
+    Returns (date, variant, rows deleted) per retired variant."""
     tok, acct = _creds()
-    dates = sorted({d for d, _ in synced_variants(db_id)})
+    dates = sorted({d for d, _ in synced_variants(db_id, store)})
+    sw = "" if store == PRIMARY_STORE else f"store = '{_sql_escape(store)}' AND "
     out: list[tuple[str, str, int]] = []
     for d in dates[:-retain] if retain > 0 else dates:
-        for v in FLOOR_FREE_VARIANTS:
+        for v in SORT_VARIANTS:
             rows = _d1_query(
-                f"DELETE FROM index_row_groups WHERE date = '{_sql_escape(d)}' AND variant = '{v}' RETURNING 1 AS n;",
+                f"DELETE FROM index_row_groups WHERE {sw}date = '{_sql_escape(d)}' AND variant = '{_sql_escape(d1_variant(v, store))}' RETURNING 1 AS n;",
                 acct, tok, db_id,
             )
             if rows:
@@ -405,13 +487,14 @@ def retire_d1(retain: int, db_id: str = D1_DB_ID) -> list[tuple[str, str, int]]:
     return out
 
 
-def index_dir(date: str, variant: str = "path", db_id: str = D1_DB_ID) -> str | None:
+def index_dir(date: str, variant: str = "path", db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> str | None:
     """Bucket-relative dir holding ``date``'s ``variant`` parquet — the D1
     pointer (``index_schema.dir``); None when that (date, variant) was never
     synced. The parquet is ``<dir>/<INDEX_VARIANTS[variant]>``."""
     tok, acct = _creds()
+    sw = "" if check_store(store) == PRIMARY_STORE else f"store = '{_sql_escape(store)}' AND "
     rows = _d1_query(
-        f"SELECT dir FROM index_schema WHERE date = '{_sql_escape(date)}' AND variant = '{_sql_escape(variant)}';",
+        f"SELECT dir FROM index_schema WHERE {sw}date = '{_sql_escape(date)}' AND variant = '{_sql_escape(d1_variant(variant, store))}';",
         acct, tok, db_id,
     )
     return rows[0]["dir"] if rows else None
@@ -450,17 +533,28 @@ COMPACT_SQL = (
 )
 
 
-def synced_variants(db_id: str = D1_DB_ID) -> list[tuple[str, str]]:
-    """Every (date, variant) with a schema row in D1 (= a complete sync)."""
+def synced_variants(db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> list[tuple[str, str]]:
+    """Every (date, variant) of ``store`` with a schema row in D1 (= a complete
+    sync); variants as the store names them (a secondary store's prefix off).
+    The primary's query is unchanged: secondary rows (a `:` in the variant)
+    are dropped here, not in SQL."""
     tok, acct = _creds()
-    rows = _d1_query("SELECT date, variant FROM index_schema ORDER BY date, variant;", acct, tok, db_id)
-    return [(r["date"], r["variant"]) for r in rows]
+    if check_store(store) == PRIMARY_STORE:
+        rows = _d1_query("SELECT date, variant FROM index_schema ORDER BY date, variant;", acct, tok, db_id)
+        return [(r["date"], r["variant"]) for r in rows if ":" not in r["variant"]]
+    rows = _d1_query(
+        f"SELECT date, variant FROM index_schema WHERE store = '{_sql_escape(store)}' ORDER BY date, variant;",
+        acct, tok, db_id,
+    )
+    pre = f"{store}:"
+    return [(r["date"], r["variant"][len(pre):]) for r in rows if r["variant"].startswith(pre)]
 
 
-def compact_d1(date: str, variant: str, db_id: str = D1_DB_ID) -> int:
+def compact_d1(date: str, variant: str, db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> int:
     """Compact one (date, variant)'s verbose `rg_json` rows in place; returns the
     number of rows left in the old form afterwards (0 = done)."""
     tok, acct = _creds()
+    variant = d1_variant(variant, store)
     _d1_query(COMPACT_SQL.format(date=date, variant=variant), acct, tok, db_id)
     rows = _d1_query(
         f"SELECT count(*) AS n FROM index_row_groups WHERE date = '{date}' AND variant = '{variant}' AND rg_json LIKE '{{%';",

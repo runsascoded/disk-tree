@@ -168,6 +168,45 @@ disk-tree migrate-row-groups [DIR|URL]  # Rewrite scan blobs to ≤64K-row parqu
                           # ~40 ms at 1M rows; over R2 a `depth ≤ 2` view fetches ~2 MiB vs ~38 MiB).
                           # Default: the write dir; `r2://bucket/prefix` rewrites remote blobs where they are
 
+disk-tree recompress PATH…  # Rewrite v1 layer-2 listings as v2 in place, lossless (spec `listing-slim.md`
+                          # phase 2): files, dirs (recursive `*.parquet`, sidecars skipped) or fsspec URLs
+                          # (`gs://`, `r2://`, `s3://`). Streams by row group (never a whole file in memory):
+                          # drops `uri` (scan root → metadata; refused unless `uri == <root>/<path>` on every
+                          # row) and the `sum_*` pivots equal to `size`, re-encodes under
+                          # `$DISK_TREE_PARQUET_CODEC` in ≤64K-row groups to a `.v2.tmp` sibling, verifies
+                          # (row count + order-insensitive digest of `(path,size,mtime,kind)`), then swaps
+                          # (atomic rename; copy + delete on a URL). v2 input is skipped; a failure leaves
+                          # the original untouched, exit 1. `-n` dry-run, `-k` keeps `<stem>.v1.parquet`,
+                          # `-j` JSON. Per-file old/new size + ratio, and totals
+disk-tree listing-format PATH…  # The audit: each parquet's listing format (v1 | v2 | not-a-listing), codec,
+                          # row groups, rows, size (+ root/implied for v2) from the footer only; `-j` JSON
+
+disk-tree tiers L2        # Cut the path store's sorts (spec `path-store.md` §1.2/§4.1) from a layer-2 — a
+                          # local path or an fsspec URL (copied once through `blobfs.open_read`): `path` =
+                          # every row (objects + dirs) sorted `(depth, path, …labels)`; `bysize` = the same
+                          # rows sorted `(⌊log2 size⌋ desc, path, …labels)`, size 0 last, the bucket computed
+                          # in SQL (never stored). 8K-row groups (`-r`), `tier`/`sort` (+ `bucket: log2`) in
+                          # the parquet metadata, the source's listing format inherited. `-t path,bysize`
+                          # (default both), `-s STEM` (may be a URL: cut locally, uploaded), `-g` writes the
+                          # `.groups.json` footer sidecar beside each (`find/groups.py`; carries `b_min` now),
+                          # `-v usr` extra sorted copies led by those columns, `-j` JSON; `-m` DuckDB memory limit (default 8GB — an
+                          # external sort, spills to `-T`, default `.duckdb-tmp` beside the stem; unbounded it took
+                          # 28 GB for 57M rows), `-p` threads. Prints rows, groups,
+                          # bytes, KV per tier. `import -i` does the same at import time (bare `-i` = both;
+                          # the `dirs`/`objects`/`coarse` tiers are retired). The cloud overlay's
+                          # `dt-cloud index-write` (cw) and `dt-cloud path-index -P` (gcs, the r2 demo)
+                          # cut the same two sorts from their bucket unions — objects as rows, L2 column
+                          # names — under `path-index[-bysize][-by-user].parquet` (spec §4.2–4.4)
+disk-tree tiers plan SIDECAR P THR  # The reader's span selection run offline over a tier's `.groups.json`
+                          # (phase 0's instrument): for `path` it mirrors `readRects` exactly (depth rect
+                          # `dP+1..`, path range `[P/, P0)`, `b_max ≥ thr·atten^(d−dP−1)` per group); for
+                          # `bysize` it is `b_max ≥ thr_min ∧ p_max ≥ P/ ∧ p_min < P0`. Reports groups
+                          # selected, rows they hold, bytes (compressed chunks), and — from the parquet —
+                          # rows that actually pass, i.e. the decode waste. `P` = `.` for the root; `-a`
+                          # attenuation, `-d` max depth, `-t` tier (default: from the name), `-C` skips the
+                          # count, `-j` JSON. Measured on a 20K-child flat dir at 2048-row groups: `path`
+                          # decodes 10 groups / 20,015 rows for 1,250 answers, `bysize` 1 group / 2,048
+
 disk-tree filter URI QUERY  # Recursive filter, true re-aggregation: sizes of everything matching QUERY
                             # (`/…/` regex or substring); outermost matches only — never double-counts
                             # Slash-free queries match path segments (basenames); queries with `/` match
@@ -317,8 +356,10 @@ auto-expand.
 ## Development
 
 ```bash
-# Python setup
-uv sync
+# Python setup — one uv workspace: the engine (root) + the cloud overlay
+# (`cloud/`, package `dt-cloud`) share ONE `uv.lock` and one `.venv`.
+uv sync                                                 # engine only
+uv sync --all-packages --all-extras --all-groups        # engine + dt-cloud, every extra, test groups
 disk-tree index .
 
 # Start API server
@@ -382,10 +423,11 @@ Stream-engine tuning knobs (env, all with measured defaults — see the constant
 ## Tests
 
 ```bash
-pytest tests/
+pytest tests/                    # engine
+cd cloud && pytest               # dt-cloud (same venv; sync with --all-packages first)
 ```
 
-Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet).
+Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet). CI and the job images install `--frozen` from the workspace lock (`deploy/sheet-mirror/Dockerfile` is the reference recipe: `uv sync --frozen --no-dev --no-editable --package dt-cloud --extra …` into `UV_PROJECT_ENVIRONMENT=/usr/local`); a plain `pip install .` resolves fresh and ships pins the tests never ran.
 
 ## Current State (www branch)
 

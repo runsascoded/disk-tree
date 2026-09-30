@@ -14,13 +14,30 @@ from dt_cloud.cli import main
 
 
 def _write_path_index(path: Path, rows: list[tuple]) -> None:
-    """(path, depth, usr, b, o) — the columns the over-time roll-up reads."""
+    """(path, depth, usr, b, o) — a pre-store index (dir rows, wire names)."""
     tbl = pa.table({
         "path": [r[0] for r in rows],
         "depth": pa.array([r[1] for r in rows], pa.int32()),
         "usr": pa.array([r[2] for r in rows], pa.string()),
         "b": pa.array([r[3] for r in rows], pa.int64()),
         "o": pa.array([r[4] for r in rows], pa.int64()),
+    })
+    pq.write_table(tbl, path)
+
+
+def _write_store_index(path: Path, rows: list[tuple]) -> None:
+    """The same rows as a store generation's `path` sort (`kind`, `size`,
+    `n_files`), each dir's objects present as object rows under it — which the
+    roll-up must leave out."""
+    dirs = [(p, d, u, "dir", b, o) for p, d, u, b, o in rows]
+    objs = [(f"{p}/obj{i}.bin", d + 1, u, "file", b // o, 1) for p, d, u, b, o in rows for i in range(o)]
+    tbl = pa.table({
+        "path": [r[0] for r in dirs + objs],
+        "depth": pa.array([r[1] for r in dirs + objs], pa.int32()),
+        "usr": pa.array([r[2] for r in dirs + objs], pa.string()),
+        "kind": [r[3] for r in dirs + objs],
+        "size": pa.array([r[4] for r in dirs + objs], pa.int64()),
+        "n_files": pa.array([r[5] for r in dirs + objs], pa.int64()),
     })
     pq.write_table(tbl, path)
 
@@ -64,6 +81,28 @@ def test_write_over_time_index(tmp_path: Path):
     assert json.loads((tmp_path / "ot" / "over-time.scans.json").read_text()) == ["s0", "s1", "s2", "s3"]
     # SCD-2 runs (pyrmts' interval kernel): fleet root + B change at s2, B/a
     # static, B/b only s1–s2.
+    assert _intervals(tmp_path / "ot" / "over-time.parquet") == [
+        (0, "", 100, 10, 0, 1),
+        (0, "", 200, 20, 2, 3),
+        (1, B, 100, 10, 0, 1),
+        (1, B, 200, 20, 2, 3),
+        (2, f"{B}/a", 50, 5, 0, 3),
+        (2, f"{B}/b", 7, 1, 1, 2),
+    ]
+
+
+def test_store_generations_roll_up_like_pre_store_ones(tmp_path: Path):
+    """Scans across the store switch — s0/s1 dir-only indexes, s2/s3 store
+    sorts with object rows — consolidate to exactly the intervals the
+    all-legacy run gives: dir rows' `size`/`n_files` are the old `b`/`o`,
+    object rows are not series."""
+    scans = []
+    for i, (sid, rows) in enumerate(SCANS.items()):
+        pi = tmp_path / f"{sid}.parquet"
+        (_write_path_index if i < 2 else _write_store_index)(pi, rows)
+        scans.append((sid, str(pi)))
+    s = OT.write_over_time_index(scans, tmp_path / "ot", mem="1GB", threads=2)
+    assert (s["rows"], s["paths"]) == (6, 4)
     assert _intervals(tmp_path / "ot" / "over-time.parquet") == [
         (0, "", 100, 10, 0, 1),
         (0, "", 200, 20, 2, 3),
@@ -190,6 +229,13 @@ def test_multiscan_row_is_pyrmts_row_shape_keyed_by_the_last_scan():
     }
 
 
+def test_multiscan_dataset_namespaces_secondary_stores():
+    """The manifest's `dataset` keeps stores apart (pyrmts owns the table; its
+    PK is `(dataset, key)`): the primary's is unchanged."""
+    assert [OT.multiscan_dataset(), OT.multiscan_dataset("primary"), OT.multiscan_dataset("meta")] == ["over-time", "over-time", "meta:over-time"]
+    assert OT.multiscan_row(["2026-09-01T0001"], written_at_ms=1, store="meta")["dataset"] == "meta:over-time"
+
+
 def test_manifest_sql_is_one_idempotent_upsert():
     row = {
         "dataset": "over-time", "tier": "over-time", "shard_dur": "2scans", "period_start": 1, "period_end": 2,
@@ -205,9 +251,14 @@ def test_over_time_groups_cli_dry_run_lists_unsealed_groups(monkeypatch, tmp_pat
     from dt_cloud import index_footer as IF
 
     dates = [f"2026-09-{d:02d}T0001" for d in range(1, 19)]  # 18 scans → 2 groups of 8, tail of 2
-    monkeypatch.setattr(IF, "synced_variants", lambda: [(d, "path") for d in dates])
-    monkeypatch.setattr(OT, "synced_groups", lambda: {dates[7]})  # first group already sealed
+    asked: list[tuple[str, str]] = []
+    monkeypatch.setattr(IF, "synced_variants", lambda store: asked.append(("variants", store)) or [(d, "path") for d in dates])
+    monkeypatch.setattr(OT, "synced_groups", lambda store: asked.append(("groups", store)) or {dates[7]})  # first group already sealed
     r = CliRunner().invoke(main, ["over-time-groups", "-g", "G", "-K", "8", "-n", "-o", str(tmp_path)])
     assert r.exit_code == 0, r.output + r.stderr
     assert json.loads(r.output) == {"groups": [dates[15]], "dry_run": True}
+    # `-s` scopes both reads to that store; the default is the primary.
+    r = CliRunner().invoke(main, ["over-time-groups", "-g", "G", "-K", "8", "-n", "-s", "meta", "-o", str(tmp_path)])
+    assert r.exit_code == 0, r.output + r.stderr
+    assert asked == [("variants", "primary"), ("groups", "primary"), ("variants", "meta"), ("groups", "meta")]
     # (the plan lines go to the real stderr via `err`, outside CliRunner's capture)

@@ -6,8 +6,9 @@ Phase 1).
 The SCD-2 interval consolidation is **pyrmts' generic multiscan kernel**
 (`pyrmts_engine.multiscan_duckdb.consolidate_parquet_duckdb` — vectorized
 gaps-and-islands over `read_parquet`, out-of-core). cw supplies only the glue:
-roll each scan's `path-index` to `(depth, path)` totals (owner slices summed
-away — over-time is `(path)`-granular) plus a depth-0 fleet-root row, and hand
+roll each scan's `path` sort to `(depth, path)` totals of its dir rows (owner
+slices summed away — over-time is `(path)`-granular; object rows, present since
+the path store, are not series) plus a depth-0 fleet-root row, and hand
 the per-scan shards to pyrmts keyed as a `Pyramid(binCol='depth', dims=[path],
 metrics=count(b,o))` — which yields exactly `(depth, path, b, o, __scan_lo,
 __scan_hi)`. Interval bounds index the ordered scan list; storage is ~static
@@ -30,7 +31,7 @@ import duckdb
 from pyrmts.types import Dim, Metric, Pyramid
 from pyrmts_engine.multiscan_duckdb import consolidate_parquet_duckdb
 
-from .index import ROW_GROUP_SIZE
+from .index import ROW_GROUP_SIZE, duckdb_codec
 
 err = partial(print, file=sys.stderr)
 
@@ -74,12 +75,20 @@ def over_time_pyramid() -> Pyramid:
     )
 
 
-def _roll_sql(path_index: str) -> str:
-    """One scan's `path-index` → `(depth, path, b, o)` totals + a depth-0
-    fleet-root row (sum of the buckets at depth 1)."""
+def _roll_sql(con: "duckdb.DuckDBPyConnection", path_index: str) -> str:
+    """One scan's `path` sort → `(depth, path, b, o)` totals + a depth-0
+    fleet-root row (sum of the buckets at depth 1). A store generation
+    (`kind` on every row; specs/path-store.md §4.5) contributes its dir rows'
+    `size` / `n_files`; a pre-store index (dir rows only, wire names) its
+    `b` / `o` — the same rows in, the same intervals out, across the switch."""
+    cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path_index}') LIMIT 0").fetchall()}
+    if "kind" in cols:
+        b, o, where = "size", "n_files", " WHERE kind = 'dir'"
+    else:
+        b, o, where = "b", "o", ""
     return (
-        f"WITH t AS (SELECT depth, path, sum(b)::BIGINT AS b, sum(o)::BIGINT AS o "
-        f"FROM read_parquet('{path_index}') GROUP BY depth, path) "
+        f"WITH t AS (SELECT depth, path, sum({b})::BIGINT AS b, sum({o})::BIGINT AS o "
+        f"FROM read_parquet('{path_index}'){where} GROUP BY depth, path) "
         f"SELECT * FROM t UNION ALL SELECT 0, '', sum(b)::BIGINT, sum(o)::BIGINT FROM t WHERE depth = 1"
     )
 
@@ -120,13 +129,13 @@ def write_over_time_index(
         scan_files: list[tuple[str, str]] = []
         for i, (sid, pi) in enumerate(scans):
             shard = shards / f"{i:04d}.parquet"
-            con.execute(f"COPY ({_roll_sql(str(pi))}) TO '{shard}' (FORMAT parquet)")
+            con.execute(f"COPY ({_roll_sql(con, str(pi))}) TO '{shard}' (FORMAT parquet)")
             scan_files.append((sid, str(shard)))
         ms = consolidate_parquet_duckdb(scan_files, over_time_pyramid(), con=con)
         con.register("ms_over_time", ms.table)
         con.execute(
             f"COPY (SELECT * FROM ms_over_time ORDER BY depth, path, {SCAN_LO}) "
-            f"TO '{out_path}' (FORMAT parquet, ROW_GROUP_SIZE {ROW_GROUP_SIZE})"
+            f"TO '{out_path}' (FORMAT parquet, {duckdb_codec()}, ROW_GROUP_SIZE {ROW_GROUP_SIZE})"
         )
         con.unregister("ms_over_time")
         rows = con.execute(f"SELECT count(*) FROM read_parquet('{out_path}')").fetchone()[0]
@@ -215,6 +224,17 @@ MULTISCAN_TIER = "over-time"
 MULTISCAN_ENCODER = "interval"
 
 
+def multiscan_dataset(store: str | None = None) -> str:
+    """The manifest `dataset` of ``store``'s groups: ``over-time`` for the
+    primary, ``<store>:over-time`` for a secondary store (specs/multi-store.md;
+    the site's `overTimeDataset`). pyrmts owns `pyramid_multiscans`, whose
+    ``(dataset, key)`` PK already keeps stores apart — no store column."""
+    from .index_footer import PRIMARY_STORE, check_store
+
+    s = check_store(store or PRIMARY_STORE)
+    return MULTISCAN_DATASET if s == PRIMARY_STORE else f"{s}:{MULTISCAN_DATASET}"
+
+
 def scan_ms(scan: str) -> int:
     """A scan id (`YYYY-MM-DD` or `YYYY-MM-DDTHHMM`, UTC) as epoch milliseconds —
     the manifest's period axis, which orders groups for the reader."""
@@ -235,14 +255,14 @@ def sealed_groups(dates: list[str], group_size: int = OVER_TIME_GROUP_SIZE) -> l
     return [ds[i : i + group_size] for i in range(0, len(ds) - group_size + 1, group_size)]
 
 
-def multiscan_row(scans: list[str], *, written_at_ms: int) -> dict:
+def multiscan_row(scans: list[str], *, written_at_ms: int, store: str | None = None) -> dict:
     """The `pyramid_multiscans` row for one sealed group (mirrors
     `pyrmts_engine.multiscan_index.multiscan_d1_row`): `key` = the group's last
     scan id, `shard_dur` = the group size, period = first..last scan."""
     if not scans:
         raise ValueError("multiscan_row: no scans")
     return {
-        "dataset": MULTISCAN_DATASET,
+        "dataset": multiscan_dataset(store),
         "tier": MULTISCAN_TIER,
         "shard_dur": f"{len(scans)}scans",
         "period_start": scan_ms(scans[0]),
@@ -265,13 +285,13 @@ def manifest_sql(row: dict) -> str:
     return f"INSERT OR REPLACE INTO pyramid_multiscans ({', '.join(cols)}) VALUES ({', '.join(vals)});"
 
 
-def synced_groups(db_id: str | None = None) -> set[str]:
+def synced_groups(db_id: str | None = None, store: str | None = None) -> set[str]:
     """The group keys already in the manifest (a complete group: footer synced,
     row written last)."""
     from .index_footer import D1_DB_ID, _creds, _d1_query
 
     tok, acct = _creds()
-    rows = _d1_query(f"SELECT key FROM pyramid_multiscans WHERE dataset = '{MULTISCAN_DATASET}';", acct, tok, db_id or D1_DB_ID)
+    rows = _d1_query(f"SELECT key FROM pyramid_multiscans WHERE dataset = '{multiscan_dataset(store)}';", acct, tok, db_id or D1_DB_ID)
     return {r["key"] for r in rows}
 
 

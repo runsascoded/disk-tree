@@ -13,16 +13,19 @@
     "clean": "rm -rf node_modules/.vite dist",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:list": "playwright test --list"
+    "test:e2e:list": "playwright test --list",
+    "bench": "node bench/bench.ts",
+    "bench:diff": "node bench/diff.ts"
   },
   "dependencies": {
     "@disk-tree/react": "workspace:*",
     "@floating-ui/react": "^0.27.20",
     "@open-athena/auth": "github:Open-Athena/auth#7442ab0d54d65c850689074e5ca40a0d91ce87ba",
-    "@rdub/file-tree": "https://github.com/runsascoded/file-tree#b64278c27d45479fe09507dabc0e16dd0a4b8b87",
+    "@rdub/file-tree": "https://github.com/runsascoded/file-tree#9d9bd749469aa4ae76b860ea9a403c3ab18df80b",
     "@rdub/treemap": "workspace:*",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-table": "^8.21.3",
+    "fzstd": "0.1.1",
     "hyparquet": "^1.27.1",
     "pyrmts": "github:runsascoded/pyrmts#ad35ff808beb8bbbe8d4fb7dddb894de4421bb62&path:/js/packages/pyrmts",
     "pyrmts-cfw": "github:runsascoded/pyrmts#ad35ff808beb8bbbe8d4fb7dddb894de4421bb62&path:/js/packages/pyrmts-cfw",
@@ -31,11 +34,12 @@
     "react-icons": "^5.7.0",
     "react-router-dom": "^6.30.6",
     "use-kbd": "https://github.com/runsascoded/use-kbd#06ae0cfee696462fb35d761bb413b159eb66a1dd",
-    "use-prms": "^0.4.1"
+    "use-prms": "^0.5.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260820.1",
     "@playwright/test": "^1.56.0",
+    "@types/node": "24.13.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.5.0",

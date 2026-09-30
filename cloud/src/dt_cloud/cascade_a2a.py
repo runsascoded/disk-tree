@@ -37,6 +37,11 @@ def compare(bucket: str, index_path: str, dt_path: str, top: int = 10) -> dict:
     dt_cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{dt_path}') LIMIT 0").fetchall()}
     if not {"path", "usr", "size", "n_files"} <= dt_cols:
         raise ValueError(f"{dt_path}: need path, usr, size, n_files (has {sorted(dt_cols)})")
+    # A v2 listing (spec `listing-slim.md`) leaves a single-valued class pivot
+    # implied: it equals `size` on every row, so it is derived, not compared to 0.
+    from disk_tree.listing_format import format_of
+    implied = {c: src for c, src in format_of(dt_path).implied.items() if c in CLASS_COLS.values()}
+    dt_cols |= set(implied)
     classes = {m: d for m, d in CLASS_COLS.items() if d in dt_cols}
     has_mtime = "mtime_mean" in dt_cols
     b_esc = bucket.replace("'", "''")
@@ -49,7 +54,8 @@ def compare(bucket: str, index_path: str, dt_path: str, top: int = 10) -> dict:
         WHERE path = '{b_esc}' OR path LIKE '{b_esc}/%'
         """
     )
-    con.execute(f"CREATE TEMP TABLE d AS SELECT * REPLACE (CASE WHEN path = '.' THEN '' ELSE path END AS path) FROM read_parquet('{dt_path}')")
+    derived = "".join(f", {src} AS {c}" for c, src in implied.items())
+    con.execute(f"CREATE TEMP TABLE d AS SELECT * REPLACE (CASE WHEN path = '.' THEN '' ELSE path END AS path){derived} FROM read_parquet('{dt_path}')")
     for m, dc in CLASS_COLS.items():
         if dc not in dt_cols:
             con.execute(f"ALTER TABLE d ADD COLUMN {dc} BIGINT DEFAULT 0")

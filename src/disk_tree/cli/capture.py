@@ -51,7 +51,9 @@ def _frame(root: str, names: list[str], sizes: list[int], mtimes: list[int]):
         'bucket': root,
         'name': names,
         'size_bytes': pd.array(sizes, dtype='int64'),
-        'created': pd.to_datetime(mtimes, unit='s', utc=True),
+        # Pinned to ms: parquet has no seconds unit, so a `[s]` frame (pandas 3's
+        # result for `unit='s'`) would read back as `[ms]` — write what reads.
+        'created': pd.to_datetime(mtimes, unit='s', utc=True).astype('datetime64[ms, UTC]'),
         'storage_class_id': pd.array([0] * len(names), dtype='int64'),
     })
 
