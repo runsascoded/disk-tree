@@ -5,14 +5,17 @@ import { migrations, sqliteD1 } from './testD1'
 // lineages, applied over a seeded DB with foreign keys ON (as D1 enforces
 // them): existing rows become the primary store's, nothing else moves, and
 // the rebuilt pointer admits a second store's scan under the same id.
+// `after`: what follows the store migration in its lineage today — a new
+// migration is added here deliberately (and must not touch the index tables
+// this file's specs pin).
 const CASES = [
-  { lineage: 'cw', file: '0006_store_scoped_index.sql' },
-  { lineage: 'gcs', file: '0030_store_scoped_index.sql' },
+  { lineage: 'cw', file: '0006_store_scoped_index.sql', after: ['0007_agents.sql'] },
+  { lineage: 'gcs', file: '0030_store_scoped_index.sql', after: [] },
 ] as const
 
 const SCHEMA_COLS = 'store, date, variant, version, schema_json, floor_bytes, gen, dir'
 
-describe.each(CASES)('$lineage/$file', ({ lineage, file }) => {
+describe.each(CASES)('$lineage/$file', ({ lineage, file, after }) => {
   const seeded = async () => {
     const { raw } = await sqliteD1(lineage, { before: file })
     raw.exec(`
@@ -30,8 +33,9 @@ describe.each(CASES)('$lineage/$file', ({ lineage, file }) => {
     return raw
   }
 
-  it('is the last migration of its lineage', async () => {
-    expect((await migrations(lineage)).at(-1)!.name).toBe(file)
+  it('is followed in its lineage by exactly the migrations listed', async () => {
+    const names = (await migrations(lineage)).map(m => m.name)
+    expect(names.slice(names.indexOf(file))).toEqual([file, ...after])
   })
 
   it('keeps every row, as the primary store, with foreign keys intact', async () => {
