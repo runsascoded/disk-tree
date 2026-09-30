@@ -1,6 +1,6 @@
 # Multi-store deploys: secondary stores at their own URL paths (first user: a `/meta` self-scan)
 
-Status: **phase 1 implemented on the base** (2026-09-29; not yet deployed or migrated anywhere); phases 2–3 open. Proposed 2026-09-29 from the cw-s3 session (Ryan: "(a) multi-store base sg … yes spec it, this is a good direction").
+Status: **phases 1 and 2 implemented on the base** (2026-09-29; not yet deployed or migrated anywhere); phases 3 and 3b open. Proposed 2026-09-29 from the cw-s3 session (Ryan: "(a) multi-store base sg … yes spec it, this is a good direction").
 
 ## Motivation
 
@@ -80,6 +80,28 @@ That spec's phase 2 is a **union** of N locations into one Map. This one is its 
 - a secondary store failing with `no such column: store` on the un-migrated schema.
 
 **Not done in phase 1**: the dev-stack diff of `/api/series` / `/api/subtree` / `/api/diff` before vs after. Every dev stack here points at a prod D1. The byte-identity argument is that the primary's SQL, context object and cache keys are all unchanged. `warm-cache` has no `--store` yet (phase 3).
+
+## Phase 2 as built
+
+**The primary's build is the single-store build.** With `VITE_STORES_EXTRA` unset, `STORES` is `[primary]` as before, `Root` mounts the same routes, and every request is byte-identical: the store seam returns the URL itself and the global `fetch` for the primary, so no `store=` ever appears. CIC'd on the read-only stack (`API_ORIGIN=https://r2.rbw.sh VITE_STORE=r2 VITE_AUTH_MODE=public`): `/` renders, and its `/data/r2/scans.json`, `/data/r2/<scan>/meta.json`, `/api/subtree`, `/api/diff`, `/api/age-pyramid`, `/api/series` requests carry no `store=`.
+
+**Build var** (`site/vite.config.ts`): `STORES_EXTRA` beside `STORE` in `wrangler.toml` `[vars]`, or `VITE_STORES_EXTRA` in the environment — comma-separated registry keys. It is the FE half of `STORES_JSON`: the Functions' entry gives the store its data (`SNAPSHOTS_SUBDIR`, `STORE_*`, `scope`), the registry row gives it its page (`path`, `base`, `label`, `title`, flags), and the two meet on the key. `resolveStores(primary, extra)` in `src/stores.ts` builds the list (primary first) and refuses, at build time, an unknown key, the primary among the extras, a secondary whose `path` is `/`, or two stores on one path.
+
+**The `meta` registry row**: `key: 'meta'`, `path: '/meta'`, `base: '/data/meta'`, label `Meta`, `rootLabel: 'our storage'`, `owners` / `staging` / `prices` off. `base` matches the data Function's read scope for `store=meta` (`snapshots/<SNAPSHOTS_SUBDIR>/` with `SNAPSHOTS_SUBDIR = meta`): `/data/meta/scans.json?store=meta` → `snapshots/meta/`, `/data/meta/<scan>/meta.json?store=meta` → `snapshots/meta/<scan>/meta.json`. The scheme, buckets and copy are placeholders until phase 3 scans it.
+
+**The request seam** (`src/stores.ts`): `storeQuery(store)` is `''` for the primary and `store=<key>` for a secondary (phase 1's `requestedStore`: no param = the primary); `storeUrl(url, store)` appends it (`?` or `&`, before any `#`); `storeFetch(store)` is the global `fetch` for the primary and a URL-rewriting wrapper (string, `URL` or `Request` input) for a secondary. `src/store.tsx` carries the store as a React context: `<StoreProvider store>` / `useStore()` (the primary outside any provider, so every component that used to read `DEFAULT_STORE` keeps its behaviour), `useStoreFetch()`, `useStoreUrl()`.
+
+**Where it's threaded.** `App.tsx` reads its store from the context (not the pathname) and sends `/api/subtree`, `/api/diff`, `/api/age-pyramid` and `<base>/<scan>/*.json` through `useStoreFetch`, with `store.key` in every query key (two mounted stores can share a scan id and a path spelling); `scan.ts` (`useScans`), `LifecycleFold`, `OgPage`, `SizeOverTime` (`/api/series`), `rules.ts` (`/data/rules.json`, enabled by the subtree's `owners`) likewise. `FilesPage` browses `/v1/files?store=<key>` through file-tree's `HttpStore` `fetch` option, and `/api/store?store=<key>`; the primary's client is built with no `fetch` option, exactly as before. `ChildrenTable` takes `staging` / `owners` from the subtree's store, so a secondary store has no trash gesture and no assignment column. `useDocTitle` uses the subtree's store title. `plans.ts` (the executor and `/api/plans/*`) stays the primary's: staging is off on every secondary store, so those calls never fire there.
+
+**Router** (`src/Root.tsx`): per secondary store, `<path>/files/*` → `FilesPage` and `<path>/*` → `App`, each inside `<StoreProvider>` behind the same `AuthGate`; `<path>/og` already came from the `STORES` map. No `/users`, `/assignments`, `/staged` or `/admin` under a secondary path — those pages are the primary's, and their Functions 404 for any other store (phase 1). A wrong first segment under `/meta` gets `App`'s 404 with a `home` link to `/meta`.
+
+**Store switcher** (multi-store builds only; a single-store build shows nothing new): the ☰ menu (`SiteNav.tsx`) links the subtree's own `Map` (`store.path`) and `Scans` (`<path>/files`) and lists every configured store with the current one marked; the omnibar (`SiteKbd.tsx`) offers `<label> store (<path>)` actions for the *other* stores under Pages, and its `Map (home)` / `Browse scans` entries are store-relative. The per-store `store:<key>` actions `App` used to register (a self-link on a single-store build) moved there.
+
+**Tests** (`src/stores.test.ts`, 14): resolution (the untouched build, a primary, extras trimmed / de-duplicated, the four refusals with exact messages), the exact URLs a primary and a secondary store request (`/data/*`, `/api/*`, `/v1/files/*`, with and without a query, with a fragment), `storeFetch` (the primary's is the given fetch itself; a secondary's over string / URL / Request inputs, init passed through), `storeForPath`.
+
+**CIC'd** with `VITE_STORES_EXTRA=meta` on the same read-only stack: `/meta` mounts (title `Our storage — scan & index data`, crumb `our storage`), requests `/data/meta/scans.json?store=meta` (404 from r2.rbw.sh, which has no `STORES_JSON` — expected), the ☰ menu shows `Map` → `/meta`, `Scans` → `/meta/files`, then `R2 /` and `Meta /meta` (current); switching to R2 renders the primary with its unchanged requests; `/meta/files` requests `/v1/files/list?prefix=&store=meta` and `/api/store?store=meta`.
+
+**Not done in phase 2**: nothing deployed (no `STORES_EXTRA` in any `wrangler.toml`); the login wall's copy stays the primary's (`AuthGate` reads `DEFAULT_STORE`) — a secondary store's `scope` is enforced server-side and surfaces as the scan-list error strip; `index.html`'s `<title>` / og tags are the primary's; `/meta/og` renders but no og image is generated for it (`pnpm shots` is per deploy).
 
 ## Open questions
 

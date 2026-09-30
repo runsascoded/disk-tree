@@ -7,6 +7,8 @@ import { useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { SiteNav } from './SiteNav'
 import { SiteKbd } from './SiteKbd'
+import { useStore, useStoreFetch } from './store'
+import { storeQuery } from './stores'
 import { useDocTitle } from './title'
 import { Tooltip } from './Tooltip'
 import { CopyName } from './CopyName'
@@ -15,19 +17,32 @@ import { useUnits } from './units'
 
 // Same-origin proxy (CF Pages Function, app session required) → the raw scan
 // store. Which store, and which prefixes the function allow-lists, is the
-// deployment's config (`STORE_*` in wrangler.toml) — `/api/store` reports it.
-const store = HttpStore('/v1/files')
+// deployment's config (`STORE_*` in wrangler.toml; a secondary store's
+// `STORES_JSON` entry, read with `store=<key>`) — `/api/store` reports it.
+const FILES_API = '/v1/files'
+/** file-tree's client over the proxy, as this subtree's store reads it: the
+ * primary's requests are exactly the default client's (no `fetch` option —
+ * the global one, called as file-tree calls it); a secondary store's carry
+ * `store=<key>` through `storeFetch`. */
+function useFilesStore() {
+  const store = useStore()
+  const sfetch = useStoreFetch()
+  return useMemo(() => HttpStore(FILES_API, storeQuery(store) ? { fetch: sfetch } : {}), [store, sfetch])
+}
 interface StoreInfo { uri: string; prefixes: string[] }
-const useStoreInfo = () =>
-  useQuery<StoreInfo>({
-    queryKey: ['store'],
+function useStoreInfo() {
+  const store = useStore()
+  const sfetch = useStoreFetch()
+  return useQuery<StoreInfo>({
+    queryKey: ['store', store.key],
     queryFn: async () => {
-      const r = await fetch('/api/store')
+      const r = await sfetch('/api/store')
       if (!r.ok) throw new Error(`store: ${r.status}`)
       return r.json()
     },
     staleTime: Infinity,
   })
+}
 
 // The parquet viewer with file-tree's `elide` strategy for wide cells (the
 // sweep logs' `name`/`dir` columns are long GCS paths): the column still clips
@@ -104,10 +119,15 @@ const headerProps = () => ({ style: { fontWeight: 650, borderBottom: '1px solid 
 const viewerOpts = { elide: { tooltip: elideTooltip }, headerProps, resizableColumns: { scope: 'schema' as const } }
 
 export function FilesPage() {
+  // The page lives at `<store path>/files` — `/files` for the primary, `/meta/files`
+  // for a secondary store — and browses that store's proxy.
+  const store = useStore()
+  const routeBase = `${store.path === '/' ? '' : store.path}/files`
+  const files = useFilesStore()
   // Reflect where in the store the reader is drilled: `.../sweep/runs` →
   // "runs · Files", a parquet file → "<file> · Files", the root → "Files".
   const { pathname } = useLocation()
-  const seg = decodeURIComponent(pathname.replace(/^\/files\/?/, '').replace(/\/$/, '').split('/').pop() ?? '')
+  const seg = decodeURIComponent(pathname.slice(routeBase.length).replace(/^\//, '').replace(/\/$/, '').split('/').pop() ?? '')
   useDocTitle(seg || undefined, 'Files')
   const { fmtBytes } = useUnits()
   const parquetViewer = useMemo(() => makeParquetViewer({ ...viewerOpts, renderCell: makeRenderCell(fmtBytes) }), [fmtBytes])
@@ -119,8 +139,8 @@ export function FilesPage() {
         Raw scan store{info ? <> — <code>{info.uri}</code> ({info.prefixes.map((p, i) => <span key={p}>{i ? ' + ' : ''}<code>{p}</code></span>)})</> : null}, access-gated.
       </p>
       <FileTree
-        store={store}
-        routeBase="/files"
+        store={files}
+        routeBase={routeBase}
         title="Scan data — raw listings + snapshots"
         parquetRenderer={parquetViewer}
       />

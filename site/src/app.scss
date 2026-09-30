@@ -320,6 +320,8 @@ button.mini.neg {
     &[aria-current] { font-weight: 650; }
     b { font-weight: 650; }
   }
+  // The store switcher's rows (a multi-store deploy): the store's label, its path dimmed after it.
+  .store-link .dim { color: var(--ink-3); font-size: 12px; }
   &.user-menu { min-width: 250px; .user-card { padding: 4px 6px 2px; } }
 }
 .scan-tip { display: grid; gap: 3px; b { color: inherit; } .classmix { margin-top: 4px; } }

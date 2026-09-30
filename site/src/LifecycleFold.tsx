@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { describeRule, displayId, groupRows, lifecycleDiffByBucket, parseLifecycle, rulePrefix } from './lifecycle'
 import type { BucketLifecycleRow, LifecycleSnapshot } from './lifecycle'
-import type { Store } from './stores'
+import { storeUrl, type Store } from './stores'
 import { Tooltip } from './Tooltip'
 
 // Each bucket's lifecycle rules as the scan job snapshotted them
@@ -23,7 +23,7 @@ function useLifecycle(store: Store, scan: string | null | undefined) {
     enabled: !!lc && !!scan && (!lc.recordedFrom || scan >= lc.recordedFrom),
     staleTime: Infinity,
     queryFn: async () => {
-      const r = await fetch(`${store.base}/${scan}/lifecycle.json`)
+      const r = await fetch(storeUrl(`${store.base}/${scan}/lifecycle.json`, store))
       return r.ok ? parseLifecycle(await r.json(), store.buckets[0], lc!.rules) : null
     },
   })

@@ -2,8 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useScans } from './scan'
 import { Treemap } from './Treemap'
-import type { Store } from './stores'
-import { DEFAULT_STORE } from './stores'
+import { DEFAULT_STORE, storeUrl, type Store } from './stores'
 import type { TreeNode } from './types'
 import type { UserIndexEntry } from './colors'
 
@@ -45,11 +44,11 @@ export function OgPage({ store = DEFAULT_STORE }: { store?: Store }) {
   // the same `/api/subtree` the map draws, through the query cache.
   const asof = useScans(store).data?.[0]
   const treeQ = useQuery<{ tree: TreeNode }>({
-    queryKey: ['subtree', asof, '', 1200, '', 'og'],
+    queryKey: ['subtree', store.key, asof, '', 1200, '', 'og'],
     enabled: !!asof,
     staleTime: Infinity,
     queryFn: async () => {
-      const r = await fetch(`/api/subtree?date=${asof}&path=&w=1200&h=630`, { credentials: 'include' })
+      const r = await fetch(storeUrl(`/api/subtree?date=${asof}&path=&w=1200&h=630`, store), { credentials: 'include' })
       if (!r.ok) throw new Error(`subtree: ${r.status}`)
       return r.json()
     },

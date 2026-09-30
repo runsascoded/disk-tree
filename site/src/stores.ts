@@ -167,21 +167,104 @@ const REGISTRY: Store[] = [
       signIn: 'Sign in',
     },
   },
+  {
+    // The deploy's own storage (specs/multi-store.md): the scan + index data
+    // the deployments write — the GCS snapshot bucket and its R2 mirror — as
+    // a secondary store, mounted under `/meta` beside a primary (`STORES_EXTRA`).
+    // Its data is the same layer-3 shape under `snapshots/meta/`, served by the
+    // Functions with `store=meta` (`STORES_JSON` → `SNAPSHOTS_SUBDIR = meta`).
+    // Staff-only server-side (the store's `scope`); no ownership ledger, no
+    // trash gesture, no storage-class prices.
+    key: 'meta',
+    label: 'Meta',
+    title: 'Our storage — scan & index data',
+    desc: 'The scan and index data these deployments write (the GCS snapshot bucket and its R2 mirror) — treemap, sizes over time, and diffs.',
+    path: '/meta',
+    scheme: 'gs://',
+    base: '/data/meta',
+    ogImage: '/og.jpg',
+    prices: false,
+    staging: false,
+    owners: false,
+    executor: 'plan-sweep',
+    buckets: ['oa-gcs-usage-dvx', 'oa-cw-s3-usage-index'],
+    rootLabel: 'our storage',
+    objectsNote: 'Scan outputs are written once per job run and never rewritten in place, so created is the object’s publish time.',
+    wall: {
+      restrict: 'The meta store is limited to Open Athena staff.',
+      signIn: 'Sign in with Open Athena',
+    },
+  },
 ]
 
-// A deployment serves one store, selected by VITE_STORE at build time (unset =
-// the first registry store, so the cw-s3 build is unchanged). The "deployment
-// as configuration" seam for the shared base (specs/union-of-roots.md).
-export const STORES: Store[] = import.meta.env.VITE_STORE
-  ? REGISTRY.filter(s => s.key === import.meta.env.VITE_STORE)
-  : [REGISTRY[0]]
+/** The registry rows a build serves, primary first.
+ *
+ * A deployment serves one **primary** store, selected by `VITE_STORE` at build
+ * time (unset = the first registry store, so the cw-s3 build is unchanged) —
+ * the "deployment as configuration" seam for the shared base
+ * (specs/union-of-roots.md). `VITE_STORES_EXTRA` (comma-separated keys) adds
+ * **secondary** stores, each mounted under its own `path` (`/meta`) and read
+ * through the same Functions with `store=<key>` (specs/multi-store.md phase 2).
+ * The primary keeps `/` and its requests carry no `store=` at all, so a build
+ * without extras is exactly the single-store build. A misconfiguration is a
+ * build-time error, not an empty page. */
+export function resolveStores(primary: string | undefined, extra: string | undefined): Store[] {
+  const find = (key: string): Store => {
+    const s = REGISTRY.find(r => r.key === key)
+    if (!s) throw new Error(`stores: no registry store '${key}' (have ${REGISTRY.map(r => r.key).join(', ')})`)
+    return s
+  }
+  const first = primary ? find(primary) : REGISTRY[0]
+  const out = [first]
+  for (const key of [...new Set((extra ?? '').split(',').map(k => k.trim()).filter(Boolean))]) {
+    if (key === first.key) throw new Error(`stores: '${key}' is the primary store (VITE_STORE); it can't also be in VITE_STORES_EXTRA`)
+    const s = find(key)
+    if (s.path === '/') throw new Error(`stores: secondary store '${key}' has no path of its own (path '/' is the primary's)`)
+    if (out.some(o => o.path === s.path)) throw new Error(`stores: '${key}' shares path '${s.path}' with another configured store`)
+    out.push(s)
+  }
+  return out
+}
 
+export const STORES: Store[] = resolveStores(import.meta.env.VITE_STORE, import.meta.env.VITE_STORES_EXTRA)
+
+/** The primary store: `/`, and every request as it was before stores existed. */
 export const DEFAULT_STORE = STORES[0]
 
-// Longest matching path wins. (This deployment — cw-s3.oa.dev, the `cw-s3`
-// branch — serves the CoreWeave store only; the GCS view is gcs.oa.dev.)
-export const storeForPath = (pathname: string): Store =>
-  [...STORES]
+/** The `store=<key>` a secondary store's requests carry; `''` for the primary
+ * (`_lib/stores.ts` `requestedStore`: no param = the primary). */
+export const storeQuery = (store: Store, primary: Store = DEFAULT_STORE): string =>
+  store.key === primary.key ? '' : `store=${encodeURIComponent(store.key)}`
+
+/** `url` as `store` fetches it: unchanged for the primary, else with
+ * `store=<key>` appended to the query (`?` or `&` as needed). Every data
+ * request (`/api/*`, `/data/*`, `/v1/files/*`) goes through this, so the
+ * Functions resolve the store from the one param. */
+export function storeUrl(url: string, store: Store, primary: Store = DEFAULT_STORE): string {
+  const q = storeQuery(store, primary)
+  if (!q) return url
+  const hash = url.indexOf('#')
+  const [head, frag] = hash < 0 ? [url, ''] : [url.slice(0, hash), url.slice(hash)]
+  return `${head}${head.includes('?') ? '&' : '?'}${q}${frag}`
+}
+
+/** A `fetch` bound to `store`: the global one for the primary (byte-identical
+ * requests), else one that rewrites each URL with `storeUrl`. Also what a
+ * file-tree `HttpStore` takes as its `fetch` option. */
+export function storeFetch(store: Store, primary: Store = DEFAULT_STORE, impl: typeof fetch = fetch): typeof fetch {
+  if (!storeQuery(store, primary)) return impl
+  return (input, init) => impl(
+    typeof input === 'string' ? storeUrl(input, store, primary)
+      : input instanceof URL ? storeUrl(input.toString(), store, primary)
+      : new Request(storeUrl(input.url, store, primary), input),
+    init,
+  )
+}
+
+/** The configured store a location belongs to: the longest matching secondary
+ * `path` (`/meta`, `/meta/…`), else the primary. */
+export const storeForPath = (pathname: string, stores: Store[] = STORES): Store =>
+  [...stores.slice(1)]
     .sort((a, b) => b.path.length - a.path.length)
-    .find(s => s.path !== '/' && (pathname === s.path || pathname.startsWith(`${s.path}/`)))
-  ?? DEFAULT_STORE
+    .find(s => pathname === s.path || pathname.startsWith(`${s.path}/`))
+  ?? stores[0]
