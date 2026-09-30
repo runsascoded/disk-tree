@@ -490,6 +490,12 @@ h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
     font-size: 0.92em;
   }
 }
+.authwall .card.privacy {
+  max-width: 560px;
+  text-align: left;
+  h2 { font-size: 1.05em; margin: 1.2em 0 0.4em; color: var(--ink); }
+  p + p { margin-top: 0.6em; }
+}
 .loading { color: var(--ink-3); }
 
 // Cross-site link (prod hosts are one-store-each; see App's `crossSite`).
