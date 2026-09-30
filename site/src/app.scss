@@ -63,7 +63,8 @@ main {
   padding: var(--pad-t) var(--pad-x) 48px;
   display: flex;
   flex-direction: column;
-  gap: 22px;
+  --main-gap: 22px;
+  gap: var(--main-gap);
 }
 header h1 { font-size: 24px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
 header .hrow {
@@ -958,13 +959,20 @@ h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
 .diff-move {
   border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums;
   margin: 1px 2px 2px;
-  // Labels and numbers both nowrap: in a narrow card the table scrolls
-  // sideways as a whole, instead of the label column collapsing to one letter
-  // per line while the nowrap numbers keep their width.
+  // The label is `nowrap` like the numbers: in a narrow dock the table
+  // otherwise squeezes it to one letter per line ("b / y / t / e / s").
   th { text-align: left; font-weight: 500; color: var(--ink-2); padding: 0 10px 0 0; white-space: nowrap; }
   td { text-align: right; padding: 0 0 0 12px; white-space: nowrap; }
   td.eq { color: var(--ink); }
+  @media (max-width: 640px) {
+    font-size: 11.5px;
+    th { padding-right: 6px; }
+    td { padding-left: 7px; }
+  }
 }
+// Still too wide (a ⊕ first-scanned column on a small phone): the dock scrolls
+// sideways rather than crushing a column.
+.dt-treemap-tip.dock:has(.diff-move) { overflow-x: auto; }
 // The diff tip is a line taller (path + bytes + objects + status) than the
 // main map's, so its docked panel gets more fixed height.
 .diff-tm .dt-treemap-tip.dock { --dt-dock-h: 112px; }
@@ -2070,7 +2078,13 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
   .topbar.ctrl-hidden .tb-row2 { transform: translateY(-100%); opacity: 0; pointer-events: none; }
   // The flow spacer reserves the controls' measured height at the top so the
   // overlay covers no content there; it rides off-screen once scrolled.
-  .tb-row2-spacer { height: var(--tb-row2-h, 0); }
+  // It starts flush under row 1, where the tray does (cancelling main's flex
+  // gap above it), and leaves a tighter gap to the content below — otherwise
+  // the map sat two full gaps under the tray.
+  .tb-row2-spacer { height: var(--tb-row2-h, 0); margin: calc(-1 * var(--main-gap)) 0 -10px; }
+  // The map's own bar holds only the legend here (crumbs and ⛶ are hidden on
+  // a phone); with no legend it's an empty 22px strip over the map.
+  .treemap .dt-treemap-bar:not(:has(.dt-treemap-legend > *)) { display: none !important; }
   .topbar .brand { display: none; }
   .topbar .tb-suffix { display: none; }
   // The path clips itself with an ellipsis on wide screens; on a phone the
