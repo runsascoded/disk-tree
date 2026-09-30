@@ -5,6 +5,7 @@ import { AdminDbPage } from './AdminDbPage'
 import { AdminPage } from './AdminPage'
 import App from './App'
 import { AuthGate, SignInPage } from './AuthGate'
+import { PrivacyPage } from './PrivacyPage'
 import { FilesPage } from './FilesPage'
 import { AssignmentsPage } from './AssignmentsPage'
 import { StagedPage } from './StagedPage'
@@ -31,6 +32,7 @@ export default function Root() {
       ))}
       {/* The wall as a page (ungated): where the inline "sign in" links go. */}
       <Route path="/signin" element={<SignInPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/admin" element={<AuthGate><AdminPage /></AuthGate>} />
       <Route path="/admin/db" element={<AuthGate><AdminDbPage /></AuthGate>} />
       <Route path="/admin/db/:table" element={<AuthGate><AdminDbPage /></AuthGate>} />
