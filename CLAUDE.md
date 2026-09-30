@@ -116,6 +116,19 @@ disk-tree migrate-row-groups [DIR|URL]  # Rewrite scan blobs to ≤64K-row parqu
                           # ~40 ms at 1M rows; over R2 a `depth ≤ 2` view fetches ~2 MiB vs ~38 MiB).
                           # Default: the write dir; `r2://bucket/prefix` rewrites remote blobs where they are
 
+disk-tree recompress PATH…  # Rewrite v1 layer-2 listings as v2 in place, lossless (spec `listing-slim.md`
+                          # phase 2): files, dirs (recursive `*.parquet`, sidecars skipped) or fsspec URLs
+                          # (`gs://`, `r2://`, `s3://`). Streams by row group (never a whole file in memory):
+                          # drops `uri` (scan root → metadata; refused unless `uri == <root>/<path>` on every
+                          # row) and the `sum_*` pivots equal to `size`, re-encodes under
+                          # `$DISK_TREE_PARQUET_CODEC` in ≤64K-row groups to a `.v2.tmp` sibling, verifies
+                          # (row count + order-insensitive digest of `(path,size,mtime,kind)`), then swaps
+                          # (atomic rename; copy + delete on a URL). v2 input is skipped; a failure leaves
+                          # the original untouched, exit 1. `-n` dry-run, `-k` keeps `<stem>.v1.parquet`,
+                          # `-j` JSON. Per-file old/new size + ratio, and totals
+disk-tree listing-format PATH…  # The audit: each parquet's listing format (v1 | v2 | not-a-listing), codec,
+                          # row groups, rows, size (+ root/implied for v2) from the footer only; `-j` JSON
+
 disk-tree filter URI QUERY  # Recursive filter, true re-aggregation: sizes of everything matching QUERY
                             # (`/…/` regex or substring); outermost matches only — never double-counts
                             # Slash-free queries match path segments (basenames); queries with `/` match
