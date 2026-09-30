@@ -119,11 +119,11 @@ def test_tiers_from_either_format(tmp_path: Path, codec):
     assert lf.format_of(v1) == lf.V1
     w1 = write_tiers(v1, str(tmp_path / 't1'))
     w2 = write_tiers(v2, str(tmp_path / 't2'))
-    assert list(w1.values()) == list(w2.values()) == [4, 5, 4]
+    assert list(w1.values()) == list(w2.values()) == [9, 9]
     for a, b in zip(w1, w2):
         pd.testing.assert_frame_equal(read_parquet(a), read_parquet(b))
         assert _codecs(a) == _codecs(b) == {codec}
         assert lf.format_of(b) == lf.format_of(v2)
     con = duckdb.connect()
-    dirs1, dirs2 = str(tmp_path / 't1.dirs.parquet'), str(tmp_path / 't2.dirs.parquet')
-    assert [live_bucket(con, p) for p in (v1, v2, dirs1, dirs2)] == ['b1'] * 4
+    path1, path2 = str(tmp_path / 't1.path.parquet'), str(tmp_path / 't2.path.parquet')
+    assert [live_bucket(con, p) for p in (v1, v2, path1, path2)] == ['b1'] * 4

@@ -129,6 +129,27 @@ disk-tree recompress PATH…  # Rewrite v1 layer-2 listings as v2 in place, loss
 disk-tree listing-format PATH…  # The audit: each parquet's listing format (v1 | v2 | not-a-listing), codec,
                           # row groups, rows, size (+ root/implied for v2) from the footer only; `-j` JSON
 
+disk-tree tiers L2        # Cut the path store's sorts (spec `path-store.md` §1.2/§4.1) from a layer-2 — a
+                          # local path or an fsspec URL (copied once through `blobfs.open_read`): `path` =
+                          # every row (objects + dirs) sorted `(depth, path, …labels)`; `bysize` = the same
+                          # rows sorted `(⌊log2 size⌋ desc, path, …labels)`, size 0 last, the bucket computed
+                          # in SQL (never stored). 8K-row groups (`-r`), `tier`/`sort` (+ `bucket: log2`) in
+                          # the parquet metadata, the source's listing format inherited. `-t path,bysize`
+                          # (default both), `-s STEM` (may be a URL: cut locally, uploaded), `-g` writes the
+                          # `.groups.json` footer sidecar beside each (`find/groups.py`; carries `b_min` now),
+                          # `-v usr` extra sorted copies led by those columns, `-j` JSON. Prints rows, groups,
+                          # bytes, KV per tier. `import -i` does the same at import time (bare `-i` = both;
+                          # the `dirs`/`objects`/`coarse` tiers are retired)
+disk-tree tiers plan SIDECAR P THR  # The reader's span selection run offline over a tier's `.groups.json`
+                          # (phase 0's instrument): for `path` it mirrors `readRects` exactly (depth rect
+                          # `dP+1..`, path range `[P/, P0)`, `b_max ≥ thr·atten^(d−dP−1)` per group); for
+                          # `bysize` it is `b_max ≥ thr_min ∧ p_max ≥ P/ ∧ p_min < P0`. Reports groups
+                          # selected, rows they hold, bytes (compressed chunks), and — from the parquet —
+                          # rows that actually pass, i.e. the decode waste. `P` = `.` for the root; `-a`
+                          # attenuation, `-d` max depth, `-t` tier (default: from the name), `-C` skips the
+                          # count, `-j` JSON. Measured on a 20K-child flat dir at 2048-row groups: `path`
+                          # decodes 10 groups / 20,015 rows for 1,250 answers, `bysize` 1 group / 2,048
+
 disk-tree filter URI QUERY  # Recursive filter, true re-aggregation: sizes of everything matching QUERY
                             # (`/…/` regex or substring); outermost matches only — never double-counts
                             # Slash-free queries match path segments (basenames); queries with `/` match
