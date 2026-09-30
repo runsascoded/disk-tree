@@ -217,7 +217,7 @@ function UserMenu() {
     <>
       {tokenOpen && <TokenModal onClose={() => setTokenOpen(false)} />}
       <button type="button" className="tb-avatar" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label={`Signed in as ${dispName}`} title={dispName}>
-        {guest
+        {guest || ident.avatar
           ? <Avatar src={ident.avatar} name={dispName} size={26} />
           : <Avatar github={ghHandle(who)} name={shortName(who)} size={26} />}
       </button>
@@ -227,7 +227,7 @@ function UserMenu() {
             <div className="menu-pop user-menu" ref={m.refs.setFloating} style={m.floatingStyles} {...m.getFloatingProps()}>
               {guest
                 ? <GuestCard name={dispName} avatar={ident.avatar} email={ident.email} />
-                : <UserCard who={who} extra={<SessionLines email={ident.email} user={myUser} emails={emails} />} />}
+                : <UserCard who={who} avatar={ident.avatar} extra={<SessionLines email={ident.email} user={myUser} emails={emails} />} />}
               <hr />
               <Explain text="Byte units, site-wide: binary (TiB) ↔ decimal (TB)">
                 <button type="button" role="menuitem" className="mi" onClick={() => toggleUnits()}>
