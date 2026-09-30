@@ -201,11 +201,11 @@ describe('handlers', () => {
     // A public deploy: anonymous viewers hold the base scope only.
     const pub = { ...PRIMARY, PUBLIC_READ: '1' } as Env
     const primaryId = await requireViewer({ request: req(''), env: pub })
-    expect(primaryId).toEqual({ email: null, name: null, scopes: ['cw'], admin: false, via: 'public' })
+    expect(primaryId).toEqual({ email: null, name: null, scopes: ['cw'], admin: false, via: 'public', subject: null })
     const r = await requireViewer({ request: req('store=meta'), env: storeEnv(pub, 'meta', META) }) as Response
     expect([r.status, await r.text()]).toEqual([401, '{"error":"unauthenticated"}\n'])
     // Localhost dev holds every scope, `admin` included.
     const dev = await requireViewer({ request: new Request('http://localhost/api/subtree?store=meta'), env: storeEnv(PRIMARY, 'meta', META) })
-    expect(dev).toEqual({ email: 'dev@example.test', name: null, scopes: ['gcs', 'cw', 'admin', 'requests'], admin: true, via: 'session' })
+    expect(dev).toEqual({ email: 'dev@example.test', name: null, scopes: ['gcs', 'cw', 'admin', 'requests'], admin: true, via: 'session', subject: null })
   })
 })
