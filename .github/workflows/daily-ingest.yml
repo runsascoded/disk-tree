@@ -1,9 +1,10 @@
 # Daily r2.rbw.sh ingestion, moved off the laptop LaunchAgent to GHA (reliable
 # scheduling; the LaunchAgent never fired). Mirrors scripts/r2-ingest.sh: list
-# the three public buckets → union path-index + coarse tiers + snapshot → upload
-# to disk-tree-demo → publish footers to the D1 the Map reads. Idempotent per
-# date (a fresh generation flips the pointer). Run it by hand anytime via
-# "Run workflow" (workflow_dispatch).
+# the three public buckets → the union's path store (`path` + `bysize` sorts,
+# objects included; specs/path-store.md §4.4) + snapshot → upload to
+# disk-tree-demo → publish footers to the D1 the Map reads. Idempotent per date
+# (a fresh generation flips the pointer). Run it by hand anytime via "Run
+# workflow" (workflow_dispatch).
 #
 # Creds (repo secrets/vars): R2_HCCS_RO_* + R2_HCCS_ENDPOINT_URL (ctbk/crashes,
 # HCCS account); R2_DEMO_SRC_RO_* (token "disky demo bkts RO": read, RAC
@@ -54,7 +55,7 @@ jobs:
           list "${{ secrets.R2_HCCS_RO_ACCESS_KEY_ID }}" "${{ secrets.R2_HCCS_RO_SECRET_ACCESS_KEY }}" ctbk     "$HCCS_ENDPOINT"
           list "${{ secrets.R2_HCCS_RO_ACCESS_KEY_ID }}" "${{ secrets.R2_HCCS_RO_SECRET_ACCESS_KEY }}" crashes  "$HCCS_ENDPOINT"
           list "${{ secrets.R2_DEMO_SRC_RO_ACCESS_KEY_ID }}" "${{ secrets.R2_DEMO_SRC_RO_SECRET_ACCESS_KEY }}" jc-taxes "$RAC_ENDPOINT"
-      - name: Union → path-index + coarse tiers + snapshot
+      - name: Union → path store (path + bysize sorts) + snapshot
         run: |
           cd cloud && uv run dt-cloud path-index -d "${{ steps.d.outputs.date }}" \
             -l "$GITHUB_WORKSPACE/work/listing/*/*.parquet" \
@@ -81,7 +82,7 @@ jobs:
           cd cloud && uv run dt-cloud index-sync "${{ steps.d.outputs.date }}" \
             -g "${{ steps.d.outputs.gen }}" -b "$BUCKET" \
             -k "listing/${{ steps.d.outputs.date }}/index/${{ steps.d.outputs.gen }}" \
-            -d "$GITHUB_WORKSPACE/work/index" -v path -v coarse16 -v coarse20 -v coarse24
+            -d "$GITHUB_WORKSPACE/work/index" -v path -v bysize
       - name: Smoke — the new generation serves
         run: |
           set -euo pipefail

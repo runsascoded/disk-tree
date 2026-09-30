@@ -184,6 +184,35 @@ def test_compose_fits_discord_limit_by_dropping_tail_movers():
     assert len(ups) + len(downs) < 60
 
 
+def test_read_table_takes_both_index_generations(tmp_path):
+    """`read_table` builds the same `Table` from a pre-store index (dir rows,
+    `b`/`o`) and a store sort (`kind`, `size`, `n_files`, object rows) —
+    dir rows to MAX_DEPTH, objects left out."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    rows = [("mb", 1, None, 50 * GIB, 5), ("mb/x", 2, "ann-a", 30 * GIB, 3), ("mb/x", 2, None, 20 * GIB, 2), ("mb/a/b/c/d/e", 6, "ann-a", GIB, 1)]
+    legacy = tmp_path / "legacy.parquet"
+    pq.write_table(pa.table({
+        "path": [r[0] for r in rows], "depth": [r[1] for r in rows], "usr": pa.array([r[2] for r in rows], pa.string()),
+        "b": [r[3] for r in rows], "o": [r[4] for r in rows],
+    }), legacy)
+    store = tmp_path / "store.parquet"
+    objs = [("mb/x/o1.bin", 3, "ann-a", 30 * GIB, 1), ("mb/o2.bin", 2, None, 20 * GIB, 1)]
+    pq.write_table(pa.table({
+        "path": [r[0] for r in rows + objs], "depth": [r[1] for r in rows + objs], "usr": pa.array([r[2] for r in rows + objs], pa.string()),
+        "kind": ["dir"] * len(rows) + ["file"] * len(objs),
+        "size": [r[3] for r in rows + objs], "n_files": [r[4] for r in rows + objs],
+    }), store)
+    for f in (legacy, store):
+        t = W.read_table(str(f))
+        assert (t.total, t.depth, t.slices) == (
+            {"mb": 50 * GIB, "mb/x": 50 * GIB},
+            {"mb": 1, "mb/x": 2},
+            {"mb/x": {"ann-a": 30 * GIB}},
+        )
+
+
 def test_prior_scan_skips_to_the_newest_scan_at_least_a_week_back():
     dates = ["2026-09-01", "2026-09-05", "2026-09-06", "2026-09-07", "2026-09-13", "2026-09-14"]
     assert W.prior_scan(dates, "2026-09-14") == "2026-09-07"

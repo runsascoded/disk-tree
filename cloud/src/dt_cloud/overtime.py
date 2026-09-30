@@ -6,8 +6,9 @@ Phase 1).
 The SCD-2 interval consolidation is **pyrmts' generic multiscan kernel**
 (`pyrmts_engine.multiscan_duckdb.consolidate_parquet_duckdb` — vectorized
 gaps-and-islands over `read_parquet`, out-of-core). cw supplies only the glue:
-roll each scan's `path-index` to `(depth, path)` totals (owner slices summed
-away — over-time is `(path)`-granular) plus a depth-0 fleet-root row, and hand
+roll each scan's `path` sort to `(depth, path)` totals of its dir rows (owner
+slices summed away — over-time is `(path)`-granular; object rows, present since
+the path store, are not series) plus a depth-0 fleet-root row, and hand
 the per-scan shards to pyrmts keyed as a `Pyramid(binCol='depth', dims=[path],
 metrics=count(b,o))` — which yields exactly `(depth, path, b, o, __scan_lo,
 __scan_hi)`. Interval bounds index the ordered scan list; storage is ~static
@@ -74,12 +75,20 @@ def over_time_pyramid() -> Pyramid:
     )
 
 
-def _roll_sql(path_index: str) -> str:
-    """One scan's `path-index` → `(depth, path, b, o)` totals + a depth-0
-    fleet-root row (sum of the buckets at depth 1)."""
+def _roll_sql(con: "duckdb.DuckDBPyConnection", path_index: str) -> str:
+    """One scan's `path` sort → `(depth, path, b, o)` totals + a depth-0
+    fleet-root row (sum of the buckets at depth 1). A store generation
+    (`kind` on every row; specs/path-store.md §4.5) contributes its dir rows'
+    `size` / `n_files`; a pre-store index (dir rows only, wire names) its
+    `b` / `o` — the same rows in, the same intervals out, across the switch."""
+    cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path_index}') LIMIT 0").fetchall()}
+    if "kind" in cols:
+        b, o, where = "size", "n_files", " WHERE kind = 'dir'"
+    else:
+        b, o, where = "b", "o", ""
     return (
-        f"WITH t AS (SELECT depth, path, sum(b)::BIGINT AS b, sum(o)::BIGINT AS o "
-        f"FROM read_parquet('{path_index}') GROUP BY depth, path) "
+        f"WITH t AS (SELECT depth, path, sum({b})::BIGINT AS b, sum({o})::BIGINT AS o "
+        f"FROM read_parquet('{path_index}'){where} GROUP BY depth, path) "
         f"SELECT * FROM t UNION ALL SELECT 0, '', sum(b)::BIGINT, sum(o)::BIGINT FROM t WHERE depth = 1"
     )
 
@@ -120,7 +129,7 @@ def write_over_time_index(
         scan_files: list[tuple[str, str]] = []
         for i, (sid, pi) in enumerate(scans):
             shard = shards / f"{i:04d}.parquet"
-            con.execute(f"COPY ({_roll_sql(str(pi))}) TO '{shard}' (FORMAT parquet)")
+            con.execute(f"COPY ({_roll_sql(con, str(pi))}) TO '{shard}' (FORMAT parquet)")
             scan_files.append((sid, str(shard)))
         ms = consolidate_parquet_duckdb(scan_files, over_time_pyramid(), con=con)
         con.register("ms_over_time", ms.table)

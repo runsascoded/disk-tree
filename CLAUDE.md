@@ -139,7 +139,10 @@ disk-tree tiers L2        # Cut the path store's sorts (spec `path-store.md` §1
                           # `.groups.json` footer sidecar beside each (`find/groups.py`; carries `b_min` now),
                           # `-v usr` extra sorted copies led by those columns, `-j` JSON. Prints rows, groups,
                           # bytes, KV per tier. `import -i` does the same at import time (bare `-i` = both;
-                          # the `dirs`/`objects`/`coarse` tiers are retired)
+                          # the `dirs`/`objects`/`coarse` tiers are retired). The cloud overlay's
+                          # `dt-cloud index-write` (cw) and `dt-cloud path-index -P` (gcs, the r2 demo)
+                          # cut the same two sorts from their bucket unions — objects as rows, L2 column
+                          # names — under `path-index[-bysize][-by-user].parquet` (spec §4.2–4.4)
 disk-tree tiers plan SIDECAR P THR  # The reader's span selection run offline over a tier's `.groups.json`
                           # (phase 0's instrument): for `path` it mirrors `readRects` exactly (depth rect
                           # `dP+1..`, path range `[P/, P0)`, `b_max ≥ thr·atten^(d−dP−1)` per group); for

@@ -27,7 +27,6 @@ from .identity import IDENTITIES_ENV, load_identities
 from .site import DEFAULT_URL as SITE_DEFAULT_URL
 from .secrets import env_secret, secret
 from .index_footer import INDEX_VARIANTS
-from .viz import COARSE_EXPS
 from .listing import prepare_listing
 from .prefixes import load_prefix_map
 from .records import mine_record_rows
@@ -455,7 +454,7 @@ def wandb_mine(
 @option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, default=None, help=f"identities.yaml path or URL, needed with -a (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Output dir for JSON files [default: site/public/data/<asof>]")
-@option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the complete floor-free path index parquet here (pixel-budget subtree API; specs/path-index-lazy-drill.md)")
+@option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the path store here (`<dir>/path-index.parquet`, the `path` sort; `path-index-bysize.parquet` and the by-user copies land beside it — specs/path-store.md §4.3)")
 @option("-x", "--access", "access", multiple=True, help="Access-log layer-2a agg parquet glob(s); adds per-node last-read ('a') for the read-recency lens")
 def build_path_index(
     attributions: tuple[str, ...],
@@ -588,28 +587,34 @@ def bucket_sources(specs: tuple[str, ...], default_bucket: str) -> list[tuple[st
 
 
 @main.command("index-write")
-@option("-A", "--age-only", is_flag=True, help="Only the age pyramid — skip the path-index + coarse recompute (a ladder-only backfill; sync with `index-sync -A`, other variants keep their pointer)")
+@option("-A", "--age-only", is_flag=True, help="Only the age pyramid — skip the store's sorts (a ladder-only backfill; sync with `index-sync -A`, the sort pointers keep their generation)")
 @option("-b", "--bucket", default=None, help="Bucket a bare (no `<bucket>=`) layer-2 argument describes (default $CW_BUCKET)")
 @option("-m", "--mem", default="8GB", help="DuckDB memory limit")
-@option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-coarse<E>.parquet")
+@option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-bysize.parquet (+ .groups.json sidecars) + age-pyramid-*.parquet")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
+@option("-W", "--no-wire-aliases", "wire_aliases", is_flag=True, default=True, help="Leave out the dir-only index's wire columns (`b, o, wts, wb, c2..c4, a`) — only once the site reader maps the store's names (specs/path-store.md phase 2)")
 @argument("sources", nargs=-1, required=True)
-def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
-    """Write the scan's index tiers from its layer-2 parquet(s) — SOURCES are
+def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, wire_aliases: bool, sources: tuple[str, ...]) -> None:
+    """Write the scan's path store from its layer-2 parquet(s) — SOURCES are
     `<bucket>=<l2.parquet>` pairs, one per bucket of the scan (a bare path is
-    `-b`'s bucket): the floor-free `path-index.parquet` (dir rows,
-    bucket-prefixed, sorted (depth, path), 8k-row groups, the site's column
-    contract) and the coarse tiers, floors in their parquet metadata.
-    `index-sync` then publishes their footers to D1."""
+    `-b`'s bucket): every row (objects and dirs), bucket-prefixed, in the
+    layer-2's column names, cut by the engine into the `path` sort
+    (`path-index.parquet`, `(depth, path)`) and the `bysize` sort
+    (`path-index-bysize.parquet`, `(⌊log2 size⌋ desc, path)`), 8k-row groups,
+    footer sidecars beside them, plus the age pyramid (specs/path-store.md
+    §4.2). `index-sync` then publishes their footers to D1."""
     from .index import write_index
     from .sweep import CW_BUCKET
 
-    s = write_index(bucket_sources(sources, bucket or CW_BUCKET), out_dir, mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only)
+    s = write_index(
+        bucket_sources(sources, bucket or CW_BUCKET), out_dir,
+        mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only, wire_aliases=wire_aliases,
+    )
     if age_only:
         err(f"index-write: age pyramid only — floor {s['pyramid']['floor']}, {len(s['pyramid']['bins'])} tiers over {s['buckets']}")
     else:
-        err(f"index-write: {s['rows']:,} rows over {s['buckets']}; floors {s['floors']}; kept {s['paths']}")
+        err(f"index-write: {s['rows']:,} rows over {s['buckets']}; sorts {s['sorts']}")
     print(json.dumps(s))
 
 
@@ -737,9 +742,8 @@ def over_time_groups(
 @main.command("index-sync")
 @option("-A", "--age-only", is_flag=True, help="Only the age-pyramid variants (a ladder-only backfill; the other variants keep their pointer)")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
-@option("-C", "--coarse-only", is_flag=True, help="Only the coarse tiers (a backfill; the floor-free variants keep their pointer)")
 @option("-d", "--dir", "listing_dir", default=None, help="Local/mounted dir holding the parquets (default: <bucket>/<key>)")
-@option("-F", "--floor-free-only", is_flag=True, help="Only the floor-free variants (path, user)")
+@option("-F", "--sorts-only", is_flag=True, help="Only the store's sorts (path, bysize, and their by-user copies where written)")
 @option("-g", "--gen", required=True, help="Generation stamp these files belong to (the run's GEN; `legacy` for the pre-generation listing/<date>/ layout)")
 @option("-k", "--key", default=None, help="Bucket-relative dir the parquets live under — what the site reads (default: listing/<date>/index/<gen>; listing/<date> for gen `legacy`)")
 @option("-L", "--local", is_flag=True, help="Write to the local wrangler D1 instead of --remote")
@@ -749,9 +753,8 @@ def over_time_groups(
 def index_sync(
     age_only: bool,
     bucket: str,
-    coarse_only: bool,
     listing_dir: str | None,
-    floor_free_only: bool,
+    sorts_only: bool,
     gen: str,
     key: str | None,
     local: bool,
@@ -769,7 +772,7 @@ def index_sync(
     `<store>:<variant>`, the `store` column set — needs the store migration;
     specs/multi-store.md). The default, the primary, writes exactly the
     pre-stores SQL."""
-    from .index_footer import check_store, exists, sync_d1
+    from .index_footer import SORT_VARIANTS, check_store, exists, sync_d1
 
     try:
         check_store(store)
@@ -779,15 +782,14 @@ def index_sync(
     key = key or (f"listing/{date}" if gen == "legacy" else f"listing/{date}/index/{gen}")
     base = listing_dir or f"{bucket}/{key}"
     todo = variants or tuple(INDEX_VARIANTS)
-    if coarse_only:
-        todo = tuple(v for v in todo if v.startswith("coarse"))
-    if floor_free_only:
-        todo = tuple(v for v in todo if not v.startswith("coarse"))
+    if sorts_only:
+        todo = tuple(v for v in todo if v in SORT_VARIANTS)
     if age_only:
         todo = tuple(v for v in todo if v.startswith("age-pyramid"))
     # A deployment produces only some variants (gcs's `path-index` writes no
-    # age pyramid or over-time tier); an absent file is skipped, not fatal —
-    # otherwise every variant after it in `INDEX_VARIANTS` order went unsynced.
+    # age pyramid or over-time tier; a generation before the store has no
+    # `bysize`); an absent file is skipped, not fatal — otherwise every variant
+    # after it in `INDEX_VARIANTS` order went unsynced.
     skipped = []
     for variant in todo:
         path = f"{base}/{INDEX_VARIANTS[variant]}"
@@ -804,7 +806,7 @@ def index_sync(
 
 
 @main.command("index-gc")
-@option("-r", "--retain", type=int, default=None, help="Retention: also retire the floor-free variants' row groups of every scan older than the newest N (their pointers stay; the reader falls back to the parquet footer)")
+@option("-r", "--retain", type=int, default=None, help="Retention: also retire the store sorts' row groups of every scan older than the newest N (their pointers stay; the reader opens the .groups.json blob instead)")
 @option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @argument("dates", nargs=-1)
 def index_gc(retain: int | None, store: str, dates: tuple[str, ...]) -> None:
@@ -836,31 +838,6 @@ def index_dir_cmd(store: str, variant: str, date: str) -> None:
     if d is None:
         raise SystemExit(1)
     print(d)
-
-
-@main.command("index-tiers")
-@option("-m", "--mem", default="48GB", help="DuckDB memory limit")
-@option("-P", "--path-index", "path_index", type=Path, required=True, help="Local floor-free path-index.parquet; the coarse tiers are written beside it")
-@option("-t", "--threads", default=8, type=int, help="DuckDB threads")
-@option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: beside the index)")
-@argument("date")
-def index_tiers(mem: str, path_index: Path, threads: int, tmp_dir: Path | None, date: str) -> None:
-    """Backfill the coarse index tiers for an archived scan from its floor-free
-    path index (specs/view-serving.md §1): the per-path subtree totals, then one
-    parquet per E in COARSE_EXPS × {by-path, by-user}, floors in the KV metadata.
-    Same code path `path-index` runs on a fresh scan; `index-sync` records the
-    floors in D1. An old index's `team` column is dropped on the way."""
-    import duckdb
-
-    from .viz import write_coarse_tiers
-
-    con = duckdb.connect()
-    con.execute(f"SET memory_limit='{mem}'; SET threads={threads}")
-    con.execute(f"SET temp_directory='{tmp_dir or path_index.parent / '.duckdb-tmp'}'")
-    src = f"read_parquet('{path_index}')"
-    con.execute(f"CREATE TEMP TABLE tot AS SELECT path, sum(b) AS pb FROM {src} GROUP BY path")
-    floors, counts = write_coarse_tiers(con, path_index, rows=src)
-    err(f"index-tiers {date}: {json.dumps({str(e): {'floor': floors[e], 'paths': counts[e]} for e in floors})}")
 
 
 @main.command("labels")
@@ -2450,7 +2427,7 @@ def discord_webhook(bot_token: str | None, channel: str, guild: str | None, name
 def weekly(date: str | None, top: int, dry_run: bool, prior: str | None, root: str | None, threshold_gib: int, site_url: str | None, webhook: str | None) -> None:
     """Post the weekly storage report to Marin's #internal-discuss: totals vs a
     week ago, what the sweep removed, and the biggest movers with owners, from
-    the two scans' coarse index tiers. See specs/weekly-discord-report.md."""
+    the two scans' `path` sorts (dir rows to depth 5). See specs/weekly-discord-report.md."""
     from . import weekly as wk
     from .site import creds
 

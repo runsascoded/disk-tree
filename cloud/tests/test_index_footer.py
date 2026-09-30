@@ -105,11 +105,11 @@ def _write_index(path) -> "pq.FileMetaData":
 def test_group_rows_compact_form(tmp_path):
     md = _write_index(tmp_path / "i.parquet")
     rows = _group_rows(md)
-    assert [(r["rg"], r["row_start"], r["row_end"], r["d_min"], r["d_max"], r["p_min"], r["p_max"], r["b_max"], r["u_min"], r["u_max"]) for r in rows] == [
-        (0, 0, 4, 2, 2, "marin-b/d0", "marin-b/d3", 40, "u1", "u1"),
-        (1, 4, 6, 2, 2, "marin-b/d4", "marin-b/d5", 60, "u2", "u2"),
+    assert [(r["rg"], r["row_start"], r["row_end"], r["d_min"], r["d_max"], r["p_min"], r["p_max"], r["b_min"], r["b_max"], r["u_min"], r["u_max"]) for r in rows] == [
+        (0, 0, 4, 2, 2, "marin-b/d0", "marin-b/d3", 10, 40, "u1", "u1"),
+        (1, 4, 6, 2, 2, "marin-b/d4", "marin-b/d5", 50, 60, "u2", "u2"),
     ]
-    assert set(rows[0]) == {"rg", "d_min", "d_max", "p_min", "p_max", "b_max", "u_min", "u_max", "row_start", "row_end", "rg_json"}
+    assert set(rows[0]) == {"rg", "d_min", "d_max", "p_min", "p_max", "b_max", "u_min", "u_max", "row_start", "row_end", "rg_json", "b_min"}
     for r in rows:
         rg = md.row_group(r["rg"])
         expected = [
@@ -123,6 +123,27 @@ def test_group_rows_compact_form(tmp_path):
     cols = json.loads(rows[0]["rg_json"])[2]
     assert [bool(c[2]) for c in cols] == [False, True, True, False]
     assert [el["name"] for el in _schema_json(md)["schema"][1:]] == ["path", "depth", "usr", "b"]
+    # A dir-only index (wire names, no `tier` metadata) is generation 1.
+    assert _schema_json(md)["version"] == 1
+
+
+def test_store_sort_is_version_2_and_sizes_resolve_to_size(tmp_path):
+    """A sort the engine cut (`tier` in its metadata; `size`, `kind` columns)
+    syncs as `index_schema.version` 2 — how a reader learns the generation has
+    objects and a `bysize` sibling — with the group stats off `size`."""
+    from dt_cloud.index_footer import INDEX_VERSION_STORE, extract
+
+    t = pa.table({
+        "path": ["b", "b/x.bin", "b/y"], "size": pa.array([30, 20, 10], pa.int64()),
+        "depth": pa.array([1, 2, 2], pa.int64()), "kind": ["dir", "file", "dir"],
+    })
+    t = t.replace_schema_metadata({b"tier": b"path", b"sort": b"depth,path"})
+    pq.write_table(t, tmp_path / "path-index.parquet", compression="snappy")
+    schema, groups = extract(str(tmp_path / "path-index.parquet"))
+    assert schema["version"] == INDEX_VERSION_STORE == 2
+    assert [el["name"] for el in schema["schema"][1:]] == ["path", "size", "depth", "kind"]
+    assert "floor_bytes" not in schema
+    assert [(g["b_min"], g["b_max"], g["u_min"], g["u_max"]) for g in groups] == [(10, 30, None, None)]
 
 
 def _verbose_rg_json(md: "pq.FileMetaData", g: int) -> str:
@@ -254,20 +275,23 @@ def test_gc_d1_deletes_only_generations_no_pointer_names(monkeypatch):
     ]
 
 
-def test_retire_d1_drops_floor_free_groups_of_scans_past_the_retention_window(monkeypatch):
-    """Newest `retain` scans keep everything; older scans lose only path/user
-    row groups (the coarse tiers stay); pointers are untouched."""
+def test_retire_d1_drops_sort_groups_of_scans_past_the_retention_window(monkeypatch):
+    """Newest `retain` scans keep everything; older scans lose only the store
+    sorts' row groups (`SORT_VARIANTS`: path, bysize and the by-user copies —
+    a pre-store scan simply has no bysize rows to drop); the age pyramid stays;
+    pointers are untouched."""
     import sqlite3
 
-    from dt_cloud.index_footer import retire_d1
+    from dt_cloud.index_footer import SORT_VARIANTS, retire_d1
 
+    assert SORT_VARIANTS == ("path", "bysize", "user", "bysize-user")
     con = sqlite3.connect(":memory:")
     con.executescript("CREATE TABLE index_schema (date TEXT, variant TEXT, version INTEGER, schema_json TEXT, floor_bytes INTEGER, gen TEXT, dir TEXT, PRIMARY KEY (date, variant));")
     con.executescript("""
       CREATE TABLE index_row_groups (date TEXT, variant TEXT, gen TEXT, rg INTEGER, PRIMARY KEY (date, variant, gen, rg));
     """)
     for d in ("2026-09-01", "2026-09-02", "2026-09-03"):
-        for v in ("path", "user", "coarse24", "coarse24-user"):
+        for v in ("path", "user", "age-pyramid-1d") + (("bysize",) if d != "2026-09-01" else ()):
             con.execute("INSERT INTO index_schema VALUES (?, ?, 1, '[]', NULL, 'legacy', ?)", (d, v, f"listing/{d}"))
             con.executemany("INSERT INTO index_row_groups VALUES (?, ?, 'legacy', ?)", [(d, v, i) for i in range(2)])
 
@@ -279,12 +303,13 @@ def test_retire_d1_drops_floor_free_groups_of_scans_past_the_retention_window(mo
     monkeypatch.setattr(index_footer, "_creds", lambda: ("tok", "acct"))
     assert retire_d1(2) == [("2026-09-01", "path", 2), ("2026-09-01", "user", 2)]
     assert con.execute("SELECT date, variant, count(*) FROM index_row_groups GROUP BY 1, 2 ORDER BY 1, 2").fetchall() == [
-        ("2026-09-01", "coarse24", 2), ("2026-09-01", "coarse24-user", 2),
-        ("2026-09-02", "coarse24", 2), ("2026-09-02", "coarse24-user", 2), ("2026-09-02", "path", 2), ("2026-09-02", "user", 2),
-        ("2026-09-03", "coarse24", 2), ("2026-09-03", "coarse24-user", 2), ("2026-09-03", "path", 2), ("2026-09-03", "user", 2),
+        ("2026-09-01", "age-pyramid-1d", 2),
+        ("2026-09-02", "age-pyramid-1d", 2), ("2026-09-02", "bysize", 2), ("2026-09-02", "path", 2), ("2026-09-02", "user", 2),
+        ("2026-09-03", "age-pyramid-1d", 2), ("2026-09-03", "bysize", 2), ("2026-09-03", "path", 2), ("2026-09-03", "user", 2),
     ]
-    assert con.execute("SELECT count(*) FROM index_schema").fetchone() == (12,)
+    assert con.execute("SELECT count(*) FROM index_schema").fetchone() == (11,)
     assert retire_d1(2) == []  # idempotent
+    assert retire_d1(1) == [("2026-09-02", "path", 2), ("2026-09-02", "bysize", 2), ("2026-09-02", "user", 2)]
 
 
 def test_groups_blob_is_the_synced_rows_as_one_document(tmp_path):
@@ -303,8 +328,8 @@ def test_groups_blob_is_the_synced_rows_as_one_document(tmp_path):
         "schema": schema["schema"],
         "floor_bytes": 4096,
         "groups": [
-            [r["rg"], r["d_min"], r["d_max"], r["p_min"], r["p_max"], r["b_max"], r["u_min"], r["u_max"], r["row_start"], r["row_end"], r["rg_json"]]
+            [r["rg"], r["d_min"], r["d_max"], r["p_min"], r["p_max"], r["b_max"], r["u_min"], r["u_max"], r["row_start"], r["row_end"], r["rg_json"], r["b_min"]]
             for r in rows
         ],
     }
-    assert [g[0] for g in json.loads(text)["groups"]] == [0, 1]
+    assert [(g[0], g[11]) for g in json.loads(text)["groups"]] == [(0, 10), (1, 50)]  # `b_min` appended 12th
