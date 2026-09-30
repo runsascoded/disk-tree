@@ -58,11 +58,17 @@ function wranglerVars(env = process.env.CLOUDFLARE_ENV): Record<string, string> 
 const VARS = wranglerVars()
 const STORE = process.env.VITE_STORE ?? VARS.STORE ?? ''
 const AUTH_MODE = process.env.VITE_AUTH_MODE ?? VARS.AUTH_MODE ?? 'app'
+// Secondary stores (specs/multi-store.md phase 2): comma-separated registry
+// keys, each mounted under its own path (`/meta`). `STORES_EXTRA` beside
+// `STORE` in wrangler.toml, or `VITE_STORES_EXTRA` in the environment; unset →
+// the single-store build, unchanged.
+const STORES_EXTRA = process.env.VITE_STORES_EXTRA ?? VARS.STORES_EXTRA ?? ''
 
 export default defineConfig({
   define: {
     'import.meta.env.VITE_STORE': JSON.stringify(STORE),
     'import.meta.env.VITE_AUTH_MODE': JSON.stringify(AUTH_MODE),
+    'import.meta.env.VITE_STORES_EXTRA': JSON.stringify(STORES_EXTRA),
   },
   plugins: [react(), devSeriesIndex],
   server: {
