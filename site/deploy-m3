@@ -8,12 +8,11 @@
 # pushed and deploys to RAC. Pages rejects a custom config path, so the dev
 # config is swapped in as wrangler.toml for the build (vite reads its `[vars]`
 # for STORE / AUTH_MODE) and the deploy, then restored (deploy-r2.yml's trick).
-# Auth: `CLOUDFLARE_API_TOKEN` = the worktree's `CF_TOKEN`; the account id from
-# `CLOUDFLARE_ACCOUNT_ID` (.envrc).
+# Auth: `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` from the worktree's
+# .envrc (wrangler reads both directly).
 set -euo pipefail
 cd "$(dirname "$0")"
-: "${CF_TOKEN:?set by .envrc}" "${CLOUDFLARE_ACCOUNT_ID:?set by .envrc}"
-export CLOUDFLARE_API_TOKEN=$CF_TOKEN
+: "${CLOUDFLARE_API_TOKEN:?set by .envrc}" "${CLOUDFLARE_ACCOUNT_ID:?set by .envrc}"
 
 config=wrangler.toml
 for a in "$@"; do case "$a" in -d|--dev) config=wrangler.dev.toml ;; *) echo "deploy-m3: unknown arg $a" >&2; exit 2 ;; esac; done

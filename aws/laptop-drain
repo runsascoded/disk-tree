@@ -5,8 +5,8 @@ specs/m3-site.md Phase 3): `disk-tree dispatch -s` over the deployments' D1s.
 A Python entry run as the venv's `python` for the same reason as
 `laptop-scan`: it renames deleted paths into `~/.Trash/disk-tree/`, and macOS
 TCC attributes that to the launchd root process, which needs Full Disk Access.
-Secrets stay out of the plist: `CF_TOKEN` is read from the worktree's `.envrc`
-through `direnv export json`.
+Secrets stay out of the plist: `CLOUDFLARE_API_TOKEN` is read from the
+worktree's `.envrc` through `direnv export json`.
 
 Polls both the `site/` D1 (`disk-tree-m3-db`, the `laptop` executor's runs) and
 `ui/`'s (`disk-tree-auth`, until disk.rbw.sh cuts over). Real runs trash (the
@@ -28,7 +28,7 @@ def main() -> None:
     envrc = json.loads(subprocess.run(['/opt/homebrew/bin/direnv', 'export', 'json'], cwd=M3, check=True, capture_output=True, text=True).stdout or '{}')
     env = {
         **os.environ, **envrc,
-        'CLOUDFLARE_API_TOKEN': envrc['CF_TOKEN'],
+        'CLOUDFLARE_API_TOKEN': envrc['CLOUDFLARE_API_TOKEN'],
         'AWS_PROFILE': 'm3',
         'DISK_TREE_R2_ENDPOINT_URL': 'https://0dcad5654e9744de6616f74b8df4af63.r2.cloudflarestorage.com',
         'DISK_TREE_SCAN_DIRS': 'r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans',

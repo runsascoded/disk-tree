@@ -2,7 +2,7 @@
 # (`cfn_dashboard.py`, byte-identical to the gcs / cw-s3 branches' copies) wired
 # for the laptop deployment. Local passphrase-encrypted state (as `../aws/`):
 # `PULUMI_CONFIG_PASSPHRASE` in the worktree's `.envrc`; the provider reads
-# `CLOUDFLARE_API_TOKEN` (= `$CF_TOKEN`).
+# `CLOUDFLARE_API_TOKEN` (also in `.envrc`).
 name: disk-tree-m3-cf
 description: Cloudflare resources for disk.rbw.sh — Pages project shell, custom domain + rbw.sh CNAME, D1. Deployments + app config stay with wrangler.
 runtime:
