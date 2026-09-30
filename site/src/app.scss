@@ -135,6 +135,8 @@ header .hrow {
   .lbl { color: var(--ink-3); font-size: 12px; margin-right: 2px; }
   .tb-ctl, .tb-axis, .tb-scan, .tb-path { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
   .tb-scan .arrow { color: var(--ink-3); }
+  // The page scan's freshness beside its date picker (tip: exact publish time).
+  .tb-scan-ago { color: var(--ink-3); font-size: 12px; white-space: nowrap; cursor: default; }
   .tb-delta { font-weight: 650; text-decoration: none; font-variant-numeric: tabular-nums; &:hover { text-decoration: underline; } }
   // Drill-path crumbs: the deepest segment is inked; ancestors drill up.
   .tb-path {
