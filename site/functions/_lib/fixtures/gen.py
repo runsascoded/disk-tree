@@ -93,7 +93,7 @@ def write_v2(here: str) -> None:
         l2 = join(tmp, 'l2.parquet')
         aggregate_listing_to_parquet(prepare_listing(con, (listing,)), bucket='bk', scheme='s3', out_parquet=l2, con=con, mean_mtime=True)
         ix.ROW_GROUP_SIZE = 2048
-        summary = ix.write_index([('bk', l2)], join(tmp, 'out'), mem='1GB', threads=1, wire_aliases=False)
+        summary = ix.write_index([('bk', l2)], join(tmp, 'out'), mem='1GB', threads=1)
         print(json.dumps({'rows': summary['rows'], 'columns': summary['columns'], 'sorts': summary['sorts']}, indent=2), file=sys.stderr)
         shutil.os.makedirs(out_dir)
         files = {}

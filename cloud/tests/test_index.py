@@ -54,7 +54,6 @@ L2 = [
 ]
 STORE_COLS = [
     "path", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
-    "b", "o", "wts", "wb", "c2", "c3", "c4", "a",
 ]
 
 
@@ -114,20 +113,6 @@ def test_write_index(tmp_path: Path):
         (f"{BUCKET}/marin/a/x.bin", 4, "file", 20 * GIB, 1, 0, 0, T17, float(T17), None, None),
         (f"{BUCKET}/marin/b/y.bin", 4, "file", 6 * GIB, 1, 0, 0, T16, float(T16), None, None),
         (f"{BUCKET}/marin/b/z.bin", 4, "file", 4 * GIB, 1, 0, 0, T16, float(T16), None, None),
-    ]
-    # The wire aliases are exact copies in the dir-only index's shape (no
-    # storage classes, no access log → c2..c4 0, a NULL).
-    assert _read(path, "path, b, o, wts, wb, c2, c3, c4, a") == [
-        (BUCKET, 40 * GIB, 4, 0.0, 0, 0, 0, 0, None),
-        (f"{BUCKET}/empty", 0, 0, 0.0, 0, 0, 0, 0, None),
-        (f"{BUCKET}/marin", 30 * GIB, 3, float(T17) * 30 * GIB, 30 * GIB, 0, 0, 0, None),
-        (f"{BUCKET}/tmp", 10 * GIB, 1, float(T15) * 10 * GIB, 10 * GIB, 0, 0, 0, None),
-        (f"{BUCKET}/marin/a", 20 * GIB, 1, float(T17) * 20 * GIB, 20 * GIB, 0, 0, 0, None),
-        (f"{BUCKET}/marin/b", 10 * GIB, 2, float(T16) * 10 * GIB, 10 * GIB, 0, 0, 0, None),
-        (f"{BUCKET}/tmp/t.bin", 10 * GIB, 1, float(T15) * 10 * GIB, 10 * GIB, 0, 0, 0, None),
-        (f"{BUCKET}/marin/a/x.bin", 20 * GIB, 1, float(T17) * 20 * GIB, 20 * GIB, 0, 0, 0, None),
-        (f"{BUCKET}/marin/b/y.bin", 6 * GIB, 1, float(T16) * 6 * GIB, 6 * GIB, 0, 0, 0, None),
-        (f"{BUCKET}/marin/b/z.bin", 4 * GIB, 1, float(T16) * 4 * GIB, 4 * GIB, 0, 0, 0, None),
     ]
 
     # `bysize`: the same rows by size bucket desc (40 GiB → 2^35; 30 and 20 GiB
@@ -226,15 +211,15 @@ def test_store_columns_and_pivots(tmp_path: Path):
     """A labeled source puts `usr` right after `path` (the engine's label
     block); pivot columns present in any source — or implied by a v2
     listing's metadata — are in every row (0 where a source has neither);
-    `wire_aliases=False` stops at the layer-2's names."""
+    the columns are the layer-2's and nothing else."""
     assert X.store_columns([
         (["path", "usr", "size", "kind", "sum_storage_class_id_3", "depth"], {"sum_storage_class_id_1": "size"}),
         (["path", "size", "kind", "depth"], {}),
     ]) == [
         "path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
-        "sum_storage_class_id_1", "sum_storage_class_id_3", "b", "o", "wts", "wb", "c2", "c3", "c4", "a",
+        "sum_storage_class_id_1", "sum_storage_class_id_3",
     ]
-    assert X.store_columns([(["path", "size", "kind", "depth"], {})], wire_aliases=False) == [
+    assert X.store_columns([(["path", "size", "kind", "depth"], {})]) == [
         "path", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
     ]
     rows = [(".", 0, "dir", 30, 2, 2, 2, T17, float(T17)), ("x.bin", 1, "file", 10, 1, 0, 0, T17, float(T17)), ("y.bin", 1, "file", 20, 1, 0, 0, T17, float(T17))]
@@ -242,7 +227,7 @@ def test_store_columns_and_pivots(tmp_path: Path):
     _write_l2(a, rows, extra={"usr": ["u", "u", None], "sum_storage_class_id_2": pa.array([10, 10, 0], pa.int64())})
     _write_l2(b, rows)
     out = tmp_path / "index"
-    s = X.write_index([("A", str(a)), ("B", str(b))], out, mem="1GB", threads=2, wire_aliases=False)
+    s = X.write_index([("A", str(a)), ("B", str(b))], out, mem="1GB", threads=2)
     assert s["columns"] == [
         "path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
         "sum_storage_class_id_2",

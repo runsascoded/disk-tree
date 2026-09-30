@@ -19,7 +19,6 @@ from dt_cloud.viz import write_path_index
 STORE_COLS = [
     "path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
     "sum_storage_class_id_2", "sum_storage_class_id_3", "sum_storage_class_id_4",
-    "b", "o", "wts", "wb", "c2", "c3", "c4", "a",
 ]
 
 
@@ -218,8 +217,6 @@ def test_path_index_carries_read_day(tmp_path: Path, listing: str, attribution: 
     assert a_by_path["b1/users/rw/ckpt"] == rd
     assert pd.isna(a_by_path["b1/datasets"])  # never read → NULL
     assert df[df.kind == "file"]["last_read"].isna().all()
-    # The wire alias `a` is the same column.
-    assert _rows(df, ["last_read"]) == _rows(df, ["a"])
 
 
 def test_store_sorts(tmp_path: Path, listing: str, attribution: str):
@@ -264,12 +261,6 @@ def test_store_sorts(tmp_path: Path, listing: str, attribution: str):
     assert mm[("b1/users/rw/ckpt/model.bin", RW)] == E["d0701"]
     assert mm[("b1", None)] == E["d0702"]
     assert mm[("b1/users/rw/ckpt", RW)] == pytest.approx((100 * E["d0701"] + 50 * E["d0703"]) / 150)
-    # The wire aliases are exact copies (`wts/wb` = the weighted sum and its weight).
-    assert _rows(path, ["b", "o", "wb", "c2", "c3", "c4", "a"]) == _rows(
-        path.assign(c2=path.sum_storage_class_id_2, c3=path.sum_storage_class_id_3, c4=path.sum_storage_class_id_4, wb=path["size"], a=path.last_read),
-        ["size", "n_files", "wb", "c2", "c3", "c4", "a"],
-    )
-    assert [w for (w,) in _rows(path, ["wts"])] == pytest.approx([float(s) * m for s, m in zip(path["size"], path["mtime_mean"])])
 
     bysize = pd.read_parquet(pidx.with_name("path-index-bysize.parquet"))
     assert list(bysize.columns) == STORE_COLS

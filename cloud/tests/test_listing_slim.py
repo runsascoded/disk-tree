@@ -113,7 +113,7 @@ def test_indexes_are_byte_identical(layer2, codec, tmp_path: Path):
     assert json.dumps(s1).replace("/i1/", "/") == json.dumps(s2).replace("/i2/", "/")
     assert s1["columns"] == [
         "path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
-        "sum_storage_class_id_2", "b", "o", "wts", "wb", "c2", "c3", "c4", "a",
+        "sum_storage_class_id_2",
     ]
     # The single-bin age index (ad-hoc) too.
     for i, src in ((1, v1), (2, v2)):

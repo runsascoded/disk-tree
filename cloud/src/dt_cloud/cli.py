@@ -593,9 +593,8 @@ def bucket_sources(specs: tuple[str, ...], default_bucket: str) -> list[tuple[st
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-bysize.parquet (+ .groups.json sidecars) + age-pyramid-*.parquet")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
-@option("-W", "--no-wire-aliases", "wire_aliases", is_flag=True, default=True, help="Leave out the dir-only index's wire columns (`b, o, wts, wb, c2..c4, a`) — only once the site reader maps the store's names (specs/path-store.md phase 2)")
 @argument("sources", nargs=-1, required=True)
-def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, wire_aliases: bool, sources: tuple[str, ...]) -> None:
+def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
     """Write the scan's path store from its layer-2 parquet(s) — SOURCES are
     `<bucket>=<l2.parquet>` pairs, one per bucket of the scan (a bare path is
     `-b`'s bucket): every row (objects and dirs), bucket-prefixed, in the
@@ -609,7 +608,7 @@ def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, thr
 
     s = write_index(
         bucket_sources(sources, bucket or CW_BUCKET), out_dir,
-        mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only, wire_aliases=wire_aliases,
+        mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only,
     )
     if age_only:
         err(f"index-write: age pyramid only — floor {s['pyramid']['floor']}, {len(s['pyramid']['bins'])} tiers over {s['buckets']}")

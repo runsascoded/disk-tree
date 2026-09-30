@@ -21,13 +21,9 @@ footer sidecar beside each (`b_min`/`b_max` per group). `index-sync` publishes
 them as variants `path` / `bysize`; `index_schema.version` 2 tells a reader
 the generation has objects (§5 phase 1).
 
-**Wire aliases (phase-2 TODO).** Until the site reader maps the store's
-names at the edge, every row also carries the dir-only index's wire-name
-columns (`b, o, wts, wb, c2, c3, c4, a` — `WIRE_ALIASES`) so a reader on the
-old generation shape keeps working on a new one; `wire_aliases=False` drops
-them. They are exact copies (`b = size`, `o = n_files`, `a = last_read`,
-`wts/wb` the byte-weighted `mtime_mean` sum and its weight) and cost RLE
-bytes only.
+The columns are the layer-2's (spec §1.1): the site reader decodes a
+version-2 generation by those names (phase 2) and a version-1 one by its own
+short names — the version tells them apart, so the store carries no aliases.
 
 The age pyramid reads the same union (`kind = 'file'` rows; §4.5), unchanged
 in its output. No `by-user` sorts here: CoreWeave has no ownership signal
@@ -61,8 +57,6 @@ L2_OPTIONAL: dict[str, str] = {"mtime_mean": "DOUBLE", "created": "BIGINT", "las
 #: The label column (`import --label`), right after `path` when any source has it.
 LABEL_COL = "usr"
 PIVOT_PREFIX = "sum_storage_class_id_"
-#: The dir-only index's wire names, appended after the store's columns (module doc).
-WIRE_ALIASES = ("b", "o", "wts", "wb", "c2", "c3", "c4", "a")
 
 # The per-path created-day strata behind a path-aware `AgeChart` (specs/age-index.md).
 # A distinct index (not a path-index tier): rows `(path, depth, day, b, o)` sorted
@@ -105,18 +99,16 @@ def _l2_shape(con: "duckdb.DuckDBPyConnection", l2: str) -> tuple[list[str], dic
     return cols, dict(format_of(l2).implied)
 
 
-def store_columns(shapes: list[tuple[list[str], dict[str, str]]], wire_aliases: bool = True) -> list[str]:
+def store_columns(shapes: list[tuple[list[str], dict[str, str]]]) -> list[str]:
     """The store's column order for a scan whose sources have `shapes`: the
     layer-2's, label first (so `write_tiers` reads `usr` as the label block),
-    the pivots present in any source (implied ones included), then the wire
-    aliases."""
+    then the pivots present in any source (implied ones included)."""
     pivots = sorted(
         {c for cols, implied in shapes for c in (*cols, *implied) if c.startswith(PIVOT_PREFIX)},
         key=lambda c: int(c[len(PIVOT_PREFIX):]),
     )
     label = [LABEL_COL] if any(LABEL_COL in cols for cols, _ in shapes) else []
-    out = ["path", *label, "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", *L2_OPTIONAL, *pivots]
-    return out + (list(WIRE_ALIASES) if wire_aliases else [])
+    return ["path", *label, "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", *L2_OPTIONAL, *pivots]
 
 
 def store_rows_sql(l2: str, bucket: str, shape: tuple[list[str], dict[str, str]], columns: list[str]) -> str:
@@ -134,9 +126,6 @@ def store_rows_sql(l2: str, bucket: str, shape: tuple[list[str], dict[str, str]]
             return f"{implied[c]}::BIGINT"
         return "0::BIGINT"
 
-    def mtime_mean() -> str:
-        return "mtime_mean::DOUBLE" if "mtime_mean" in cols else "NULL::DOUBLE"
-
     exprs: dict[str, str] = {
         "path": f"CASE WHEN path = '.' THEN '{b}' ELSE '{b}/' || path END",
         LABEL_COL: f"{LABEL_COL}::VARCHAR" if LABEL_COL in cols else "NULL::VARCHAR",
@@ -148,15 +137,6 @@ def store_rows_sql(l2: str, bucket: str, shape: tuple[list[str], dict[str, str]]
         "n_desc": "n_desc::BIGINT",
         "mtime": "mtime::BIGINT",
         **{c: (f"{c}::{t}" if c in cols else f"NULL::{t}") for c, t in L2_OPTIONAL.items()},
-        # the wire aliases (module doc)
-        "b": "size::BIGINT",
-        "o": "n_files::BIGINT",
-        "wts": f"(CASE WHEN {mtime_mean()} IS NULL THEN 0 ELSE ({mtime_mean()}::DECIMAL(38,0) * size::DECIMAL(38,0)) END)::DOUBLE",
-        "wb": f"(CASE WHEN {mtime_mean()} IS NULL THEN 0 ELSE size END)::BIGINT",
-        "c2": pivot(f"{PIVOT_PREFIX}2"),
-        "c3": pivot(f"{PIVOT_PREFIX}3"),
-        "c4": pivot(f"{PIVOT_PREFIX}4"),
-        "a": "last_read::INTEGER" if "last_read" in cols else "NULL::INTEGER",
     }
     sel = ",\n          ".join(f"{exprs[c] if c in exprs else pivot(c)} AS {c}" for c in columns)
     return f"""
@@ -170,8 +150,6 @@ def write_store(
     con: "duckdb.DuckDBPyConnection",
     sources: list[tuple[str, str]],
     out_dir: str | Path,
-    *,
-    wire_aliases: bool = True,
 ) -> tuple[str, list[str]]:
     """Write the store's table — the union of ``sources``' rows, one
     ``(bucket, layer-2 parquet)`` per bucket of the scan — as
@@ -185,7 +163,7 @@ def write_store(
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     shapes = [_l2_shape(con, str(l2)) for _, l2 in sources]
-    columns = store_columns(shapes, wire_aliases)
+    columns = store_columns(shapes)
     selects = []
     for i, ((bucket, l2), shape) in enumerate(zip(sources, shapes)):
         con.execute(f"SET VARIABLE STORE_L2_{i} = ?", [str(l2)])
@@ -408,7 +386,6 @@ def write_index(
     tmp_dir: str | Path | None = None,
     age_only: bool = False,
     sort_variants: tuple[tuple[str, ...], ...] = (),
-    wire_aliases: bool = True,
 ) -> dict:
     """Write the store's sorts (`path-index.parquet`, `path-index-bysize.parquet`,
     + `sort_variants` copies) and the age pyramid under ``out_dir`` from
@@ -420,14 +397,12 @@ def write_index(
     ``age_only``: write *only* the age pyramid (skip the sorts). For a
     ladder-only backfill, where the layer-2s are unchanged so the sorts would
     come out byte-identical — sync just the `age-pyramid-*` variants
-    (`index-sync -A`) and the sort pointers keep their generation.
-
-    ``wire_aliases``: append the dir-only index's wire columns (module doc)."""
+    (`index-sync -A`) and the sort pointers keep their generation."""
     out = Path(out_dir)
     con = duckdb.connect()
     con.execute(f"SET memory_limit='{mem}'; SET threads={threads}")
     con.execute(f"SET temp_directory='{tmp_dir or out / '.duckdb-tmp'}'")
-    store, columns = write_store(con, sources, out, wire_aliases=wire_aliases)
+    store, columns = write_store(con, sources, out)
     buckets = [b for b, _ in sources]
     try:
         if age_only:

@@ -102,7 +102,7 @@ def _rss(tag: str) -> None:
 # The gcs store's columns (specs/path-store.md §1.1) in the engine's layer-2
 # order — `usr` (the owner slice) right after `path` as the label block, the
 # storage-class pivots the listing carries, `created` / `last_read` (the access
-# log's last-read day) — plus the wire aliases (`index.WIRE_ALIASES`).
+# log's last-read day).
 STORE_L2_SHAPE = (
     ["path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
      "sum_storage_class_id_2", "sum_storage_class_id_3", "sum_storage_class_id_4"],
@@ -121,7 +121,6 @@ def _write_store(
     attr: bool,
     fp_dir: str,
     maxseg: int,
-    wire_aliases: bool = True,
 ) -> dict[str, dict]:
     """The store's sorts beside ``path_index`` (specs/path-store.md §4.3) from
     the rolled-up dir slices (``ptu``, ``dir_stats``, ``dir_attr`` when
@@ -167,7 +166,7 @@ def _write_store(
             """
         )
     _rss("dstruct")
-    columns = store_columns([STORE_L2_SHAPE], wire_aliases=wire_aliases)
+    columns = store_columns([STORE_L2_SHAPE])
     dir_exprs = {
         "path": "p.path", "usr": "p.usr", "size": "p.b::BIGINT", "depth": "p.depth::INTEGER", "kind": "'dir'",
         "n_files": "p.o::BIGINT", "n_children": "(d.own_o + d.n_subdirs)::BIGINT", "n_desc": "n.n_desc::BIGINT",
@@ -177,8 +176,6 @@ def _write_store(
         "sum_storage_class_id_2": "coalesce(p.c2, 0)::BIGINT",
         "sum_storage_class_id_3": "coalesce(p.c3, 0)::BIGINT",
         "sum_storage_class_id_4": "coalesce(p.c4, 0)::BIGINT",
-        "b": "p.b::BIGINT", "o": "p.o::BIGINT", "wts": "p.wts::DOUBLE", "wb": "p.wb::BIGINT",
-        "c2": "coalesce(p.c2, 0)::BIGINT", "c3": "coalesce(p.c3, 0)::BIGINT", "c4": "coalesce(p.c4, 0)::BIGINT", "a": "p.a::INTEGER",
     }
     # An object is attributed to its dir's owner (the same deepest-prefix join
     # `dir_attr` resolved per dir; a leaf needs no explosion). The access log is
@@ -193,11 +190,6 @@ def _write_store(
         "mtime_mean": "floor(epoch(x.created))::DOUBLE",
         "created": "floor(epoch(x.created))::BIGINT", "last_read": "NULL::INTEGER",
         **{f"sum_storage_class_id_{c}": f"(CASE WHEN x.storage_class_id = {c} THEN x.size_bytes ELSE 0 END)::BIGINT" for c in (2, 3, 4)},
-        "b": "x.size_bytes::BIGINT", "o": "1::BIGINT",
-        "wts": "(CASE WHEN x.created IS NOT NULL THEN x.size_bytes::DECIMAL(38,0) * epoch(x.created)::BIGINT ELSE 0 END)::DOUBLE",
-        "wb": "(CASE WHEN x.created IS NOT NULL THEN x.size_bytes ELSE 0 END)::BIGINT",
-        **{f"c{c}": f"(CASE WHEN x.storage_class_id = {c} THEN x.size_bytes ELSE 0 END)::BIGINT" for c in (2, 3, 4)},
-        "a": "NULL::INTEGER",
     }
     sel = lambda exprs: ", ".join(f"{exprs[c]} AS {c}" for c in columns)  # noqa: E731
     store = path_index.with_name(STORE_L2)
