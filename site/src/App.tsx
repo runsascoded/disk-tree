@@ -13,7 +13,7 @@ import { DiffTreemap, DiffHeader, useDiffModel } from './DiffTreemap'
 import { DiffTable } from './DiffTable'
 import type { DiffData } from './diffModel'
 import { ScanCombobox } from './ScanCombobox'
-import { buildUserIndex, epochDaysToDate } from './colors'
+import { ago, buildUserIndex, epochDaysToDate } from './colors'
 import { ChildrenTable } from './ChildrenTable'
 import { FitSelect } from './FitSelect'
 import { PathPopover } from './PathPopover'
@@ -863,7 +863,7 @@ function AppContent() {
   const segs = drillPath.split('/').filter(Boolean)
   const scanTip = meta && (
     <div className="scan-tip">
-      {asof && !/[T ]\d{2}/.test(asof) && meta.published && (
+      {meta.published && (
         <div>published {new Date(meta.published).toISOString().replace('T', ' ').slice(0, 16)} UTC</div>
       )}
       <div><b>{fmtBytes(meta.total_bytes)}</b> · <b>{fmtN(meta.total_objects)}</b> objects across {store.rootLabel}</div>
@@ -951,6 +951,13 @@ function AppContent() {
           <span className="tb-scan">
             <ScanCombobox value={asof} scans={scans} onChange={setDP} label="Scan date" />
           </span>
+        )}
+        {/* How fresh the page's scan is, at a glance (the picker shows only
+            its date); the tip carries the exact publish time + totals. */}
+        {meta?.published && (
+          <Tooltip content={scanTip}>
+            <span className="tb-scan-ago" tabIndex={0}>scanned {ago(Date.parse(meta.published) / 1000)} ago</span>
+          </Tooltip>
         )}
         {bar.color.length > 1 && (
           <label className="tb-ctl">

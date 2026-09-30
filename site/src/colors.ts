@@ -36,6 +36,15 @@ export const epochDaysToMonthShort = (d: number): string => {
   return y === new Date().getUTCFullYear() ? MON[dt.getUTCMonth()] : `${MON[dt.getUTCMonth()]} ’${String(y).slice(2)}`
 }
 
+/** Compact elapsed time since epoch seconds `ts`: `42s`, `17m`, `3h`, `5d`. */
+export const ago = (ts: number): string => {
+  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts))
+  if (s < 60) return `${s}s`
+  if (s < 3600) return `${Math.floor(s / 60)}m`
+  if (s < 86400) return `${Math.floor(s / 3600)}h`
+  return `${Math.floor(s / 86400)}d`
+}
+
 /** Day-precision variant (`8/21`, year-qualified when not the current year) —
  * read-recency spans days, not the months the created-age lens works in. */
 export const epochDaysToDate = (d: number, now = new Date()): string => {

@@ -13,18 +13,12 @@ import { UserChip } from './UserChip'
 import { useUnits } from './units'
 import { fmtN } from './types'
 import { DEFAULT_STORE } from './stores'
+import { ago } from './colors'
 import { useCanStage, useIdent } from './auth'
 import { useRowSelection, useRowSelectionKeys } from './rowSelection'
 import { useDispatch, useExecJobs, useRunAction, useStagedPlan, useUnstage, LIVE_STATES } from './plans'
 import type { DeletionRun, ExecJob, StagedItem } from './plans'
 
-const ago = (ts: number): string => {
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - ts))
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.floor(s / 60)}m`
-  if (s < 86400) return `${Math.floor(s / 3600)}h`
-  return `${Math.floor(s / 86400)}d`
-}
 const iso = (ts: number): string => new Date(ts * 1000).toISOString()
 
 // `<scheme><bucket>/<path>/` → the treemap's URL path (below the store root).
