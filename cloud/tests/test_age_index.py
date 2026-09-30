@@ -1,5 +1,6 @@
 """The per-path created-day age index (`dt_cloud.index.write_age_index`) and its
-footer extraction (`index_footer` with no `usr` column) — specs/age-index.md."""
+footer extraction (`index_footer` with no `usr` column) — specs/age-index.md.
+Both read the store's union (`write_store`), not the per-bucket layer-2s."""
 from pathlib import Path
 
 import duckdb
@@ -7,7 +8,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from dt_cloud.index import AGE_INDEX, write_age_index
+from dt_cloud.index import AGE_INDEX, write_age_index, write_store
 from dt_cloud.index_footer import extract, groups_blob
 
 DAY = 86400
@@ -15,18 +16,26 @@ DAY = 86400
 
 def _l2(tmp_path: Path, files: list[tuple[str, int, int, str]]) -> Path:
     """A synthetic layer-2 parquet (disk-tree import shape): rows of
-    (path, size, mtime, kind)."""
+    (path, size, mtime, kind); the count columns are a leaf's."""
+    n = len(files)
     t = pa.table({
         "path": [f[0] for f in files],
         "size": [f[1] for f in files],
         "mtime": [f[2] for f in files],
         "kind": [f[3] for f in files],
         "depth": [f[0].count("/") + 1 for f in files],
+        "n_files": [1 if f[3] == "file" else 0 for f in files],
+        "n_children": [0] * n,
+        "n_desc": [0] * n,
     })
     tmp_path.mkdir(parents=True, exist_ok=True)
     p = tmp_path / "l2.parquet"
     pq.write_table(t, p)
     return p
+
+
+def _store(con: duckdb.DuckDBPyConnection, sources: list[tuple[str, Path]], out: Path) -> str:
+    return write_store(con, [(b, str(l2)) for b, l2 in sources], out)[0]
 
 
 def _read(path: Path) -> list[tuple]:
@@ -45,7 +54,7 @@ def test_rollup_is_descendant_inclusive(tmp_path: Path):
         ("marin/tmp/ttl=14d", 0, 0, "dir"),                   # dir rows ignored
     ])
     con = duckdb.connect()
-    write_age_index(con, [("BKT", str(l2))], tmp_path)
+    write_age_index(con, _store(con, [("BKT", l2)], tmp_path), tmp_path)
     assert _read(tmp_path / AGE_INDEX) == [
         # depth 0: the synthetic fleet root (all buckets summed per day)
         ("", 0, 100, 310, 3),
@@ -76,7 +85,7 @@ def test_floor_drops_small_prefixes_but_keeps_root(tmp_path: Path):
         ("tiny/y.bin", 100, 100 * DAY, "file"),
     ])
     con = duckdb.connect()
-    s = write_age_index(con, [("BKT", str(l2))], tmp_path)
+    s = write_age_index(con, _store(con, [("BKT", l2)], tmp_path), tmp_path)
     paths = {r[0] for r in _read(tmp_path / AGE_INDEX)}
     assert s["floor"] > 100
     assert "BKT/tiny" not in paths          # below floor
@@ -87,7 +96,7 @@ def test_multi_bucket_root_sums_every_bucket(tmp_path: Path):
     la = _l2(tmp_path / "a", [("m/x.bin", 1000, 100 * DAY, "file")])
     lb = _l2(tmp_path / "b", [("m/y.bin", 2000, 100 * DAY, "file")])
     con = duckdb.connect()
-    write_age_index(con, [("A", str(la)), ("B", str(lb))], tmp_path)
+    write_age_index(con, _store(con, [("A", la), ("B", lb)], tmp_path), tmp_path)
     rows = _read(tmp_path / AGE_INDEX)
     root = [r for r in rows if r[0] == ""]
     assert root == [("", 0, 100, 3000, 2)]  # 1000 (A) + 2000 (B), 2 objects
@@ -99,9 +108,10 @@ def test_footer_extract_without_usr_column(tmp_path: Path):
         ("marin/sub/c.bin", 500_000_000, 100 * DAY, "file"),
     ])
     con = duckdb.connect()
-    s = write_age_index(con, [("BKT", str(l2))], tmp_path)
+    s = write_age_index(con, _store(con, [("BKT", l2)], tmp_path), tmp_path)
     schema, groups = extract(str(tmp_path / AGE_INDEX))
     assert [e["name"] for e in schema["schema"][1:]] == ["path", "depth", "day", "b", "o"]
+    assert schema["version"] == 1  # not a store sort
     assert schema["floor_bytes"] == s["floor"]
     assert len(groups) == 1
     g = groups[0]
@@ -132,7 +142,7 @@ def test_age_pyramid_bins_and_cascade(tmp_path: Path):
         ("marin/y/c.bin", 50, base_day + 25 * H, "file"),   # next day (same month)
     ])
     con = duckdb.connect()
-    s = write_age_pyramid(con, [("BKT", str(l2))], tmp_path, bins=("1h", "1d", "1mo"))
+    s = write_age_pyramid(con, _store(con, [("BKT", l2)], tmp_path), tmp_path, bins=("1h", "1d", "1mo"))
     ms = 1000
     h0 = base_day * ms                             # a's hour bucket
     h1 = (base_day + H) * ms                        # b's hour bucket

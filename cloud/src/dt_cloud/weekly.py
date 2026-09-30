@@ -6,13 +6,14 @@ movers with their owners. ``movers`` and ``compose`` are pure functions over
 plain rows so the tests pin their exact output; only ``load_table``,
 ``load_totals``, ``load_swept`` and ``post`` touch the network.
 
-Rows come from the ``coarse20-by-user`` index tier of each scan (one row per
-rolled-up path × owner slice, ``usr`` NULL = the *unowned* slice, so a path's
-total is the sum of its rows; 4 GiB floor, so a mover's delta is exact to
-within that floor). ``path`` is bucket-qualified with
+Rows come from the ``path`` sort of each scan's index — its dir rows to
+``MAX_DEPTH`` (one row per rolled-up path × owner slice, ``usr`` NULL = the
+*unowned* slice, so a path's total is the sum of its rows; exact, no floor:
+``movers``' byte threshold is the only cut). ``path`` is bucket-qualified with
 no ``gs://`` and no trailing slash (``marin-us-east5/checkpoints``); depth 1 is
 the bucket itself, so the report's "depth ≤ 4 under the bucket" is index depth
-≤ 5.
+≤ 5. A pre-store generation (dir rows only, wire names ``b`` / ``o``) reads the
+same way.
 """
 from __future__ import annotations
 
@@ -30,8 +31,8 @@ SENDER = "GCS usage"
 MESSAGE_LIMIT = 2000
 MAX_DEPTH = 5  # index depth: bucket + 4 segments
 DESCENT = 0.8  # a child explains its parent when it carries ≥ this share of the parent's delta
-TABLE_VARIANT = "coarse20-user"
-TABLE_FILE = "path-index-coarse20-by-user.parquet"
+TABLE_VARIANT = "path"
+TABLE_FILE = "path-index.parquet"
 
 # ---- rows --------------------------------------------------------------------
 
@@ -334,8 +335,9 @@ def load_meta(root: str, date: str) -> dict:
 
 
 def load_table(bucket: str, date: str) -> Table:
-    """The scan's ``coarse20-by-user`` tier (rows to MAX_DEPTH), located via the
-    D1 index pointer like every other index reader."""
+    """The scan's ``path`` sort's dir rows to MAX_DEPTH (a prefix of the file:
+    sorted `(depth, path)`, so the depth filter prunes row groups), located
+    via the D1 index pointer like every other index reader."""
     import fsspec
     import pyarrow.parquet as pq
 
@@ -345,8 +347,19 @@ def load_table(bucket: str, date: str) -> Table:
     if d is None:
         raise RuntimeError(f"weekly: {date} has no synced {TABLE_VARIANT} index tier")
     fs, path = fsspec.core.url_to_fs(f"gs://{bucket}/{d}/{TABLE_FILE}")
-    t = pq.read_table(path, filesystem=fs, columns=["path", "depth", "usr", "b", "o"], filters=[("depth", "<=", MAX_DEPTH)])
-    return Table(Row(p, int(dp), int(b), int(o), u) for p, dp, u, b, o in zip(*(t.column(c).to_pylist() for c in ("path", "depth", "usr", "b", "o"))))
+    return read_table(path, fs)
+
+
+def read_table(path: str, filesystem=None) -> Table:
+    """`Table` of an index parquet's dir rows to MAX_DEPTH: a store generation's
+    (`kind = 'dir'`, `size`, `n_files`) or a pre-store one's (`b`, `o`)."""
+    import pyarrow.parquet as pq
+
+    store = "kind" in pq.read_schema(path, filesystem=filesystem).names
+    b, o = ("size", "n_files") if store else ("b", "o")
+    filters = [("depth", "<=", MAX_DEPTH)] + ([("kind", "==", "dir")] if store else [])
+    t = pq.read_table(path, filesystem=filesystem, columns=["path", "depth", "usr", b, o], filters=filters)
+    return Table(Row(p, int(dp), int(bb), int(oo), u) for p, dp, u, bb, oo in zip(*(t.column(c).to_pylist() for c in ("path", "depth", "usr", b, o))))
 
 
 def load_runs(url: str, token: str) -> list[dict]:

@@ -97,22 +97,29 @@ def test_the_two_formats(layer2, codec):
 
 
 def test_indexes_are_byte_identical(layer2, codec, tmp_path: Path):
-    """path-index, the coarse tiers and the age pyramid, from either format."""
+    """The store's sorts (+ sidecars) and the age pyramid, from either format:
+    the v2's implied `sum_storage_class_id_2` is restored as a real column
+    (`= size`), so the store carries it either way."""
     v1, v2 = layer2
     s1 = X.write_index([(BUCKET, v1)], tmp_path / "i1", mem="1GB", threads=1)
     s2 = X.write_index([(BUCKET, v2)], tmp_path / "i2", mem="1GB", threads=1)
-    files = sorted(p.name for p in (tmp_path / "i1").glob("*.parquet"))
-    assert files == sorted(p.name for p in (tmp_path / "i2").glob("*.parquet"))
-    assert files == sorted([
-        "path-index.parquet",
-        *(f"path-index-coarse{e}.parquet" for e in X.COARSE_EXPS),
-        *(f"age-pyramid-{b}.parquet" for b in X.AGE_PYRAMID_BINS),
-    ])
+    files = sorted(p.name for p in (tmp_path / "i1").glob("*.parquet")) + sorted(p.name for p in (tmp_path / "i1").glob("*.json"))
+    assert files == sorted(p.name for p in (tmp_path / "i2").glob("*.parquet")) + sorted(p.name for p in (tmp_path / "i2").glob("*.json"))
+    assert files == [
+        *sorted(["path-index.parquet", "path-index-bysize.parquet", *(f"age-pyramid-{b}.parquet" for b in X.AGE_PYRAMID_BINS)]),
+        "path-index-bysize.groups.json", "path-index.groups.json",
+    ]
     assert {f: (tmp_path / "i1" / f).read_bytes() == (tmp_path / "i2" / f).read_bytes() for f in files} == {f: True for f in files}
     assert json.dumps(s1).replace("/i1/", "/") == json.dumps(s2).replace("/i2/", "/")
+    assert s1["columns"] == [
+        "path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
+        "sum_storage_class_id_2", "b", "o", "wts", "wb", "c2", "c3", "c4", "a",
+    ]
     # The single-bin age index (ad-hoc) too.
     for i, src in ((1, v1), (2, v2)):
-        X.write_age_index(duckdb.connect(), [(BUCKET, src)], tmp_path / f"i{i}")
+        con = duckdb.connect()
+        store, _ = X.write_store(con, [(BUCKET, src)], tmp_path / f"i{i}")
+        X.write_age_index(con, store, tmp_path / f"i{i}")
     assert (tmp_path / "i1" / X.AGE_INDEX).read_bytes() == (tmp_path / "i2" / X.AGE_INDEX).read_bytes()
     # And the index is written in the switch's codec.
     md = pq.read_metadata(tmp_path / "i2" / "path-index.parquet")

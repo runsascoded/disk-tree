@@ -2,10 +2,11 @@
 # r2.rbw.sh ingestion — the LOCAL / manual runner. The daily schedule now lives
 # in GitHub Actions (.github/workflows/daily-ingest.yml, 07:15 UTC + manual
 # dispatch); this script stays as a laptop fallback / one-off freshener.
-# Scan the public R2 buckets (ctbk, crashes, jc-taxes) → union path-index +
-# coarse tiers + snapshot → upload to the disk-tree-demo bucket → publish footers
-# to the disk-tree-demo-db D1. The Map (site/) reads that index. Idempotent per
-# date (a re-run lands a fresh generation and flips the pointer).
+# Scan the public R2 buckets (ctbk, crashes, jc-taxes) → the union's path store
+# (`path` + `bysize` sorts, objects included; specs/path-store.md §4.4) +
+# snapshot → upload to the disk-tree-demo bucket → publish footers to the
+# disk-tree-demo-db D1. The Map (site/) reads that index. Idempotent per date
+# (a re-run lands a fresh generation and flips the pointer).
 #
 # Creds come from .envrc via direnv (R2_HCCS_RO_* for HCCS ctbk/crashes,
 # R2_RAC_RO_* ("disky demo bkts RO") for RAC jc-taxes, R2_RW_* to write disk-tree-demo, CLOUDFLARE_API_TOKEN +
@@ -34,8 +35,9 @@ list "$R2_HCCS_RO_ACCESS_KEY_ID" "$R2_HCCS_RO_SECRET_ACCESS_KEY" ctbk     "$HCCS
 list "$R2_HCCS_RO_ACCESS_KEY_ID" "$R2_HCCS_RO_SECRET_ACCESS_KEY" crashes  "$HCCS_EP"
 list "$R2_RAC_RO_ACCESS_KEY_ID" "$R2_RAC_RO_SECRET_ACCESS_KEY" jc-taxes "$R2_ENDPOINT_URL"
 
-# 2. Union all three (grouped by bucket → the Map's top cells) → path-index +
-#    coarse tiers (beside -P) + snapshot JSONs.
+# 2. Union all three (grouped by bucket → the Map's top cells) → the store's
+#    sorts (`path-index.parquet` at -P, `path-index-bysize.parquet` + the
+#    .groups.json sidecars beside it) + snapshot JSONs.
 ( cd cloud && uv run dt-cloud path-index -d "$DATE" -l "$WORK/listing/*/*.parquet" \
     -P "$WORK/index/path-index.parquet" -o "$WORK/snap" )
 
@@ -47,6 +49,6 @@ put "$WORK/snap/"  "snapshots/r2/$DATE/"
 
 ( cd cloud && D1_DB_ID="$D1_ID" D1_DB_NAME="$BUCKET-db" INDEX_VARIANTS=path \
     uv run dt-cloud index-sync "$DATE" -g "$GEN" -b "$BUCKET" -k "listing/$DATE/index/$GEN" \
-      -d "$WORK/index" -v path -v coarse16 -v coarse20 -v coarse24 )
+      -d "$WORK/index" -v path -v bysize )
 
 echo "[r2-ingest] $DATE gen=$GEN done"
