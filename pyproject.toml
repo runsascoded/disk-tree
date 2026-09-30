@@ -80,6 +80,14 @@ dev = [
     "pytest",
 ]
 
+[tool.uv.workspace]
+# `cloud/` (dt-cloud, the cloud overlay) is a workspace member: ONE lockfile
+# for the engine and the overlay, one environment, so the job images, CI and
+# the laptop all resolve the same pins (before this, `cloud/uv.lock` and
+# `uv.lock` disagreed on 34 packages and each `uv sync` repointed the shared
+# venv to whichever ran last; the job image ignored both and resolved fresh).
+members = ["cloud"]
+
 [tool.uv.sources]
 
 [tool.setuptools]

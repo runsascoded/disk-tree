@@ -51,15 +51,13 @@ jobs:
       - run: uv python install 3.12
       # The root wheel force-includes ui/dist; the editable install wants it present.
       - run: mkdir -p ui/dist
+      # One workspace env (engine + `cloud/` overlay, one lockfile): every
+      # package, extra and group, so both suites run against the same pins.
+      - run: uv sync --frozen --all-packages --all-extras --all-groups
       - name: disk_tree engine tests (incl. e2e backends)
-        run: |
-          uv sync --all-extras
-          uv run pytest tests/ -q
+        run: uv run pytest tests/ -q
       - name: dt_cloud tests
-        run: |
-          cd cloud
-          uv sync --group test --extra overtime   # `dt_cloud.overtime` imports pyrmts
-          uv run pytest tests/ -q
+        run: cd cloud && uv run pytest tests/ -q
 
   deploy:
     # `cloud` → disk-tree-demo (r2.rbw.sh); `dev` → disk-tree-demo-dev (dev.r2.rbw.sh).

@@ -18,7 +18,7 @@ eval "$(dt-cloud sheet-mirror env "$cfg")"
 ctx=$(mktemp -d)
 trap 'rm -rf "$ctx"' EXIT
 mkdir -p "$ctx/cloud" "$ctx/deploy/sheet-mirror"
-cp -R "$root/pyproject.toml" "$root/README.md" "$root/src" "$ctx/"
+cp -R "$root/pyproject.toml" "$root/README.md" "$root/uv.lock" "$root/src" "$ctx/"
 cp -R "$root/cloud/pyproject.toml" "$root/cloud/src" "$ctx/cloud/"
 cp "$here/Dockerfile" "$here/cloudbuild.yaml" "$here/sync.sh" "$ctx/deploy/sheet-mirror/"
 find "$ctx" -name __pycache__ -type d -prune -exec rm -rf {} +

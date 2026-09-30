@@ -278,8 +278,10 @@ auto-expand.
 ## Development
 
 ```bash
-# Python setup
-uv sync
+# Python setup — one uv workspace: the engine (root) + the cloud overlay
+# (`cloud/`, package `dt-cloud`) share ONE `uv.lock` and one `.venv`.
+uv sync                                                 # engine only
+uv sync --all-packages --all-extras --all-groups        # engine + dt-cloud, every extra, test groups
 disk-tree index .
 
 # Start API server
@@ -343,10 +345,11 @@ Stream-engine tuning knobs (env, all with measured defaults — see the constant
 ## Tests
 
 ```bash
-pytest tests/
+pytest tests/                    # engine
+cd cloud && pytest               # dt-cloud (same venv; sync with --all-packages first)
 ```
 
-Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet).
+Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet). CI and the job images install `--frozen` from the workspace lock (`deploy/sheet-mirror/Dockerfile` is the reference recipe: `uv sync --frozen --no-dev --no-editable --package dt-cloud --extra …` into `UV_PROJECT_ENVIRONMENT=/usr/local`); a plain `pip install .` resolves fresh and ships pins the tests never ran.
 
 ## Current State (www branch)
 

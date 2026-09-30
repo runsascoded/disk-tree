@@ -64,7 +64,7 @@ def _expected_listing(tree: Path) -> pd.DataFrame:
         'bucket': str(tree),
         'name': [n for n, _ in rows],
         'size_bytes': pd.array([_blocks(p) for _, p in rows], dtype='int64'),
-        'created': pd.to_datetime([int(os.stat(p).st_mtime) for _, p in rows], unit='s', utc=True),
+        'created': pd.to_datetime([int(os.stat(p).st_mtime) for _, p in rows], unit='s', utc=True).astype('datetime64[ms, UTC]'),
         'storage_class_id': pd.array([0, 0, 0], dtype='int64'),
     })
 

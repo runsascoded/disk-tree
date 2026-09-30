@@ -255,7 +255,7 @@ def analyze(pf: "pq.ParquetFile", batch_rows: int = BLOB_ROW_GROUP_SIZE) -> Anal
                     raise RecompressError(f"row 0: uri {u0!r} is not `<root>/{p0}`")
             expected = pc.if_else(
                 pc.equal(path, '.'), pa.scalar(root, type=path.type),
-                pc.binary_join_element_wise(pa.scalar(root + '/', type=path.type), path, ''),
+                pc.binary_join_element_wise(pa.scalar(root + '/', type=path.type), path, pa.scalar('', type=path.type)),
             )
             ok = pc.equal(uri, expected)
             if not all_rows(ok):

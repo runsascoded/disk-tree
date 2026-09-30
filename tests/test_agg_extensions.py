@@ -508,8 +508,10 @@ def test_side_max_cols_with_labels_and_partitions(tmp_path: Path):
     for k in (1, 2):
         part = _run_side(tmp_path, listing, side, f'k{k}', max_cols=('last_ts', 'read_ops'), label=labels, partition_depth=k)
         pd.testing.assert_frame_equal(one, part)
+    # A missing label reads back as None or NaN depending on pandas' string
+    # dtype (3.x: NaN); the spec is "no label", so both normalize to None.
     rows = [
-        (r.path, r.team, r.usr, None if pd.isna(r.last_ts) else r.last_ts.to_pydatetime(),
+        (r.path, _none(r.team), _none(r.usr), None if pd.isna(r.last_ts) else r.last_ts.to_pydatetime(),
          None if pd.isna(r.read_ops) else int(r.read_ops))
         for r in one[one.depth <= 1].itertuples()
     ]
@@ -557,6 +559,11 @@ def test_side_validation(tmp_path: Path):
 # ---------- Size histogram column (spec mgu-scale-unification.md, item E) ----------
 
 from disk_tree.find.agg_ext import SIZE_HIST_BINS, size_bin
+
+
+def _none(x):
+    """Missing → None (pandas 3's default string dtype reads a NULL as NaN)."""
+    return None if pd.isna(x) else x
 
 # Sizes at every edge that matters: 0, both sides of several powers of two,
 # both sides of the last closed bin's top (2^39) and the open-ended last bin.

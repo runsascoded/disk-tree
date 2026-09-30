@@ -61,11 +61,15 @@ def _layer2(tmp_path: Path, labels: str | None = None) -> str:
     return out
 
 
+def _rows(df: pd.DataFrame, cols: list[str]) -> list[tuple]:
+    """`cols` per row as tuples, a NULL as None (pandas 3's string dtype reads
+    a NULL back as NaN; the spec is "no value")."""
+    return [tuple(None if pd.isna(v) else v for v in row) for row in df[cols].itertuples(index=False)]
+
+
 def _sort_keys(path: str) -> list[tuple]:
     meta = pq.read_metadata(path).metadata
-    cols = meta[b'sort'].decode().split(',')
-    df = pd.read_parquet(path)
-    return [tuple(None if pd.isna(v) else v for v in row) for row in df[cols].itertuples(index=False)]
+    return _rows(pd.read_parquet(path), meta[b'sort'].decode().split(','))
 
 
 def test_coarse_floor():
@@ -185,14 +189,14 @@ def test_sort_variants_over_label_slices(tmp_path: Path):
     ]
     dirs = pd.read_parquet(f'{stem}.dirs.parquet')
     assert list(dirs.columns[:3]) == ['path', 'usr', 'size']
-    assert [tuple(r) for r in dirs[['path', 'usr', 'size']].itertuples(index=False)] == [
+    assert _rows(dirs, ['path', 'usr', 'size']) == [
         ('.', None, 120 * _UNIT), ('.', 'a', 120 * _UNIT), ('.', 'b', 60 * _UNIT), ('.', 'c', 15 * _UNIT),
         ('d0', 'c', 15 * _UNIT), ('d1', 'a', 30 * _UNIT), ('d2', None, 45 * _UNIT),
         ('d3', 'b', 60 * _UNIT), ('d4', None, 75 * _UNIT), ('d5', 'a', 90 * _UNIT),
     ]
     by_usr = pd.read_parquet(f'{stem}.dirs-by-usr.parquet')
     assert pq.read_metadata(f'{stem}.dirs-by-usr.parquet').metadata[b'sort'] == b'usr,depth,path'
-    assert [tuple(r) for r in by_usr[['usr', 'path']].itertuples(index=False)] == [
+    assert _rows(by_usr, ['usr', 'path']) == [
         (None, '.'), (None, 'd2'), (None, 'd4'),
         ('a', '.'), ('a', 'd1'), ('a', 'd5'),
         ('b', '.'), ('b', 'd3'),
@@ -201,7 +205,7 @@ def test_sort_variants_over_label_slices(tmp_path: Path):
     # Floor 16 MiB (2^(28−4)) per *row*: the root's `c` slice (15 MiB) drops
     # while its other slices stay; `d0` drops with it.
     coarse = pd.read_parquet(f'{stem}.coarse-by-usr.parquet')
-    assert [tuple(r) for r in coarse[['usr', 'path']].itertuples(index=False)] == [
+    assert _rows(coarse, ['usr', 'path']) == [
         (None, '.'), (None, 'd2'), (None, 'd4'),
         ('a', '.'), ('a', 'd1'), ('a', 'd5'),
         ('b', '.'), ('b', 'd3'),
