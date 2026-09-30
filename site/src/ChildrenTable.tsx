@@ -151,6 +151,11 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
   // no children) must not shorten the hook list, or React throws "Rendered
   // fewer hooks than expected" on the way in.
   if (!kids.length) return null
+  // The created cell is three table columns (swatch · month · year), so each
+  // part lines up down the page; the year column only exists when a listed
+  // row is outside the current year.
+  const createdParts = (d: number) => epochDaysToMonthShort(d).split(' ')
+  const hasYr = shown.some(k => k.d != null && createdParts(k.d).length > 1)
   const selBar = showSel && sel.selected.size > 0 && (
     <span className="sel-bar">
       <b>{sel.selected.size}</b> selected · {fmtBytes(selBytes)}
@@ -198,6 +203,7 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
             <th className="num">share</th>
             {th('o', 'objects')}
             <th
+              colSpan={hasYr ? 3 : 2}
               className={'num sortable' + (sort.k === 'd' ? ' on' : '')}
               onClick={() => setSort(s => ({ k: 'd', asc: s.k === 'd' ? !s.asc : false }))}
               title="sort"
@@ -218,7 +224,7 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
             </th>
             {hasRead && th('a', 'read', false)}
             {hasOwners && <th>owner(s)</th>}
-            {showSel && <th>actions</th>}
+            {showSel && <th className="actions" aria-label="actions" />}
           </tr>
         </thead>
         <tbody>
@@ -238,10 +244,14 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
                 <td className="num">{fmtBytes(k.b)}</td>
                 <td className="num">{node.b ? ((100 * k.b) / node.b).toFixed(1) : 0}%</td>
                 <td className="num">{fmtN(k.o)}</td>
-                <td className="created num">{k.d != null ? (() => {
-                  const [mon, yr] = epochDaysToMonthShort(k.d).split(' ')
-                  return <span className="cm"><i style={{ background: ageInk(k.d) }} /><span className="mon">{mon}{yr && <span className="yr"> {yr}</span>}</span></span>
-                })() : '—'}</td>
+                {k.d != null ? (() => {
+                  const [mon, yr] = createdParts(k.d)
+                  return <>
+                    <td className="created sw"><i style={{ background: ageInk(k.d) }} /></td>
+                    <td className="created mon">{mon}</td>
+                    {hasYr && <td className="created yr">{yr ?? ''}</td>}
+                  </>
+                })() : <td className="created none num" colSpan={hasYr ? 3 : 2}>—</td>}
                 {hasRead && <td title={k.a != null ? 'most recent GET/HEAD/LIST under this prefix (access logs)' : undefined}>
                   {k.a != null ? epochDaysToDate(k.a) : '—'}
                 </td>}
@@ -283,7 +293,7 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
             <td className="num">{fmtBytes(kids.reduce((s, k) => s + k.b, 0))}</td>
             <td className="num">{node.b ? ((100 * kids.reduce((s, k) => s + k.b, 0)) / node.b).toFixed(1) : 0}%</td>
             <td className="num">{kids.reduce((s, k) => s + k.o, 0).toLocaleString('en-US')}</td>
-            <td colSpan={2 + (hasRead ? 1 : 0) + (hasOwners ? 1 : 0) + (showSel ? 2 : 0)} />
+            <td colSpan={(hasYr ? 3 : 2) + (hasRead ? 1 : 0) + (hasOwners ? 1 : 0) + (showSel ? 1 : 0)} />
           </tr>
         </tfoot>
       </table>
