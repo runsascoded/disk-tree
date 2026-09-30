@@ -952,7 +952,10 @@ h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
 .diff-move {
   border-collapse: collapse; font-size: 12.5px; font-variant-numeric: tabular-nums;
   margin: 1px 2px 2px;
-  th { text-align: left; font-weight: 500; color: var(--ink-2); padding: 0 10px 0 0; }
+  // Labels and numbers both nowrap: in a narrow card the table scrolls
+  // sideways as a whole, instead of the label column collapsing to one letter
+  // per line while the nowrap numbers keep their width.
+  th { text-align: left; font-weight: 500; color: var(--ink-2); padding: 0 10px 0 0; white-space: nowrap; }
   td { text-align: right; padding: 0 0 0 12px; white-space: nowrap; }
   td.eq { color: var(--ink); }
 }
