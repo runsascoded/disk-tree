@@ -1628,16 +1628,17 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
     }
     .never { color: var(--never-read); font-weight: 600; filter: brightness(1.4); }
     .none { color: var(--ink-3); }
+    // Created = three columns (swatch · month · year) under one header, so
+    // every part aligns down the page; the year column is omitted when no
+    // listed row needs one.
     td.created {
       white-space: nowrap;
-      // Dot + month as a 2-col group, flush-right in the cell (a trailing
-      // empty year track used to leave dead space that shoved it left). Month
-      // track floors at 3ch so bare months align; a year suffix grows it.
-      .cm { display: inline-grid; grid-template-columns: 8px minmax(3ch, max-content); gap: 0 5px; align-items: center; justify-items: end; }
+      &.sw { padding-right: 5px; text-align: right; }
+      &.mon { padding-left: 0; padding-right: 0; text-align: left; }
+      &.yr { padding-left: 4px; text-align: left; color: var(--ink-3); font-size: 11px; }
       // A contrast ring so the pale (new) and dark (old) ends of the viridis
       // ramp both read against the row — the swatch was invisible at each end.
       i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 35%, transparent); }
-      .yr { color: var(--ink-3); font-size: 11px; }
     }
     td.owners { white-space: nowrap; }
     // The row's actions: the trash gesture (a staging store) and the assign
