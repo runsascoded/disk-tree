@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import re
 from pathlib import Path
 
 import duckdb
@@ -223,9 +224,11 @@ def test_pre_b_min_sidecar_loads(tmp_path: Path, tiers: Path):
 def test_cli_plan(tiers: Path):
     r = CliRunner().invoke(cli, ['tiers', 'plan', str(tiers / 'l2.bysize.groups.json'), 'flat', '32768'])
     assert r.exit_code == 0, r.output
-    assert r.output.split('\n') == [
+    # The byte figures follow the codec (`$DISK_TREE_PARQUET_CODEC`, zstd by
+    # default, snappy in the `codec` fixture): normalize them, assert the rest.
+    assert re.sub(r'bytes \S+/\S+', 'bytes <b>', r.output).split('\n') == [
         "bysize: P=flat (depth 1) thr=32768 atten=1 depths 2..∞ paths ['flat/', 'flat0')",
-        "  groups 1/10  rows 2,048/20,015  bytes 10.7K/102.1K  matched 1,250  waste 39.0%",
+        "  groups 1/10  rows 2,048/20,015  bytes <b>  matched 1,250  waste 39.0%",
         "",
     ]
     r = CliRunner().invoke(cli, ['tiers', 'plan', '-j', '-C', '-a', '0.5', '-d', '1', str(tiers / 'l2.path.groups.json'), 'nest', str(MiB)])
