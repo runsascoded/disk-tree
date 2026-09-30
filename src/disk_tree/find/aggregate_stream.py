@@ -1257,21 +1257,17 @@ def _finalize_parts(
     # between `parent` and `uri`) — the published layer-2 must be column-order
     # identical across engines so file-level diffs and positional set ops
     # (EXCEPT) work.
+    # The parts carry every column of the v1 shape (`uri` included); the
+    # output is v2 (spec `listing-slim.md`): `uri` is not selected, the
+    # implied pivots are not selected, the format rides in the metadata.
     from disk_tree import listing_format as lf
-    canonical_cols = [
+    fmt = lf.slim(manifest['scan_root'], [
         'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
-        *pivot_names, *([MTIME_MEAN] if mean_mtime else []),
+        *manifest['all_pivot_names'], *([MTIME_MEAN] if mean_mtime else []),
         'uri', 'depth',
-    ]
-    if 'scan_root' in manifest:
-        fmt = lf.slim(manifest['scan_root'], [
-            'path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind', 'parent',
-            *manifest['all_pivot_names'], *([MTIME_MEAN] if mean_mtime else []),
-            'uri', 'depth',
-        ], manifest['implied'])
-        canonical_cols = lf.written_columns(fmt)
-    else:
-        fmt = lf.V1
+    ], manifest['implied'])
+    canonical_cols = lf.written_columns(fmt)
+    assert set(pivot_names) == set(canonical_cols) & set(manifest['all_pivot_names'])
     fields = []
     for c in canonical_cols:
         if c in ('path', 'kind', 'parent', 'uri'):
@@ -1490,6 +1486,20 @@ def aggregate_stream(
         with open(manifest_path) as fh:
             manifest = json.load(fh)
         _stage(f"resuming from streamed parts at {parts_dir} (stream pass skipped)")
+        if 'scan_root' not in manifest:
+            # Parts streamed before the v2 listing format (spec
+            # `listing-slim.md`) still finalize as v2: the root is a function
+            # of the call, and every pivot column the parts hold is written
+            # (whether one is single-valued was decided by the stream pass
+            # that produced them, which this manifest predates).
+            from disk_tree.backends.url import canonical
+            manifest = {
+                **manifest,
+                'scan_root': canonical(f'{scheme}://{bucket}'),
+                'all_pivot_names': manifest['pivot_names'],
+                'implied': {},
+            }
+            _stage("parts predate the v2 listing format: finalizing as v2 with every pivot column written")
         return _finalize_and_clean(parts_dir, manifest, out_parquet, jobs=jobs)
     ex = None
     if jobs > 1:
@@ -1631,7 +1641,7 @@ def aggregate_stream(
         manifest = {
             'pivot_names': pivot_names,
             # v2 output (spec `listing-slim.md`); a resumed manifest without
-            # these keys finalizes the v1 shape its parts were built for.
+            # these keys is filled in on resume (see `aggregate_stream`).
             'scan_root': scan_root,
             'all_pivot_names': all_pivot_names,
             'implied': implied,
