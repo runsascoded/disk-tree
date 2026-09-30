@@ -429,3 +429,19 @@ def test_dir_cache_from_before_the_store_is_rebuilt(tmp_path: Path, listing: str
     assert list(pd.read_parquet(cache / "dir-stats.parquet").columns) == list(DIR_STATS_COLS)
     assert _rows(pd.read_parquet(pidx), ["path", "mtime"])[:1] == [("b1", int(TS["d0703"].timestamp()))]
 
+
+def test_store_without_user_sorts(tmp_path: Path, listing: str, attribution: str):
+    """`user_sorts=False` writes the two sorts only, attributed rows and all —
+    the reader prunes a lens by the footer's `u_min`/`u_max` (gcs's shape:
+    half the bytes and footer rows; specs/path-store.md §1.6)."""
+    identities_path = tmp_path / "identities.yaml"
+    identities_path.write_text(IDENTITIES_YAML)
+    out = tmp_path / "out"
+    pidx = tmp_path / "path-index.parquet"
+    meta = write_path_index((listing,), out, "2026-07-20", (attribution,), identities_path, path_index=pidx, user_sorts=False, row_group_rows=2048)
+    assert meta["index"] == {"rows": 12, "sorts": {"path": {"rows": 12, "groups": 1}, "bysize": {"rows": 12, "groups": 1}}}
+    assert sorted(p.name for p in tmp_path.glob("path-index*")) == [
+        "path-index-bysize.groups.json", "path-index-bysize.parquet", "path-index.groups.json", "path-index.parquet",
+    ]
+    assert _kv(pidx) == {"tier": "path", "sort": "depth,path,usr"}
+

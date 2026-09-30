@@ -197,11 +197,16 @@ def write_sorts(
     *,
     sort_variants: tuple[tuple[str, ...], ...] = (),
     groups: bool = True,
+    row_group_rows: int = ROW_GROUP_SIZE,
 ) -> dict[str, dict]:
     """Cut the store's two sorts (+ ``sort_variants`` of each) from the union
     at ``store`` into ``out_dir`` under their served names, with the
     `.groups.json` footer sidecars. Returns ``{variant: {file, rows, groups}}``
-    in write order."""
+    in write order.
+
+    ``row_group_rows``: the HTTP range-read unit — and the D1 footer's row
+    count per sort. A fleet the size of gcs (777M rows) needs 32K to keep
+    two sorts × 120 scans under D1's 10 GB (specs/path-store.md §1.6)."""
     import pyarrow.parquet as pq
     from disk_tree.find.groups import groups_path
     from disk_tree.find.tiers import TIERS, tier_path, write_tiers
@@ -209,7 +214,7 @@ def write_sorts(
     out = Path(out_dir)
     stem = str(out / "path-index")
     written = write_tiers(
-        store, stem, tiers=TIERS, row_group_rows=ROW_GROUP_SIZE,
+        store, stem, tiers=TIERS, row_group_rows=row_group_rows,
         sort_variants=sort_variants, con=con, groups=groups,
     )
     result: dict[str, dict] = {}
@@ -386,6 +391,7 @@ def write_index(
     tmp_dir: str | Path | None = None,
     age_only: bool = False,
     sort_variants: tuple[tuple[str, ...], ...] = (),
+    row_group_rows: int = ROW_GROUP_SIZE,
 ) -> dict:
     """Write the store's sorts (`path-index.parquet`, `path-index-bysize.parquet`,
     + `sort_variants` copies) and the age pyramid under ``out_dir`` from
@@ -412,7 +418,7 @@ def write_index(
                 "pyramid": pyramid,
                 "files": {AGE_PYRAMID_VARIANTS[b]: s["file"] for b, s in pyramid["bins"].items()},
             }
-        sorts = write_sorts(con, store, out, sort_variants=sort_variants)
+        sorts = write_sorts(con, store, out, sort_variants=sort_variants, row_group_rows=row_group_rows)
         n = sorts["path"]["rows"]
         err(f"store: {n:,} rows ({', '.join(columns)}) over {buckets}")
         pyramid = write_age_pyramid(con, store, out)

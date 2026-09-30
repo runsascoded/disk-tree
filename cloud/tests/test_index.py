@@ -270,3 +270,17 @@ def test_write_index_age_only(tmp_path: Path):
         "files": {f"age-pyramid-{b}": _pyr_files(out)[b] for b in BINS},
     }
     assert sorted(p.name for p in out.iterdir() if p.name != ".duckdb-tmp") == sorted(f"age-pyramid-{b}.parquet" for b in BINS)
+
+
+def test_write_index_row_group_rows(tmp_path: Path):
+    """`row_group_rows` sets the sorts' group size — the range-read unit and the
+    footer's row count per sort (gcs cuts 32K groups; specs/path-store.md §1.6)."""
+    rows = [(".", 0, "dir", 4100, 4100, 4100, 4100, T17, float(T17))] + [
+        (f"f{i:04d}.bin", 1, "file", 1, 1, 0, 0, T17, float(T17)) for i in range(4100)
+    ]
+    l2 = tmp_path / "l2.parquet"
+    _write_l2(l2, rows)
+    out = tmp_path / "index"
+    s = X.write_index([(BUCKET, str(l2))], out, mem="1GB", threads=2, row_group_rows=2048)
+    assert s["sorts"] == {"path": {"rows": 4101, "groups": 3}, "bysize": {"rows": 4101, "groups": 3}}
+
