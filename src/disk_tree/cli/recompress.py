@@ -9,6 +9,7 @@ from click import argument, echo, option
 from utz import err
 
 from disk_tree.cli.base import cli
+from disk_tree import listing_format as lf
 
 
 def _hr(n: int | None) -> str:
@@ -31,12 +32,14 @@ def recompress_cmd(as_json: bool, keep: bool, dry_run: bool, paths: tuple[str, .
     """Rewrite old-format (v1) layer-2 listings as v2 in place, lossless.
 
     PATHS are parquet files, directories (recursive `*.parquet`; sidecars
-    skipped) or fsspec URLs (`gs://…`, `r2://…`, `s3://…`). A v2 file is
-    skipped. Each rewrite streams by row group (never a whole file in memory),
-    drops `uri` and the pivot columns equal to `size`, re-encodes under
-    `$DISK_TREE_PARQUET_CODEC` in ≤64K-row groups, verifies the row count and an
-    order-insensitive digest of `(path, size, mtime, kind)` against the
-    original, then swaps (atomic rename; copy + delete on a URL). A file that
+    skipped) or fsspec URLs (`gs://…`, `r2://…`, `s3://…`). A v2 file under
+    `$DISK_TREE_PARQUET_CODEC` is skipped; one under another codec is
+    re-encoded (same columns and keys). Each rewrite streams by row group
+    (never a whole file in memory), drops `uri` and the pivot columns equal to
+    `size`, re-encodes under `$DISK_TREE_PARQUET_CODEC` in ≤64K-row groups,
+    verifies the row count and an order-insensitive digest of `(path, size,
+    mtime, kind)` against the original, then swaps (atomic rename; copy +
+    delete on a URL). A file that
     fails verification, or whose `uri` column is not `<root>/<path>` on every
     row, is left untouched and reported; the exit status is then 1.
     """
@@ -87,11 +90,12 @@ def recompress_cmd(as_json: bool, keep: bool, dry_run: bool, paths: tuple[str, .
 def _line(r) -> str:
     imp = f" implied {','.join(r.implied)}" if r.implied else ''
     if r.status == 'skipped':
-        return f"{r.path}: already v2 ({_hr(r.old_size)}, {r.rows:,} rows)"
+        return f"{r.path}: already v2 {r.codec} ({_hr(r.old_size)}, {r.rows:,} rows)"
+    recoded = f", {r.recoded} → {lf.codec()}" if r.recoded else ''
     if r.status == 'planned':
-        return f"{r.path}: would rewrite ({_hr(r.old_size)}, {r.rows:,} rows, root {r.scan_root}{imp})"
+        return f"{r.path}: would rewrite ({_hr(r.old_size)}, {r.rows:,} rows, root {r.scan_root}{imp}{recoded})"
     kept = f", old kept at {r.kept}" if r.kept else ''
-    return f"{r.path}: {_hr(r.old_size)} → {_hr(r.new_size)} ({100 * r.ratio:.1f}%, {r.rows:,} rows, root {r.scan_root}{imp}{kept})"
+    return f"{r.path}: {_hr(r.old_size)} → {_hr(r.new_size)} ({100 * r.ratio:.1f}%, {r.rows:,} rows, root {r.scan_root}{imp}{recoded}{kept})"
 
 
 @cli.command('listing-format')

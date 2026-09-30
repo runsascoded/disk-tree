@@ -205,11 +205,55 @@ def test_already_v2_is_skipped(tmp_path: Path):
     r = CliRunner().invoke(cli, ['recompress', path])
     assert r.exit_code == 0, r.output
     assert r.output.split('\n') == [
-        f"{path}: already v2 ({_hr(len(v2))}, {len(df):,} rows)",
+        f"{path}: already v2 snappy ({_hr(len(v2))}, {len(df):,} rows)",
         'rewrote 0 file(s), 1 already v2',
         '',
     ]
     assert _bytes(path) == v2
+
+
+def test_v2_is_recoded_when_the_codec_differs(tmp_path: Path, monkeypatch):
+    """TFFP: a v2 file under a `$DISK_TREE_PARQUET_CODEC` other than its own is
+    rewritten in place under the switch codec — same columns, same format keys,
+    same frame — and is skipped once it matches. The v1 → v2 rewrite is the same
+    verify-then-swap, so the codec flip re-runs over already-slim files."""
+    df = v1_frame()
+    path = write_v1(df, str(tmp_path / 'a.parquet'))
+    monkeypatch.setenv('DISK_TREE_PARQUET_CODEC', 'snappy')
+    assert rc.recompress(path).status == 'rewritten'
+    kv, names, snappy = _kv(path), blobfs.read_schema(path).names, _bytes(path)
+    assert _codecs(path) == {'SNAPPY'}
+    monkeypatch.setenv('DISK_TREE_PARQUET_CODEC', 'zstd')
+    r = CliRunner().invoke(cli, ['recompress', '-n', path])
+    assert r.exit_code == 0, r.output
+    assert r.output.split('\n') == [
+        f"{path}: would rewrite ({_hr(len(snappy))}, {len(df):,} rows, root gcs://b1 implied sum_storage_class_id_1, snappy → zstd)",
+        f"would rewrite 1 file(s), {_hr(len(snappy))} before, 0 already v2",
+        '',
+    ]
+    assert _bytes(path) == snappy
+    r = CliRunner().invoke(cli, ['recompress', path])
+    assert r.exit_code == 0, r.output
+    new_size = (tmp_path / 'a.parquet').stat().st_size
+    assert new_size < len(snappy)
+    assert r.output.split('\n') == [
+        f"{path}: {_hr(len(snappy))} → {_hr(new_size)} ({100 * new_size / len(snappy):.1f}%, {len(df):,} rows, root gcs://b1 implied sum_storage_class_id_1, snappy → zstd)",
+        f"rewrote 1 file(s), {_hr(len(snappy))} → {_hr(new_size)} ({100 * new_size / len(snappy):.1f}%), 0 already v2",
+        '',
+    ]
+    assert _ls(str(tmp_path)) == ['a.parquet']
+    assert _codecs(path) == {'ZSTD'}
+    assert _kv(path) == kv
+    assert blobfs.read_schema(path).names == names
+    assert_frame_equal(blobfs.read_parquet(path), df)
+    zstd = _bytes(path)
+    r = CliRunner().invoke(cli, ['recompress', '-j', path])
+    assert r.exit_code == 0, r.output
+    assert json.loads(r.output)['results'] == [{
+        'path': path, 'status': 'skipped', 'old_size': len(zstd), 'new_size': None, 'ratio': None, 'rows': len(df),
+        'scan_root': 'gcs://b1', 'implied': {'sum_storage_class_id_1': 'size'}, 'kept': None, 'codec': 'zstd', 'recoded': None,
+    }]
+    assert _bytes(path) == zstd
 
 
 def test_dry_run_writes_nothing(tmp_path: Path):
@@ -239,6 +283,7 @@ def test_keep_leaves_the_v1_file(tmp_path: Path):
         'results': [{
             'path': path, 'status': 'rewritten', 'old_size': len(old), 'new_size': new_size, 'ratio': new_size / len(old),
             'rows': len(df), 'scan_root': 'gcs://b1', 'implied': {'sum_storage_class_id_1': 'size'}, 'kept': kept,
+            'codec': 'snappy', 'recoded': None,
         }],
         'failures': [],
         'totals': {
