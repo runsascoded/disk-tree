@@ -14,7 +14,8 @@ import {
 } from '@floating-ui/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { DEFAULT_STORE } from './stores'
+import { DEFAULT_STORE, STORES } from './stores'
+import { useStore } from './store'
 import { FaGithub } from 'react-icons/fa'
 import { MdMenu } from 'react-icons/md'
 import { Link, useLocation } from 'react-router-dom'
@@ -157,7 +158,13 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
   const canAssign = useCanAssign()
   const [aboutOpen, setAboutOpen] = useState(false)
   const m = useMenu('bottom-start')
-  const here = (to: string) => (to === '/' ? pathname === '/' : pathname === to || pathname.startsWith(to + '/'))
+  // The subtree's store: its own map + scan browser (`/meta`, `/meta/files`),
+  // and only the affordances it has (ownership, staging are the primary's).
+  const store = useStore()
+  const base = store.path === '/' ? '' : store.path
+  // The map is "here" at the store's root only (a drilled path is a place of
+  // its own); every other page, on it or under it.
+  const here = (to: string) => (to === store.path ? pathname === to : pathname === to || pathname.startsWith(to + '/'))
   const link = (to: string, label: string) => (
     <Link key={to} role="menuitem" className="mi" to={to} aria-current={here(to) ? 'page' : undefined} onClick={() => m.setOpen(false)}>
       {label}
@@ -173,11 +180,24 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
         <FloatingPortal>
           <FloatingFocusManager context={m.context} modal={false}>
             <div className="menu-pop" ref={m.refs.setFloating} style={m.floatingStyles} {...m.getFloatingProps()}>
-              {link('/', 'Map')}
-              {link('/files', 'Scans')}
-              {canAssign && DEFAULT_STORE.owners && link('/users', 'Users')}
-              {canAssign && DEFAULT_STORE.owners && link('/assignments', 'Assignments')}
-              {DEFAULT_STORE.staging && link('/staged', 'Staged')}
+              {link(store.path, 'Map')}
+              {link(`${base}/files`, 'Scans')}
+              {canAssign && store.owners && link('/users', 'Users')}
+              {canAssign && store.owners && link('/assignments', 'Assignments')}
+              {store.staging && link('/staged', 'Staged')}
+              {/* The store switcher — only a multi-store deploy has one
+                  (specs/multi-store.md phase 2): each configured store at its
+                  own path, the current one marked. */}
+              {STORES.length > 1 && (
+                <>
+                  <hr />
+                  {STORES.map(s => (
+                    <Link key={`store:${s.key}`} role="menuitem" className="mi store-link" to={s.path} aria-current={s.key === store.key ? 'true' : undefined} onClick={() => m.setOpen(false)}>
+                      {s.label} <span className="dim">{s.path}</span>
+                    </Link>
+                  ))}
+                </>
+              )}
               <hr />
               <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setAboutOpen(true) }}>About — the data, axes &amp; colors</button>
               {extra?.map(e => (

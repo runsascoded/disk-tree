@@ -7,7 +7,7 @@ import { dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonthShort } fr
 import type { UserIndexEntry } from './colors'
 import type { OwnerIndex } from './owners'
 import { OwnerBar, ownerShares } from './OwnerBar'
-import { DEFAULT_STORE } from './stores'
+import { useStore } from './store'
 import { Tooltip } from './Tooltip'
 import { elideMid } from './CopyName'
 import { AssignSelect } from './AssignSelect'
@@ -52,11 +52,13 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
   const PAGE = PAGE_SIZES.includes(nP) ? nP : 20
   // A staging store (`Store.staging`): full viewers — not read-only guest
   // links — select + trash (stage for deletion; an admin approves later).
-  // Owner assignment (`Store.owners`) is an admin's, alongside.
-  const staging = DEFAULT_STORE.staging
+  // Owner assignment (`Store.owners`) is an admin's, alongside. Both are the
+  // subtree's store's flags: a secondary store has neither.
+  const store = useStore()
+  const staging = store.staging
   const canStage = useCanStage()
   const stage = useStage()
-  const assigning = !!ownerIdx && DEFAULT_STORE.owners && canAssign
+  const assigning = !!ownerIdx && store.owners && canAssign
   const showSel = staging ? canStage : assigning
   const trash = (uri: string) => stage.mutate({ prefixes: [uri + '/'] })
   // One memo for the whole multi-select gesture (stored on the stage batch).
@@ -84,7 +86,7 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
   // attribution and no ledger → no `owner(s)`): a store without those axes
   // shouldn't read as a table of dashes.
   const hasRead = kids.some(k => k.a != null)
-  const hasOwners = (!!ownerIdx && DEFAULT_STORE.owners) || kids.some(k => k.us?.length)
+  const hasOwners = (!!ownerIdx && store.owners) || kids.some(k => k.us?.length)
 
   // Created-month ink: an age gradient over the listed rows' range, so a
   // column of "May / Jun / Apr" also reads at a glance as older ↔ newer.
