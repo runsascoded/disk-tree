@@ -32,6 +32,17 @@ if TYPE_CHECKING:
 
 R2_ENDPOINT_VAR = 'DISK_TREE_R2_ENDPOINT_URL'
 
+# gcsfs ≥ 2026.8.1 reads through an "adaptive prefetcher" by default
+# (`USE_EXPERIMENTAL_ADAPTIVE_PREFETCHING`, formerly opt-in): every read handle
+# gets a producer task on fsspec's event loop, and a handle that pyarrow still
+# holds at interpreter exit is finalized after that loop is gone — `close()`
+# then blocks forever in `fsspec.asyn.sync` (`recompress gs://…` printed its
+# report and never exited; on Batch, killed at `maxRunDuration`). Every reader
+# here seeks the footer, then streams row groups, which a plain readahead cache
+# serves as well; so the process opts out unless the environment already chose,
+# and handles this module opens itself name their cache (`open_read`).
+os.environ.setdefault('USE_EXPERIMENTAL_ADAPTIVE_PREFETCHING', 'false')
+
 #: Remote paths known to exist (see module docstring).
 _known: set[str] = set()
 
@@ -122,6 +133,16 @@ def fs_for(url: str):
             )
         return _s3fs(ep, bucket_profile(p.netloc)), f"{p.netloc}{p.path}"
     return _fsspec().core.url_to_fs(url)
+
+
+def open_read(path: str):
+    """A binary read handle on a URL, with its cache named (see the prefetch note
+    at the top): the caller closes it. Local paths are not accepted — pyarrow
+    reads those natively."""
+    if not is_url(path):
+        raise ValueError(f"open_read: not a URL: {path}")
+    fs, p = fs_for(path)
+    return fs.open(p, 'rb', cache_type='readahead')
 
 
 def _ensure_parent(fs, p: str) -> None:

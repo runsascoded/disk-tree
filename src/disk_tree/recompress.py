@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Iterator
 
@@ -127,12 +128,24 @@ class Analysis:
 
 
 def _open(path: str) -> tuple["pq.ParquetFile", object | None, str]:
-    """`(ParquetFile, fs | None, path-within-fs)` for a local path or URL."""
+    """`(ParquetFile, fs | None, path-within-fs)` for a local path or URL. A
+    URL is read through `blobfs.open_read` (its cache named, no prefetcher);
+    read it under `_opened`, which closes that handle — `ParquetFile.close()`
+    alone leaves a caller-supplied source open."""
     import pyarrow.parquet as pq
     if not blobfs.is_url(path):
         return pq.ParquetFile(path), None, path
     fs, p = blobfs.fs_for(path)
-    return pq.ParquetFile(p, filesystem=fs), fs, p
+    return pq.ParquetFile(blobfs.open_read(path)), fs, p
+
+
+@contextmanager
+def _opened(path: str) -> Iterator[tuple["pq.ParquetFile", object | None, str]]:
+    pf, fs, p = _open(path)
+    try:
+        yield pf, fs, p
+    finally:
+        pf.close(force=True)
 
 
 def _codec_name(md: "pq.FileMetaData") -> str:
@@ -143,14 +156,14 @@ def _codec_name(md: "pq.FileMetaData") -> str:
 
 def info(path: str) -> Info:
     """A file's format version, codec, row groups, rows and size — the footer only."""
-    pf, _, _ = _open(path)
-    md = pf.metadata
-    fmt = lf.parse(pf.schema_arrow.metadata)
-    return Info(
-        path=path, version=fmt.version, codec=_codec_name(md), row_groups=md.num_row_groups, rows=md.num_rows,
-        size=blobfs.size(path), columns=tuple(pf.schema_arrow.names), scan_root=fmt.scan_root,
-        implied=dict(fmt.implied),
-    )
+    with _opened(path) as (pf, _, _):
+        md = pf.metadata
+        fmt = lf.parse(pf.schema_arrow.metadata)
+        return Info(
+            path=path, version=fmt.version, codec=_codec_name(md), row_groups=md.num_row_groups, rows=md.num_rows,
+            size=blobfs.size(path), columns=tuple(pf.schema_arrow.names), scan_root=fmt.scan_root,
+            implied=dict(fmt.implied),
+        )
 
 
 def _is_blob(path: str) -> bool:
@@ -288,33 +301,33 @@ def recompress(
 ) -> Result:
     """Rewrite the v1 listing at `path` (local or URL) as v2 in place; see the module doc."""
     import pyarrow.parquet as pq
-    pf, fs, p = _open(path)
-    old_size = blobfs.size(path)
-    fmt0 = lf.parse(pf.schema_arrow.metadata)
-    if fmt0.version >= 2:
-        return Result(path, 'skipped', old_size, rows=pf.metadata.num_rows, scan_root=fmt0.scan_root, implied=dict(fmt0.implied))
-    a = analyze(pf, batch_rows)
-    fmt = lf.slim(a.scan_root, pf.schema_arrow.names, a.implied)
-    if dry_run:
-        return Result(path, 'planned', old_size, rows=a.rows, scan_root=a.scan_root, implied=a.implied)
-    dropped = ['uri', *a.implied]
-    kept = lf.written_columns(fmt)
-    dcols = tuple(c for c in DIGEST_COLUMNS if c in kept)
-    schema = _v2_schema(pf.schema_arrow, fmt, dropped)
-    tmp, tmp_p = path + TMP_SUFFIX, p + TMP_SUFFIX
-    kw = {'filesystem': fs} if fs is not None else {}
-    with pq.ParquetWriter(tmp_p, schema, **kw, **lf.pyarrow_codec()) as w:
-        for batch in pf.iter_batches(batch_size=batch_rows, columns=kept):
-            w.write_batch(batch.select(kept), row_group_size=batch_rows)
+    with _opened(path) as (pf, fs, p):
+        old_size = blobfs.size(path)
+        fmt0 = lf.parse(pf.schema_arrow.metadata)
+        if fmt0.version >= 2:
+            return Result(path, 'skipped', old_size, rows=pf.metadata.num_rows, scan_root=fmt0.scan_root, implied=dict(fmt0.implied))
+        a = analyze(pf, batch_rows)
+        fmt = lf.slim(a.scan_root, pf.schema_arrow.names, a.implied)
+        if dry_run:
+            return Result(path, 'planned', old_size, rows=a.rows, scan_root=a.scan_root, implied=a.implied)
+        dropped = ['uri', *a.implied]
+        kept = lf.written_columns(fmt)
+        dcols = tuple(c for c in DIGEST_COLUMNS if c in kept)
+        schema = _v2_schema(pf.schema_arrow, fmt, dropped)
+        tmp, tmp_p = path + TMP_SUFFIX, p + TMP_SUFFIX
+        kw = {'filesystem': fs} if fs is not None else {}
+        with pq.ParquetWriter(tmp_p, schema, **kw, **lf.pyarrow_codec()) as w:
+            for batch in pf.iter_batches(batch_size=batch_rows, columns=kept):
+                w.write_batch(batch.select(kept), row_group_size=batch_rows)
     try:
-        new = pq.ParquetFile(tmp_p, **kw)
-        rows, dg = digest(new.iter_batches(batch_size=batch_rows, columns=list(dcols)), dcols)
+        with _opened(tmp) as (new, _, _):
+            rows, dg = digest(new.iter_batches(batch_size=batch_rows, columns=list(dcols)), dcols)
+            got = lf.parse(new.schema_arrow.metadata)
         if rows != a.rows or dg != a.digest:
             raise VerifyError(
                 f"{path}: rewritten file does not verify (rows {rows} vs {a.rows}, "
                 f"digest {dg:#x} vs {a.digest:#x}); original kept"
             )
-        got = lf.parse(new.schema_arrow.metadata)
         if got != fmt:
             raise VerifyError(f"{path}: rewritten file's format keys {got} != {fmt}; original kept")
         new_size = blobfs.size(tmp)

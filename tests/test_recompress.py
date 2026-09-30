@@ -336,3 +336,43 @@ def test_listing_format(tmp_path: Path, monkeypatch):
             'scan_root': 'gcs://b1', 'implied': {'sum_storage_class_id_1': 'size'},
         },
     ]
+
+
+def test_url_source_handles_name_a_cache_and_are_closed(tmp_path: Path, monkeypatch):
+    """gcsfs ≥ 2026.8.1 reads through a background prefetcher unless the caller
+    names a cache, and a handle left to the interpreter-exit GC then blocks
+    forever in its finalizer (a `recompress gs://…` printed its report and
+    never exited). Over a URL, every read handle is opened with an explicit
+    `cache_type` and is closed before the call returns — not left to a cycle."""
+    from fsspec.implementations.memory import MemoryFileSystem
+    # `(basename, cache_type, closed)` per read handle. `MemoryFile.close` is a
+    # no-op (`.closed` never flips), so the close is observed on the wrapper.
+    opened: list[list] = []
+    orig = MemoryFileSystem.open
+
+    def spy(self, path, mode='rb', **kw):
+        f = orig(self, path, mode, **kw)
+        if 'r' in mode:
+            rec = [path.rsplit('/', 1)[-1], kw.get('cache_type'), False]
+            opened.append(rec)
+            close = f.close
+
+            def observed():
+                rec[2] = True
+                close()
+            f.close = observed
+        return f
+
+    monkeypatch.setattr(MemoryFileSystem, 'open', spy)
+    src = write_v1(v1_frame(), str(tmp_path / 'v1.parquet'))
+    url = f'memory://{uuid4()}/v1.parquet'
+    blobfs.put(src, url)
+    assert rc.info(url).version == 1
+    assert rc.recompress(url).status == 'rewritten'
+    assert rc.info(url).version == 2
+    assert [tuple(rec) for rec in opened] == [
+        ('v1.parquet', 'readahead', True),          # listing-format: footer
+        ('v1.parquet', 'readahead', True),          # recompress: analyze + rewrite pass
+        ('v1.parquet.v2.tmp', 'readahead', True),   # recompress: verify the rewrite
+        ('v1.parquet', 'readahead', True),          # listing-format: footer, v2
+    ]
