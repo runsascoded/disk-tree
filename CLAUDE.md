@@ -137,7 +137,9 @@ disk-tree tiers L2        # Cut the path store's sorts (spec `path-store.md` §1
                           # the parquet metadata, the source's listing format inherited. `-t path,bysize`
                           # (default both), `-s STEM` (may be a URL: cut locally, uploaded), `-g` writes the
                           # `.groups.json` footer sidecar beside each (`find/groups.py`; carries `b_min` now),
-                          # `-v usr` extra sorted copies led by those columns, `-j` JSON. Prints rows, groups,
+                          # `-v usr` extra sorted copies led by those columns, `-j` JSON; `-m` DuckDB memory limit (default 8GB — an
+                          # external sort, spills to `-T`, default `.duckdb-tmp` beside the stem; unbounded it took
+                          # 28 GB for 57M rows), `-p` threads. Prints rows, groups,
                           # bytes, KV per tier. `import -i` does the same at import time (bare `-i` = both;
                           # the `dirs`/`objects`/`coarse` tiers are retired). The cloud overlay's
                           # `dt-cloud index-write` (cw) and `dt-cloud path-index -P` (gcs, the r2 demo)

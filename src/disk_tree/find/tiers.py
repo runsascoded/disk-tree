@@ -46,6 +46,11 @@ if TYPE_CHECKING:
     import duckdb
 
 TIERS = ('path', 'bysize')
+#: DuckDB's memory budget for a cut when the caller brings no connection. The
+#: sort is external (it spills to `temp_directory`), so this bounds peak RSS
+#: rather than the input: an unbounded connection takes DuckDB's default, 80 %
+#: of RAM — measured 28 GB peak for a 57M-row cut on a 30 GB Batch task.
+DEFAULT_MEM = '8GB'
 DEFAULT_ROW_GROUP_ROWS = 8192
 # DuckDB's vector size: the granularity at which its parquet writer cuts row groups.
 ROW_GROUP_STEP = 2048
@@ -93,6 +98,20 @@ def _order_sql(key: str) -> str:
     return f'{key} NULLS FIRST'
 
 
+def connect(mem: str = DEFAULT_MEM, threads: int | None = None, tmp_dir: str | None = None) -> "duckdb.DuckDBPyConnection":
+    """A DuckDB connection bounded for an external sort: `memory_limit` = `mem`,
+    `temp_directory` = `tmp_dir` (spill), `threads` when given."""
+    import duckdb as _duckdb
+    con = _duckdb.connect()
+    con.execute(f"SET memory_limit='{mem}'")
+    if threads is not None:
+        con.execute(f"SET threads={int(threads)}")
+    if tmp_dir is not None:
+        os.makedirs(tmp_dir, exist_ok=True)
+        con.execute(f"SET temp_directory='{tmp_dir}'")
+    return con
+
+
 def write_tiers(
     layer2: str,
     stem: str,
@@ -101,9 +120,17 @@ def write_tiers(
     sort_variants: tuple[tuple[str, ...], ...] = (),
     con: "duckdb.DuckDBPyConnection | None" = None,
     groups: bool = False,
+    mem: str = DEFAULT_MEM,
+    threads: int | None = None,
+    tmp_dir: str | None = None,
 ) -> dict[str, int]:
     """Cut `tiers` (+ `sort_variants` of each) from the local layer-2 parquet
     at `layer2` into `<stem>.<tier>[-by-<cols>].parquet`.
+
+    Without `con`, the cut runs on :func:`connect` — `mem` (DuckDB's
+    `memory_limit`), `threads`, and `tmp_dir` (its spill directory; default
+    `<stem's dir>/.duckdb-tmp`, removed after) bound it; a caller's `con`
+    brings its own settings.
 
     Returns `{output path: row count}` in write order. Each file carries
     `tier` / `sort` (and, for `bysize`, `bucket`) in its parquet key-value
@@ -111,9 +138,11 @@ def write_tiers(
     `<tier>.groups.json` beside it (:mod:`disk_tree.find.groups`) — the
     precomputed footer a serverless reader plans range reads from.
     """
-    import duckdb as _duckdb
+    own_tmp = None
     if con is None:
-        con = _duckdb.connect()
+        if tmp_dir is None:
+            own_tmp = tmp_dir = os.path.join(os.path.dirname(os.path.abspath(stem)) or '.', '.duckdb-tmp')
+        con = connect(mem=mem, threads=threads, tmp_dir=tmp_dir)
     # DuckDB's parquet writer flushes a row group once the buffered rows reach
     # the target, in 2048-row vector steps — so "≤ N rows per group" holds
     # exactly for multiples of 2048 and silently overshoots otherwise
@@ -177,6 +206,8 @@ def write_tiers(
         copy(tier, order((), base), ())
         for variant in sort_variants:
             copy(tier, order(variant, base), variant)
+    if own_tmp:
+        shutil.rmtree(own_tmp, ignore_errors=True)
     return written
 
 
@@ -229,6 +260,9 @@ def cut_tiers(
     row_group_rows: int = DEFAULT_ROW_GROUP_ROWS,
     sort_variants: tuple[tuple[str, ...], ...] = (),
     groups: bool = False,
+    mem: str = DEFAULT_MEM,
+    threads: int | None = None,
+    tmp_dir: str | None = None,
 ) -> list[TierReport]:
     """:func:`write_tiers` over any layer-2 — a local path or a URL (read once
     into a temp copy; DuckDB sorts local files) — to `stem` (default
@@ -246,7 +280,7 @@ def cut_tiers(
             local_stem = os.path.join(out_dir, os.path.basename(stem)) if out_dir else stem
             written = write_tiers(
                 local, local_stem, tiers=tiers, row_group_rows=row_group_rows,
-                sort_variants=sort_variants, groups=groups,
+                sort_variants=sort_variants, groups=groups, mem=mem, threads=threads, tmp_dir=tmp_dir,
             )
             reports: list[TierReport] = []
             for out, n in written.items():

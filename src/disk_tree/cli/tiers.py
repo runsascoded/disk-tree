@@ -7,7 +7,7 @@ import json
 from click import Context, Group, argument, echo, option
 
 from disk_tree.cli.base import cli
-from disk_tree.find.tiers import DEFAULT_ROW_GROUP_ROWS, TIERS
+from disk_tree.find.tiers import DEFAULT_MEM, DEFAULT_ROW_GROUP_ROWS, TIERS
 
 
 class DefaultGroup(Group):
@@ -39,17 +39,23 @@ def _hr(n: int) -> str:
 @tiers_group.command('cut')
 @option('-g', '--groups', is_flag=True, help='Also write each tier\'s `.groups.json` footer sidecar beside it (`find/groups.py`)')
 @option('-j', '--json', 'as_json', is_flag=True, help='One JSON document on stdout')
+@option('-m', '--mem', default=DEFAULT_MEM, help=f'DuckDB memory limit for the sort (default {DEFAULT_MEM}); it spills past this, so it bounds peak RSS, not the input')
+@option('-p', '--threads', default=None, type=int, help='DuckDB threads (default: DuckDB\'s)')
 @option('-r', '--row-group-rows', default=DEFAULT_ROW_GROUP_ROWS, help=f'Max rows per parquet row group, a multiple of 2048 (default {DEFAULT_ROW_GROUP_ROWS}: the HTTP range-read unit)')
 @option('-s', '--stem', default=None, help='Output stem: tiers land at `<stem>.<tier>[-by-<cols>].parquet`; may be a URL (cut locally, then uploaded). Default: the layer-2 beside itself minus `.parquet`, or its basename in the cwd for a URL source')
 @option('-t', '--tiers', default=','.join(TIERS), help=f'Tiers to cut, comma-separated, any subset of {",".join(TIERS)} (default: all)')
+@option('-T', '--tmp', 'tmp_dir', default=None, help='DuckDB spill directory for the sort (default: `.duckdb-tmp` beside the output stem, removed after); put it on the volume with room')
 @option('-v', '--sort-variant', 'sort_variants', multiple=True, help='Extra sorted copies of each tier led by these comma-separated columns (e.g. `usr` → `(usr, depth, path)`, file `…path-by-usr.parquet`); repeatable')
 @argument('layer2')
 def cut_cmd(
     groups: bool,
     as_json: bool,
+    mem: str,
+    threads: int | None,
     row_group_rows: int,
     stem: str | None,
     tiers: str,
+    tmp_dir: str | None,
     sort_variants: tuple[str, ...],
     layer2: str,
 ):
@@ -66,6 +72,7 @@ def cut_cmd(
     reports = cut_tiers(
         layer2, stem=stem, tiers=parse_tiers(tiers), row_group_rows=row_group_rows,
         sort_variants=tuple(tuple(c for c in v.split(',') if c) for v in sort_variants), groups=groups,
+        mem=mem, threads=threads, tmp_dir=tmp_dir,
     )
     if as_json:
         echo(json.dumps([r.asdict() for r in reports], indent=2))

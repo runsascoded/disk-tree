@@ -21,7 +21,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from disk_tree.find.aggregate_duckdb import aggregate_listing_to_parquet
-from disk_tree.find.tiers import ROW_GROUP_STEP, parse_tiers, size_bucket, tier_path, write_tiers
+from disk_tree.find.tiers import connect, ROW_GROUP_STEP, parse_tiers, size_bucket, tier_path, write_tiers
 from disk_tree.listing import prepare_listing
 
 TS = dt.datetime(2026, 7, 28, tzinfo=dt.timezone.utc)
@@ -300,3 +300,23 @@ def test_cli_tiers_need_a_dir_and_a_disk_engine(tmp_path: Path):
     )
     assert r.returncode != 0
     assert r.stderr.rstrip().split('\n')[-1] == 'ValueError: --tiers needs --tiers-dir (or --out-dir)'
+
+
+def test_connect_is_bounded(tmp_path: Path):
+    """A cut without a caller's connection runs on `connect()`: DuckDB's
+    memory limit, threads and spill directory are the ones asked for (an
+    unbounded connection takes 80 % of RAM — 28 GB on a 30 GB Batch task)."""
+    con = connect(mem='512MiB', threads=2, tmp_dir=str(tmp_path / 'spill'))  # DuckDB reads `MB` as 10^6
+    setting = lambda k: con.execute(f"SELECT current_setting('{k}')").fetchone()[0]
+    assert (setting('memory_limit'), setting('threads'), setting('temp_directory')) == ('512.0 MiB', 2, str(tmp_path / 'spill'))
+    assert (tmp_path / 'spill').is_dir()
+
+
+def test_write_tiers_default_spill_dir_is_removed(tmp_path: Path):
+    layer2 = _layer2(tmp_path)
+    stem = str(tmp_path / 'out' / 'b1')
+    (tmp_path / 'out').mkdir()
+    written = write_tiers(layer2, stem, tiers=('path',), mem='512MB')
+    assert list(written) == [f'{stem}.path.parquet']
+    assert sorted(p.name for p in (tmp_path / 'out').iterdir()) == ['b1.path.parquet']
+
