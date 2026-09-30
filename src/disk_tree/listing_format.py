@@ -14,10 +14,11 @@ tiers cut from it) comes in two shapes:
   it equals, so readers restore it exactly.
 
 The codec is a separate switch (:func:`codec`, env `DISK_TREE_PARQUET_CODEC`,
-default Snappy) governing the layer-2 listing, the engine tiers and the
-overlay's served indexes: zstd flips on once every reader decodes it (the
-site's `/files` viewer, `@rdub/file-tree`, does not yet — spec
-`listing-slim.md`).
+default zstd since every reader decodes it — the site's `/files` viewer,
+`@rdub/file-tree`, was the last; `snappy` opts back out) governing the layer-2
+listing, the engine tiers and the overlay's served indexes (spec
+`listing-slim.md`). A reader's decoder must ship before its writer flips: a
+site deploy before the job image that writes zstd.
 
 Readers see the v1 shape through :func:`restore` (`blobfs.read_parquet` does
 this for every blob read), so nothing downstream needs to know which one it
@@ -50,7 +51,7 @@ COLUMNS_KEY = 'disk_tree.columns'
 
 LISTING_FORMAT = 2
 
-#: The one codec switch (see module doc): `snappy` (default) | `zstd` (opt-in).
+#: The one codec switch (see module doc): `zstd` (default) | `snappy` (opt-out).
 CODEC_VAR = 'DISK_TREE_PARQUET_CODEC'
 CODECS = ('snappy', 'zstd')
 ZSTD_LEVEL = 3
@@ -58,7 +59,7 @@ ZSTD_LEVEL = 3
 
 def codec() -> str:
     """The parquet codec the listing/tier/index writers use (`$DISK_TREE_PARQUET_CODEC`)."""
-    c = os.environ.get(CODEC_VAR, 'snappy').strip().lower() or 'snappy'
+    c = os.environ.get(CODEC_VAR, 'zstd').strip().lower() or 'zstd'
     if c not in CODECS:
         raise ValueError(f"${CODEC_VAR}={c!r}: expected one of {CODECS}")
     return c

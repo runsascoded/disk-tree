@@ -205,7 +205,7 @@ def test_already_v2_is_skipped(tmp_path: Path):
     r = CliRunner().invoke(cli, ['recompress', path])
     assert r.exit_code == 0, r.output
     assert r.output.split('\n') == [
-        f"{path}: already v2 snappy ({_hr(len(v2))}, {len(df):,} rows)",
+        f"{path}: already v2 zstd ({_hr(len(v2))}, {len(df):,} rows)",
         'rewrote 0 file(s), 1 already v2',
         '',
     ]
@@ -283,7 +283,7 @@ def test_keep_leaves_the_v1_file(tmp_path: Path):
         'results': [{
             'path': path, 'status': 'rewritten', 'old_size': len(old), 'new_size': new_size, 'ratio': new_size / len(old),
             'rows': len(df), 'scan_root': 'gcs://b1', 'implied': {'sum_storage_class_id_1': 'size'}, 'kept': kept,
-            'codec': 'snappy', 'recoded': None,
+            'codec': 'zstd', 'recoded': None,
         }],
         'failures': [],
         'totals': {

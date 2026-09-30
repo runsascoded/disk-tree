@@ -51,7 +51,7 @@ The plain rewrite is itself smaller than the original (≈ 24 vs ≈ 37 MiB for 
 
 Columns: v1 minus `uri` minus the implied pivots.
 
-**Codec switch: zstd is opt-in, default off.** One switch, `$DISK_TREE_PARQUET_CODEC` (`snappy` by default, `zstd` opts in at level 3, `ZSTD_LEVEL`), is read in one place (`listing_format.codec()` / `duckdb_codec()` / `pyarrow_codec()`). It governs every writer phase 1 touched: the layer-2 listing (both engines), the engine tiers, and the overlay's served indexes (`dt_cloud.index.duckdb_codec`, a lazy wrapper so the CLI still imports without the engine). The column/metadata changes above do not depend on it. **The default flips to zstd once `@rdub/file-tree` can decode it** (spec `~/c/js/file-tree/specs/zstd-parquet.md`). Until then every push to `cloud` (which redeploys r2.rbw.sh) and each deployment's next index run would break `/files` on new files. Flipping needs the file-tree release pinned in `site/`; then set the env on the jobs, or change the default. `migrate-row-groups` keeps each file's own codec. Levels 6/9 are not measured yet.
+**Codec switch: zstd by default since 2026-09-30** (opt-in until `@rdub/file-tree` decoded it). One switch, `$DISK_TREE_PARQUET_CODEC` (`zstd` by default at level 3, `ZSTD_LEVEL`; `snappy` opts out), is read in one place (`listing_format.codec()` / `duckdb_codec()` / `pyarrow_codec()`). It governs every writer phase 1 touched: the layer-2 listing (both engines), the engine tiers, and the overlay's served indexes (`dt_cloud.index.duckdb_codec`, a lazy wrapper so the CLI still imports without the engine). The column/metadata changes above do not depend on it. The default flipped once `@rdub/file-tree` decoded zstd (its spec `zstd-parquet.md`, done 2026-09-30: `defaultCompressors` via `fzstd`; `site/` pins `dist.cef98b1`). **Deploy order per deployment: the site (the pin) before the job image that writes zstd**, or `/files` shows a decode error on every new file until it does. `migrate-row-groups` keeps each file's own codec; `recompress` re-encodes a v2 file under another codec (same columns and keys), so the flip reaches the already-slim files by re-running it. Levels 6/9 are not measured yet.
 
 **"Present and non-trivial" pivots.** A `--pivot-sum` column is implied when the pivoted column holds exactly one value **and no NULLs** for the bucket: then every file row's pivot is its own size, folder placeholders likewise, synthesized dirs 0 = 0, and the cascade sums both alike, so `sum_<col>_<v> == size` on every row by construction (not checked after the fact). Such a pivot is not computed at all. With ≥ 2 values, or one value plus NULLs, every pivot column is written as before. "Absent" in a reader means "equals `size`" only when `implied` says so. A pivot missing without that entry keeps its old meaning (no bytes in that class, or no `-p`). Dropping the majority class of a multi-class bucket (derivable as `size − Σothers`) was not done.
 
@@ -92,7 +92,7 @@ Columns: v1 minus `uri` minus the implied pivots.
 | `cloud/overtime.py` | path-index rows | n/a (writes the switch codec) |
 | site Functions `_lib/index.ts` (path-index, tiers, age, over-time via D1 footers), `api/bench.ts` | index columns | + zstd `compressors` |
 | `ui/cfn/parquet.ts` (r2.rbw.sh static reader of scan blobs) | `BASE_COLS` (already excludes `uri`) + `mtime_mean`, `child_scan_id` | + zstd `compressors`; v2 fixture test |
-| site `/files` viewer (`FilesPage.tsx` → `@rdub/file-tree` parquet renderer) | any (generic table) | **cannot decode zstd**: file-tree's renderer has no `compressors` seam. This is why zstd stays opt-in |
+| site `/files` viewer (`FilesPage.tsx` → `@rdub/file-tree` parquet renderer) | any (generic table) | decodes zstd since file-tree `dist.cef98b1` (`defaultCompressors`, `fzstd`; a `compressors` option for more codecs) |
 | site `/v1/files` proxy | raw bytes | n/a |
 | `packages/*` | none (no parquet readers) | n/a |
 
@@ -111,7 +111,7 @@ Size on a synthetic single-class fixture (200k objects in 400 runs × 10 steps �
 
 #### Open (phase 1 follow-ups)
 
-- Flip `$DISK_TREE_PARQUET_CODEC` to zstd (or change the default) once `@rdub/file-tree`'s parquet renderer accepts hyparquet `compressors` (spec `~/c/js/file-tree/specs/zstd-parquet.md`) and `site/` pins that release. The site (with `fzstd`) must deploy before any job writes zstd.
+- ~~Flip `$DISK_TREE_PARQUET_CODEC` to zstd~~ Done 2026-09-30 (the default; see the codec switch above).
 - The stream engine's intermediate parts still carry `uri` (disk during the run only; dropping it there is a separate, unmeasured saving).
 - The shallow sidecar (`.shallow.parquet`) keeps its v1 columns including `uri` — it is not a listing (chunk-local `path`s under many roots) and is small.
 - zstd 6/9 write-CPU vs size not measured. `fzstd` decode CPU per 8k-row index group in a Worker not measured.
