@@ -31,10 +31,11 @@ export const ownerOk = (usr: string | null, o: OwnerScope | undefined): boolean 
 
 /** `cl=` ⊆ `snca` (Standard / Nearline / Coldline / Archive): the storage-
  * class axis. Unlike the owner pools it doesn't pick rows — every index row
- * is a (path, owner) slice carrying its own class split (`b` with `c2..c4`,
- * Standard = the rest) — it *scales* each row down to the allowed classes'
- * bytes. Objects aren't tracked per class, so `o` (and the written-time
- * moments) scale with the byte share. All/none/absent = no scope. */
+ * is a (path, owner) slice carrying its own class split (`size` with
+ * `cls2..cls4`, Standard = the rest) — it *scales* each row down to the
+ * allowed classes' bytes. Objects aren't tracked per class, so `n_files`
+ * (and the written-time weight) scale with the byte share. All/none/absent
+ * = no scope. */
 export type ClassScope = ReadonlySet<'1' | '2' | '3' | '4'>
 const CLASS_LETTERS: Record<string, '1' | '2' | '3' | '4'> = { s: '1', n: '2', c: '3', a: '4' }
 export function parseClasses(raw: string | null): ClassScope | undefined {
@@ -47,12 +48,12 @@ export function parseClasses(raw: string | null): ClassScope | undefined {
 export const classKey = (cl: ClassScope | undefined): string =>
   cl ? ['1', '2', '3', '4'].filter(c => cl.has(c as '1')).map(c => ({ 1: 's', 2: 'n', 3: 'c', 4: 'a' })[c as '1' | '2' | '3' | '4']).join('') : ''
 /** A row cut down to its allowed classes' bytes (a copy; `r` untouched). */
-export function classRow<R extends { b: number; o: number; wts: number; wb: number; c2: number; c3: number; c4: number }>(r: R, cl: ClassScope | undefined): R {
+export function classRow<R extends { size: number; n_files: number; mtime_w: number; cls2: number; cls3: number; cls4: number }>(r: R, cl: ClassScope | undefined): R {
   if (!cl) return r
-  const c1 = Math.max(0, r.b - r.c2 - r.c3 - r.c4)
-  const b = (cl.has('1') ? c1 : 0) + (cl.has('2') ? r.c2 : 0) + (cl.has('3') ? r.c3 : 0) + (cl.has('4') ? r.c4 : 0)
-  const f = r.b > 0 ? b / r.b : 0
-  return { ...r, b, o: Math.round(r.o * f), wts: r.wts * f, wb: r.wb * f, c2: cl.has('2') ? r.c2 : 0, c3: cl.has('3') ? r.c3 : 0, c4: cl.has('4') ? r.c4 : 0 }
+  const c1 = Math.max(0, r.size - r.cls2 - r.cls3 - r.cls4)
+  const size = (cl.has('1') ? c1 : 0) + (cl.has('2') ? r.cls2 : 0) + (cl.has('3') ? r.cls3 : 0) + (cl.has('4') ? r.cls4 : 0)
+  const f = r.size > 0 ? size / r.size : 0
+  return { ...r, size, n_files: Math.round(r.n_files * f), mtime_w: r.mtime_w * f, cls2: cl.has('2') ? r.cls2 : 0, cls3: cl.has('3') ? r.cls3 : 0, cls4: cl.has('4') ? r.cls4 : 0 }
 }
 
 /** `q=`: `/…/` = regex (case-insensitive); anything else = substring (ci),

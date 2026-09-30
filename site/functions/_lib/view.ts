@@ -9,21 +9,33 @@
  * is row-group-pruned range reads, a threshold filter, and a nested-tree
  * assembly with `(other)` = parent − Σ kept children (exact by subtraction).
  *
- * Tier planning: the coarse tiers keep only paths whose subtree clears an
- * absolute floor F_E (the job writes E = 16, 20, 24). Descendant-inclusive
- * bytes are monotone, so when the query's threshold is ≥ F_E the tier's rows
- * are a superset of what the query keeps and the answer is identical to the
- * floor-free tier's — just read from a few row groups instead of the whole
- * file. The planner picks the coarsest such tier; a path below every floor
- * (or a scan without coarse tiers) reads the floor-free tier.
+ * Tier planning, version-1 generations (dir rows only): the coarse tiers
+ * keep only paths whose subtree clears an absolute floor F_E (the job wrote
+ * E = 16, 20, 24). Descendant-inclusive bytes are monotone, so when the
+ * query's threshold is ≥ F_E the tier's rows are a superset of what the
+ * query keeps and the answer is identical to the floor-free tier's — just
+ * read from a few row groups instead of the whole file. The planner picks
+ * the coarsest such tier; a path below every floor (or a scan without
+ * coarse tiers) reads the floor-free tier.
+ *
+ * Sort choice, version-2 generations (the path store, specs/path-store.md:
+ * every row, objects included, `kind` on each, no coarse tiers): a
+ * thresholded subtree read goes to the `bysize` sort — the groups above the
+ * threshold under P, whatever the tree's shape — unless P's subtree is small
+ * enough (`n_desc` under `SMALL_SUBTREE_ROWS`) that the fixed per-bucket
+ * cost outweighs it, in which case `path` is read whole and thresholded in
+ * memory. Point lookups (P's own row, the diff's other-side names) always
+ * read `path`. `(other)` = P − Σ kept on both counts and bytes, with
+ * `f = n_children(P) − kept` — objects and dirs alike.
  */
 import type { Env } from './auth.js'
-import { type IndexHandle, type Lens, openIndex, readAsks, readRects, readRows, type Rect, type Row, type Trace, withTrace } from './index.js'
+import { type IndexHandle, isStore, type Lens, openIndex, readAsks, readRects, readRows, readSizeRects, type Rect, type Row, sizeVariant, type Trace, withTrace } from './index.js'
 import { ownerLens, type OwnerLens } from './owners.js'
 import { type ClassScope, classRow, nameFilter, type NamePred, ownerOk, type OwnerScope } from './scope.js'
 import { filterThreshold, looseThreshold, matchRoots, pickTier, rebasedThreshold, rootRects } from './filter.js'
 import { ownerClaims } from './ownerTotals.js'
 import { shared } from './shared.js'
+import { storeKey } from './stores.js'
 import { extrasFor } from './extras.js'
 import { loadRegistry } from './identity.js'
 
@@ -34,10 +46,17 @@ export const MIN_AREA_DEFAULT = 12 // px² of the smallest legible cell (~3×4)
 export const ATTEN_DEFAULT = 2
 export const QUANT = 128 // px quantization for w/h → cache-key stability
 const HARD_CAP = 50_000 // response nodes; way above any real canvas budget
-// Coarse tiers the job writes, coarsest first (viz.py COARSE_EXPS).
+// Coarse tiers the version-1 job wrote, coarsest first (viz.py COARSE_EXPS).
 const COARSE_EXPS = [16, 20, 24]
+/** A store subtree with fewer rows than this reads `path` whole (a few
+ * 8k-row groups) instead of paying `bysize`'s one-group-per-bucket floor
+ * (specs/path-store.md §1.2, §1.3 "bucket width"). */
+export const SMALL_SUBTREE_ROWS = 3 * 8192
 
-export type ViewNode = { n: string; b: number; o: number; c?: ViewNode[]; f?: number } & Record<string, unknown>
+/** A node of the served tree. `k`: what the path is — an object (`file`) or
+ * a directory; a v1 generation only has directories, and a fold (`(other)`)
+ * is drawn as a branch. */
+export type ViewNode = { n: string; k: 'file' | 'dir'; b: number; o: number; c?: ViewNode[]; f?: number } & Record<string, unknown>
 
 export interface ViewOpts {
   date: string
@@ -75,11 +94,15 @@ export interface ViewOpts {
    * tier regardless of the budget (specs/filter-views.md §2). The client
    * re-requests with `full=1` for the planned tiers. */
   partial?: boolean
+  /** The store's small-subtree cutoff, rows (default `SMALL_SUBTREE_ROWS`). */
+  smallRows?: number
 }
 
 export interface View {
   tree: ViewNode
-  /** Which tier answered: `coarse<E>` or `fine` (floor-free). */
+  /** Which tier answered: a v1 generation's `coarse<E>` or `fine`
+   * (floor-free); a store generation's sort, `bysize` or `path` (a lens:
+   * `bysize-user` / `user`). */
   tier: string
   /** How that tier's metadata was read: `d1` (footer in D1) or `footer`. */
   index: string
@@ -99,28 +122,42 @@ export class NotFound extends Error {}
  * fallback question, not a server fault. */
 export class LensUnavailable extends Error {}
 
+/** A path's aggregate over its rows (owner slices) — the wire's names. */
 interface Agg {
   b: number
   o: number
+  /** Σ size·mtime_mean over rows with a mean, and the bytes weighed. */
   wts: number
   wb: number
   a: number | null // subtree-max last-read epoch day (read lens); null = never read
   cb: Record<string, number>
   ub: Record<string, number>  // per-user bytes; unclaimed = b − Σ ub
+  /** What the path is; null on a synthesized aggregate (a fold, a filtered ancestor). */
+  kind: 'file' | 'dir' | null
+  /** Direct children, objects + dirs — the same on every slice of a path;
+   * null on a v1 row, which never had it. */
+  nc: number | null
+  /** All descendants (rows under the path in the `path` sort); null on v1. */
+  nd: number | null
 }
 
-const newAgg = (): Agg => ({ b: 0, o: 0, wts: 0, wb: 0, a: null, cb: {}, ub: {} })
+const newAgg = (): Agg => ({ b: 0, o: 0, wts: 0, wb: 0, a: null, cb: {}, ub: {}, kind: null, nc: null, nd: null })
 
 function merge(a: Agg, r: Row): void {
-  a.b += r.b
-  a.o += r.o
-  a.wts += r.wts
-  a.wb += r.wb
-  if (r.a != null) a.a = a.a == null ? r.a : Math.max(a.a, r.a)
-  for (const [k, v] of [['2', r.c2], ['3', r.c3], ['4', r.c4]] as [string, number][]) {
+  a.b += r.size
+  a.o += r.n_files
+  if (r.mtime_mean != null && r.mtime_w > 0) {
+    a.wts += r.mtime_mean * r.mtime_w
+    a.wb += r.mtime_w
+  }
+  if (r.last_read != null) a.a = a.a == null ? r.last_read : Math.max(a.a, r.last_read)
+  for (const [k, v] of [['2', r.cls2], ['3', r.cls3], ['4', r.cls4]] as [string, number][]) {
     if (v) a.cb[k] = (a.cb[k] ?? 0) + v
   }
-  if (r.usr) a.ub[r.usr] = (a.ub[r.usr] ?? 0) + r.b
+  if (r.usr) a.ub[r.usr] = (a.ub[r.usr] ?? 0) + r.size
+  a.kind = r.kind
+  if (r.n_children != null) a.nc = r.n_children
+  if (r.n_desc != null) a.nd = r.n_desc
 }
 
 function subtract(parent: Agg, kids: Agg[]): Agg {
@@ -151,6 +188,9 @@ function scale(a: Agg, frac: number): Agg {
   out.wts = a.wts * frac
   out.wb = a.wb * frac
   out.a = a.a
+  out.kind = a.kind
+  out.nc = a.nc
+  out.nd = a.nd
   for (const key of ['cb', 'ub'] as const) for (const [k, v] of Object.entries(a[key])) out[key][k] = v * frac
   return out
 }
@@ -168,14 +208,63 @@ function display(a: Agg): Record<string, unknown> {
   return out
 }
 
-/** Open an index variant; `null` when the scan has no such tier synced. */
+/** Open an index variant; `null` when the scan has no such tier synced.
+ * A miss is remembered for as long as a handle is (`openIndex`'s TTL): a
+ * store generation has no coarse tiers and a v1 one no `bysize`, so every
+ * view of it would otherwise re-ask D1 for the tiers it will never have. */
+const missing = new Map<string, number>()
+const MISS_TTL = 60_000
 async function tryOpen(env: Env, date: string, variant: string): Promise<IndexHandle | null> {
+  const ck = `${storeKey(env)}:${date}:${variant}`
+  const at = missing.get(ck)
+  if (at != null && Date.now() - at < MISS_TTL) return null
   try {
     return await openIndex(env, date, variant)
   } catch (e) {
-    if (String((e as Error).message).includes('not synced')) return null
+    if (String((e as Error).message).includes('not synced')) {
+      missing.set(ck, Date.now())
+      return null
+    }
     throw e
   }
+}
+
+/** A thresholded read of everything under some rects, from the sort that
+ * answers it cheapest (module doc): a store generation's `bysize` twin of
+ * `pathIdx`'s sort for a big subtree, else `pathIdx` itself (a v1 tier, or a
+ * small store subtree read whole). `nDesc` = rows under P (null = unknown:
+ * treat as big). Returns the rows and the variant that served them. */
+async function readSubtree(
+  env: Env,
+  date: string,
+  pathIdx: IndexHandle,
+  rects: Rect[],
+  thrAt: (depth: number) => number,
+  lens: Lens | undefined,
+  nDesc: number | null,
+  smallRows: number,
+  tr?: Trace,
+): Promise<{ rows: Row[]; variant: string }> {
+  if (isStore(pathIdx) && (nDesc == null || nDesc > smallRows)) {
+    const sized = await tryOpen(env, date, sizeVariant(pathIdx.variant))
+    if (sized) return { rows: await readSizeRects(withTrace(sized, tr), rects, thrAt, lens), variant: sized.variant }
+  }
+  return { rows: await readRects(pathIdx, rects, thrAt, lens), variant: pathIdx.variant }
+}
+
+/** Rows under P, from P's own rows: `n_desc` (the same on every owner
+ * slice); the fleet root sums its depth-1 rows' subtrees (+ the rows
+ * themselves). Null on a v1 generation. */
+function subtreeRows(path: string, rootRows: Row[]): number | null {
+  if (path !== '') return rootRows[0]?.n_desc ?? null
+  const per = new Map<string, number | null>()
+  for (const r of rootRows) per.set(r.path, r.n_desc)
+  let n = 0
+  for (const nd of per.values()) {
+    if (nd == null) return null
+    n += nd + 1
+  }
+  return n
 }
 
 const floorOf = (h: IndexHandle): number | null => h.floor
@@ -194,7 +283,7 @@ export async function readRootRows(env: Env, date: string): Promise<{ path: stri
   const by = new Map<string, { path: string; b: number; o: number }>()
   for (const r of src) {
     const a = by.get(r.path) ?? { path: r.path, b: 0, o: 0 }
-    a.b += r.b; a.o += r.o
+    a.b += r.size; a.o += r.n_files
     by.set(r.path, a)
   }
   return [...by.values()]
@@ -364,6 +453,10 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
     merge(rootAll, r)
     if (ownerOk(r.usr, owner)) merge(rootMine, r)
   }
+  // The fleet root has no row of its own: its children are the depth-1 paths.
+  if (path === '') rootAll.nc = rootMine.nc = new Set(rootRows.map(r => r.path)).size
+  const nDesc = subtreeRows(path, rootRows)
+  const smallRows = o.smallRows ?? SMALL_SUBTREE_ROWS
   // P's total, when U's claim covers P (one point read on the by-path tier).
   let rootTot: Agg | null = null
   if (rootTotal) {
@@ -445,9 +538,10 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
     }
     if (!roots.length) {
       const fineIdx = fine ?? withTrace(await openFine(env, date, 'path'), tr)
-      p1 = aggregate(await readRows(fineIdx, dP + 1, maxDepth != null ? dP + maxDepth : 1e9, pLo, pHi, thrAt))
+      const got = await readSubtree(env, date, fineIdx, [{ dLo: dP + 1, dHi: maxDepth != null ? dP + maxDepth : 1e9, pLo, pHi }], thrAt, undefined, nDesc, smallRows, tr)
+      p1 = aggregate(got.rows)
       roots = matchRoots(p1.depth.keys(), query, path)
-      p1Tier = 'fine'
+      p1Tier = isStore(fineIdx) ? got.variant : 'fine'
     }
     tr?.('match', performance.now() - t0)
     if (!roots.length) return null
@@ -472,13 +566,22 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
     const withFloors = tiers.filter(t => floorOf(t.idx) != null).map(t => ({ name: t.name, floor: floorOf(t.idx)!, idx: t.idx }))
     const chosen = o.partial ? (withFloors[0] ?? 'fine') : pickTier(withFloors, T)
     const regionIdx = chosen === 'fine' ? (fine ?? withTrace(await openFine(env, date, 'path'), tr)) : chosen.idx
-    const tierName = chosen === 'fine' ? 'fine' : chosen.name
+    let tierName = chosen === 'fine' ? 'fine' : chosen.name
     const readRoots = [...roots].sort((x, y) => rootAggOf.get(y)!.b - rootAggOf.get(x)!.b).slice(0, REGION_READS)
       .map(r => ({ path: r, depth: depthF.get(r)! }))
     const loose = looseThreshold(T, atten, readRoots.map(r => r.depth))
+    // The forest's rows: Σ n_desc over the roots read (null = a root without it).
+    const forestRows = readRoots.reduce<number | null>((n, r) => { const nd = p1!.all.get(r.path)?.nd; return n == null || nd == null ? null : n + nd }, 0)
     t0 = performance.now()
-    const rows2 = maxDepth != null && maxDepth <= 0 ? [] : await readRects(regionIdx, rootRects(readRoots).map(q => maxDepth != null ? { ...q, dHi: Math.min(q.dHi, q.dLo + maxDepth - 1) } : q), loose)
-    tr?.('rows', performance.now() - t0)
+    let rows2: Row[] = []
+    let variant: string | undefined
+    if (!(maxDepth != null && maxDepth <= 0)) {
+      const got = await readSubtree(env, date, regionIdx, rootRects(readRoots).map(q => maxDepth != null ? { ...q, dHi: Math.min(q.dHi, q.dLo + maxDepth - 1) } : q), loose, undefined, forestRows, smallRows, tr)
+      rows2 = got.rows
+      variant = got.variant
+      if (isStore(regionIdx)) tierName = variant
+    }
+    tr?.('rows', performance.now() - t0, variant)
     const p2 = aggregate(rows2)
     const rootSet = new Set(roots)
     const rootFor = (p: string): string | null => { for (let q = parentOf(p); q.length >= 0; q = parentOf(q)) { if (rootSet.has(q)) return q; if (q === '') return null } return null }
@@ -509,8 +612,11 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
   // childless (the client treats a `c`-less branch as drillable), and the
   // deeper bands — the bulk of the work — are never touched.
   t0 = performance.now()
-  const rows = await readRows(idx, dP + 1, maxDepth != null ? dP + maxDepth : 1e9, pLo, pHi, thrAt, lens)
-  tr?.('rows', performance.now() - t0)
+  const sub = await readSubtree(env, date, idx, [{ dLo: dP + 1, dHi: maxDepth != null ? dP + maxDepth : 1e9, pLo, pHi }], thrAt, lens, nDesc, smallRows, tr)
+  const rows = sub.rows
+  tr?.('rows', performance.now() - t0, sub.variant)
+  // A store generation names the sort that answered; a v1 one its tier.
+  const tierName = isStore(idx) ? sub.variant : pick.name
   // The lens's claimed regions from the by-path tier (their own rows and
   // everything under them): every path there whose U-share can clear the
   // threshold is present, since all ≥ U's share. P itself as a region means
@@ -531,7 +637,7 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
   const plain = !ol && !owner && !classes && !regionRects.length && !query
   if (plain) {
     const tot = new Map<string, number>()
-    for (const r of rows) tot.set(r.path, (tot.get(r.path) ?? 0) + r.b)
+    for (const r of rows) tot.set(r.path, (tot.get(r.path) ?? 0) + r.size)
     for (const [p, b] of tot) {
       const d = p.split('/').length
       if (b >= thrAt(d)) aggDepth.set(p, d)
@@ -635,7 +741,7 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
     const key = kept.has(par) ? par : par === path || (path === '' && !p.includes('/')) ? path : null
     if (key !== null) foldedOf.set(key, (foldedOf.get(key) ?? 0) + 1)
   }
-  return { rootAll, rootAgg, kept, aggDepth, foldedOf, threshold, thrAt, tier: pick.name, idx, truncated, ...(matches ? { matches } : {}), ownerLens: ol, scoped }
+  return { rootAll, rootAgg, kept, aggDepth, foldedOf, threshold, thrAt, tier: tierName, idx, truncated, ...(matches ? { matches } : {}), ownerLens: ol, scoped }
 }
 
 /** P's own row(s) from the by-path tiers — coarsest that has it, else fine. */
@@ -679,11 +785,12 @@ export async function buildView(env: Env, o: ViewOpts): Promise<View> {
   const dP = path === '' ? 0 : path.split('/').length
   const [v, ex] = await Promise.all([readView(env, o), extrasFor(env, o.date, path)])
   if (!v) {
-    return { tree: { n: rootName(path, env), b: 0, o: 0 }, tier: 'none', index: 'none', threshold: 0, nodes: 0, truncated: false, ...(query ? { matches: [], matched: [] } : {}) }
+    return { tree: { n: rootName(path, env), k: 'dir', b: 0, o: 0 }, tier: 'none', index: 'none', threshold: 0, nodes: 0, truncated: false, ...(query ? { matches: [], matched: [] } : {}) }
   }
   const { kept, aggDepth, foldedOf, thrAt } = v
   const nodeOf = (name: string, a: Agg): ViewNode => ({
     n: name,
+    k: a.kind ?? 'dir',
     b: Math.round(a.b),
     o: Math.round(a.o),
     ...display(a),
@@ -711,7 +818,11 @@ export async function buildView(env: Env, o: ViewOpts): Promise<View> {
     const rest = subtract(a, kidAggs)
     node.c = kids
     if (rest.b > thrAt((aggDepth.get(childPaths[0]!) ?? dP + 1))) {
-      node.c.push({ ...nodeOf('(other)', rest), f: foldedOf.get(p) ?? 0 } as ViewNode)
+      // What the fold stands in for: every child not named — objects and
+      // dirs — where the row says how many children there are; else the
+      // sub-threshold children the read saw (a v1 tier holds dirs only).
+      const f = a.nc != null ? Math.max(0, a.nc - childPaths.length) : foldedOf.get(p) ?? 0
+      node.c.push({ ...nodeOf('(other)', rest), f } as ViewNode)
     }
     return node
   }
@@ -739,7 +850,8 @@ export interface DiffRow {
   /** Path relative to P (`(other)` = the fold under its parent). */
   p: string
   d: number
-  k: 'dir'
+  /** What the path is on whichever side has it; a fold is `dir`. */
+  k: 'file' | 'dir'
   s: 'added' | 'removed' | 'changed' | 'unchanged'
   a: number
   b: number
@@ -809,6 +921,12 @@ export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
     else vb = await readView(env, { ...o, date: to, threshold: shared, ...cap })
   }
   tr?.('views', performance.now() - t0)
+  // One side a v1 generation (dirs only), the other a store (objects too):
+  // the objects have no counterpart to be compared with, so they fold into
+  // `(other)` on the store side rather than reading as added / removed.
+  if (va && vb && isStore(va.idx) !== isStore(vb.idx)) {
+    for (const v of [va, vb]) for (const [p, a] of v.kept) if (a.kind === 'file') v.kept.delete(p)
+  }
   const walkStart = performance.now()
   const matchedUnion = query ? [...new Map([...(va?.matched ?? []), ...(vb?.matched ?? [])].map(m => [m.path, m])).values()].sort((x, y) => x.path < y.path ? -1 : 1) : undefined
   const totals = {
@@ -915,7 +1033,7 @@ export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
     !a ? 'added' : !b ? 'removed' : Math.round(a.b) !== Math.round(b.b) || Math.round(a.o) !== Math.round(b.o) ? 'changed' : 'unchanged'
   const emit = (p: string, d: number, a: Agg | null, b: Agg | null, x: boolean, l?: 1 | 2) => {
     rows.push({
-      p, d, k: 'dir', s: status(a, b),
+      p, d, k: a?.kind ?? b?.kind ?? 'dir', s: status(a, b),
       a: Math.round(a?.b ?? 0), b: Math.round(b?.b ?? 0), oa: Math.round(a?.o ?? 0), ob: Math.round(b?.o ?? 0),
       ...(x ? { x: true } : {}), ...(l ? { l } : {}),
     })

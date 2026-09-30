@@ -94,13 +94,21 @@ export async function cacheStore(env: CacheEnv, key: Request, body: string, head
 
 /** A `Trace` sink plus its `Server-Timing` rendering (`fetch;dur=812,…`;
  * counts ride as `dur` too — DevTools shows them the same way). */
-export function serverTiming(): { trace: (name: string, ms: number) => void; time: <T>(name: string, p: Promise<T>) => Promise<T>; header: () => string } {
+export function serverTiming(): { trace: (name: string, ms: number, desc?: string) => void; time: <T>(name: string, p: Promise<T>) => Promise<T>; header: () => string } {
   const t: Record<string, number> = {}
+  // A phase's `desc`: the distinct labels its calls carried (the index sort
+  // that answered a read — `bysize`, `path`, …), in first-seen order, so a
+  // request that read both says `bysize+path`.
+  const d: Record<string, string[]> = {}
   const t0 = performance.now()
-  const trace = (name: string, ms: number) => { t[name] = (t[name] ?? 0) + ms }
+  const trace = (name: string, ms: number, desc?: string) => {
+    t[name] = (t[name] ?? 0) + ms
+    if (desc && !(d[name] ??= []).includes(desc)) d[name].push(desc)
+  }
   return {
     trace,
     time: async (name, p) => { const s = performance.now(); try { return await p } finally { trace(name, performance.now() - s) } },
-    header: () => [...Object.entries(t), ['total', performance.now() - t0] as [string, number]].map(([k, v]) => `${k};dur=${Math.round(v)}`).join(', '),
+    header: () => [...Object.entries(t), ['total', performance.now() - t0] as [string, number]]
+      .map(([k, v]) => `${k};dur=${Math.round(v)}${d[k] ? `;desc="${d[k].join('+')}"` : ''}`).join(', '),
   }
 }

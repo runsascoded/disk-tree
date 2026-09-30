@@ -1,5 +1,9 @@
 export interface TreeNode {
   n: string
+  /** What the path is: an object (`file`) or a directory. A scan indexed
+   * before the path store (specs/path-store.md) holds directories only; a
+   * fold (`(other)`) is drawn as a branch. Absent from older cached responses. */
+  k?: 'file' | 'dir'
   b: number
   o: number
   d?: number                   // bytes-weighted mean created date, epoch days

@@ -10,7 +10,7 @@ const { abs, max } = Math
 export interface DiffRow {
   p: string
   d: number
-  k: string
+  k: 'file' | 'dir'
   s: 'added' | 'removed' | 'changed' | 'unchanged'
   a: number
   b: number

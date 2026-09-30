@@ -15,8 +15,11 @@ and the two sorts compared on the same question:
   ``b_max ≥ thrAt(max(d_min, dLo))`` on the kept list, with
   ``thrAt(d) = thr · atten^(d − dP − 1)``.
 - ``bysize`` is the store's predicate: ``b_max ≥ ⌊thr_min⌋ AND p_max ≥ P/ AND
-  p_min < P0``, ``thr_min`` the attenuated threshold at the deepest depth read.
-  Rows within a bucket are path-sorted, so the path stats prune every group.
+  p_min < P0``, ``thr_min`` the smallest per-depth threshold the read applies
+  — ``thrAt`` is monotone in depth, so the lower of its values at the
+  shallowest and the deepest depth read (the deepest with ``atten < 1``, the
+  shallowest with ``atten ≥ 1``). Rows within a bucket are path-sorted, so the
+  path stats prune every group.
 
 Both are sound for any group (min/max stats bound every row it holds); the
 report's ``matched`` count — rows that actually satisfy the predicate, from
@@ -154,10 +157,11 @@ def select_path(groups: list[Group], q: Query) -> list[Group]:
 
 def select_bysize(groups: list[Group], q: Query) -> list[Group]:
     """The store's predicate (spec §2.1): `b_max ≥ ⌊thr_min⌋ AND p_max ≥ P/ AND p_min < P0`,
-    `thr_min` the threshold at the deepest depth the read covers (the tier's
-    own `d_max` when unbounded)."""
+    `thr_min` the lowest threshold any depth the read covers applies — at the
+    deepest depth (the tier's own `d_max` when unbounded) for `atten < 1`, at
+    `d_lo` for `atten ≥ 1`, where deeper rows need *more* bytes."""
     d_hi = q.d_hi if q.d_hi is not None else max((g.d_max for g in groups), default=q.d_lo)
-    thr_min = q.thr_at(max(d_hi, q.d_lo))
+    thr_min = min(q.thr_at(q.d_lo), q.thr_at(max(d_hi, q.d_lo)))
     return [
         g for g in groups
         if (thr_min <= 0 or g.b_max >= math.floor(thr_min)) and g.p_max >= q.p_lo and g.p_min < q.p_hi
