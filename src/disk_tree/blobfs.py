@@ -234,9 +234,11 @@ def _read_parquet(path: str, filters, columns: list[str] | None) -> pd.DataFrame
     return pd.read_parquet(p, filesystem=fs, filters=filters, columns=columns)
 
 
-def write_table(table: pa.Table, path: str, row_group_size: int | None = None) -> None:
+def write_table(table: pa.Table, path: str, row_group_size: int | None = None, **kw) -> None:
+    """`pq.write_table`, URL-aware; `kw` (e.g. `compression`) passes through."""
     import pyarrow.parquet as pq
-    kw = {'row_group_size': row_group_size} if row_group_size else {}
+    if row_group_size:
+        kw['row_group_size'] = row_group_size
     if not is_url(path):
         pq.write_table(table, path, **kw)
         return

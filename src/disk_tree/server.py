@@ -23,6 +23,7 @@ from disk_tree import blobfs
 from disk_tree.diff import ScanSource, recursive_diff, resolve_blob, resolve_chunk_for_path
 from disk_tree.diff_index import DIFF_TABLE_SQL, build_and_record, get_index, load_index_slice, serve_slice
 from disk_tree.filter import DEFAULT_DISPLAY_DEPTH, filter_scan, rebase_frame
+from disk_tree.listing_format import write_listing
 from disk_tree.registry import freshest_scan_covering
 from disk_tree.storage import get_backend
 from disk_tree.storage.base import BLOB_ROW_GROUP_SIZE
@@ -2225,7 +2226,7 @@ def delete_path():
                                 df.loc[mask, 'n_children'] = df.loc[mask, 'n_children'] - 1
 
                     # Rewrite parquet (this is the expensive part)
-                    blobfs.write_parquet(df, resolve_blob(blob_ref), BLOB_ROW_GROUP_SIZE)
+                    write_listing(df, resolve_blob(blob_ref), BLOB_ROW_GROUP_SIZE)
 
                     # Update denormalized stats in SQLite scan metadata
                     root_row = df[df['path'] == '.']

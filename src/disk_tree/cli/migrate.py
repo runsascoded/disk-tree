@@ -9,6 +9,7 @@ from utz import err
 from disk_tree.blobfs import read_parquet  # v2 listings come back in the v1 shape (spec `listing-slim.md`)
 from disk_tree.cli.base import cli
 from disk_tree.config import SCANS_DIR, SQLITE_PATH as DB_PATH
+from disk_tree.listing_format import write_listing  # …and every rewrite goes back out as v2
 from disk_tree.storage.base import BLOB_ROW_GROUP_SIZE
 
 
@@ -151,7 +152,7 @@ def migrate_depth():
 
             # Always re-sort by depth for efficient parquet filtering (breadth-first order)
             df = df.sort_values(['depth', 'path']).reset_index(drop=True)
-            df.to_parquet(blob_path)
+            write_listing(df, blob_path, BLOB_ROW_GROUP_SIZE)
             updated += 1
         except Exception as e:
             err(f"  Error processing {blob_path}: {e}")
@@ -345,7 +346,7 @@ def _normalize_parquet_chunks(blob_path: str, dry_run: bool, counts: dict) -> No
             df['child_scan_id'] = df['child_scan_id'].apply(
                 lambda v: basename(v) if isinstance(v, str) and isabs(v) else v
             )
-            df.to_parquet(blob_path, index=False)
+            write_listing(df, blob_path, BLOB_ROW_GROUP_SIZE)
         counts['updated'] += 1
 
     # Recurse into chunk parquets (resolve via basename in case still abs-on-disk)

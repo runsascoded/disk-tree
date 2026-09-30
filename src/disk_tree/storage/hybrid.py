@@ -16,6 +16,7 @@ import pandas as pd
 from .base import BLOB_ROW_GROUP_SIZE, StorageBackend, PathStats, path_prefix_bounds
 from .. import blobfs, config as _config
 from ..config import ROOT_DIR
+from ..listing_format import write_listing
 from ..shallow import build_shallow, remove_shallow, shallow_path, top_rows, write_shallow
 
 # Subtrees with >= this many descendants get chunked into separate parquets
@@ -154,16 +155,21 @@ class HybridBackend(StorageBackend):
         """Save a single parquet file, return basename blob_ref."""
         blob_ref = f'{uuid4()}.parquet'
         blob_path = blobfs.join(self.scans_dir, blob_ref)
-        blobfs.write_parquet(df, blob_path, BLOB_ROW_GROUP_SIZE)
+        write_listing(df, blob_path, BLOB_ROW_GROUP_SIZE)
         return blob_ref
 
     def _save_parquet_arrow(self, table: 'pa.Table') -> str:
         """Write an already-constructed Arrow table; caller is expected to have
         dropped the source DataFrame so peak memory holds Arrow buffers only.
+
+        Written as a v2 listing (spec `listing-slim.md`): a chunk's scan root
+        is its own `.` row's `uri` (the subtree's absolute location — chunk
+        rows are rebased, their `uri`s are not), so `blobfs.read_parquet`
+        restores exactly the `uri` column the chunk was cut with.
         """
         blob_ref = f'{uuid4()}.parquet'
         blob_path = blobfs.join(self.scans_dir, blob_ref)
-        blobfs.write_table(table, blob_path, BLOB_ROW_GROUP_SIZE)
+        write_listing(table, blob_path, BLOB_ROW_GROUP_SIZE)
         return blob_ref
 
     def _rebase_paths(self, df: pd.DataFrame, root_path: str) -> pd.DataFrame:
@@ -384,7 +390,7 @@ class HybridBackend(StorageBackend):
                             df = df[df['path'] != chunk_root]
                             # Add 1 because the deleted item itself counts as a descendant
                             self._update_ancestors(df, chunk_root, stats.size, stats.n_desc + 1)
-                            blobfs.write_parquet(df, blob_path, BLOB_ROW_GROUP_SIZE)
+                            write_listing(df, blob_path, BLOB_ROW_GROUP_SIZE)
                             self._refresh_shallow(blob_path)
                             self._cache.clear()
                             return stats
@@ -399,7 +405,7 @@ class HybridBackend(StorageBackend):
                                 df.loc[df['path'] == chunk_root, 'n_desc'] -= (stats.n_desc + 1)
                                 # Update root ancestors
                                 self._update_ancestors(df, chunk_root, stats.size, stats.n_desc + 1)
-                                blobfs.write_parquet(df, blob_path, BLOB_ROW_GROUP_SIZE)
+                                write_listing(df, blob_path, BLOB_ROW_GROUP_SIZE)
                                 self._refresh_shallow(blob_path)
                                 self._cache.clear()
                             return stats
@@ -423,7 +429,7 @@ class HybridBackend(StorageBackend):
         # Update ancestors - add 1 because the deleted item itself counts as a descendant
         self._update_ancestors(df, rel_path, stats.size, stats.n_desc + 1)
 
-        blobfs.write_parquet(df, blob_path, BLOB_ROW_GROUP_SIZE)
+        write_listing(df, blob_path, BLOB_ROW_GROUP_SIZE)
         self._cache.clear()
         return stats
 
