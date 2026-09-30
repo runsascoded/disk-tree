@@ -375,7 +375,7 @@ def ingest_bucket(
         con.close()
         err(
             f"[{bucket}] chunk {ci + 1}: {n_rows:,} rows → {raw_local.stat().st_size / 1e9:.2f} GB raw, "
-            f"{stats['paths_out']:,} paths / {stats['days']} day(s) agg, "
+            f"{stats['paths_out']:,} paths / {stats['hours']} hour(s) agg, "
             f"{sizes['rows']:,} read-size rows / {sizes['prefixes']:,} prefixes"
         )
 

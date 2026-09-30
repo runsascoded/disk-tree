@@ -33,7 +33,11 @@ safety net that was missing when versioning was Enabled without one.
 from __future__ import annotations
 
 import json
+import sys
+from functools import partial
 from typing import TYPE_CHECKING, Any
+
+err = partial(print, file=sys.stderr)
 
 if TYPE_CHECKING:
     from google.cloud.storage import Client as GcsClient
@@ -212,10 +216,32 @@ def push_any(
     return push(s3, bucket, intended, base=base)
 
 
-def pull_many(buckets: list[str], *, s3: "S3Client | None" = None, gcs: "GcsClient | None" = None) -> dict[str, list[dict]]:
+def pull_many(
+    buckets: list[str],
+    *,
+    s3: "S3Client | None" = None,
+    gcs: "GcsClient | None" = None,
+    keep_going: bool = False,
+) -> dict[str, list[dict]]:
     """`{bucket as given: rules}` for several buckets, in the given order — the
-    input to `dump_map` (which knows each bucket's cloud from its scheme)."""
-    return {b: pull_any(b, s3=s3, gcs=gcs) for b in buckets}
+    input to `dump_map` (which knows each bucket's cloud from its scheme).
+    With ``keep_going``, a bucket whose pull raises (typically a 403: the
+    caller's principal lacks `storage.buckets.get` there) is reported on
+    stderr and left out, so the fleet snapshot still covers the readable
+    buckets; the error propagates only when none could be read."""
+    out: dict[str, list[dict]] = {}
+    failed: list[tuple[str, Exception]] = []
+    for b in buckets:
+        try:
+            out[b] = pull_any(b, s3=s3, gcs=gcs)
+        except Exception as e:
+            if not keep_going:
+                raise
+            failed.append((b, e))
+            err(f"lifecycle: {b}: {type(e).__name__}: {e} — skipped")
+    if failed and not out:
+        raise failed[0][1]
+    return out
 
 
 def load(path: str) -> list[dict]:

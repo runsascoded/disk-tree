@@ -114,11 +114,26 @@ def _group_rows(md: "pq.FileMetaData") -> list[dict]:
     return rows
 
 
+def _remote(parquet_path: str) -> bool:
+    return parquet_path.startswith(("gs://", "oa-"))
+
+
+def exists(parquet_path: str) -> bool:
+    """Whether a tier file is there to sync — a deployment produces only some
+    of `INDEX_VARIANTS` (gcs's `path-index` writes no age pyramid), and
+    `index-sync` skips the rest instead of dying on the first absent one."""
+    if _remote(parquet_path):
+        import gcsfs
+
+        return gcsfs.GCSFileSystem().exists(parquet_path)
+    return os.path.exists(parquet_path)
+
+
 def extract(parquet_path: str) -> tuple[dict, list[dict]]:
     """Return (schema_meta, group_rows) from a local or fsspec-readable parquet."""
     import gcsfs
 
-    opener = gcsfs.GCSFileSystem().open if parquet_path.startswith(("gs://", "oa-")) else open
+    opener = gcsfs.GCSFileSystem().open if _remote(parquet_path) else open
     with opener(parquet_path, "rb") as f:
         md = pq.ParquetFile(f).metadata
     schema = _schema_json(md)

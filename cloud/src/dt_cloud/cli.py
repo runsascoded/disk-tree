@@ -769,7 +769,7 @@ def index_sync(
     `<store>:<variant>`, the `store` column set — needs the store migration;
     specs/multi-store.md). The default, the primary, writes exactly the
     pre-stores SQL."""
-    from .index_footer import check_store, sync_d1
+    from .index_footer import check_store, exists, sync_d1
 
     try:
         check_store(store)
@@ -785,9 +785,22 @@ def index_sync(
         todo = tuple(v for v in todo if not v.startswith("coarse"))
     if age_only:
         todo = tuple(v for v in todo if v.startswith("age-pyramid"))
+    # A deployment produces only some variants (gcs's `path-index` writes no
+    # age pyramid or over-time tier); an absent file is skipped, not fatal —
+    # otherwise every variant after it in `INDEX_VARIANTS` order went unsynced.
+    skipped = []
     for variant in todo:
-        n = sync_d1(date, f"{base}/{INDEX_VARIANTS[variant]}", variant=variant, gen=gen, key=key, remote=not local, store=store)
+        path = f"{base}/{INDEX_VARIANTS[variant]}"
+        if not exists(path):
+            skipped.append(variant)
+            continue
+        n = sync_d1(date, path, variant=variant, gen=gen, key=key, remote=not local, store=store)
         err(f"index-sync: {'' if store == 'primary' else f'[{store}] '}{date} [{variant}] gen {gen} @ {key} — {n} row groups ({'local' if local else 'remote'})")
+    if skipped:
+        err(f"index-sync: {date} gen {gen} @ {key} — skipped {len(skipped)} absent variant(s): {', '.join(skipped)}")
+    if len(skipped) == len(todo):
+        err(f"index-sync: no variant file under {base}")
+        raise SystemExit(1)
 
 
 @main.command("index-gc")
@@ -1028,8 +1041,9 @@ def _lc_buckets(buckets: tuple[str, ...]) -> tuple[str, ...]:
 
 @lifecycle.command("pull")
 @_LC_BUCKET
+@option("-k", "--keep-going", is_flag=True, help="A bucket whose rules can't be read (e.g. no `storage.buckets.get`) is reported and left out, instead of failing the whole pull — for the job's fleet snapshot")
 @option("-o", "--out", type=Path, help="Write here instead of stdout")
-def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
+def lifecycle_pull(buckets: tuple[str, ...], keep_going: bool, out: Path | None) -> None:
     """One bucket → the bare rule list; several → `{<bucket>: rules}` in this order."""
     from .lifecycle import dump, dump_map, pull_any, pull_many
 
@@ -1038,7 +1052,7 @@ def lifecycle_pull(buckets: tuple[str, ...], out: Path | None) -> None:
     if len(buckets) == 1:
         text = dump(pull_any(buckets[0], s3=s3, gcs=gcs), bucket=buckets[0])
     else:
-        text = dump_map(pull_many(list(buckets), s3=s3, gcs=gcs))
+        text = dump_map(pull_many(list(buckets), s3=s3, gcs=gcs, keep_going=keep_going))
     if out is None:
         sys.stdout.write(text)
     else:

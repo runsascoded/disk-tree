@@ -217,6 +217,36 @@ def test_pull_many_and_dump_map_key_by_bare_name_per_cloud():
     assert L.dump_map(snap) == json.dumps({"g2": [G_COLD], "s3b": [MPU, TTL], "g1": [G_TTL1, G_TTL14]}, indent=2) + "\n"
 
 
+class _ForbiddenBucket:
+    """A bucket the principal can list but not `get` (no `legacyBucketReader`)."""
+
+    def __init__(self, name: str):
+        self.name = name
+
+    def reload(self) -> None:
+        raise PermissionError(f"403 GET /b/{self.name}: sa@x does not have storage.buckets.get access")
+
+
+class _PartlyReadableGcs(_FakeGcs):
+    def bucket(self, name: str):
+        return _ForbiddenBucket(name) if name.startswith("forbidden") else super().bucket(name)
+
+
+def test_pull_many_keep_going_skips_unreadable_buckets(monkeypatch):
+    logged: list[str] = []
+    monkeypatch.setattr(L, "err", lambda *a: logged.append(" ".join(map(str, a))))
+    gcs = _PartlyReadableGcs({"g1": [G_TTL1], "g2": [G_COLD]})
+    buckets = ["gs://g1", "gs://forbidden-a", "gs://g2"]
+    with pytest.raises(PermissionError):
+        L.pull_many(buckets, gcs=gcs)
+    assert L.pull_many(buckets, gcs=gcs, keep_going=True) == {"gs://g1": [G_TTL1], "gs://g2": [G_COLD]}
+    assert logged == [
+        "lifecycle: gs://forbidden-a: PermissionError: 403 GET /b/forbidden-a: sa@x does not have storage.buckets.get access — skipped",
+    ]
+    with pytest.raises(PermissionError):
+        L.pull_many(["gs://forbidden-a", "gs://forbidden-b"], gcs=gcs, keep_going=True)
+
+
 def test_dump_and_load_gcs(tmp_path):
     p = tmp_path / "b.json"
     p.write_text(L.dump([G_TTL14, G_TTL1], bucket="gs://b"))
