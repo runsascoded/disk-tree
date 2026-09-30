@@ -62,3 +62,27 @@ def test_report_summary_lines():
     r = P.Report(copied=["a", "b"], skipped=["c"], bytes=1_234_567)
     assert r.summary("2026-09-23T1201", dry_run=True) == "publish-r2 2026-09-23T1201: would copy 2 (1,234,567 B), skipped 1 up to date"
     assert r.summary("2026-09-23T1201", dry_run=False) == "publish-r2 2026-09-23T1201: copied 2 (1,234,567 B), skipped 1 up to date"
+
+
+def test_is_listing_is_a_top_level_parquet_under_the_layer2_dir():
+    l2 = "cw-l2/2026-09-23T1201/"
+    assert P.is_listing(l2 + "marin-us-east-02a.parquet", l2)
+    assert P.is_listing(l2 + "hero-checkpoints.parquet", l2)
+    assert not P.is_listing(l2 + "index/20260923T120000Z/path-index.parquet", l2)
+    assert not P.is_listing(l2 + "over-time.scans.json", l2)
+    assert not P.is_listing("cw-l2/2026-09-22T1201/marin-us-east-02a.parquet", l2)
+    # tiers at a layer-2 dir's top level (the base's pre-generation layout) are not listings
+    assert not P.is_listing("listing/2026-09-23/index/path-index.parquet", "listing/2026-09-23/index/")
+    assert not P.is_listing(l2 + "path-index-coarse24.parquet", l2)
+    assert not P.is_listing(l2 + "age-pyramid-1h.parquet", l2)
+    assert not P.is_listing(l2 + "over-time.parquet", l2)
+
+
+def test_should_prune_only_when_gcs_holds_the_same_bytes():
+    dst = P.Dest(size=10, md5="ab")
+    assert P.should_prune(P.Obj("k", 10, "ab"), dst)
+    assert P.should_prune(P.Obj("k", 10, None), dst)
+    assert P.should_prune(P.Obj("k", 10, "ab"), P.Dest(size=10, md5=None))
+    assert not P.should_prune(P.Obj("k", 10, "cd"), dst)
+    assert not P.should_prune(P.Obj("k", 11, "ab"), dst)
+    assert not P.should_prune(None, dst)

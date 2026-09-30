@@ -2497,12 +2497,13 @@ def weekly(date: str | None, top: int, dry_run: bool, prior: str | None, root: s
 @main.command("publish-r2")
 @option("-b", "--bucket", "src_bucket", default=None, help="Source GCS scan store (default $DATA_BUCKET)")
 @option("-l", "--layer2", default=None, help="Layer-2 dir template, `{scan}` = the scan id (default $LAYER2_PREFIX, else listing/{scan}/index/; cw: cw-l2/{scan}/)")
+@option("-L", "--no-listings", is_flag=True, help="Leave the canonical per-bucket listings (`<layer-2 dir>/<bucket>.parquet`) in GCS only; copy the tiers + snapshot JSONs")
 @option("-n", "--dry-run", is_flag=True, help="List the keys that would be copied; copy nothing")
 @option("-p", "--prefix", "prefixes", multiple=True, help="Key prefix to publish (repeatable; default: the scan's served subset — snapshots/<subdir>/<scan>/ + the layer-2 dir)")
 @option("-s", "--subdir", default=None, help="Snapshots subdir of this store (default $SNAPSHOTS_SUBDIR, else none)")
 @option("-w", "--workers", default=8, type=int, help="Concurrent HEADs/uploads (default 8)")
 @argument("scan")
-def publish_r2(src_bucket: str | None, layer2: str | None, dry_run: bool, prefixes: tuple[str, ...], subdir: str | None, workers: int, scan: str) -> None:
+def publish_r2(src_bucket: str | None, layer2: str | None, no_listings: bool, dry_run: bool, prefixes: tuple[str, ...], subdir: str | None, workers: int, scan: str) -> None:
     """Copy one scan's served artifacts GCS → R2.
 
     The final "publish to the serving cloud" stage of an ingest that builds
@@ -2522,7 +2523,27 @@ def publish_r2(src_bucket: str | None, layer2: str | None, dry_run: bool, prefix
         layer2=layer2 or pub.LAYER2_PREFIX,
         dry_run=dry_run,
         workers=workers,
+        listings=not no_listings,
     )
+
+
+@main.command("prune-r2-listings")
+@option("-b", "--bucket", "src_bucket", default=None, help="Source GCS scan store (default $DATA_BUCKET)")
+@option("-l", "--layer2", default=None, help="Layer-2 dir template, `{scan}` = the scan id (default $LAYER2_PREFIX; cw: cw-l2/{scan}/)")
+@option("-n", "--dry-run", is_flag=True, help="Print the keys that would be deleted; delete nothing")
+@option("-w", "--workers", default=8, type=int, help="Concurrent HEADs (default 8)")
+@argument("scans", nargs=-1, required=True)
+def prune_r2_listings(src_bucket: str | None, layer2: str | None, dry_run: bool, workers: int, scans: tuple[str, ...]) -> None:
+    """Delete scans' canonical per-bucket listings from R2 — the mirror copies
+    `publish-r2 -L` no longer makes — each only when GCS still holds the
+    identical object (same size + md5). Run BEFORE recompressing the GCS
+    copies: a rewritten listing no longer matches and its R2 copy is kept.
+    Reversible: `publish-r2` (without `-L`) copies them back.
+    """
+    from . import publish as pub
+
+    for scan in scans:
+        pub.prune_listings(scan, src_bucket=src_bucket or pub.DATA_BUCKET, layer2=layer2 or pub.LAYER2_PREFIX, dry_run=dry_run, workers=workers)
 
 
 @main.command("stamp-published")

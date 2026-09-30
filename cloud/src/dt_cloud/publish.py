@@ -29,6 +29,7 @@ R2 is reached through its S3-compatible API; creds come from the env:
 from __future__ import annotations
 
 import base64
+import re
 import json
 import os
 import sys
@@ -114,6 +115,34 @@ def should_copy(src: Obj, dst: Dest | None) -> bool:
     return src.md5 is not None and dst.md5 is not None and src.md5 != dst.md5
 
 
+def is_listing(key: str, layer2_dir: str) -> bool:
+    """A canonical per-bucket listing — a `.parquet` directly under the scan's
+    layer-2 dir (`cw-l2/<scan>/<bucket>.parquet`), as opposed to the served
+    tiers under `index/<gen>/`. The base's layout (`listing/<scan>/index/`) has
+    none. Nothing served reads these (the site reads the tiers; only the
+    `/files` viewer opened them), so a deployment may keep them out of R2
+    (`publish -L`) and drop the copies already there (`prune_listings`)."""
+    if not key.startswith(layer2_dir):
+        return False
+    rest = key[len(layer2_dir):]
+    return "/" not in rest and rest.endswith(".parquet") and not TIER_STEM.match(rest)
+
+
+# The index artifacts `write_index` / the over-time build emit: never listings,
+# even at a layer-2 dir's top level (the base's pre-generation layout put the
+# tiers straight in `listing/<scan>/index/`).
+TIER_STEM = re.compile(r"^(path-index|age-index|age-pyramid|over-time)(\.|-)")
+
+
+def should_prune(src: Obj | None, dst: Dest) -> bool:
+    """Delete an R2 listing copy only when GCS still holds the same bytes: same
+    size, and the same md5 when both sides know one. A rewritten (recompressed)
+    GCS listing no longer matches, so prune BEFORE recompressing."""
+    if src is None or src.size != dst.size:
+        return False
+    return src.md5 is None or dst.md5 is None or src.md5 == dst.md5
+
+
 @dataclass
 class Report:
     copied: list[str] = field(default_factory=list)
@@ -196,11 +225,17 @@ def publish(
     layer2: str = LAYER2_PREFIX,
     dry_run: bool = False,
     workers: int = 8,
+    listings: bool = True,
 ) -> Report:
     """Copy the scan's served subset to R2, skipping what's already there.
-    Dry-run lists the keys it would copy on stdout and touches nothing."""
+    Dry-run lists the keys it would copy on stdout and touches nothing.
+    `listings=False` leaves the canonical per-bucket listings (`is_listing`)
+    in GCS only."""
     prefixes = prefixes or served_prefixes(scan, subdir, layer2)
     objs = list_source(src_bucket, prefixes)
+    if not listings:
+        l2 = layer2.format(scan=scan)
+        objs = [o for o in objs if not is_listing(o.key, l2)]
     if not objs:
         raise SystemExit(f"publish-r2: nothing under {', '.join(prefixes)} in gs://{src_bucket}")
     s3, bucket = r2_client(), r2_bucket()
@@ -231,6 +266,54 @@ def publish(
             report.copied.append(obj.key)
             report.bytes += obj.size
     err(report.summary(scan, dry_run=False))
+    return report
+
+
+def prune_listings(
+    scan: str,
+    *,
+    src_bucket: str = DATA_BUCKET,
+    layer2: str = LAYER2_PREFIX,
+    dry_run: bool = False,
+    workers: int = 8,
+) -> Report:
+    """Delete the scan's canonical listings from R2 (the mirror of what
+    `publish(listings=False)` no longer copies), each only when GCS holds the
+    identical object (`should_prune`). Dry-run prints the keys it would delete.
+    The `Report` reuses `copied` for the deleted keys and `skipped` for the
+    kept ones."""
+    l2 = layer2.format(scan=scan)
+    s3, bucket = r2_client(), r2_bucket()
+    keys: list[str] = []
+    for page in s3.get_paginator("list_objects_v2").paginate(Bucket=bucket, Prefix=l2, Delimiter="/"):
+        keys.extend(o["Key"] for o in page.get("Contents", []) if is_listing(o["Key"], l2))
+    from google.cloud import storage
+
+    gcs = storage.Client().bucket(src_bucket)
+    report = Report()
+
+    def decide(key: str) -> tuple[str, int, bool]:
+        blob = gcs.get_blob(key)
+        src = Obj(key=key, size=int(blob.size or 0), md5=md5_hex(blob.md5_hash)) if blob else None
+        dst = head_dest(s3, bucket, key)
+        return key, (dst.size if dst else 0), bool(dst) and should_prune(src, dst)
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        decisions = list(ex.map(decide, sorted(keys)))
+    report.skipped = [k for k, _, do in decisions if not do]
+    for k in report.skipped:
+        err(f"  keep {k} (GCS copy missing or different)")
+    todo = [(k, n) for k, n, do in decisions if do]
+    for k, n in todo:
+        if dry_run:
+            print(k)
+        else:
+            s3.delete_object(Bucket=bucket, Key=k)
+            err(f"  ✗ {k} ({n:,} B)")
+        report.copied.append(k)
+        report.bytes += n
+    verb = "would delete" if dry_run else "deleted"
+    err(f"prune-r2-listings {scan}: {verb} {len(report.copied)} ({report.bytes:,} B), kept {len(report.skipped)}")
     return report
 
 
