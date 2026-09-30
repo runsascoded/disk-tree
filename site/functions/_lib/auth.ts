@@ -16,8 +16,8 @@
  * `scopesFor` on every request, so removal bites instantly. Grant sessions
  * carry the scopes they were minted with (normally just the base scope).
  */
-import { type Auth, createGate, type Gate, hasScope } from '@open-athena/auth'
-import { d1AuditSink, d1GrantStore, d1RequestStore } from '@open-athena/auth/d1'
+import { type Auth, createGate, type Gate, hasScope, type Subject } from '@open-athena/auth'
+import { d1AuditSink, d1GrantStore, d1ProfileStore, d1RequestStore } from '@open-athena/auth/d1'
 import type { D1Database } from '@cloudflare/workers-types'
 
 export interface Env {
@@ -148,6 +148,9 @@ export function gateFor(env: Env): Gate | null {
     store: d1GrantStore(env.DB),
     requests: d1RequestStore(env.DB),
     audit: d1AuditSink(env.DB),
+    // The name + face Google verified at sign-in (`seedProfile`, `_lib/oidc.ts`),
+    // or a self-set one: what `whoami.subject` carries to the header chip.
+    profiles: d1ProfileStore(env.DB),
     secret: env.SESSION_SECRET,
     policy: scopesFor(env),
   })
@@ -162,6 +165,8 @@ export interface Identity {
   /** `admin` scope, as a flag — what the plan-first sweep console keys on. */
   admin: boolean
   via: 'session' | 'grant' | 'public'
+  /** The gate's subject (profile name + inlined avatar), for the header chip. */
+  subject: Subject | null
 }
 const withAdmin = (id: Omit<Identity, 'admin'>): Identity => ({ ...id, admin: id.scopes.includes(ADMIN_SCOPE) || id.scopes.includes('*') })
 
@@ -173,8 +178,8 @@ export async function isAdmin(env: Env, email: string): Promise<boolean> {
 }
 
 function authIdentity(auth: Auth): Identity {
-  if (auth.kind === 'sso') return withAdmin({ email: auth.email, name: null, scopes: auth.scopes, via: 'session' })
-  return withAdmin({ email: auth.grant.email ?? null, name: auth.grant.name ?? null, scopes: auth.scopes, via: 'grant' })
+  if (auth.kind === 'sso') return withAdmin({ email: auth.email, name: null, scopes: auth.scopes, via: 'session', subject: auth.subject })
+  return withAdmin({ email: auth.grant.email ?? null, name: auth.grant.name ?? null, scopes: auth.scopes, via: 'grant', subject: auth.grant.subject })
 }
 
 /** All app scopes (staff, and the local-dev identity so `/data` etc. work
@@ -192,7 +197,7 @@ export async function identify(ctx: Ctx): Promise<Identity | null> {
   // gcs.oa.dev request's URL host is never `localhost`/`127.0.0.1`.
   const host = new URL(ctx.request.url).hostname
   if (host === 'localhost' || host === '127.0.0.1') {
-    return withAdmin({ email: ctx.env.DEV_EMAIL ?? 'dev@example.test', name: null, scopes: allScopes(ctx.env), via: 'session' })
+    return withAdmin({ email: ctx.env.DEV_EMAIL ?? 'dev@example.test', name: null, scopes: allScopes(ctx.env), via: 'session', subject: null })
   }
   const gate = gateFor(ctx.env)
   if (!gate) return null
@@ -208,7 +213,7 @@ export async function requireScope(ctx: Ctx, scope: string): Promise<Identity | 
   // to the normal gate, so mutations stay closed (specs/federated-scans.md).
   if (ctx.env.PUBLIC_READ && scope === baseScope(ctx.env)) {
     const id = await identify(ctx)
-    return id ?? { email: null, name: null, scopes: [baseScope(ctx.env)], admin: false, via: 'public' }
+    return id ?? { email: null, name: null, scopes: [baseScope(ctx.env)], admin: false, via: 'public', subject: null }
   }
   const id = await identify(ctx)
   if (!id) return json({ error: 'unauthenticated' }, 401)

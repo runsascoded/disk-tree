@@ -9,5 +9,5 @@ import { type Ctx, type Env as AuthEnv, identify, json } from "../_lib/auth.js"
 export const onRequestGet = async (ctx: Ctx & { env: AuthEnv }): Promise<Response> => {
   const id = await identify(ctx)
   if (!id || !id.email) return json({ email: null, admin: false }, 401)
-  return json({ kind: 'sso', email: id.email, admin: id.admin, scopes: id.scopes, subject: null })
+  return json({ kind: 'sso', email: id.email, admin: id.admin, scopes: id.scopes, subject: id.subject })
 }

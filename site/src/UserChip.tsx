@@ -59,7 +59,7 @@ export const allUsers = (): { id: string; name: string }[] =>
     .sort((a, b) => a.name.localeCompare(b.name))
 
 /** The GitHub-style identity card shown on hover — avatar, name, links. */
-export function UserCard({ who, extra }: { who: string; extra?: React.ReactNode }) {
+export function UserCard({ who, avatar, extra }: { who: string; avatar?: string; extra?: React.ReactNode }) {
   const id = canonId(who)
   const name = shortName(who)
   const gh = ghHandle(who)
@@ -67,7 +67,7 @@ export function UserCard({ who, extra }: { who: string; extra?: React.ReactNode 
   return (
     <div className="user-card">
       <div className="uc-head">
-        <Avatar github={gh} name={name} size={38} />
+        <Avatar src={avatar} github={gh} name={name} size={38} />
         <div className="uc-id">
           <b>{name}</b>
         </div>

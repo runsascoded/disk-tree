@@ -12,7 +12,7 @@ describe('requireScope — PUBLIC_READ (public/no-gate deploys)', () => {
   it('grants the base viewer scope anonymously — reads open', async () => {
     const env: Partial<Env> = { PUBLIC_READ: '1', BASE_SCOPE: 'r2' }
     const id = await requireScope(ctxOf(env), baseScope(env as Env))
-    expect(id).toEqual({ email: null, name: null, scopes: ['r2'], admin: false, via: 'public' })
+    expect(id).toEqual({ email: null, name: null, scopes: ['r2'], admin: false, via: 'public', subject: null })
   })
 
   it('still gates a non-base scope — mutations/admin stay closed', async () => {
