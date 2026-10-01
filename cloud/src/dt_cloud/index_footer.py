@@ -379,6 +379,17 @@ def sync_d1(
         f"({sv}'{date}', '{variant}', {schema['version']}, '{_sql_escape(json.dumps(schema['schema'], separators=(',', ':')))}', "
         f"{'NULL' if floor is None else int(floor)}, '{_sql_escape(gen)}', '{_sql_escape(key)}');"
     )
+    # A store generation's `path` sort replaces the dir-only index outright: the
+    # coarse tiers an earlier generation of the same date synced are stale (and
+    # a reader that found them would answer from them). Retire them after the
+    # flip — their pointers first, then their rows.
+    retire_sql: list[str] = []
+    if schema["version"] >= 2 and variant == d1_variant("path", store):
+        like = _sql_escape(d1_variant("coarse", store)) + "%"
+        retire_sql = [
+            f"DELETE FROM index_row_groups WHERE {st}date='{date}' AND variant LIKE '{like}';",
+            f"DELETE FROM index_schema WHERE {st}date='{date}' AND variant LIKE '{like}';",
+        ]
 
     def group_values(r: dict) -> str:
         return (
@@ -393,7 +404,7 @@ def sync_d1(
     # re-sending it must be a no-op, not a PK collision (date, variant, gen, rg).
     head = f"INSERT OR REPLACE INTO index_row_groups {cols} VALUES "
     if not remote:  # dev: local wrangler D1
-        stmts = [gc_sql] + [f"{head}{group_values(r)};" for r in rows] + [schema_sql]
+        stmts = [gc_sql] + [f"{head}{group_values(r)};" for r in rows] + [schema_sql] + retire_sql[::-1]
         site = _site_dir()
         for i in range(0, len(stmts), 300):
             with tempfile.NamedTemporaryFile("w", suffix=".sql", delete=False) as tf:
@@ -407,6 +418,8 @@ def sync_d1(
     for chunk in _pack(head, [group_values(r) for r in rows], insert_bytes):
         _d1_query(chunk, acct, tok, db_id)
     _d1_query(schema_sql, acct, tok, db_id)  # the pointer flip: schema row last
+    for sql in retire_sql[::-1]:  # pointers, then rows
+        _d1_query(sql, acct, tok, db_id)
     return len(rows)
 
 

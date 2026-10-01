@@ -218,6 +218,17 @@ async function tryOpen(env: Env, date: string, variant: string): Promise<IndexHa
   const ck = `${storeKey(env)}:${date}:${variant}`
   const at = missing.get(ck)
   if (at != null && Date.now() - at < MISS_TTL) return null
+  // A coarse tier is a version-1 artifact: when the date's `path` sort is a
+  // store generation, any coarse pointer left for that date is an earlier
+  // generation's (index-sync now retires them; older D1s still hold some) and
+  // must not answer.
+  if (variant.startsWith('coarse')) {
+    const path = await tryOpen(env, date, 'path')
+    if (path && isStore(path)) {
+      missing.set(ck, Date.now())
+      return null
+    }
+  }
   try {
     return await openIndex(env, date, variant)
   } catch (e) {
