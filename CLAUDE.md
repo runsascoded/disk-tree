@@ -246,12 +246,11 @@ disk-tree dispatch [PLAN] # Execute a plan (id/name; default the open `Staged` p
                           # per-run results to Slack/Discord per the `delete:` block in buckets.yml
                           # (`chat`/`undo`/`database_id` + secret ENV VAR NAMES); needs `notify` for chat
 
-disk-tree iac r2-bindings # Generate deployment config from buckets.yml (spec staged-delete.md CP8):
-                          # `r2-bindings` emits the `[[r2_buckets]]` wrangler.toml blocks binding each
-disk-tree iac config      # configured R2 bucket for the edge CFN executor (CP7); `config` emits the
-disk-tree iac aws-batch   # `CfnDashboard` Pulumi component config (JSON); `aws-batch` emits the Terraform
-                          # tfvars for the AWS Batch delete executor (`iac/aws/`, the large-scope cell
-                          # the drainer submits oversized S3 runs to). One source of truth from
+disk-tree iac config      # Generate deployment config from buckets.yml (spec staged-delete.md CP8):
+disk-tree iac aws-batch   # `config` emits the `CfnDashboard` Pulumi component config (JSON);
+                          # `aws-batch` emits the Terraform tfvars for the AWS Batch delete executor
+                          # (`iac/aws/`, the large-scope cell the drainer submits oversized S3 runs
+                          # to). One source of truth from
                           # buckets.yml. IaC lives in `iac/` (applied where the SDK + creds live)
 
 disk-tree migrate         # Backfill SQLite stats from parquet files
@@ -294,19 +293,7 @@ widgets from two workspace packages:
 - `src/components/S3BucketList.tsx` — S3 bucket browser with treemap
 - `src/hooks/useScanProgress.ts` — SSE-based progress tracking
 
-**Static deployment (Cloudflare Pages)** — spec `specs/done/cloud-reduce.md` step 4. The same SPA, with the
-*read subset* of the `/api/*` contract implemented as Pages Functions (`ui/functions/api/`) over an R2
-bucket of reduced scans (`<uuid>.parquet` + `.scan.json`, as `reduce --to` / `index --to` leave them):
-`/api/scans` from the manifests, `/api/scan` + `/api/scans/history` by reading the blob with hyparquet
-using the server's own `(depth, path-prefix)` row-group pruning (`ui/cfn/parquet.ts` — range reads, no
-whole-file download), everything else 501. `GET /api/capabilities` (Flask: all on; Functions: mostly
-off) drives `useCapabilities()`, which hides scan/delete/reveal/histogram/filter/preview/compare/
-library/backend affordances and skips the SSE stream where they don't exist — a server without the
-endpoint counts as all-on. `ui/wrangler.toml` binds the bucket (`SCANS`, `SCANS_PREFIX`);
-`pnpm cfn:dev` serves `dist/` + Functions on :7789 over an emulated R2 (seed it with
-`wrangler r2 object put --local`); `pnpm test` runs the Functions' vitest suites over a fixture blob
-(`ui/cfn/tests/fixtures/gen.py`). Not yet served statically: hybrid chunk following, single-child
-auto-expand.
+The hosted/serverless app is `site/` (Pages Functions over R2 + D1; disk.rbw.sh, r2.rbw.sh, the gcs/cw deployments); `ui/` is the Flask server's SPA only.
 
 ### Cloud site auth routes (`site/functions/`)
 

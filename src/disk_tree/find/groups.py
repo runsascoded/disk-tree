@@ -30,8 +30,8 @@ parquet, holding exactly what a read needs and nothing else:
   no floor (every byte floor is a prefix of ``bysize``).
 
 This is the wire format of mgu's ``index_footer.py`` (``groups_blob``), owned
-here so the two Cloudflare readers — mgu's ``_lib/index.ts`` ``openBlob`` and
-``ui/cfn/parquet.ts`` — converge on one artifact (spec
+here so the serverless reader (``site/functions/_lib/index.ts`` ``openBlob``)
+and the engine converge on one artifact (spec
 ``mgu-engine-audit-2026-09-07.md`` §4). Column *names* differ between the two
 producers (DT tiers carry ``size``, mgu's path index ``b``; the user slice is
 ``usr`` in both when present), so the size and user columns are resolved by
@@ -200,8 +200,8 @@ def write_groups(parquet_path: str) -> GroupsStats:
 
 def write_groups_sidecar(parquet_path: str) -> GroupsStats | None:
     """Emit the ``.groups.json`` footer beside a freshly-published blob, so the
-    serverless reader (``ui/cfn``) plans range reads without a cold thrift-footer
-    parse. It is a pure *optimization*: the blob still reads through its own
+    serverless reader (``site/functions/_lib/index.ts``) plans range reads
+    without a cold thrift-footer parse. It is a pure *optimization*: the blob still reads through its own
     footer if the sidecar is absent, so a failure here (a blob without row-group
     stats, a transient write error) is non-fatal — warn and return ``None``
     rather than abort a publish whose scan blob + manifest are already valid."""

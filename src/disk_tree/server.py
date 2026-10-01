@@ -2260,9 +2260,8 @@ def delete_path():
 
 
 # ---- staged delete (spec `specs/staged-delete.md`) ------------------------
-# The HTTP surface behind the `/staged` UI, over the CP1 engine. The Cloudflare
-# edge (`ui/cfn/stagedRoutes.ts`) implements the same shapes but *enqueues* a run
-# (it can't reach arbitrary buckets); the Flask peer deletes inline (local-confirm).
+# The HTTP surface behind the `/staged` UI, over the CP1 engine; the Flask peer
+# deletes inline (local-confirm).
 
 def _staged_who() -> str:
     """Actor for a staged action on the local (ungated) server."""
@@ -2398,10 +2397,9 @@ def api_dispatch():
     })
 
 
-#: What this server can do — the live Flask peer can do everything. The static
-#: Cloudflare Pages deployment (`ui/functions/api/capabilities.ts`) answers the
-#: same shape with most of these off, and the UI hides those affordances. Keep
-#: in sync with `ui/src/api.ts` `Capabilities`.
+#: What this server can do — the live Flask peer can do everything; the UI hides
+#: affordances a server reports off. Keep in sync with `ui/src/api.ts`
+#: `Capabilities`.
 CAPABILITIES = {
     'static': False,
     'scan': True,
