@@ -17,7 +17,7 @@ import { ago, buildUserIndex, epochDaysToDate } from './colors'
 import { ChildrenTable } from './ChildrenTable'
 import { FitSelect } from './FitSelect'
 import { PathPopover } from './PathPopover'
-import { pathCopy, pathDisplay, pathText } from './pathCrumbs'
+import { fromUrlSegs, pathCopy, pathDisplay, pathText, toUrlSegs } from './pathCrumbs'
 import { listsObjects, openHref } from './objects'
 import { Busy, Skeleton } from './Busy'
 import { useRules } from './rules'
@@ -491,7 +491,16 @@ function AppContent() {
   // `/marin-us-central1/ego-dex`, not `/?p=marin-us-central1/ego-dex`. View
   // options stay query params (`?c`, `?mt`, …); the section stays in the `#hash`.
   const storeBase = store.path === '/' ? '' : store.path
-  const drillPath = pathname.slice(storeBase.length).replace(/^\/+/, '')
+  // A store home reads as `~` in the URL (`/~/c`); the path itself is the
+  // expanded one (`Users/ryan/c`), and a home URL spelled out is replaced by
+  // its `~` form below.
+  const urlPath = pathname.slice(storeBase.length).replace(/^\/+/, '')
+  const drillPath = fromUrlSegs(urlPath.split('/').filter(Boolean), store.home).join('/')
+  const urlOf = (segs: string[]) => toUrlSegs(segs, store.home).join('/')
+  const canonUrlPath = urlOf(drillPath.split('/').filter(Boolean))
+  useEffect(() => {
+    if (urlPath.replace(/\/+$/, '') !== canonUrlPath) navigate({ pathname: `${storeBase}/${canonUrlPath}`, search, hash }, { replace: true })
+  }, [urlPath, canonUrlPath]) // eslint-disable-line react-hooks/exhaustive-deps
   // Per-path created-time strata for `AgeChart`, keyed on the drilled prefix so
   // it follows the drill exactly instead of showing the whole fleet at every
   // depth (specs/age-index.md). Root (`drillPath === ''`, depth 0) is the fleet
@@ -546,13 +555,13 @@ function AppContent() {
   const drillTo = (segs: string[]) => {
     const q = new URLSearchParams(search)
     q.delete('open')
-    navigate({ pathname: segs.length ? `${storeBase}/${segs.join('/')}` : store.path, search: q.size ? `?${q}` : '', hash })
+    navigate({ pathname: segs.length ? `${storeBase}/${urlOf(segs)}` : store.path, search: q.size ? `?${q}` : '', hash })
   }
   // `?open=<name>`: an object under the drilled directory, shown in the leaf
   // viewer below the map (objects.ts `openHref`). Opening pushes history, so
   // Back closes it.
   const [openP, setOpenP] = useUrlState('open', stringParam(), true)
-  const openObject = (segs: string[]) => navigate({ ...openHref(store.path, segs, search), hash })
+  const openObject = (segs: string[]) => navigate({ ...openHref(store.path, toUrlSegs(segs, store.home), search), hash })
   // Read-recency lens domain: the access-log observation window (meta), not
   // the tree's own min/max — "no reads" is only meaningful vs when logging began.
   const readRange = useMemo((): DateRange | null =>

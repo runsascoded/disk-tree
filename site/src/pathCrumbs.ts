@@ -55,3 +55,15 @@ export function pathText(scheme: string, segs: string[], home?: string[], dir = 
 export function pathCopy(scheme: string, segs: string[], dir = false): string {
   return scheme === 'file:///' ? '/' + segs.join('/') + (dir && segs.length ? '/' : '') : pathUri(scheme, segs, dir)
 }
+
+/** A drill path's URL form: a store home folds to a leading `~` segment
+ * (`/~/c/disky`), so home URLs are short and read like the crumbs. */
+export function toUrlSegs(segs: string[], home?: string[]): string[] {
+  const { lead, leadSegs, rest } = pathDisplay('', segs, home)
+  return lead === '~' ? ['~', ...rest] : segs.slice(leadSegs)
+}
+
+/** The inverse of {@link toUrlSegs}: a leading `~` expands to the home. */
+export function fromUrlSegs(urlSegs: string[], home?: string[]): string[] {
+  return home?.length && urlSegs[0] === '~' ? [...home, ...urlSegs.slice(1)] : urlSegs
+}
