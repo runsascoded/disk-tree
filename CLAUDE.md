@@ -4,13 +4,13 @@ Disk/cloud space usage analyzer: a scanning/indexing CLI (`disk-tree`), a cloud 
 
 ## This worktree: `m3` — the laptop disk-cleanup deployment
 
-This worktree (`~/c/disky/wt/m3`, branch `m3`) is **this Mac as a deployment**: the disk-cleanup loop below runs *on this branch's own code*, so a missing CLI feature or UX tweak is made right here and committed on `m3`; upstream (`cloud`, the root worktree) decides what to take and how (`[base]`-prefixed commits, cherry-picked up — `specs/one-clone-layout.md`). It replaced the old `~/.disk` workspace (a source-less dir that had turned into a tight loop of asks against upstream). The cleanup loop's own state is `log.md` (tracked, this branch only) and `tmp/`.
+This worktree (`~/c/disky/wt/m3`, branch `m3`) is **this Mac as a deployment**: the disk-cleanup loop below runs *on this branch's own code*, so a missing CLI feature or UX tweak is made right here and committed on `m3`; upstream decides what to take and how (`[base]`-prefixed commits, cherry-picked up by the root session — `specs/one-clone-layout.md`). **`m3` merges `local`, never `cloud`** (since 2026-10-01, `specs/branch-layout.md`): `local` = `cloud` + the laptop-only code (capture, APFS/extents, drainer/trash, `du`/`scans`, walker seam, app-link, laptop executor, `~` display, age strata, migrations `0007`/`0008`); `cloud` has none of it, so merging `cloud` here would delete it all. Laptop-only `[base]` commits go to `local`, ones every site uses to `cloud`. It replaced the old `~/.disk` workspace (a source-less dir that had turned into a tight loop of asks against upstream). The cleanup loop's own state is `log.md` (tracked, this branch only) and `tmp/`.
 
 The global `~/.claude/CLAUDE.md` conventions still apply (git usage, `tmp/` scratch, commit style, etc.).
 
 ## The tool
 
-`disk-tree` is this worktree's own build: `direnv` activates `.venv` here (`uv sync --all-packages --all-extras --all-groups` after a merge from `cloud` — a bare `uv sync` drops the `r2` extra's `s3fs`, and the agents' R2 writes fail), so `disk-tree` is on `PATH` in this dir; from elsewhere it's `~/c/disky/wt/m3/.venv/bin/disk-tree`. Its index is **global and cwd-independent** — DB + parquet blobs + duckdb under `~/.config/disk-tree/`, plus any external-volume search-path entry. So a scan run here lands in the same always-ready index every disk-tree session reads. Full command reference: the rest of this file.
+`disk-tree` is this worktree's own build: `direnv` activates `.venv` here (`uv sync --all-packages --all-extras --all-groups` after a merge from `local` — a bare `uv sync` drops the `r2` extra's `s3fs`, and the agents' R2 writes fail), so `disk-tree` is on `PATH` in this dir; from elsewhere it's `~/c/disky/wt/m3/.venv/bin/disk-tree`. Its index is **global and cwd-independent** — DB + parquet blobs + duckdb under `~/.config/disk-tree/`, plus any external-volume search-path entry. So a scan run here lands in the same always-ready index every disk-tree session reads. Full command reference: the rest of this file.
 
 ## The cleanup loop
 
