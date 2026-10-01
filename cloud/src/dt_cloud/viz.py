@@ -121,6 +121,8 @@ def _write_store(
     attr: bool,
     fp_dir: str,
     maxseg: int,
+    user_sorts: bool = True,
+    row_group_rows: int | None = None,
 ) -> dict[str, dict]:
     """The store's sorts beside ``path_index`` (specs/path-store.md §4.3) from
     the rolled-up dir slices (``ptu``, ``dir_stats``, ``dir_attr`` when
@@ -206,7 +208,8 @@ def _write_store(
         con.execute(f"DROP TABLE {t}")
     _rss("store-l2")
     try:
-        return write_sorts(con, str(store), path_index.parent, sort_variants=((("usr",),) if attr else ()))
+        kw = {"row_group_rows": row_group_rows} if row_group_rows else {}
+        return write_sorts(con, str(store), path_index.parent, sort_variants=((("usr",),) if attr and user_sorts else ()), **kw)
     finally:
         store.unlink()
 
@@ -234,9 +237,16 @@ def write_path_index(
     access: tuple[str, ...] = (),
     dir_cache: Path | None = None,
     path_index: Path | None = None,
+    user_sorts: bool = True,
+    row_group_rows: int | None = None,
 ) -> dict:
     """Write age.json / meta.json under ``out_dir`` (+ the path store's sorts
     beside ``path_index``); returns meta.
+
+    ``user_sorts=False`` skips the ``-by-user`` copies: the reader prunes a
+    lens by the footer's ``u_min``/``u_max`` on the two sorts, so the copies
+    are an optimization — and on gcs (777M rows) they doubled bytes and D1
+    footer rows. ``row_group_rows`` overrides the 8K default (gcs: 32K).
 
     ``path_index`` (``<dir>/path-index.parquet``) writes the store
     (specs/path-store.md §4.3): every dir row — every ancestor path ×
@@ -487,7 +497,7 @@ def write_path_index(
     _rss("ptu")
     sorts: dict[str, dict] = {}
     if path_index is not None:
-        sorts = _write_store(con, src, path_index, attr=attr, fp_dir=fp_dir, maxseg=maxseg)
+        sorts = _write_store(con, src, path_index, attr=attr, fp_dir=fp_dir, maxseg=maxseg, user_sorts=user_sorts, row_group_rows=row_group_rows)
         _rss("store")
         # Provenance sidecar: the attributing prefixes' user/source/evidence.
         from .extras import write_extras

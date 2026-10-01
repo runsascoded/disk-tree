@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Env } from './auth'
 import { serverTiming } from './edgeCache'
-import { blobKey, columnsFor, groupMatchesSize, indexKey, type IndexHandle, openIndex, planRects, planSizeRects, readAsks, readRects, readSizeRects, type Rect, type Row, rowColumns, sizeVariant } from './index'
+import { blobKey, columnsFor, groupMatchesSize, indexKey, type IndexHandle, openIndex, pathGens, planRects, planSizeRects, readAsks, readRects, readSizeRects, type Rect, type Row, rowColumns, sizeVariant } from './index'
 import { storeEnv } from './stores'
 import { sqliteD1 } from './testD1'
 import { type D1Variant, fixture, FILES, readJson, seedGeneration } from './testStore'
@@ -27,6 +27,9 @@ vi.mock('@rdub/file-tree/stores/s3', async () => ({ S3Store: (await import('./te
 const V1 = '2026-09-01'
 const V2 = '2026-09-30T0001'
 const V2_BLOB = '2026-09-30T0002'
+/** A store generation synced over an earlier v1 one of the same date: the
+ *  v1's coarse pointer is still in D1 (r2.rbw.sh, 2026-09-30). */
+const V2_STALE = '2026-09-30T0003'
 const V2_DIR = `cw-l2/${V2}/index/g2`
 const KiB = 1024
 const MiB = 1 << 20
@@ -47,6 +50,8 @@ beforeAll(async () => {
   seedGeneration(raw, { date: V2, gen: 'g2', dir: V2_DIR, variants: v2, files: v2Files })
   seedGeneration(raw, { date: V2_BLOB, gen: 'g3', dir: `cw-l2/${V2_BLOB}/index/g3`, variants: v2, files: v2Files, retired: ['path', 'bysize'] })
   seedGeneration(raw, { date: V2, gen: 'g2', dir: `meta-l2/${V2}/index/g2`, variants: v2, files: v2Files, store: 'meta' })
+  seedGeneration(raw, { date: V2_STALE, gen: 'g0', dir: `listing/${V2_STALE}/index/g0`, variants: { coarse20: { ...v1.path, schema: { ...v1.path.schema, floor_bytes: 1 } } }, files: { coarse20: { parquet: 'path-index-zstd.parquet', groups: 'path-index-zstd.groups.json' } } })
+  seedGeneration(raw, { date: V2_STALE, gen: 'g4', dir: `cw-l2/${V2_STALE}/index/g4`, variants: v2, files: v2Files })
   env = { DB: db, ROOT_LABEL: 'root', GCS_HMAC_KEY_ID: 'k', GCS_HMAC_SECRET: 's', STORES_JSON: JSON.stringify({ meta: META }), STORE_META_ACCESS_KEY_ID: 'mk', STORE_META_SECRET_ACCESS_KEY: 'ms' } as Env
   meta = storeEnv(env, 'meta', META)
 })
@@ -201,6 +206,13 @@ describe('buildView on a store generation', () => {
     ] }))
   })
 
+  it('ignores a coarse pointer an earlier v1 generation left on a store date', async () => {
+    const want = await buildView(env, { ...base, date: V2, path: '', threshold: 32 * KiB, smallRows: 4096 })
+    const v = await buildView(env, { ...base, date: V2_STALE, path: '', threshold: 32 * KiB, smallRows: 4096 })
+    expect([v.tier, v.index, v.nodes]).toEqual(['bysize', 'd1', 510])
+    expect(v.tree).toEqual(want.tree)
+  })
+
   it('the same view from path (a small subtree by the default cutoff), the blob-served copy, and the secondary store', async () => {
     const want = await buildView(env, { ...base, date: V2, path: '', threshold: 32 * KiB, smallRows: 4096 })
     for (const [e, date, tier, index] of [[env, V2, 'path', 'd1'], [env, V2_BLOB, 'bysize', 'blob'], [meta, V2, 'bysize', 'd1']] as const) {
@@ -324,8 +336,27 @@ it('fixtures are registered', () => {
     `${V2_DIR}/path-index-bysize.groups.json`, `${V2_DIR}/path-index-bysize.parquet`, `${V2_DIR}/path-index.groups.json`, `${V2_DIR}/path-index.parquet`,
     `cw-l2/${V2_BLOB}/index/g3/path-index-bysize.groups.json`, `cw-l2/${V2_BLOB}/index/g3/path-index-bysize.parquet`,
     `cw-l2/${V2_BLOB}/index/g3/path-index.groups.json`, `cw-l2/${V2_BLOB}/index/g3/path-index.parquet`,
+    `cw-l2/${V2_STALE}/index/g4/path-index-bysize.groups.json`, `cw-l2/${V2_STALE}/index/g4/path-index-bysize.parquet`,
+    `cw-l2/${V2_STALE}/index/g4/path-index.groups.json`, `cw-l2/${V2_STALE}/index/g4/path-index.parquet`,
     `listing/${V1}/index/g1/path-index.groups.json`, `listing/${V1}/index/g1/path-index.parquet`,
+    `listing/${V2_STALE}/index/g0/path-index-coarse20.groups.json`, `listing/${V2_STALE}/index/g0/path-index-coarse20.parquet`,
     `meta-l2/${V2}/index/g2/path-index-bysize.groups.json`, `meta-l2/${V2}/index/g2/path-index-bysize.parquet`, `meta-l2/${V2}/index/g2/path-index.groups.json`, `meta-l2/${V2}/index/g2/path-index.parquet`,
   ])
   expect(fixture('v2/d1.json').endsWith('/functions/_lib/fixtures/v2/d1.json')).toBe(true)
+})
+
+describe('pathGens', () => {
+  it('folds each date’s `path` generation into the cache-key token: a re-sync is a new key', async () => {
+    const { db, raw } = await sqliteD1('cw')
+    const v2 = await readJson<Record<string, D1Variant>>('v2/d1.json')
+    const files = { path: { parquet: 'v2/path-index.parquet', groups: 'v2/path-index.groups.json' }, bysize: { parquet: 'v2/path-index-bysize.parquet', groups: 'v2/path-index-bysize.groups.json' } }
+    seedGeneration(raw, { date: 'd1', gen: 'g1', dir: 'x/d1/g1', variants: v2, files })
+    seedGeneration(raw, { date: 'd2', gen: 'g1', dir: 'x/d2/g1', variants: v2, files })
+    const e = { DB: db, ROOT_LABEL: 'root' } as Env
+    const both = await pathGens(e, ['d2', 'd1'])
+    expect(await pathGens(e, ['d1', 'd2'])).toBe(both)
+    raw.exec("UPDATE index_schema SET gen = 'g2' WHERE date = 'd1' AND variant = 'path'")
+    expect(await pathGens(e, ['d1', 'd2'])).not.toBe(both)
+    expect(await pathGens({ ROOT_LABEL: 'root' } as Env, ['d1'])).toBe('')
+  })
 })

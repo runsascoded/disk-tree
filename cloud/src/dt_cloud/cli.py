@@ -454,6 +454,8 @@ def wandb_mine(
 @option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, default=None, help=f"identities.yaml path or URL, needed with -a (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Output dir for JSON files [default: site/public/data/<asof>]")
+@option("-r", "--row-group-rows", default=None, type=int, help="Parquet row-group size for the store's sorts (default 8192; gcs: 32768 — 4× fewer D1 footer rows, specs/path-store.md §1.6)")
+@option("-U", "--no-user-sorts", "user_sorts", is_flag=True, flag_value=False, default=True, help="Skip the `-by-user` sort copies (the reader prunes a lens by the footer's u_min/u_max on the two sorts; halves bytes + footer rows)")
 @option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the path store here (`<dir>/path-index.parquet`, the `path` sort; `path-index-bysize.parquet` and the by-user copies land beside it — specs/path-store.md §4.3)")
 @option("-x", "--access", "access", multiple=True, help="Access-log layer-2a agg parquet glob(s); adds per-node last-read ('a') for the read-recency lens")
 def build_path_index(
@@ -464,6 +466,8 @@ def build_path_index(
     listings: tuple[str, ...],
     out_dir: Path | None,
     path_index: Path | None,
+    row_group_rows: int | None,
+    user_sorts: bool,
     access: tuple[str, ...],
 ) -> None:
     """Generate a dated site-data snapshot (tree/age/meta JSONs) from a listing.
@@ -478,7 +482,10 @@ def build_path_index(
 
     if out_dir is None:
         out_dir = Path("site/public/data") / asof
-    meta = write_path_index(listings, out_dir, asof, attributions, identities_path, access=access, dir_cache=dir_cache, path_index=path_index)
+    meta = write_path_index(
+        listings, out_dir, asof, attributions, identities_path, access=access, dir_cache=dir_cache, path_index=path_index,
+        user_sorts=user_sorts, row_group_rows=row_group_rows,
+    )
     err(f"wrote {out_dir}/: age.json meta.json ({meta['total_bytes']/1e12:.0f} TB, {meta['total_objects']:,} objects)")
     data_root = out_dir.parent
     dates = sorted(
@@ -591,10 +598,11 @@ def bucket_sources(specs: tuple[str, ...], default_bucket: str) -> list[tuple[st
 @option("-b", "--bucket", default=None, help="Bucket a bare (no `<bucket>=`) layer-2 argument describes (default $CW_BUCKET)")
 @option("-m", "--mem", default="8GB", help="DuckDB memory limit")
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-bysize.parquet (+ .groups.json sidecars) + age-pyramid-*.parquet")
+@option("-r", "--row-group-rows", default=8192, type=int, help="Parquet row-group size for the sorts — the range-read unit and the D1 footer's row count per sort (default 8192; a gcs-sized fleet uses 32768, specs/path-store.md §1.6)")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
 @argument("sources", nargs=-1, required=True)
-def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
+def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, row_group_rows: int, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
     """Write the scan's path store from its layer-2 parquet(s) — SOURCES are
     `<bucket>=<l2.parquet>` pairs, one per bucket of the scan (a bare path is
     `-b`'s bucket): every row (objects and dirs), bucket-prefixed, in the
@@ -608,7 +616,7 @@ def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, thr
 
     s = write_index(
         bucket_sources(sources, bucket or CW_BUCKET), out_dir,
-        mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only,
+        mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only, row_group_rows=row_group_rows,
     )
     if age_only:
         err(f"index-write: age pyramid only — floor {s['pyramid']['floor']}, {len(s['pyramid']['bins'])} tiers over {s['buckets']}")

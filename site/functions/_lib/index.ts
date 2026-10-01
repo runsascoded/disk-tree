@@ -233,6 +233,31 @@ export function schemaRow<T>(env: Env, cols: string, date: string, variant: stri
     : env.DB!.prepare(`SELECT ${cols} FROM index_schema WHERE store = ? AND date = ? AND variant = ?`).bind(storeKey(env), date, d1Variant(env, variant)).first<T>()
 }
 
+/** The `path` pointer's generation for each of `dates`, folded into one short
+ * token (FNV-1a over `date=gen` in date order; '' without a D1). An edge-cache
+ * key carries it, so re-syncing a date (a new generation, e.g. a store
+ * generation over an earlier v1 one) is a new key instead of serving views
+ * cached from the old generation for the cache's whole TTL. One query per 90
+ * dates (D1's bind limit is 100). */
+export async function pathGens(env: Env, dates: string[]): Promise<string> {
+  if (!env.DB || !dates.length) return ''
+  const gens = new Map<string, string>()
+  const uniq = [...new Set(dates)]
+  for (let i = 0; i < uniq.length; i += 90) {
+    const chunk = uniq.slice(i, i + 90)
+    const marks = chunk.map(() => '?').join(', ')
+    const { results } = isPrimary(env)
+      ? await env.DB.prepare(`SELECT date, gen FROM index_schema WHERE variant = 'path' AND date IN (${marks})`).bind(...chunk).all<{ date: string; gen: string | null }>()
+      : await env.DB.prepare(`SELECT date, gen FROM index_schema WHERE store = ? AND variant = ? AND date IN (${marks})`).bind(storeKey(env), d1Variant(env, 'path'), ...chunk).all<{ date: string; gen: string | null }>()
+    for (const r of results) gens.set(r.date, r.gen ?? '')
+  }
+  let h = 0x811c9dc5
+  for (const d of [...uniq].sort()) {
+    for (const ch of `${d}=${gens.get(d) ?? ''};`) h = Math.imul(h ^ ch.charCodeAt(0), 0x01000193)
+  }
+  return (h >>> 0).toString(36)
+}
+
 /** Every scan of the env's store with a synced floor-free (`path`) index —
  * the primary's query as it always was, a secondary store's scoped. */
 export function pathScans(env: Env, order: boolean): Promise<{ results: { date: string }[] }> {

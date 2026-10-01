@@ -1,6 +1,6 @@
 import { Explain } from './Help'
 import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { MdLayers } from 'react-icons/md'
 import { useActions } from 'use-kbd'
@@ -18,6 +18,7 @@ import { ChildrenTable } from './ChildrenTable'
 import { FitSelect } from './FitSelect'
 import { PathPopover } from './PathPopover'
 import { pathUri } from './pathCrumbs'
+import { listsObjects, openHref } from './objects'
 import { Busy, Skeleton } from './Busy'
 import { useRules } from './rules'
 import { useHashSpy } from './hashSpy'
@@ -42,6 +43,9 @@ import type { AgeRow, ColorMode, Meta, Pricing, Rules, TreeNode } from './types'
 import { CLASS_COLORS, CLASS_NAMES, CLASS_PRICE_US, MODE_LABELS, classMix, fmtN, fmtUsd, ratePerByte } from './types'
 import { SiteKbd } from './SiteKbd'
 import { useUnits } from './units'
+// The leaf viewer (file-tree's renderers, hyparquet…): its own chunk, fetched
+// the first time an object opens.
+const ObjectPanel = lazy(() => import('./ObjectPanel'))
 // The color axes on offer.
 const MODES: ColorMode[] = ['read', 'user', 'date', 'tree']
 
@@ -353,7 +357,7 @@ function AppContent() {
           { credentials: 'include', signal },
         ))
         if (!r.ok) { pf.fail(); throw new Error(`${r.status}: ${(await r.text()).slice(0, 120)}`) }
-        const j = await r.json() as { tree: TreeNode; matches?: string[]; matched?: { path: string; b: number; o: number }[]; threshold?: number }
+        const j = await r.json() as { tree: TreeNode; tier?: string; matches?: string[]; matched?: { path: string; b: number; o: number }[]; threshold?: number }
         pf.decoded()
         return j
       },
@@ -383,7 +387,7 @@ function AppContent() {
           { credentials: 'include', signal },
         ))
         if (!r.ok) { pf.fail(); throw new Error(`${r.status}`) }
-        const j = await r.json() as { tree: TreeNode }
+        const j = await r.json() as { tree: TreeNode; tier?: string }
         pf.decoded()
         return j
       },
@@ -406,6 +410,10 @@ function AppContent() {
   const dataFor = (i: number): TreeNode | null =>
     subtreeQs[i]?.data?.tree ?? (i === subtreePaths.length - 1 ? coarseQs[i]?.data?.tree ?? null : null)
   const baseTree: TreeNode | null = dataFor(0)
+  // Whether this scan lists objects (a path-store generation, whose leaves
+  // can be objects) or is a v1 dir-only index — every response of one scan
+  // answers alike, so the first that has landed says.
+  const objects = listsObjects([...subtreeQs, ...coarseQs].find(q => q.data?.tier)?.data?.tier)
   const rootErr = subtreeQs[0]?.error as Error | undefined
   // useQueries returns a fresh array each render; stamp the data so the graft
   // memo re-runs exactly when a response lands.
@@ -533,8 +541,18 @@ function AppContent() {
     () => (ageBaseQ.data?.records ?? []).map(r => ({ d: Math.floor(r.dt / 86400_000), b: r.b, o: r.o })),
     [ageBaseQ.data],
   )
-  const drillTo = (segs: string[]) =>
-    navigate({ pathname: segs.length ? `${storeBase}/${segs.join('/')}` : store.path, search, hash })
+  // A drill leaves any opened object behind (`?open=` names a child of the
+  // drilled directory).
+  const drillTo = (segs: string[]) => {
+    const q = new URLSearchParams(search)
+    q.delete('open')
+    navigate({ pathname: segs.length ? `${storeBase}/${segs.join('/')}` : store.path, search: q.size ? `?${q}` : '', hash })
+  }
+  // `?open=<name>`: an object under the drilled directory, shown in the leaf
+  // viewer below the map (objects.ts `openHref`). Opening pushes history, so
+  // Back closes it.
+  const [openP, setOpenP] = useUrlState('open', stringParam(), true)
+  const openObject = (segs: string[]) => navigate({ ...openHref(store.path, segs, search), hash })
   // Read-recency lens domain: the access-log observation window (meta), not
   // the tree's own min/max — "no reads" is only meaningful vs when logging began.
   const readRange = useMemo((): DateRange | null =>
@@ -794,6 +812,8 @@ function AppContent() {
     ),
   })
 
+  // The written-date gradient's domain: the drawn leaves' dates — objects and
+  // directories whose children this view didn't load alike (each is one cell).
   const dateRange = useMemo((): DateRange | null => {
     if (!mapTree) return null
     let min = Infinity
@@ -1055,16 +1075,18 @@ function AppContent() {
           {/* Remount per store: the treemap's caches are tied to the tree it
               mounted with, and a switch can swap `tree` without ever passing
               through null once both payloads are cached. */}
-          {/* `leaf` folds the canvas away (height 0): a genuine single object,
-              or a directory its own subtree fetch confirmed has nothing
-              drawable (objects only, or dirs under the floor) — the note below
-              says which. Never before that fetch answers: a childless dir may
-              be a branch whose kids fell below the parent's pixel budget, and
-              a zero-height canvas sends the core's squarify into a
-              non-terminating loop on degenerate aspect ratios once they land. */}
+          {/* `leaf` folds the canvas away (height 0) on a v1 scan, whose index
+              lists directories only: a drilled directory its own subtree fetch
+              confirmed has nothing drawable (only objects, or dirs under the
+              floor) — the note below says so. Never before that fetch answers:
+              a childless dir may be a branch whose kids fell below the
+              parent's pixel budget, and a zero-height canvas sends the core's
+              squarify into a non-terminating loop on degenerate aspect ratios
+              once they land. A scan that lists objects always has something
+              to draw under a directory. */}
           <div id="tree-map" className={[
             'busy-host',
-            mapPath && mapPath.length > 1 && !mapPath[mapPath.length - 1].c?.length && (mapPath[mapPath.length - 1].o <= 1 || subtreeQs[subtreeQs.length - 1]?.data) ? 'leaf' : '',
+            !objects && mapPath && mapPath.length > 1 && !mapPath[mapPath.length - 1].c?.length && subtreeQs[subtreeQs.length - 1]?.data ? 'leaf' : '',
             mapStale ? 'stale' : '',
           ].filter(Boolean).join(' ')} aria-busy={mapBusy || undefined}><Treemap
             key={store.key}
@@ -1085,9 +1107,11 @@ function AppContent() {
             ownerIdx={ownersMode ? ownerIdx : undefined}
             path={mapPath}
             onPathChange={onMapPath}
+            objects={objects}
+            onOpen={p => openObject(p.slice(1).map(n => n.n))}
           />{mapStale ? <Busy label="loading view…" /> : mapBusy ? <Busy corner label="filling in…" /> : null}</div>
-          {/* A drilled directory with nothing drawable under it: only objects
-              (not in the index yet — specs/view-serving.md §3), or directories
+          {/* A drilled directory with nothing drawable under it: the scope came
+              up empty, or (a v1 scan) it holds only objects or directories
               under this view's floor. Say so rather than show a blank canvas. */}
           {mapPath && mapPath.length > 1 && !mapPath[mapPath.length - 1].c?.length && subtreeQs[subtreeQs.length - 1]?.data && (
             mapPath[mapPath.length - 1].b === 0 && ownerMode !== 'all' ? (
@@ -1103,13 +1127,23 @@ function AppContent() {
                       : <>Nothing under <code>{mapPath[mapPath.length - 1].n}</code> is owned by anyone else in this scan</>}
                 {' '}— widen the scope in the bar above, or press Backspace to go up.
               </p>
-            ) : (
+            ) : !objects && (
               <p className="hint leaf-note">
                 <code>{mapPath[mapPath.length - 1].n}</code> holds {fmtN(mapPath[mapPath.length - 1].o)} objects and no directory of{' '}
-                {fmtBytes(subtreeQs[subtreeQs.length - 1]!.data!.threshold ?? 0)} or more. Objects aren’t listed yet — act on this prefix from the
-                controls above, or press Backspace to go up.
+                {fmtBytes(subtreeQs[subtreeQs.length - 1]!.data!.threshold ?? 0)} or more. This scan was indexed before objects were
+                listed — pick a newer scan to see them, or press Backspace to go up.
               </p>
             )
+          )}
+          {/* The opened object (`?open=`), under the map it was picked from. */}
+          {openP && mapPath && (
+            <Suspense fallback={<p className="loading">loading the viewer…</p>}>
+              <ObjectPanel
+                segs={[...segs, openP]}
+                node={mapPath.length - 1 === segs.length ? mapPath[mapPath.length - 1].c?.find(c => c.n === openP) : undefined}
+                onClose={() => setOpenP(undefined)}
+              />
+            </Suspense>
           )}
           {/* The map's own listing — this node's children. */}
           {mapPath && (
@@ -1121,6 +1155,7 @@ function AppContent() {
               userIdx={userIdx}
               onPickUser={u => pickUser(u, false)}
               onOpen={openPath}
+              onOpenObject={openObject}
             /></div>
           )}
         </>
@@ -1245,10 +1280,10 @@ function AppContent() {
               {/* A drill in the diff drills the page: the map, the table and
                   the chart follow, and the diff itself re-reads at the new
                   prefix (its rows are relative to the drilled path). */}
-              <DiffTreemap model={diffModel} onDrill={rel => drillTo([...segs, ...rel])} />
+              <DiffTreemap model={diffModel} onDrill={rel => drillTo([...segs, ...rel])} onOpen={rel => openObject([...segs, ...rel])} />
               {/* The map's tabular twin: the same cells as rows, sortable; a
                   row's name drills like its cell (and scrolls the maps up). */}
-              <DiffTable model={diffModel} scheme={store.scheme} segs={segs} onDrill={rel => openPath([...segs, ...rel])} />
+              <DiffTable model={diffModel} scheme={store.scheme} segs={segs} onDrill={rel => openPath([...segs, ...rel])} onOpen={rel => openObject([...segs, ...rel])} />
               {diffStaleOther
                 ? <Busy label={`aligning ${fmtScan(diffPrev)} → ${fmtScan(asof)}…`} />
                 : diffRefining

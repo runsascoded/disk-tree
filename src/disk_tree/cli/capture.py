@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 from datetime import datetime, timezone
 from os import getcwd
 
@@ -70,11 +71,19 @@ def read_marker(capture: str) -> dict:
 
 @cli.command('capture')
 @option('-n', '--batch-rows', default=200_000, help='Rows per shard — bounds memory: one batch is buffered at a time')
+@option('-o', '--one-fs', is_flag=True, help="Don't descend into filesystems mounted below PATH. With PATH `/` on macOS: the System volume + the Data volume (via its firmlinks), once — the whole machine")
 @option('-q', '--no-progress', is_flag=True, help='Suppress the tqdm progress bar')
 @option('-s', '--sudo', is_flag=True, help='Run `find` as sudo')
 @option('-t', '--to', required=True, help='Where the capture goes: a local dir or an fsspec URL (`r2://bucket/prefix`)')
 @argument('path', required=False)
-def capture_cmd(batch_rows: int, no_progress: bool, sudo: bool, to: str, path: str | None):
+def capture_cmd(
+    batch_rows: int,
+    one_fs: bool,
+    no_progress: bool,
+    sudo: bool,
+    to: str,
+    path: str | None,
+):
     """Stream PATH's listing to --to as layer-1 shards, using no local disk.
 
     Prints the capture dir (`<to>/<host>/<root>/<stamp>`), which `reduce` takes.
@@ -116,7 +125,7 @@ def capture_cmd(batch_rows: int, no_progress: bool, sudo: bool, to: str, path: s
         n_shards += 1
         names, sizes, mtimes = [], [], []
 
-    for e in backend.list(root, errors=errors, sudo=sudo, progress=not no_progress):
+    for e in backend.list(root, errors=errors, sudo=sudo, one_fs=one_fs, progress=not no_progress):
         if e['kind'] == 'dir' or e['path'] == '':
             continue
         names.append(e['path'])
@@ -138,6 +147,18 @@ def capture_cmd(batch_rows: int, no_progress: bool, sudo: bool, to: str, path: s
         'error_count': errors.count,
         'error_paths': errors.paths,
     }
+    if sys.platform == 'darwin':
+        # The APFS container the walk sits on (volumes, snapshots, free): what
+        # the walk can't attribute, so a UI can draw the whole disk. A root on a
+        # non-APFS volume (ExFAT external) legitimately has none; and the field
+        # is an annotation, so a `diskutil` failure is logged rather than
+        # costing the walk its manifest.
+        from subprocess import CalledProcessError
+        from disk_tree.apfs import container_for
+        try:
+            manifest['container'] = container_for(root).to_json()
+        except (ValueError, CalledProcessError) as e:
+            err(f'{root}: no APFS container recorded: {e}')
     blobfs.write_text(blobfs.join(out, MARKER), json.dumps(manifest, indent=2) + '\n')
     tail = f', {errors.count} permission errors' if errors.count else ''
     err(f'{root}: {n_rows:,} files in {n_shards} shard(s) → {out}{tail}')

@@ -1,5 +1,7 @@
 import os
+import re
 import shutil
+import subprocess
 from os.path import abspath, isdir, isfile
 from typing import Iterator
 
@@ -17,6 +19,28 @@ CLOUDSTORAGE_PATHS = [
 #: GNU find: `gfind` where it's Homebrew's findutils (macOS), else the system
 #: `find` (Linux, where it's already GNU and has `-printf`).
 FIND = shutil.which('gfind') and 'gfind' or 'find'
+
+
+_MOUNT_RE = re.compile(r'^.+? on (?P<path>/.*?)(?: type \S+)? \([^()]*\)$')
+
+
+def mount_points() -> list[str]:
+    """Every mounted filesystem's mount point, from `mount` (macOS and Linux)."""
+    out = subprocess.run(['mount'], check=True, capture_output=True, text=True).stdout
+    return [m['path'] for line in out.splitlines() if (m := _MOUNT_RE.match(line))]
+
+
+def mounts_below(root: str, mounts: list[str]) -> list[str]:
+    """Mount points strictly inside `root`: what a one-filesystem walk prunes.
+
+    On macOS, `/` is the sealed System volume and the Data volume is reached
+    through firmlinks (`/Users`, `/Applications`, …), which aren't mount points;
+    Data's own mount path (`/System/Volumes/Data`) is, so pruning it walks
+    Data exactly once. `find -xdev` can't do this: firmlinked dirs carry the
+    Data volume's `st_dev`, so it would prune `/Users`.
+    """
+    prefix = root.rstrip('/') + '/'
+    return sorted(m for m in mounts if m.startswith(prefix) and m != root)
 
 
 class LocalBackend(Backend):
@@ -39,6 +63,7 @@ class LocalBackend(Backend):
         errors: ErrorCollector | None = None,
         excludes: list[str] | None = None,
         sudo: bool = False,
+        one_fs: bool = False,
         progress_callback: ProgressCallback | None = None,
         progress_interval: float = 1.0,
         progress: bool = True,
@@ -48,15 +73,28 @@ class LocalBackend(Backend):
 
         if excludes is None:
             excludes = CLOUDSTORAGE_PATHS
-        for pattern in excludes:
-            abs_pattern = abspath(os.path.expanduser(pattern))
-            if (abs_pattern.startswith(path0 + '/')
-                    or path0.startswith(abs_pattern.rstrip('/') + '/')
-                    or abs_pattern == path0):
-                cmd.extend(['-path', abs_pattern, '-prune', '-o'])
-
+        # `rstrip` so a `/` root's prefix is `/`, not `//` (which matched nothing,
+        # so a `/` scan walked into CloudStorage).
+        prefix = path0.rstrip('/') + '/'
+        applicable_excludes = [
+            abs_pattern
+            for pattern in excludes
+            for abs_pattern in [abspath(os.path.expanduser(pattern))]
+            if (abs_pattern.startswith(prefix)
+                or path0.startswith(abs_pattern.rstrip('/') + '/')
+                or abs_pattern == path0)
+        ]
+        # `one_fs`: don't descend into other filesystems mounted below the root
+        # (gfind prunes the current mount points — equivalent for a walk's duration).
+        if one_fs:
+            applicable_excludes = [*applicable_excludes, *mounts_below(path0, mount_points())]
         # %b = 512-byte blocks actually allocated (handles sparse files correctly)
-        cmd.extend(['-printf', r'%y %b %T@ %p\0'])
+        fmt = r'%y %b %T@ %p\0'
+        for abs_pattern in applicable_excludes:
+            # Print the pruned dir itself (an empty leaf), as `find -xdev` does:
+            # the tree shows a mount / excluded dir is there.
+            cmd.extend(['-path', abs_pattern, '-printf', fmt, '-prune', '-o'])
+        cmd.extend(['-printf', fmt])
         if sudo:
             cmd = ['sudo', *cmd]
 
