@@ -45,7 +45,14 @@ The auth demo's mint form shows the UX: an optional Email field, and a checkbox,
   - Its value is a `data:` URI to send as `avatar`; `null` means none.
 - **Renames:** `profileUploadMaxBytes` is now `avatarMaxBytes`, and `seedAvatarTimeoutMs` is now `avatarFetchTimeoutMs`. `resolveAvatar` is now `parseAvatarRef` + `fetchAvatar`, or `gate.copyAvatar`. The `avatarLookup` route option is gone, since the preview endpoint is always on. `ProfilePanel`'s avatar `PUT` body is `{ avatar: { ref } }` (formerly `{ url }` / `{ github }`).
 
-## To do here
+## As built on `m3` (2026-10-01)
+
+- Pin → `fa93d14`; the explicit `seedProfile: true` flags are gone (the default now).
+- **`allowlist`**: the site's `allowed_emails` is `(email, note, who, ts)`, not the package's `(email, scopes, source, …)` schema, so `site/functions/_lib/allowlist.ts` (`siteAllowlist`) adapts it: a row reads as the base scope plus its `:read` half (a read-only link's recipient counts as covered), `put` writes `note`/`who`/`ts`, `replaceSource` refuses (no `source` column). Passed to `authRoutes` in `api/auth/[[path]].ts`, which also mounts the package's admin `…/allowed` routes. Tests: `_lib/allowlist.test.ts`, incl. a real `POST /api/auth/grants` with `allowlist: true` → `added`, then `already`.
+- **Mint form** (`AdminPage.tsx`): a **Sign-in** checkbox once an email is typed (default on); with Read-only it warns the recipient signs in **as a full viewer** (the allowlist has no read-only tier). `<AvatarField>` replaces the Avatar URL box; a 400's `detail` shows in the error; the minted panel reports `allowed.status`. Draft keeps the face unless it's > 32 KB.
+- CIC on dev: the checkbox + caveat appear with an email; a GitHub profile and `@Gargron@mastodon.social` preview; a LinkedIn profile gets the readable refusal. A real mint (writes a grant + an allowlist row to the shared D1) not yet run.
+
+## To do here (original list)
 
 - [ ] Bump the pin in `site/package.json` from `7442ab0` to **`fa93d14`** or later.
   - `2f70e25` adds One Tap `prompt` / FedCM for the button.
