@@ -135,7 +135,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24  # the D1 test fake uses `node:sqlite` (Node ≥ 22.5)
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
