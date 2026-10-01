@@ -103,6 +103,8 @@ D1: the footer grows with rows. cw 6.4k groups per sort (from 0.8k); gcs ~100k p
 - *Pruning.* On the fixture (`fixtures/v2`, one tier group per footer group, 4 per sort): `bk/flat` at 32 KiB on `bysize` decodes 1 of 4 footer groups, `bk/small` on `path` 2 of 4, a point lookup one more; a lens no group's `usr` range covers decodes none (`pathStore.test.ts`, asserting the store's range reads). On cw's real `bysize` sidecar at 512 rows/footer group the phase-0 reads keep exactly the footer groups holding their selected tier groups: root 1 of 14, a 10 TiB dir 1, a 100 GiB dir 3, the flat dir 4.
 - *The new D1 math.* D1 holds the last N scans' footer rows (`index-gc -r N`), everything older reads its `.groups.parquet`. gcs at 32K groups, two sorts: N × 36 MB, so N = 120 is ~4.3 GB and the cap is set by headroom, not history; at 8K groups and three sorts, N × 218 MB ⇒ N ≈ 30 for ~6.5 GB. The cold tier adds ~13–77 MB per scan to the bucket, beside ~27–55 GB of tiers.
 
+**Measured on gcs (2026-10-01, first switch):** `-u bysize`, 8K-row groups, three sorts (`path`, `bysize`, `bysize-user`), each 777.1M rows / 94,864 groups; `path-index` 33.7 min (three sorts 19.5 min), upload 24.3 GB in 41 s, `index-sync` ~4 min per sort. `INDEX_RETAIN=30` with the cold tier: `index-gc` retired 33 older scans' footers behind their `.groups.parquet`; D1 2.53 → 1.54 GB (~830 B/row in D1). Cold tier on disk: ~170 B/row for a v2 sort (bysize 16.1 MB per scan), ~48 MB per scan for three sorts vs ~218 MB in D1. Reads: root lens on 9/30 200 in 2.6 s cold (equal bytes to 9/29's v1); retired scans' root, drills and lens 2.4–3.1 s via the `pq` handle.
+
 ## 2. Reads
 
 ### 2.1 Subtree (treemap)
