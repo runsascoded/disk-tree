@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isFold, pathCopy, pathCrumbs, pathDisplay, pathText, pathUri } from './pathCrumbs'
+import { fromUrlSegs, isFold, pathCopy, pathCrumbs, pathDisplay, pathText, pathUri, toUrlSegs } from './pathCrumbs'
 import type { Crumb } from './pathCrumbs'
 
 describe('pathCrumbs', () => {
@@ -56,5 +56,22 @@ describe('pathDisplay / pathText / pathCopy', () => {
     expect(pathCopy('file:///', ['Users', 'ryan', 'c'], true)).toBe('/Users/ryan/c/')
     expect(pathCopy('file:///', [])).toBe('/')
     expect(pathCopy('gs://', ['b', 'x'])).toBe('gs://b/x')
+  })
+})
+
+describe('toUrlSegs / fromUrlSegs', () => {
+  const home = ['Users', 'ryan']
+  it('home folds to a leading `~` and expands back', () => {
+    expect(toUrlSegs(['Users', 'ryan', 'c', 'disky'], home)).toEqual(['~', 'c', 'disky'])
+    expect(toUrlSegs(['Users', 'ryan'], home)).toEqual(['~'])
+    expect(fromUrlSegs(['~', 'c', 'disky'], home)).toEqual(['Users', 'ryan', 'c', 'disky'])
+    expect(fromUrlSegs(['~'], home)).toEqual(['Users', 'ryan'])
+  })
+  it('paths outside home, and stores without one, pass through', () => {
+    expect(toUrlSegs(['Applications', 'Slack.app'], home)).toEqual(['Applications', 'Slack.app'])
+    expect(toUrlSegs(['Users'], home)).toEqual(['Users'])
+    expect(toUrlSegs(['b', 'x'])).toEqual(['b', 'x'])
+    expect(fromUrlSegs(['~', 'x'])).toEqual(['~', 'x'])
+    expect(fromUrlSegs(['Users', 'ryan', 'c'], home)).toEqual(['Users', 'ryan', 'c'])
   })
 })
