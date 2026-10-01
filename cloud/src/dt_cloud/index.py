@@ -225,7 +225,7 @@ def write_sorts(
     count per sort. A fleet the size of gcs (777M rows) needs 32K to keep
     two sorts × 120 scans under D1's 10 GB (specs/path-store.md §1.6)."""
     import pyarrow.parquet as pq
-    from disk_tree.find.groups import groups_path
+    from disk_tree.find.groups import groups_parquet_path, groups_path
     from disk_tree.find.tiers import TIERS, tier_path, write_tiers
 
     out = Path(out_dir)
@@ -242,6 +242,7 @@ def write_sorts(
             os.replace(src, dst)
             if groups:
                 os.replace(groups_path(src), groups_path(dst))
+                os.replace(groups_parquet_path(src), groups_parquet_path(dst))
             name = variant_name(tier, variant)
             result[name] = {"file": dst, "rows": written[src], "groups": pq.read_metadata(dst).num_row_groups}
             err(f"{name}: {written[src]:,} rows, {result[name]['groups']:,} row groups → {dst}")

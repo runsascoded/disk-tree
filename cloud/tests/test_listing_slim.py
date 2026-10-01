@@ -106,7 +106,10 @@ def test_indexes_are_byte_identical(layer2, codec, tmp_path: Path):
     files = sorted(p.name for p in (tmp_path / "i1").glob("*.parquet")) + sorted(p.name for p in (tmp_path / "i1").glob("*.json"))
     assert files == sorted(p.name for p in (tmp_path / "i2").glob("*.parquet")) + sorted(p.name for p in (tmp_path / "i2").glob("*.json"))
     assert files == [
-        *sorted(["path-index.parquet", "path-index-bysize.parquet", *(f"age-pyramid-{b}.parquet" for b in X.AGE_PYRAMID_BINS)]),
+        *sorted([
+            "path-index.parquet", "path-index-bysize.parquet", "path-index.groups.parquet", "path-index-bysize.groups.parquet",
+            *(f"age-pyramid-{b}.parquet" for b in X.AGE_PYRAMID_BINS),
+        ]),
         "path-index-bysize.groups.json", "path-index.groups.json",
     ]
     assert {f: (tmp_path / "i1" / f).read_bytes() == (tmp_path / "i2" / f).read_bytes() for f in files} == {f: True for f in files}

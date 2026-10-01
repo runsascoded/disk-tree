@@ -296,10 +296,10 @@ def test_store_sorts(tmp_path: Path, listing: str, attribution: str):
         assert (g[0], g[5], g[8], g[9], g[11]) == (0, 200 * GB, 0, 12, 30 * GB)
     assert not pidx.with_name(".store.parquet").exists()
     assert sorted(p.name for p in tmp_path.glob("path-index*")) == [
-        "path-index-by-user.groups.json", "path-index-by-user.parquet",
-        "path-index-bysize-by-user.groups.json", "path-index-bysize-by-user.parquet",
-        "path-index-bysize.groups.json", "path-index-bysize.parquet",
-        "path-index.groups.json", "path-index.parquet",
+        "path-index-by-user.groups.json", "path-index-by-user.groups.parquet", "path-index-by-user.parquet",
+        "path-index-bysize-by-user.groups.json", "path-index-bysize-by-user.groups.parquet", "path-index-bysize-by-user.parquet",
+        "path-index-bysize.groups.json", "path-index-bysize.groups.parquet", "path-index-bysize.parquet",
+        "path-index.groups.json", "path-index.groups.parquet", "path-index.parquet",
     ]
 
 
@@ -323,7 +323,8 @@ def test_write_path_index_plain(tmp_path: Path, listing: str):
         ("b1/users/rw/ckpt/model.bin", "file", 100 * GB), ("b1/users/rw/ckpt/opt.bin", "file", 50 * GB),
     ]
     assert sorted(p.name for p in pidx.parent.glob("path-index*")) == [
-        "path-index-bysize.groups.json", "path-index-bysize.parquet", "path-index.groups.json", "path-index.parquet",
+        "path-index-bysize.groups.json", "path-index-bysize.groups.parquet", "path-index-bysize.parquet",
+        "path-index.groups.json", "path-index.groups.parquet", "path-index.parquet",
     ]
     age = json.loads((out / "age.json").read_text())
     assert sorted(age, key=lambda r: (r["d"], r["d1"])) == [
@@ -441,7 +442,8 @@ def test_store_without_user_sorts(tmp_path: Path, listing: str, attribution: str
     meta = write_path_index((listing,), out, "2026-07-20", (attribution,), identities_path, path_index=pidx, user_sorts=False, row_group_rows=2048)
     assert meta["index"] == {"rows": 12, "sorts": {"path": {"rows": 12, "groups": 1}, "bysize": {"rows": 12, "groups": 1}}}
     assert sorted(p.name for p in tmp_path.glob("path-index*")) == [
-        "path-index-bysize.groups.json", "path-index-bysize.parquet", "path-index.groups.json", "path-index.parquet",
+        "path-index-bysize.groups.json", "path-index-bysize.groups.parquet", "path-index-bysize.parquet",
+        "path-index.groups.json", "path-index.groups.parquet", "path-index.parquet",
     ]
     assert _kv(pidx) == {"tier": "path", "sort": "depth,path,usr"}
 
@@ -543,6 +545,7 @@ def test_store_with_only_the_bysize_user_sort(tmp_path: Path, listing: str, attr
     meta = write_path_index((listing,), tmp_path / "out", "2026-07-20", (attribution,), identities_path, path_index=pidx, user_sort_tiers=("bysize",))
     assert meta["index"] == {"rows": 12, "sorts": {"path": {"rows": 12, "groups": 1}, "bysize": {"rows": 12, "groups": 1}, "bysize-user": {"rows": 12, "groups": 1}}}
     assert sorted(p.name for p in tmp_path.glob("path-index*.parquet")) == [
-        "path-index-bysize-by-user.parquet", "path-index-bysize.parquet", "path-index.parquet",
+        "path-index-bysize-by-user.groups.parquet", "path-index-bysize-by-user.parquet", "path-index-bysize.groups.parquet",
+        "path-index-bysize.parquet", "path-index.groups.parquet", "path-index.parquet",
     ]
     assert _kv(pidx.with_name("path-index-bysize-by-user.parquet")) == {"tier": "bysize", "sort": "usr,size_bucket desc,path", "bucket": "log2"}

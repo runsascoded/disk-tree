@@ -137,7 +137,8 @@ def write_tiers(
     `tier` / `sort` (and, for `bysize`, `bucket`) in its parquet key-value
     metadata. With `groups`, each tier also gets its group manifest
     `<tier>.groups.json` beside it (:mod:`disk_tree.find.groups`) — the
-    precomputed footer a serverless reader plans range reads from.
+    precomputed footer a serverless reader plans range reads from — and the
+    same rows as the cold footer tier `<tier>.groups.parquet`.
 
     `variant_tiers` limits the sort variants to those tiers (None: every
     tier) — gcs keeps one user-first copy, `bysize` by `usr`, for lens reads.
@@ -203,7 +204,7 @@ def write_tiers(
         written[out] = int(con.execute(f"SELECT COUNT(*) FROM read_parquet('{out}')").fetchone()[0])
         if groups:
             from disk_tree.find.groups import write_groups
-            write_groups(out)
+            write_groups(out, footer_parquet=True)
 
     for tier in tiers:
         base = TIER_SORTS[tier]
@@ -275,7 +276,7 @@ def cut_tiers(
     are cut locally, then uploaded beside each other."""
     import pyarrow.parquet as pq
     from disk_tree import blobfs
-    from disk_tree.find.groups import groups_path
+    from disk_tree.find.groups import groups_parquet_path, groups_path
     if stem is None:
         stem = default_stem(layer2)
     remote_stem = blobfs.is_url(stem)
@@ -297,6 +298,7 @@ def cut_tiers(
                     blobfs.put(out, final)
                     if groups:
                         blobfs.put(groups_path(out), groups_path(final))
+                        blobfs.put(groups_parquet_path(out), groups_parquet_path(final))
                 reports.append(TierReport(path=final, rows=n, groups=md.num_row_groups, bytes=os.path.getsize(out), kv=kv))
             return reports
         finally:

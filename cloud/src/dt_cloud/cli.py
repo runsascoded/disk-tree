@@ -818,10 +818,11 @@ def index_sync(
 
 
 @main.command("index-gc")
-@option("-r", "--retain", type=int, default=None, help="Retention: also retire the store sorts' row groups of every scan older than the newest N (their pointers stay; the reader opens the .groups.json blob instead)")
+@option("-b", "--base", default="oa-gcs-usage-dvx", help="Where the pointers' dirs live, for -r's cold-footer check: the data bucket (default oa-gcs-usage-dvx), a mounted dir, or an fsspec URL (`r2://bucket`)")
+@option("-r", "--retain", type=int, default=None, help="Retention: also retire the store sorts' row groups of every scan older than the newest N whose `.groups.parquet` exists (their pointers stay; the reader range-reads that cold footer instead). A variant without one keeps its rows (warned): backfill it with `index-blob`")
 @option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
 @argument("dates", nargs=-1)
-def index_gc(retain: int | None, store: str, dates: tuple[str, ...]) -> None:
+def index_gc(base: str, retain: int | None, store: str, dates: tuple[str, ...]) -> None:
     """Delete row groups of index generations no pointer names — a REPROC's
     previous generation, or a sync that died before flipping. All synced
     scans by default; DATES to restrict. With -r, the retention pass too."""
@@ -832,8 +833,11 @@ def index_gc(retain: int | None, store: str, dates: tuple[str, ...]) -> None:
         n = gc_d1(d, store=store)
         err(f"index-gc: {d} — {n} stale row groups deleted")
     if retain is not None:
-        for d, v, n in retire_d1(retain, store=store):
-            err(f"index-gc: retired {d} [{v}] — {n} row groups (footer path serves it now)")
+        retired, skipped = retire_d1(retain, store=store, base=base)
+        for d, v, n in retired:
+            err(f"index-gc: retired {d} [{v}] — {n} row groups (its .groups.parquet serves it now)")
+        for d, v, missing in skipped:
+            err(f"index-gc: WARNING kept {d} [{v}] in D1 — no cold footer at {missing} (backfill: dt-cloud index-blob -P {d})")
 
 
 @main.command("index-dir")
@@ -873,26 +877,83 @@ def labels(attributions: tuple[str, ...], identities_path: str | None, listings:
 
 
 @main.command("index-blob")
+@option("-a", "--all", "all_dates", is_flag=True, help="Every scan with a synced pointer (instead of DATES)")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
-@option("-d", "--dir", "listing_dir", default=None, help="Local/mounted/gs:// dir holding the parquets (default: gs://<bucket>/<key>)")
-@option("-g", "--gen", required=True, help="Generation the files belong to (`legacy` for listing/<date>/)")
+@option("-d", "--dir", "listing_dir", default=None, help="Local/mounted/gs:// dir holding the parquets (default: gs://<bucket>/<key>); one DATE only")
+@option("-g", "--gen", default=None, help="Generation the files belong to (`legacy` for listing/<date>/); default: each variant's D1 pointer dir")
+@option("-J", "--from-json", is_flag=True, help="Build the .groups.parquet from the .groups.json already beside the tier, not the tier's own footer (implies -P)")
 @option("-k", "--key", default=None, help="Bucket-relative dir the parquets live under (default: listing/<date>/index/<gen>; listing/<date> for gen `legacy`)")
+@option("-n", "--dry-run", is_flag=True, help="Print what would be written; write nothing")
+@option("-P", "--parquet-only", is_flag=True, help="Only the cold footer tier (`.groups.parquet`); leave the .groups.json as it is")
+@option("-s", "--store", default="primary", help="The store whose pointers name the dirs (no -g): `primary` (default) or a secondary store's `STORES_JSON` key")
+@option("-S", "--sorts-only", is_flag=True, help="Only the store's sorts (`SORT_VARIANTS`: what `index-gc -r` retires)")
 @option("-v", "--variant", "variants", multiple=True, type=Choice(list(INDEX_VARIANTS)), help="Only these variants (default: all)")
-@argument("date")
-def index_blob(bucket: str, listing_dir: str | None, gen: str, key: str | None, variants: tuple[str, ...], date: str) -> None:
-    """Write each tier's group-manifest blob (`<tier>.groups.json`, the rows
-    `index-sync` puts in D1) beside its parquet — the backfill for scans synced
-    before `index-sync` wrote blobs; the site opens the blob once retention
-    retires a tier's rows from D1 (specs/view-serving.md)."""
-    from .index_footer import extract, write_groups_blob
+@argument("dates", nargs=-1)
+def index_blob(
+    all_dates: bool,
+    bucket: str,
+    listing_dir: str | None,
+    gen: str | None,
+    from_json: bool,
+    key: str | None,
+    dry_run: bool,
+    parquet_only: bool,
+    store: str,
+    sorts_only: bool,
+    variants: tuple[str, ...],
+    dates: tuple[str, ...],
+) -> None:
+    """Write each tier's footer sidecars beside its parquet — the cold footer
+    tier `<tier>.groups.parquet` and the `<tier>.groups.json` blob, the rows
+    `index-sync` puts in D1. The backfill for generations synced before
+    `index-sync` wrote them: `index-gc -r` retires a scan's rows from D1 only
+    once its `.groups.parquet` exists, and the site then range-reads it
+    (specs/path-store.md §1.6). E.g. before lowering retention on gcs:
 
-    key = key or (f"listing/{date}" if gen == "legacy" else f"listing/{date}/index/{gen}")
-    base = listing_dir or f"gs://{bucket}/{key}"
-    for variant in variants or tuple(INDEX_VARIANTS):
-        path = f"{base}/{INDEX_VARIANTS[variant]}"
-        schema, rows = extract(path)
-        out, n = write_groups_blob(path, schema, rows)
-        err(f"index-blob: {date} [{variant}] {len(rows)} groups → {out} ({n:,} B)")
+        dt-cloud index-blob -a -S -P
+
+    Each variant's dir comes from `-d`/`-k`/`-g`, else its D1 pointer; an
+    absent tier (a deployment writes only some variants) is skipped."""
+    from .index_footer import SORT_VARIANTS, exists, extract, groups_parquet_path, index_dir, read_groups_blob, synced_variants, write_groups_blob, write_groups_parquet
+
+    if all_dates == bool(dates):
+        raise UsageError("give DATES or -a, not both")
+    if listing_dir and (all_dates or len(dates) > 1):
+        raise UsageError("-d names one scan's dir: one DATE only")
+    by_pointer = not (listing_dir or gen is not None or key is not None)
+    synced = synced_variants(store=store) if all_dates or by_pointer else []
+    todo_dates = sorted({d for d, _ in synced}) if all_dates else list(dates)
+    todo_vars = variants or tuple(INDEX_VARIANTS)
+    if sorts_only:
+        todo_vars = tuple(v for v in todo_vars if v in SORT_VARIANTS)
+    have = set(synced)
+    for date in todo_dates:
+        for variant in todo_vars:
+            if listing_dir:
+                base = listing_dir
+            elif gen is not None or key is not None:
+                k = key or (f"listing/{date}" if gen == "legacy" else f"listing/{date}/index/{gen}")
+                base = f"gs://{bucket}/{k}"
+            else:
+                if (date, variant) not in have:
+                    continue
+                k = index_dir(date, variant, store=store)
+                if k is None:
+                    continue
+                base = f"gs://{bucket}/{k}"
+            path = f"{base}/{INDEX_VARIANTS[variant]}"
+            if not exists(path):
+                err(f"index-blob: {date} [{variant}] no tier at {path}; skipped")
+                continue
+            if dry_run:
+                err(f"index-blob: {date} [{variant}] would write {groups_parquet_path(path)}{'' if parquet_only or from_json else ' + .groups.json'}")
+                continue
+            schema, rows = read_groups_blob(path) if from_json else extract(path)
+            out, n = write_groups_parquet(path, schema, rows)
+            err(f"index-blob: {date} [{variant}] {len(rows)} groups → {out} ({n:,} B)")
+            if not (parquet_only or from_json):
+                out, n = write_groups_blob(path, schema, rows)
+                err(f"index-blob: {date} [{variant}] {len(rows)} groups → {out} ({n:,} B)")
 
 
 @main.command("index-extras")
