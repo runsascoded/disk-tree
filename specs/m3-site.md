@@ -97,7 +97,7 @@ Verdict: **go**. The ingest is trivially small for Batch, so the job definition 
 
 ### Phase 4: cut over and retire
 
-**Status (2026-10-01): cut over.** `site/` serves disk.rbw.sh (deploy `09cbce05`): prod got the `STORE_*` secrets, Google sign-in verified on prod, every data route 401s signed out, `/auth/app-link` live for disky. `ui/`'s `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` / `ALLOWED_EMAILS` secrets deleted; the drainer polls only `disk-tree-m3-db`. Left: the Access app on `/auth/sso` (Ryan, dashboard: this token can't see Access apps), the consent screen's privacy URL → `disk.rbw.sh/privacy` (Ryan), and deleting `ui/functions/`, `ui/cfn/`, `ui/wrangler.toml` on `cloud` (deleting them on `m3` alone would conflict on every merge). The scan keeps its `disk-tree index` step: the CLI cleanup loop (`du`, `overcount`) reads that blob.
+**Status (2026-10-01): cut over.** `site/` serves disk.rbw.sh (deploy `09cbce05`): prod got the `STORE_*` secrets, Google sign-in verified on prod, every data route 401s signed out, `/auth/app-link` live for disky. `ui/`'s `ACCESS_AUD` / `ACCESS_TEAM_DOMAIN` / `ALLOWED_EMAILS` secrets deleted; the drainer polls only `disk-tree-m3-db`. Ryan deleted the Access app `disk-tree` (`/auth/sso` now falls through to the SPA) and pointed the consent screen's privacy URL at `disk.rbw.sh/privacy` (no logo: uploading one would force Google brand verification). Left: deleting `ui/functions/`, `ui/cfn/`, `ui/wrangler.toml` on `cloud` (deleting them on `m3` alone would conflict on every merge). The scan keeps its `disk-tree index` step: the CLI cleanup loop (`du`, `overcount`) reads that blob.
 
 - Deploy `site/` to Pages `disk-tree`.
 - Delete the Access app `disk-tree` and the `ACCESS_*` secrets.
