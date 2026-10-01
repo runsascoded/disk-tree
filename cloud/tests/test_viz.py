@@ -18,7 +18,6 @@ from dt_cloud.viz import write_path_index
 
 STORE_COLS = [
     "path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
-    "age_b0", "age_b1", "age_b2", "age_b3", "age_b4", "age_b5", "age_b6",
     "sum_storage_class_id_2", "sum_storage_class_id_3", "sum_storage_class_id_4",
 ]
 
@@ -493,9 +492,10 @@ def test_rows_carry_bytes_by_age(tmp_path: Path):
         }
     ).to_parquet(listing_path)
     pidx = tmp_path / "idx" / "path-index.parquet"
-    write_path_index((str(listing_path),), tmp_path / "out", "2026-07-20", path_index=pidx)
+    write_path_index((str(listing_path),), tmp_path / "out", "2026-07-20", path_index=pidx, age_strata=True)
     df = pd.read_parquet(pidx)
     ages = [f"age_b{i}" for i in range(7)]
+    assert list(df.columns) == STORE_COLS[:12] + ages + STORE_COLS[12:]
     assert _rows(df, ["path", *ages]) == [
         ("b1", 1, 2, 4, 8, 16, 32, 64),
         ("b1/mid", 0, 0, 0, 8, 16, 0, 0), ("b1/new", 1, 2, 4, 0, 0, 0, 0), ("b1/old", 0, 0, 0, 0, 0, 32, 64),
