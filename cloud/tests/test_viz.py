@@ -503,3 +503,31 @@ def test_rows_carry_bytes_by_age(tmp_path: Path):
         ("b1/new/a", 1, 0, 0, 0, 0, 0, 0), ("b1/new/b", 0, 2, 0, 0, 0, 0, 0), ("b1/new/c", 0, 0, 4, 0, 0, 0, 0),
         ("b1/old/f", 0, 0, 0, 0, 0, 32, 0), ("b1/old/g", 0, 0, 0, 0, 0, 0, 64),
     ]
+
+
+def test_access_aggregates_mix_day_and_hour_grain(tmp_path: Path, listing: str, attribution: str):
+    """The access aggregates' grain moved from `day` to `hour`; a glob spans
+    both shapes until the day-grain parts age out (gcs 2026-10-01: `path-index`
+    died on "schema mismatch in glob: column day"). Parts are read by name and
+    the day taken from whichever column each has — the as-of rule included."""
+    parts = tmp_path / "agg"
+    parts.mkdir()
+    pd.DataFrame({
+        "bucket": ["b1", "b1"], "path": ["users/rw/ckpt", "users"],
+        "day": [TS["d0703"].date(), TS["d0703"].date()], "op": ["GET", "GET"],
+        "last_ts": [TS["d0703"], TS["d0703"]], "n_ops": [3, 3], "bytes_out": [1000, 1000],
+    }).to_parquet(parts / "a-day.parquet")
+    pd.DataFrame({
+        "bucket": ["b1", "b1"], "path": ["datasets/raw", "datasets"],
+        "hour": [TS["d0702"], TS["d0720"]], "op": ["GET", "GET"],
+        "last_ts": [TS["d0702"], TS["d0720"]], "n_ops": [1, 9], "bytes_out": [10, 9000],
+    }).to_parquet(parts / "b-hour.parquet")
+    identities_path = tmp_path / "identities.yaml"
+    identities_path.write_text(IDENTITIES_YAML)
+    pidx = tmp_path / "path-index.parquet"
+    meta = write_path_index((listing,), tmp_path / "out", "2026-07-20", (attribution,), identities_path, access=(str(parts / "*.parquet"),), path_index=pidx)
+    assert meta["access"] == {"from": epoch_day(TS["d0702"]), "to": epoch_day(TS["d0703"])}
+    a_by_path = pd.read_parquet(pidx).groupby("path")["last_read"].max().to_dict()
+    assert (a_by_path["b1/users/rw/ckpt"], a_by_path["b1/datasets/raw"], a_by_path["b1/datasets"], a_by_path["b1"]) == (
+        epoch_day(TS["d0703"]), epoch_day(TS["d0702"]), epoch_day(TS["d0702"]), epoch_day(TS["d0703"]),
+    )

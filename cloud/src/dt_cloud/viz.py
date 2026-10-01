@@ -433,6 +433,16 @@ def write_path_index(
     con.execute("CREATE TEMP TABLE access_agg (bucket VARCHAR, dir VARCHAR, aday INTEGER, ro BIGINT, rb BIGINT)")
     if access:
         globs = "[" + ", ".join(f"'{g}'" for g in access) + "]"
+        # The aggregates' time grain moved from `day` to `hour` (engine
+        # `aggregate_access`); a glob spans both shapes until the day-grain
+        # parts age out, so read them by name and take the day from whichever
+        # column a part has.
+        acc = f"read_parquet({globs}, union_by_name = true)"
+        have = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {acc}").fetchall()}
+        day_of = [f"CAST({c} AS DATE)" for c in ("day", "hour") if c in have]
+        if not day_of:
+            raise ValueError(f"access aggregates have neither `day` nor `hour`: {sorted(have)}")
+        day = day_of[0] if len(day_of) == 1 else f"COALESCE({', '.join(day_of)})"
         con.execute(
             f"""
             INSERT INTO access_agg
@@ -440,15 +450,15 @@ def write_path_index(
               CAST(floor(epoch(MAX(last_ts)) / 86400) AS INTEGER) AS aday,
               COALESCE(SUM(n_ops) FILTER (WHERE op IN ('GET', 'HEAD')), 0) AS ro,
               COALESCE(SUM(bytes_out) FILTER (WHERE op IN ('GET', 'HEAD')), 0) AS rb
-            FROM read_parquet({globs})
-            WHERE op IN ('GET', 'HEAD', 'LIST') AND day < DATE '{asof}'
+            FROM {acc}
+            WHERE op IN ('GET', 'HEAD', 'LIST') AND {day} < DATE '{asof}'
             GROUP BY 1, 2
             """
         )
         lo, hi = con.execute(
             f"SELECT CAST(floor(epoch(MIN(last_ts)) / 86400) AS INTEGER), "
-            f"CAST(floor(epoch(MAX(last_ts)) / 86400) AS INTEGER) FROM read_parquet({globs}) "
-            f"WHERE day < DATE '{asof}'"
+            f"CAST(floor(epoch(MAX(last_ts)) / 86400) AS INTEGER) FROM {acc} "
+            f"WHERE {day} < DATE '{asof}'"
         ).fetchone()
         if lo is not None:
             access_window = (int(lo), int(hi))
