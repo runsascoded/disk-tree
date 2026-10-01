@@ -633,22 +633,6 @@ def _pack(head: str, values: list[str], limit: int) -> list[str]:
     return out
 
 
-# In-place rewrite of rows still holding the verbose (pre-2026-09-06) thrift-shaped
-# `rg_json` object into the compact array form, with SQLite's JSON1 — no parquet
-# read, one statement per (date, variant). Old rows start with `{`.
-COMPACT_SQL = (
-    "UPDATE index_row_groups SET rg_json = json_array("
-    "CAST(json_extract(rg_json, '$.num_rows') AS INTEGER), "
-    "json_extract(rg_json, '$.columns[0].meta_data.codec'), "
-    "(SELECT json_group_array(json_array("
-    "CAST(json_extract(value, '$.meta_data.data_page_offset') AS INTEGER), "
-    "CAST(json_extract(value, '$.meta_data.total_compressed_size') AS INTEGER), "
-    "CAST(coalesce(json_extract(value, '$.meta_data.dictionary_page_offset'), '0') AS INTEGER))) "
-    "FROM json_each(index_row_groups.rg_json, '$.columns'))"
-    ") WHERE date = '{date}' AND variant = '{variant}' AND rg_json LIKE '{{%';"
-)
-
-
 def synced_variants(db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> list[tuple[str, str]]:
     """Every (date, variant) of ``store`` with a schema row in D1 (= a complete
     sync); variants as the store names them (a secondary store's prefix off).
@@ -664,16 +648,3 @@ def synced_variants(db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> list[t
     )
     pre = f"{store}:"
     return [(r["date"], r["variant"][len(pre):]) for r in rows if r["variant"].startswith(pre)]
-
-
-def compact_d1(date: str, variant: str, db_id: str = D1_DB_ID, store: str = PRIMARY_STORE) -> int:
-    """Compact one (date, variant)'s verbose `rg_json` rows in place; returns the
-    number of rows left in the old form afterwards (0 = done)."""
-    tok, acct = _creds()
-    variant = d1_variant(variant, store)
-    _d1_query(COMPACT_SQL.format(date=date, variant=variant), acct, tok, db_id)
-    rows = _d1_query(
-        f"SELECT count(*) AS n FROM index_row_groups WHERE date = '{date}' AND variant = '{variant}' AND rg_json LIKE '{{%';",
-        acct, tok, db_id,
-    )
-    return int(rows[0]["n"])
