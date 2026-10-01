@@ -25,11 +25,6 @@ import { CLASS_NAMES, fmtN } from './types'
 import { useUnits } from './units'
 import { pathCopy, pathText } from './pathCrumbs'
 
-// The deployment's `/v1/files` proxy (a CF Pages Function behind the site's
-// viewer gate): which bucket it reads and which prefixes it allows is the
-// deployment's config — `/api/store` reports it.
-const FILES_API = '/v1/files'
-
 /** A file-tree `Store` over a public bucket's base URL: range GETs straight
  *  to `<base>/<key>` (the bucket's CORS must admit this site). Objects are
  *  opened by key, never listed, so `list` is unsupported. */
@@ -170,10 +165,10 @@ export default function ObjectPanel({ segs, node, onClose }: {
   const ft = useMemo((): FtStore | null =>
     !src ? null
     : src.kind === 'public' ? publicStore(src.base)
-    : src.kind === 'proxy' ? HttpStore(FILES_API, storeQuery(store) ? { fetch: sfetch } : {})
+    : src.kind === 'proxy' ? HttpStore(src.api, storeQuery(store) ? { fetch: sfetch } : {})
     : null,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [src?.kind, src && 'base' in src ? src.base : null, store, sfetch])
+  [src?.kind, src && 'base' in src ? src.base : null, src && 'api' in src ? src.api : null, store, sfetch])
   const key = src?.key ?? segs.slice(1).join('/')
   const uri = store.scheme + segs.join('/')
   const shown = pathText(store.scheme, segs, store.home)

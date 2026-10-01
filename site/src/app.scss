@@ -333,6 +333,15 @@ button.mini.neg {
   .store-link .dim { color: var(--ink-3); font-size: 12px; }
   &.user-menu { min-width: 250px; .user-card { padding: 4px 6px 2px; } }
 }
+// "Open in disky" fallback hint: bottom-center, click or 8 s to dismiss.
+.app-hint {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  z-index: 10001; max-width: calc(100vw - 32px);
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 14px; font-size: 13.5px; cursor: pointer;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.3);
+}
 .scan-tip { display: grid; gap: 3px; b { color: inherit; } .classmix { margin-top: 4px; } }
 
 // Nav links: quiet tabs// Nav links: quiet tabs, not underlined prose links; the current page reads

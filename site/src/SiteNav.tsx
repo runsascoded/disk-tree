@@ -20,6 +20,7 @@ import { FaGithub } from 'react-icons/fa'
 import { MdMenu } from 'react-icons/md'
 import { Link, useLocation } from 'react-router-dom'
 import { AboutModal } from './About'
+import { offerAppLink, openInApp } from './appLink'
 import { Avatar } from './Avatar'
 import { AUTH_MODE, signInUrl, useCanAssign, useIdent, useSignOut } from './auth'
 import { useRegistry } from './identities'
@@ -221,8 +222,14 @@ function UserMenu() {
   const myUser = useMyUser(ident?.email, ownersOn)
   const emails = useUserEmails(ownersOn)
   const [tokenOpen, setTokenOpen] = useState(false)
+  const [appHint, setAppHint] = useState<string | null>(null)
   const { units, suffixB, toggleUnits, toggleSuffixB } = useUnits()
   const m = useMenu('bottom-end')
+  useEffect(() => {
+    if (!appHint) return
+    const t = setTimeout(() => setAppHint(null), 8000)
+    return () => clearTimeout(t)
+  }, [appHint])
   // Public deploys have no auth — no sign-in affordance.
   if (!ident) return AUTH_MODE === 'public' ? null : <a className="tb-signin" href={signInUrl()}>sign in</a>
   const who = myUser ?? ident.email
@@ -231,9 +238,24 @@ function UserMenu() {
   // guest isn't in, so it'd fall back to an email-derived initial + "ping Ryan").
   const guest = ident.guest
   const dispName = guest ? (ident.name ?? ident.email) : shortName(who)
+  // "Open in disky" (specs/app-link.md): a signed-in session on a desktop Mac
+  // hands its sign-in to the app. A guest link can't (the server refuses a
+  // grant minting a grant). An unregistered `disky://` scheme navigates
+  // nowhere, silently; if the page still has focus a moment later, say why.
+  const showAppLink = !guest && offerAppLink(navigator, window)
+  const openApp = () => {
+    m.setOpen(false)
+    openInApp().then(
+      () => setTimeout(() => {
+        if (document.visibilityState === 'visible' && document.hasFocus()) setAppHint('Nothing happened? Install the disky app.')
+      }, 1500),
+      (e: Error) => setAppHint(`Couldn't open disky: ${e.message}`),
+    )
+  }
   return (
     <>
       {tokenOpen && <TokenModal onClose={() => setTokenOpen(false)} />}
+      {appHint && <div className="app-hint" role="status" onClick={() => setAppHint(null)}>{appHint}</div>}
       <button type="button" className="tb-avatar" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label={`Signed in as ${dispName}`} title={dispName}>
         {guest || ident.avatar
           ? <Avatar src={ident.avatar} name={dispName} size={26} />
@@ -261,6 +283,11 @@ function UserMenu() {
                 <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setTokenOpen(true) }}>
                   agent / CLI token…
                 </button>
+              )}
+              {showAppLink && (
+                <Explain text="Sign the disky macOS app in as you, with a single-use link (expires in a minute)">
+                  <button type="button" role="menuitem" className="mi" onClick={openApp}>Open in disky</button>
+                </Explain>
               )}
               <button type="button" role="menuitem" className="mi" onClick={signOut}>log out</button>
             </div>
