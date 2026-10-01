@@ -243,11 +243,11 @@ export function AdminPage() {
         </div>
         {email.trim() && (
           <div className="field">
-            <label htmlFor="mint-allow">Sign-in</label>
+            <label htmlFor="mint-allow">Allowlist</label>
             <input id="mint-allow" type="checkbox" checked={allowSignIn} onChange={e => setAllowSignIn(e.target.checked)} />
             <span className="hint">
-              also let this email sign in with Google or an emailed code (adds it to the allowlist; revoking the link doesn't remove it)
-              {allowSignIn && readOnly && <> — <b>as a full viewer</b>: the allowlist has no read-only tier</>}
+              also add this email to the allowlist, so they can sign in themselves (Google or an emailed code) — {readOnly ? 'read-only' : 'full viewer'}, like the link.
+              Revoking the link doesn't remove it
             </span>
           </div>
         )}
