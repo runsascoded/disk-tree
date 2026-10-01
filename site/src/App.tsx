@@ -1159,6 +1159,7 @@ function AppContent() {
               node={mapPath[mapPath.length - 1]}
               segs={tblSegs}
               scheme={store.scheme}
+              home={store.home}
               ownerIdx={ownersMode ? ownerIdx : undefined}
               userIdx={userIdx}
               onPickUser={u => pickUser(u, false)}
@@ -1291,7 +1292,7 @@ function AppContent() {
               <DiffTreemap model={diffModel} onDrill={rel => drillTo([...segs, ...rel])} onOpen={rel => openObject([...segs, ...rel])} />
               {/* The map's tabular twin: the same cells as rows, sortable; a
                   row's name drills like its cell (and scrolls the maps up). */}
-              <DiffTable model={diffModel} scheme={store.scheme} segs={segs} onDrill={rel => openPath([...segs, ...rel])} onOpen={rel => openObject([...segs, ...rel])} />
+              <DiffTable model={diffModel} scheme={store.scheme} home={store.home} segs={segs} onDrill={rel => openPath([...segs, ...rel])} onOpen={rel => openObject([...segs, ...rel])} />
               {diffStaleOther
                 ? <Busy label={`aligning ${fmtScan(diffPrev)} → ${fmtScan(asof)}…`} />
                 : diffRefining
