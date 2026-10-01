@@ -90,6 +90,7 @@ exclude = [
     ".claude/",
     ".idea/",
     ".venv/",
+    "node_modules/",
     "screenshots/",
     "tmp/",
     "*.iml",

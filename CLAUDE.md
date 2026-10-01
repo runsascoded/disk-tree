@@ -201,7 +201,7 @@ cd site && pnpm dev
 
 ## Packaging / Distribution
 
-The engine is published to PyPI as `disk-tree` (`uv build` → a wheel of `src/disk_tree`; CLI only).
+`uv build` builds the engine's wheel (`src/disk_tree`; CLI only); there is no release workflow.
 `dt-cloud` (`cloud/`) is a workspace member installed from the lock, not published.
 
 ## Data Flow
@@ -246,7 +246,7 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet). CI a
 ## Performance
 
 - Depth column enables parquet predicate pushdown (only load needed rows)
-- `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning / SQL range predicates (rows sorted `(depth, path)`); wired into `du` / `scans` / staged-delete reads
+- `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning (rows sorted `(depth, path)`); wired into `du` / `scans` / staged-delete reads
 - Denormalized stats avoid parquet reads for the scan list
 
 **Sizes are per-path, not per-extent.** `gfind -printf '%b'` reports blocks allocated to a *path*; APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount. So a subtree's reported size is an upper bound on what deleting it frees. Measured 2026-08-29: deleting 35 dormant `.venv` dirs totalling 16.9 GiB freed 9 GiB — uv's default macOS link mode is `clone`, so the remainder stayed live in `~/.cache/uv`. Clones are invisible to `stat` (distinct inodes, `nlink == 1`), so inode/link-count bookkeeping catches hardlinks only — and hardlinks are nearly irrelevant here: a census of `$HOME` found `nlink > 1` over-counting just **4.3 GiB of 385.9 GiB (1.1%)**, which is why `%i`/`%n` are *not* indexed. `disk-tree reclaim` (extent intersection, for a custom keep-set) and `disk-tree overcount` (`ATTR_CMNEXT_PRIVATESIZE`, no open per file, for apparent-vs-exclusive) answer the question properly, on demand. The whole-*volume* overcount is free without either — `df` counts shared blocks once, so `apparent_total − df_used` is the number, but only for a scan that covers the entire volume (a subtree's apparent can't be compared to the volume's `df`); for a subtree, `overcount`'s `Σexclusive` is the physical footprint.

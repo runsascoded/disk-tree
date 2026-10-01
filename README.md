@@ -18,8 +18,11 @@ Disk and cloud storage analyzer: a scanning/indexing CLI, and a Cloudflare-hoste
 
 ## Install
 
+From a clone (one uv workspace: the engine plus the `dt-cloud` overlay in `cloud/`):
+
 ```bash
-pip install disk-tree
+uv sync                                     # engine (`disk-tree` CLI)
+uv sync --all-packages --all-extras         # + dt-cloud, every extra
 ```
 
 ## Site
