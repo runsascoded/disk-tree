@@ -32,10 +32,9 @@ def _fmt(size: int, human: bool) -> str:
 @argument('uri')
 def du_cmd(all_kinds: bool, depth: int, no_human: bool, as_json: bool, top: int, scan_id: str | None, uri: str):
     """Biggest children of URI, per level, from the freshest covering scan."""
-    from disk_tree.diff import resolve_blob, resolve_chunk_for_path
     from disk_tree.extents import read_reclaim_sidecar
-    from disk_tree.filter import rebase_frame
     from disk_tree.registry import freshest_scan_covering
+    from disk_tree.resolve import rebase_frame, resolve_blob, resolve_chunk_for_path
     from disk_tree.storage import get_backend
 
     uri = uri.rstrip('/') or '/'
