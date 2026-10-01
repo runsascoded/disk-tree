@@ -8,8 +8,8 @@ TCC attributes that to the launchd root process, which needs Full Disk Access.
 Secrets stay out of the plist: `CLOUDFLARE_API_TOKEN` is read from the
 worktree's `.envrc` through `direnv export json`.
 
-Polls both the `site/` D1 (`disk-tree-m3-db`, the `laptop` executor's runs) and
-`ui/`'s (`disk-tree-auth`, until disk.rbw.sh cuts over). Real runs trash (the
+Polls the `site/` D1 (`disk-tree-m3-db`, the `laptop` executor's runs; `ui/`'s
+`disk-tree-auth` retired with the 2026-10-01 cut-over). Real runs trash (the
 7-day TTL empties them); after one, a fresh capture → Batch so the map
 reflects the freed bytes.
 """
@@ -21,7 +21,6 @@ from pathlib import Path
 M3 = Path(__file__).resolve().parent.parent
 BIN = M3 / '.venv' / 'bin'
 SITE_D1 = 'e5288564-a010-4177-9f3c-77e25fad9f72'   # disk-tree-m3-db (cf/)
-UI_D1 = 'c17a63c1-1d6f-443c-9d35-f1e9c5e674ac'     # disk-tree-auth (ui/'s)
 
 
 def main() -> None:
@@ -35,7 +34,7 @@ def main() -> None:
     }
     after = f'{BIN}/python {M3}/aws/laptop-scan --capture-only'
     os.execve(str(BIN / 'disk-tree'), [
-        'disk-tree', 'dispatch', '-s', '--d1', SITE_D1, '--d1', UI_D1, '--trash', '--ttl', '7d', '-a', after, '-H', 'm3',
+        'disk-tree', 'dispatch', '-s', '--d1', SITE_D1, '--trash', '--ttl', '7d', '-a', after, '-H', 'm3',
     ], env)
 
 
