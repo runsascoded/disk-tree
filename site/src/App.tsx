@@ -330,7 +330,8 @@ function AppContent() {
   // and every level of the drilled path gets its own subtree query, grafted
   // in depth order — interactive drills hit each level's cache as they go,
   // and a cold deep link fans the whole chain out in parallel.
-  const graftPath = pathname.slice((store.path === '/' ? '' : store.path).length).replace(/^\/+/, '')
+  // The URL's `~` (a store home) expanded: `/~/c` → `Users/ryan/c`.
+  const graftPath = fromUrlSegs(pathname.slice((store.path === '/' ? '' : store.path).length).split('/').filter(Boolean), store.home).join('/')
   const canW = Math.ceil((typeof window === 'undefined' ? 1280 : window.innerWidth) / 128) * 128
   // Perf-mark keys (`perf.ts`): what tells one load of a widget from another
   // on this page — path, scan(s), canvas width, scope.
