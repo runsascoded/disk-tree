@@ -237,19 +237,19 @@ describe('buildView on a store generation', () => {
   it('the same view from path (a small subtree by the default cutoff), the blob-served copy, and the secondary store', async () => {
     const want = await buildView(env, { ...base, date: V2, path: '', threshold: 32 * KiB, smallRows: 4096 })
     for (const [e, date, tier, index] of [[env, V2, 'path', 'd1'], [env, V2_BLOB, 'bysize', 'blob'], [meta, V2, 'bysize', 'd1']] as const) {
-      const v = await buildView(e, { ...base, date, path: '', threshold: 32 * KiB, ...(tier === 'path' ? {} : { smallRows: 4096 }) })
+      const v = await buildView(e, { ...base, date, path: '', threshold: 32 * KiB, smallRows: tier === 'path' ? 1e12 : 4096 })
       expect([v.tier, v.index, v.nodes]).toEqual([tier, index, 510])
       expect(v.tree).toEqual({ ...want.tree, n: e === meta ? 'meta root' : 'root' })
     }
-    expect(SMALL_SUBTREE_ROWS).toBe(24576)
+    expect(SMALL_SUBTREE_ROWS).toBe(0)
   })
 
-  it('a flat directory: its objects are the children; a tiny one reads path whole', async () => {
+  it('a flat directory: its objects are the children; a tiny one reads whichever sort holds fewer rows', async () => {
     const flat = await buildView(env, { ...base, date: V2, path: 'bk/flat', threshold: 32 * KiB, smallRows: 0 })
     expect([flat.tier, flat.nodes]).toEqual(['bysize', 500])
     expect(flat.tree).toEqual(node('flat', 'dir', 32767500, 8000, { c: flatKids() }))
     const small = await buildView(env, { ...base, date: V2, path: 'bk/small', threshold: 1 })
-    expect([small.tier, small.nodes]).toEqual(['path', 3])
+    expect([small.tier, small.nodes]).toEqual(['bysize', 3])
     expect(small.tree).toEqual(node('small', 'dir', 6000, 3, { c: [node('s2', 'file', 3000, 1), node('s1', 'file', 2000, 1), node('s0', 'file', 1000, 1)] }))
   })
 
@@ -263,7 +263,7 @@ describe('buildView on a store generation', () => {
 
   it('a depth cap: rows at the cap come back childless, from the band read alone', async () => {
     const v = await buildView(env, { ...base, date: V2, path: '', threshold: 32 * KiB, maxDepth: 2, smallRows: 0 })
-    expect([v.tier, v.nodes]).toEqual(['bysize', 3])
+    expect([v.tier, v.nodes]).toEqual(['path', 3])
     expect(v.tree).toEqual(node('root', 'dir', 37229948, 8009, { c: [
       node('bk', 'dir', 37229948, 8009, { c: [node('flat', 'dir', 32767500, 8000), node('nest', 'dir', 4456448, 5)] }),
     ] }))
@@ -283,7 +283,7 @@ describe('buildView on a store generation', () => {
     expect(descs(st.header())).toEqual({ groups: 'path+bysize', rows: 'bysize' })
     const st2 = serverTiming()
     await buildView(env, { ...base, date: V2, path: 'bk/small', threshold: 1, trace: st2.trace })
-    expect(descs(st2.header())).toEqual({ groups: 'path', rows: 'path' })
+    expect(descs(st2.header())).toEqual({ groups: 'path+bysize', rows: 'bysize' })
   })
 })
 
@@ -308,7 +308,7 @@ describe('buildDiff', () => {
     })
     const removed = await buildDiff(env, { ...base, from: V2, to: V2_BLOB, path: 'bk/small', threshold: 1 })
     expect(removed.rows).toEqual([])
-    expect([removed.total_a, removed.total_b, removed.tier]).toEqual([6000, 6000, 'path'])
+    expect([removed.total_a, removed.total_b, removed.tier]).toEqual([6000, 6000, 'bysize'])
     const gone = await buildDiff(env, { ...base, from: V2, to: V1, path: 'bk/small', threshold: 1 })
     expect(gone.rows).toEqual([
       row('s2', 1, 'file', 'removed', 3000, 0, 1, 0),

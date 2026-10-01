@@ -657,9 +657,10 @@ export async function readRects(
   rects: Rect[],
   thrAt?: (depth: number) => number,
   lens?: Lens,
+  plan?: Span[],
 ): Promise<Row[]> {
   if (!rects.length) return []
-  const kept = await planRects(h, rects, thrAt, lens)
+  const kept = plan ?? await planRects(h, rects, thrAt, lens)
   // A row passes the lens iff its usr equals the key.
   const lensOk = (r: Row) => !lens || r.usr === lens.key
   const inRect = (r: Row) => rects.some(q => r.depth >= q.dLo && r.depth <= q.dHi && r.path >= q.pLo && r.path <= q.pHi)
@@ -807,9 +808,10 @@ export async function readSizeRects(
   rects: Rect[],
   thrAt: (depth: number) => number,
   lens?: Lens,
+  plan?: Span[],
 ): Promise<Row[]> {
   if (!rects.length) return []
-  const kept = await planSizeRects(h, rects, thrAt, lens)
+  const kept = plan ?? await planSizeRects(h, rects, thrAt, lens)
   const lensOk = (r: Row) => !lens || r.usr === lens.key
   const inRect = (r: Row) => rects.some(q => r.depth >= q.dLo && r.depth <= q.dHi && r.path >= q.pLo && r.path < q.pHi)
   return decodeSpans(h, kept, r => r.size >= thrAt(r.depth) && inRect(r) && lensOk(r))
