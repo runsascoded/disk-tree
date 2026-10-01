@@ -43,7 +43,11 @@ def main() -> None:
         run(str(BIN / 'disk-tree'), 'index', '-C', '-D', '--no-progress', '--to', 'r2://disk-tree/scans', '/Users/ryan',
             profile='m3', DISK_TREE_SCAN_DIRS='r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans')
     log('capture')
-    out = run(str(BIN / 'disk-tree'), 'capture', '-o', '-q', '-t', 'r2://disk-tree/captures', '/', profile='m3', capture=True, DISK_TREE_HOST=HOST)
+    # The scan's scope (disky's setting: whole machine or home only) arrives as
+    # `DISKY_SCAN_ROOT`; `-o` (stay on one filesystem) only for `/`, where it
+    # keeps the Data volume from being walked twice.
+    root = os.environ.get('DISKY_SCAN_ROOT', '/')
+    out = run(str(BIN / 'disk-tree'), 'capture', *(['-o'] if root == '/' else []), '-q', '-t', 'r2://disk-tree/captures', root, profile='m3', capture=True, DISK_TREE_HOST=HOST)
     capture = out.splitlines()[-1]
     log(f'captured {capture}')
     job = run(str(BIN / 'python'), str(M3 / 'aws' / 'submit'), capture, profile='r', capture=True)
