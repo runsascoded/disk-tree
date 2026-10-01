@@ -10,7 +10,7 @@ The global `~/.claude/CLAUDE.md` conventions still apply (git usage, `tmp/` scra
 
 ## The tool
 
-`disk-tree` is this worktree's own build: `direnv` activates `.venv` here (`uv sync` after a merge from `cloud`), so `disk-tree` is on `PATH` in this dir; from elsewhere it's `~/c/disky/wt/m3/.venv/bin/disk-tree`. Its index is **global and cwd-independent** — DB + parquet blobs + duckdb under `~/.config/disk-tree/`, plus any external-volume search-path entry. So a scan run here lands in the same always-ready index every disk-tree session reads. Full command reference: the rest of this file.
+`disk-tree` is this worktree's own build: `direnv` activates `.venv` here (`uv sync --all-packages --all-extras --all-groups` after a merge from `cloud` — a bare `uv sync` drops the `r2` extra's `s3fs`, and the agents' R2 writes fail), so `disk-tree` is on `PATH` in this dir; from elsewhere it's `~/c/disky/wt/m3/.venv/bin/disk-tree`. Its index is **global and cwd-independent** — DB + parquet blobs + duckdb under `~/.config/disk-tree/`, plus any external-volume search-path entry. So a scan run here lands in the same always-ready index every disk-tree session reads. Full command reference: the rest of this file.
 
 ## The cleanup loop
 
