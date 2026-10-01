@@ -158,10 +158,9 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
   const canAssign = useCanAssign()
   const [aboutOpen, setAboutOpen] = useState(false)
   const m = useMenu('bottom-start')
-  // The subtree's store: its own map + scan browser (`/meta`, `/meta/files`),
-  // and only the affordances it has (ownership, staging are the primary's).
+  // The subtree's store: its own map (`/meta`), and only the affordances it
+  // has (ownership, staging are the primary's).
   const store = useStore()
-  const base = store.path === '/' ? '' : store.path
   // The map is "here" at the store's root only (a drilled path is a place of
   // its own); every other page, on it or under it.
   const here = (to: string) => (to === store.path ? pathname === to : pathname === to || pathname.startsWith(to + '/'))
@@ -181,7 +180,6 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
           <FloatingFocusManager context={m.context} modal={false}>
             <div className="menu-pop" ref={m.refs.setFloating} style={m.floatingStyles} {...m.getFloatingProps()}>
               {link(store.path, 'Map')}
-              {link(`${base}/files`, 'Scans')}
               {canAssign && store.owners && link('/users', 'Users')}
               {canAssign && store.owners && link('/assignments', 'Assignments')}
               {store.staging && link('/staged', 'Staged')}

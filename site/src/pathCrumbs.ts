@@ -12,7 +12,7 @@ export interface Crumb {
   last: boolean
 }
 
-/** A treemap's `(other)` / `(files)` folds: synthetic children, not prefixes. */
+/** A treemap's `(other)` fold: synthetic children, not a prefix. */
 export const isFold = (name: string): boolean => name.startsWith('(')
 
 /** One crumb per segment of a path (the root excluded). */
