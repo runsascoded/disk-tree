@@ -32,6 +32,7 @@ The `created` dot and the treemap's age colour can keep using `d` (the mean) unt
 
 ## As built (2026-10-01)
 
+- **Opt-in** (`dt-cloud path-index -g/--age-strata`, `write_path_index(age_strata=True)`): off by default, so a store that hasn't asked for them keeps its schema, `dir-stats` cache and ingest cost (gcs's 777M-row sorts in particular). m3's `aws/ingest.sh` passes `-g`.
 - **Index** (`dt_cloud.viz.write_path_index`): `dir_stats` sums each dir's own objects into the 7 buckets (`index.age_bucket_sql`: age = scan day − created day; a future stamp lands in `<1d`), the `ptu` roll-up carries them to every ancestor like `b`, and object rows put their size in their one bucket. The columns join the store only where a source's shape lists them (`store_columns`), so `index-write` stores (cw, gcs) keep their schema until they opt in. Laptop `/` ingest: peak RSS 4.2 → 5.0 GiB, wall unchanged, 1,050 → 1,052 row groups.
 - **Edge**: `Row.ages` (decoded when the generation has the columns, else null), summed / subtracted / scaled through `view.ts`'s `Agg`, emitted as `ag` when any bucket is non-zero. Additive, so no `cv` bump.
 - **Table**: when the page's rows carry `ag`, the `created` column becomes **age**: a 64 px stacked bar per row, newest (yellow) → oldest (purple) on the date ramp; the tip lists each bucket's bytes and share plus the mean written date. Without `ag` the swatch · month · year columns stay. Sorting still keys on the mean.
