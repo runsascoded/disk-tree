@@ -42,12 +42,14 @@ from .secrets import env_secret
 
 
 def _site_dir() -> Path:
-    """Nearest ancestor ``site/`` holding wrangler.toml (repo layout)."""
+    """Nearest ancestor ``site/`` (the Pages app: ``site/functions``; repo layout).
+    Not keyed on ``wrangler.toml``: ``cloud`` carries none (each deployment
+    branch owns its own; the r2 demo's is ``wrangler.r2.toml``)."""
     for base in [Path.cwd(), *Path.cwd().parents, Path(__file__).resolve().parents[3]]:
         cand = base / "site"
-        if (cand / "wrangler.toml").exists():
+        if (cand / "functions").is_dir():
             return cand
-    raise FileNotFoundError("site/wrangler.toml not found (run from the repo)")
+    raise FileNotFoundError("site/ not found (run from the repo)")
 
 
 # `index_schema.version`, per synced file. A reader keys its row shape off it
