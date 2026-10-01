@@ -43,5 +43,5 @@ echo "[ingest] uploaded to s3://$bucket/{listing/$store/$date/index/$gen,snapsho
 t0=$(date +%s)
 : "${D1_DB_ID:?}" "${CLOUDFLARE_API_TOKEN:?}" "${CLOUDFLARE_ACCOUNT_ID:?}"
 ( cd /app/cloud && /app/.venv/bin/dt-cloud index-sync "$date" -g "$gen" -b "$bucket" -k "listing/$store/$date/index/$gen" \
-    -d "$work/index" -v path -v coarse16 -v coarse20 -v coarse24 )
+    -d "$work/index" -v path -v bysize )
 echo "[ingest] footers → D1 $D1_DB_NAME in $(( $(date +%s) - t0 ))s"
