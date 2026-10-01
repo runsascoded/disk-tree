@@ -1643,9 +1643,12 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
     td.owners { white-space: nowrap; }
     // The row's actions: the trash gesture (a staging store) and the assign
     // select (an attribution store, admins).
+    // A table cell (an `inline-flex` cell stops being one: its borders and
+    // height drift from the row's); the children space themselves.
     .actions {
       white-space: nowrap;
-      display: inline-flex; align-items: center; gap: 4px;
+      vertical-align: middle;
+      > * + * { margin-left: 4px; }
       // The staging store's trash gesture (one per row): a muted red glyph,
       // red at rest (a grey emoji was near-invisible in dark mode).
       button.trash {
