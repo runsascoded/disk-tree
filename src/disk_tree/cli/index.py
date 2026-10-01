@@ -10,7 +10,7 @@ from disk_tree.sqla.db import init
 from humanize import naturalsize
 from utz import err, iec
 
-_CLOUD = ('s3://', 'gcs://', 'r2://', 'ssh://')
+_CLOUD = ('s3://', 'gcs://', 'r2://')
 LOW_SPACE_VAR = 'DISK_TREE_LOW_SPACE_BYTES'
 REMOTE_TARGET_VAR = 'DISK_TREE_REMOTE_SCAN_TARGET'
 DEFAULT_LOW_SPACE_BYTES = 5 * 2**30
@@ -19,8 +19,8 @@ DEFAULT_LOW_SPACE_BYTES = 5 * 2**30
 def _check_local_space(auto_remote: bool) -> None:
     """Warn — or, with `--auto-remote`, redirect — when the local write target is
     low on space: the crisis a remote target exists for (spec
-    `remote-scan-targets.md`). A URL target is never checked; the reduce still
-    needs *transient* local scratch either way, only the persistent blob moves.
+    `remote-scan-targets.md`). A URL target is never checked; only the
+    persistent blob moves.
     """
     from shutil import disk_usage
     from disk_tree import blobfs, config as _config
@@ -87,7 +87,7 @@ def index(
     # Scheduled scans that must land on external media: bail before doing any
     # work when the write target fell back to the boot disk (no opted-in volume
     # mounted). Exit 0 so a launchd/cron wrapper logs a skip, not a failure.
-    if require_external and not url.startswith(('s3://', 'gcs://', 'r2://', 'ssh://')):
+    if require_external and not url.startswith(_CLOUD):
         from disk_tree import config as _config
         wd = _config.scan_write_dir()
         if wd == _config.DEFAULT_SCANS_DIR:
@@ -193,7 +193,7 @@ def _build_reclaim_sidecar(url: str, blob_path: str):
     if not SUPPORTED:
         err(f"--extents is macOS-only (got {sys.platform}); skipping")
         return
-    if url.startswith(('s3://', 'gcs://', 'r2://', 'ssh://')) or not isdir(url):
+    if url.startswith(_CLOUD) or not isdir(url):
         err(f"--extents needs a local directory that still exists; skipping ({url})")
         return
     with time("extents"):

@@ -118,8 +118,8 @@ def scans_move(src_dir: str | None, no_keep_latest: bool, dry_run: bool, dest: s
 def scans_register(src: str):
     """Add scans described by `*.scan.json` manifests to this DB.
 
-    SRC is one manifest, or a dir / URL holding them. A cloud reduce (or another
-    machine's `index --to`) records its Scan row in *its* DB; the manifest beside
+    SRC is one manifest, or a dir / URL holding them. Another machine's
+    `index --to` records its Scan row in *its* DB; the manifest beside
     the remote blob is how the scan reaches this one. Blobs resolve through the
     search path, so put their dir on `DISK_TREE_SCAN_DIRS`. Idempotent.
     """

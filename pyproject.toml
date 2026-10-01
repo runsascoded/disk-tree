@@ -13,9 +13,7 @@ dependencies = [
     "flask",
     "flask-sqlalchemy",
     "humanize",
-    "kaleido",
     "pandas",
-    "plotly",
     "pyarrow",
     "python-dateutil",
     "pyyaml>=6.0.3",
@@ -32,9 +30,7 @@ dev = [
 mem = [
     "memray",
 ]
-# Post monthly digests to Slack/Discord (`disk-tree digest`). Core stays lean —
-# only a deployment that posts pulls `thrds`; `discord_api` needs only stdlib.
-# The OP plot uses plotly + kaleido, already core deps.
+# Announce staged-delete runs to Slack/Discord (`dispatch --serve`'s `delete.chat`).
 notify = [
     "thrds",
 ]

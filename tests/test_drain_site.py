@@ -82,7 +82,7 @@ def test_dry_run_sizes_without_deleting_and_reports_would_delete(db):
     assert deleted == []
     assert out == [{
         "run_id": "laptop-dry-1", "plan_id": 1, "actor": "ryan", "mode": "dry", "items": 2, "deleted_paths": 0,
-        "deleted_bytes": 200, "deleted_objects": 4, "errors": [], "submitted": False, "finished_ts": 200, "trashed": False,
+        "deleted_bytes": 200, "deleted_objects": 4, "errors": [], "finished_ts": 200, "trashed": False,
     }]
     assert db.query("SELECT finished_ts, deleted_bytes, deleted_objects, undo_state, undo_deadline, purge_state FROM deletion_runs") == [
         {"finished_ts": 200, "deleted_bytes": 200, "deleted_objects": 4, "undo_state": "none", "undo_deadline": None, "purge_state": "none"},

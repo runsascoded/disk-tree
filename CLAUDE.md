@@ -40,7 +40,7 @@ Key goals:
 disk-tree index [URL]     # Scan a directory, an s3:// bucket, or an r2:// bucket (S3-compatible: lists
                           # through the bucket's endpoint — `DISK_TREE_R2_ENDPOINT_URL` or its
                           # buckets.yml `endpoint_url` — with `r2://` uris). gcs:// has no live lister
-                          # and refuses (`UnsupportedBackend`): use `pull` / `import` for it
+                          # and refuses (`UnsupportedBackend`): use `bulk-list` + `import` for it
   -C, --no-cache-read     # Force fresh scan (`index` otherwise returns any cached scan unconditionally)
   -e, --require-external  # Skip (exit 0) if the write target is the boot disk (no opted-in external
                           # volume mounted). For scheduled scans that must land on external media
@@ -66,24 +66,14 @@ disk-tree index [URL]     # Scan a directory, an s3:// bucket, or an r2:// bucke
 disk-tree capture PATH -t URL  # The split pipeline for a ~full disk (spec `cloud-reduce.md`): gfind →
                           # layer-1 listing shards streamed straight to a dir/URL (`r2://…`), bounded
                           # memory, zero local disk. Files only (dirs implied; APFS dirs hold 0 blocks).
-                          # Prints the capture dir `<to>/<host>/<root>/<stamp>` (+ `_SUCCESS.json`)
-disk-tree reduce CAPTURE  # capture → layer-2 scan blob + Scan row, on any machine with disk
-  -e, --engine            # duckdb (default; handles the unsorted shards) | pandas | stream
-  -t, --to URL            # Upload the blob (same as `index --to`).
-                          # A remote blob gets a `<blob>.scan.json` manifest beside it (so does
-                          # `index --to <url>`): the Scan row, portable — a runner's own DB is
-                          # thrown away. `.github/workflows/reduce.yml` is the cloud runner
-                          # (`workflow_dispatch`: capture URL → blob URL; needs the R2 secrets)
+                          # Prints the capture dir `<to>/<host>/<root>/<stamp>` (+ `_SUCCESS.json`);
+                          # m3's AWS Batch ingest (`dt-cloud path-index`) aggregates it
 disk-tree scans register SRC  # Import `*.scan.json` manifests (one file, or a dir/URL of them) into
-                          # this DB — how a cloud-reduced scan reaches the laptop. Idempotent; put
-                          # the blobs' dir on `DISK_TREE_SCAN_DIRS` so they resolve
+                          # this DB. `index --to <url>` writes one beside each remote blob (the Scan
+                          # row, portable). Idempotent; put the blobs' dir on `DISK_TREE_SCAN_DIRS`
+                          # so they resolve
 
 disk-tree scans           # List cached scans (JSON)
-
-disk-tree migrate-row-groups [DIR|URL]  # Rewrite scan blobs to ≤64K-row parquet row groups, in place,
-                          # streaming (a directory listing decodes every overlapping row group: ~4 ms vs
-                          # ~40 ms at 1M rows; over R2 a `depth ≤ 2` view fetches ~2 MiB vs ~38 MiB).
-                          # Default: the write dir; `r2://bucket/prefix` rewrites remote blobs where they are
 
 disk-tree recompress PATH…  # Rewrite v1 layer-2 listings as v2 in place, lossless (spec `listing-slim.md`
                           # phase 2): files, dirs (recursive `*.parquet`, sidecars skipped) or fsspec URLs
@@ -154,26 +144,12 @@ disk-tree volumes [PATH]  # The APFS container PATH (default `/`) lives on: each
                           # point and snapshots, plus free space — what no walk shows (Preboot, VM/swap,
                           # Recovery, the sealed System volume, OS-update snapshots). `-j` JSON. macOS-only
 
-disk-tree fetch [BUCKET…] # Bulk-list configured buckets → dated raw-listing shards
-disk-tree pull [BUCKET…]  # fetch + import as dated scans
-disk-tree sync            # pull all configured buckets (cron entrypoint)
-                          # Config: ~/.config/disk-tree/buckets.yml (see specs/personal-sync.md)
-
-disk-tree digest [BUCKET] # Post a bucket's usage digest to Slack/Discord: one thread per period,
-                          # an OP edited in place + one reply per scan (spec comms-notify.md).
-                          # Config: a `digest:` block in buckets.yml (profile/period/site_url/
-                          # icons_base + slack/discord channel + secret ENV VAR NAMES). Generic
-                          # engine (`disk_tree.notify`) + per-deployment profile; ships a `bytes`
-                          # reference profile. `-p slack|discord` (default discord), `-m YYYY-MM`
-                          # (default current month), `-n` dry-run (render + print OP, no post/secrets).
-                          # Needs the `notify` extra (`thrds`); the plot uses core plotly+kaleido
-
 disk-tree stage URI…      # Stage URIs for deletion into a shared open plan (spec staged-delete.md,
                           # CP1). The opt-in "delete" model: nothing dies by inaction
 disk-tree staged          # List open plans (staged sets) + recent runs (-j for JSON)
 disk-tree unstage URI…    # Remove URIs from every open plan
 disk-tree undo RUN_ID     # Undo a deletion run: restore the objects it deleted where the store allows
-                          # it (S3/R2 versioning — remove the delete-markers; local/ssh have no undo).
+                          # it (S3/R2 versioning — remove the delete-markers; local has no undo).
                           # Dry by default (report restorable scope); `-f`/`--for-real` restores. Records
                           # the run's `undo_state` (spec staged-delete.md CP5)
 
@@ -186,16 +162,6 @@ disk-tree dispatch [PLAN] # Execute a plan (id/name; default the open `Staged` p
                           # `backend_for` (`-i` base poll secs, `-o` once, Ctrl-C stops). Announces
                           # per-run results to Slack/Discord per the `delete:` block in buckets.yml
                           # (`chat`/`undo`/`database_id` + secret ENV VAR NAMES); needs `notify` for chat
-
-disk-tree iac config      # Generate deployment config from buckets.yml (spec staged-delete.md CP8):
-disk-tree iac aws-batch   # `config` emits the `CfnDashboard` Pulumi component config (JSON);
-                          # `aws-batch` emits the Terraform tfvars for the AWS Batch delete executor
-                          # (`iac/aws/`, the large-scope cell the drainer submits oversized S3 runs
-                          # to). One source of truth from
-                          # buckets.yml. IaC lives in `iac/` (applied where the SDK + creds live)
-
-disk-tree migrate         # Backfill SQLite stats from parquet files
-disk-tree migrate-depth   # Add depth column to existing parquets
 ```
 
 ### Site (`site/`) and widget packages
@@ -256,7 +222,7 @@ Default paths (override with `DISK_TREE_ROOT`):
 
 **Blob storage is a search path, not a single directory.** The DB stays on the boot disk (small, always mounted); blobs may live anywhere on `config.scan_read_dirs()`, since `Scan.blob` holds a basename. Creating `<volume>/disk-tree/scans` on an external volume opts it in — no config needed — and it becomes the *write* target while mounted; unplugging simply drops it out of the search path. `DISK_TREE_SCAN_DIRS` (colon-separated, priority order) overrides discovery, and an explicit `DISK_TREE_ROOT` disables it entirely so tests and alternate profiles stay self-contained. A candidate under an unmounted `/Volumes/<name>` is never written to — that would silently create the directory on the boot disk.
 
-A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — the remote-target story for a boot disk too full to hold scan output (spec `remote-scan-targets.md`). `index --to <url>` (or `DISK_TREE_REMOTE_SCAN_TARGET` + `-R`) writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam); the reclaim sidecar, `--extents`, and `migrate*` are local-only and skip remote blobs. The shallow sidecar (`<root-stem>.shallow.parquet`, each chunk's top level, written by every hybrid save) follows the blob anywhere, and scan blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
+A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — the remote-target story for a boot disk too full to hold scan output (spec `remote-scan-targets.md`). `index --to <url>` (or `DISK_TREE_REMOTE_SCAN_TARGET` + `-R`) writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam); the reclaim sidecar and `--extents` are local-only and skip remote blobs. The shallow sidecar (`<root-stem>.shallow.parquet`, each chunk's top level, written by every hybrid save) follows the blob anywhere, and scan blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
 
 **Cross-account credentials** — a `buckets.yml` entry (or `defaults`) may carry a `profile:` naming an AWS credential profile (`blobfs.bucket_profile`), so a source and a target in *different* accounts each authenticate with their own key inside one `index --to` run. It threads to every S3/R2 seam: the `s3fs` blob IO (`_s3fs(endpoint, profile)`), the `aws`-CLI lister (`S3Backend(profile=…)`), and the `boto3` bulk lister (`S3BulkLister(profile=…)`, `bulk-list -f`). No profile → ambient credentials (env / default profile), the single-account default. Cross-account needs per-bucket endpoints too, so leave `DISK_TREE_R2_ENDPOINT_URL` unset (it globally overrides all per-bucket endpoints).
 
