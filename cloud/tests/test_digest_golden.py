@@ -25,8 +25,7 @@ import pytest
 from click.testing import CliRunner
 
 from dt_cloud import cli
-from dt_cloud import cw_digest as CW
-from dt_cloud import digest as GCS
+from dt_cloud import digest as DG
 
 TIB = 1024**4
 GOLDEN = Path(__file__).parent / "fixtures" / "digest"
@@ -192,7 +191,7 @@ class FakeBot:
 
 
 # every arrow glyph the Discord twin might reference
-EMOJI = {GCS.emoji_name(d): f"e{d}" for d in range(-80, 81, 10)}
+EMOJI = {DG.emoji_name(d): f"e{d}" for d in range(-80, 81, 10)}
 
 
 def _dump(log: list, state: dict | None = None) -> str:
@@ -215,22 +214,33 @@ def slack(monkeypatch):
 # ---- adapters: the only lines a refactor of the digest API may touch ---------
 
 
+GCS = DG.template(DG.PRESETS["gcs"])
+CW = DG.template(DG.PRESETS["cw"])
+
+
+def _client():
+    import thrds.slack
+
+    return thrds.slack.SlackClient("xoxb", "C1")
+
+
 def converge_gcs(root: Path, month: date) -> dict:
-    return GCS.post_digest(str(root), month, "xoxb", "C1")
+    return DG.converge_slack(GCS, str(root), month, _client(), "C1")
 
 
 def converge_cw(root: Path, month: date, variant: str, reply_hour: int = 12) -> dict:
-    return CW.post_digest(str(root), month, "xoxb", "C1", variant, reply_hour=reply_hour)
+    from dataclasses import replace
+
+    return DG.converge_slack(DG.template(replace(DG.PRESETS["cw"], reply_hour=reply_hour)), str(root), month, _client(), "C1", variant)
 
 
 def redo_cw(root: Path, month: date, for_real: bool) -> dict:
-    return CW.redo_replies(str(root), month, "xoxb", "C1", "sender", for_real=for_real)
+    return DG.redo_replies(CW, str(root), month, _client(), "C1", "sender", for_real=for_real)
 
 
 def converge_gcs_discord(root: Path, month: date, state: dict, log: list, edit_replies: bool = False) -> dict:
-    rows = GCS.load_month(str(root), month)
-    return GCS.converge_discord(
-        rows, month, state,
+    return DG.converge_discord(
+        GCS, GCS.load(str(root), month), month, state,
         hook=FakeHook(log), bot=FakeBot(log), emoji=EMOJI, plot="/x/plot.png",
         edit_replies=edit_replies, reply_hook=FakeHook(log, "reply_hook"),
     )

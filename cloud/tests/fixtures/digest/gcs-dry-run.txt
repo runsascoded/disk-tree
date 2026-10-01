@@ -7,7 +7,7 @@
 
 ![GCS usage — August 2026](<plot-url>)
 
---- replies (sender | body | avatar) ---
+--- replies (sender: username | body | icon) ---
 8/1 — 3,012 TB (+12.5, 0.4%) | $19,425/mo (+$256) [↗︎](https://gcs.oa.dev/?d=260801#diff) | av_deg30.png?v=4
 8/2 — 3,010 TB (−2.5, 0.1%) | $19,272/mo (−$153) [↗︎](https://gcs.oa.dev/?d=260802#diff) | av_deg-10.png?v=4
 8/3 — 3,045 TB (+35.0, 1.2%) | $19,988/mo (+$716) [↗︎](https://gcs.oa.dev/?d=260803#diff) | av_deg50.png?v=4
