@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { AvatarField } from '@open-athena/auth/react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { SiteNav } from './SiteNav'
 import { DEFAULT_STORE } from './stores'
@@ -52,6 +53,9 @@ const fmtTs = (ts: number | null): string => (ts ? new Date(ts * 1000).toLocaleS
 
 const linkFor = (token: string): string => `${window.location.origin}/?key=${token}`
 
+/** `POST /api/auth/grants`' allowlist outcome for a link minted with `allowlist: true`. */
+interface Allowed { email: string; status: 'added' | 'widened' | 'already' }
+
 /** Who a link is for: the person (`subject.name`, then their email), else the
  * grant's admin `name` — the fallback for CLI/agent-token grants. */
 const holderName = (g: Grant): string | null => g.subject?.name || g.subject?.email || g.name || null
@@ -63,7 +67,9 @@ interface Draft {
   memo: string
   name: string
   email: string
-  avatar: string
+  /** A face's `data:` URI (null: none). */
+  avatar: string | null
+  allowSignIn: boolean
   days: string
   readOnly: boolean
 }
@@ -91,18 +97,24 @@ export function AdminPage() {
   const [memo, setMemo] = useState(draft.memo ?? '')
   const [name, setName] = useState(draft.name ?? '')
   const [email, setEmail] = useState(draft.email ?? '')
-  const [avatar, setAvatar] = useState(draft.avatar ?? '')
+  // A face as the `data:` URI `<AvatarField>` produced (copied server-side at
+  // mint, never a hotlink); null = none.
+  const [avatar, setAvatar] = useState<string | null>(draft.avatar || null)
+  // With an email: also put it on the sign-in allowlist (`allowlist: true`).
+  const [allowSignIn, setAllowSignIn] = useState(draft.allowSignIn ?? true)
   const [days, setDays] = useState(draft.days ?? '30')
   const [readOnly, setReadOnly] = useState(draft.readOnly ?? true)
-  const [minted, setMinted] = useState<{ label: string; url: string } | null>(null)
+  const [minted, setMinted] = useState<{ label: string; url: string; allowed: Allowed | null } | null>(null)
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ memo, name, email, avatar, days, readOnly }))
+      // A face is a few-KB `data:` URI; keep it in the draft unless it's oversized.
+      const face = avatar && avatar.length <= 32_000 ? avatar : null
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ memo, name, email, avatar: face, allowSignIn, days, readOnly }))
     } catch {
       // sessionStorage can throw (private mode / disabled) — a lost draft is cosmetic.
     }
-  }, [memo, name, email, avatar, days, readOnly])
+  }, [memo, name, email, avatar, allowSignIn, days, readOnly])
 
   const grantsQ = useQuery<{ grants: Grant[] }, Error>({
     queryKey: ['auth', 'grants'],
@@ -129,20 +141,26 @@ export function AdminPage() {
           note: memo.trim(),
           subjectName: name.trim() || null,
           email: email.trim() || null,
-          avatar: avatar.trim() || null,
+          avatar,
+          allowlist: !!email.trim() && allowSignIn,
           scopes: [readOnly ? `${DEFAULT_STORE.key}:read` : DEFAULT_STORE.key],
           expiresInS,
         }),
       })
-      if (!r.ok) throw new Error(`create failed: ${r.status}`)
-      return r.json() as Promise<{ grant: Grant; token: string }>
+      if (!r.ok) {
+        // A refused face (`400 { error: 'invalid avatar', detail }`) says why.
+        const body = await r.json().catch(() => null) as { error?: string; detail?: string } | null
+        throw new Error(body?.detail ? `${body.error ?? 'create failed'}: ${body.detail}` : `create failed: ${r.status}`)
+      }
+      return r.json() as Promise<{ grant: Grant; token: string; allowed?: Allowed }>
     },
-    onSuccess: ({ grant, token }) => {
-      setMinted({ label: holderName(grant) ?? grant.note ?? 'unnamed', url: linkFor(token) })
+    onSuccess: ({ grant, token, allowed }) => {
+      setMinted({ label: holderName(grant) ?? grant.note ?? 'unnamed', url: linkFor(token), allowed: allowed ?? null })
       setMemo('')
       setName('')
       setEmail('')
-      setAvatar('')
+      setAvatar(null)
+      setAllowSignIn(true)
       setReadOnly(true)
       try {
         sessionStorage.removeItem(DRAFT_KEY)
@@ -176,7 +194,7 @@ export function AdminPage() {
       return r.json() as Promise<{ id: string; token: string }>
     },
     onSuccess: ({ token }) => {
-      setMinted({ label: 'rotated link', url: linkFor(token) })
+      setMinted({ label: 'rotated link', url: linkFor(token), allowed: null })
       void qc.invalidateQueries({ queryKey: ['auth', 'grants'] })
     },
   })
@@ -223,15 +241,20 @@ export function AdminPage() {
           <input id="mint-email" type="email" value={email} onChange={e => setEmail(e.target.value)} />
           <span className="hint">optional — binds the link to this address on first redeem (magic-link semantics)</span>
         </div>
-        <div className="field avatar">
-          <label htmlFor="mint-avatar">Avatar URL</label>
-          <div className="row">
-            <input id="mint-avatar" type="url" value={avatar} onChange={e => setAvatar(e.target.value)} placeholder="https://…" />
-            {avatar.trim() && (
-              <img className="avatar-preview" src={avatar.trim()} alt="" onError={e => { e.currentTarget.style.visibility = 'hidden' }} onLoad={e => { e.currentTarget.style.visibility = 'visible' }} />
-            )}
+        {email.trim() && (
+          <div className="field">
+            <label htmlFor="mint-allow">Sign-in</label>
+            <input id="mint-allow" type="checkbox" checked={allowSignIn} onChange={e => setAllowSignIn(e.target.checked)} />
+            <span className="hint">
+              also let this email sign in with Google or an emailed code (adds it to the allowlist; revoking the link doesn't remove it)
+              {allowSignIn && readOnly && <> — <b>as a full viewer</b>: the allowlist has no read-only tier</>}
+            </span>
           </div>
-          <span className="hint">optional — the direct <code>https:</code> image URL of their avatar</span>
+        )}
+        <div className="field avatar">
+          <label htmlFor="mint-avatar">Face</label>
+          <AvatarField id="mint-avatar" endpoint="/api/auth/avatar" value={avatar} onChange={setAvatar} email={email.trim() || null} name={name.trim() || null} size={40} />
+          <span className="hint">optional — paste a GitHub / Bluesky / Mastodon profile or an image address, or upload; with an email and nothing else, their Gravatar. Copied and stored, never hotlinked</span>
         </div>
         <div className="field">
           <label htmlFor="mint-memo">Memo</label>
@@ -263,6 +286,14 @@ export function AdminPage() {
             <code>{minted.url}</code>
             <button type="button" onClick={() => void navigator.clipboard.writeText(minted.url)}>copy</button>
           </div>
+          {minted.allowed && (
+            <p className="allowed">
+              <code>{minted.allowed.email}</code>{' '}
+              {minted.allowed.status === 'added' ? 'added to the allowlist: they can also sign in directly'
+                : minted.allowed.status === 'widened' ? 'already on the allowlist (widened to this link’s access)'
+                : 'already on the allowlist'}
+            </p>
+          )}
         </div>
       )}
       {revokedCount > 0 && (

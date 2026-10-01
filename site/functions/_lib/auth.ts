@@ -151,7 +151,7 @@ export function gateFor(env: Env): Gate | null {
     store: d1GrantStore(env.DB),
     requests: d1RequestStore(env.DB),
     audit: d1AuditSink(env.DB),
-    // The name + face Google verified at sign-in (`seedProfile`, `_lib/oidc.ts`),
+    // The name + face Google verified at sign-in (seeded by default),
     // or a self-set one: what `whoami.subject` carries to the header chip.
     profiles: d1ProfileStore(env.DB),
     secret: env.SESSION_SECRET,
