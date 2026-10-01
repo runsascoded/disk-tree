@@ -128,7 +128,8 @@ async function adminRow(env: Env, email: string): Promise<boolean> {
 /**
  * Email → scopes: the in-app policy that the Access policy used to be. Staff
  * get everything; a viewer domain (`VIEWER_DOMAINS`) or a D1 `allowed_emails`
- * row (the app-owned allowlist — see /admin/db) gets the base scope, plus
+ * row (the app-owned allowlist — see /admin/db) gets the base scope (a
+ * `read_only` row: the read-only tier), plus
  * `admin` for an `admin_emails` row. Email sessions re-derive scopes here on
  * every request, so removing a row de-authorizes existing sessions on their
  * next request. If the DB isn't bound (local dev), non-staff fall back to
@@ -139,10 +140,12 @@ export const scopesFor = (env: Env) => async (raw: string): Promise<string[] | n
   const base = baseScope(env)
   if (email.endsWith(`@${staffDomain(env)}`)) return allScopes(env)
   if (!env.DB) return [base]
-  const admitted = viewerDomains(env).some(d => email.endsWith(`@${d}`))
-    || !!(await env.DB.prepare('SELECT email FROM allowed_emails WHERE email = ?').bind(email).first())
-  if (!admitted) return null
-  return (await adminRow(env, email)) ? [base, ADMIN_SCOPE] : [base]
+  const byDomain = viewerDomains(env).some(d => email.endsWith(`@${d}`))
+  const row = byDomain ? null : await env.DB.prepare('SELECT read_only FROM allowed_emails WHERE email = ?').bind(email).first<{ read_only: number }>()
+  if (!byDomain && !row) return null
+  if (await adminRow(env, email)) return [base, ADMIN_SCOPE]
+  // A `read_only` row is the read-only viewer tier (what a read-only share link carries).
+  return row?.read_only ? [baseReadScope(env)] : [base]
 }
 
 export function gateFor(env: Env): Gate | null {
