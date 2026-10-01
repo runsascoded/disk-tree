@@ -33,10 +33,10 @@ MONTH = D.Month(lead=_all[:2], rows=_all[2:])
 
 
 def test_quota_constant():
-    # 1 PB decimal, which the site's "910 TiB" comments round
-    assert D.QUOTA_BYTES == 10**15
-    assert round(D.QUOTA_TIB, 2) == 909.49
-    assert (D._quota(715.0), D._free(715.0), D._free(D.QUOTA_TIB)) == ("78.6% of 1 PB", "194.5 TiB free", "0.0 TiB free")
+    # 910 TiB — CoreWeave's authoritative zone quota (`cwobject_quota_info`), ≈1 PB decimal
+    assert D.QUOTA_BYTES == 910 * 1024**4
+    assert round(D.QUOTA_TIB, 2) == 910.0
+    assert (D._quota(715.0), D._free(715.0), D._free(D.QUOTA_TIB)) == ("78.6% of 1 PB", "195.0 TiB free", "0.0 TiB free")
 
 
 def test_deg_projection():
@@ -62,6 +62,21 @@ def test_formatters_and_links():
     assert [D._span(t0, D.scan_ts(s)) for s in ("2026-09-08T0000", "2026-09-13T1200", "2026-09-07T0000", "2026-09-06T1200", "2026-09-07T1159")] == ["1d12h", "7d", "12h", "0h", "1d"]
     assert D._diff_url("2026-09-02T1200", D.scan_ts("2026-08-31T1200"), SITE) == f"{SITE}/?d=260902-1200-2d#over-time"
     assert D._diff_url("2026-09-02T1200", None, SITE) == f"{SITE}/?d=260902-1200#over-time"
+
+
+def test_qlabel_and_bucket_clause():
+    assert [D._qlabel(b) for b in (10**15, 10**14, 5 * 10**14, 2 * 10**15)] == ["1P", "100T", "500T", "2P"]
+    since = D.scan_ts("2026-09-22T1201")
+    # a known-quota bucket → linked `% of quota (free)`; unknown quota → raw TiB
+    assert D._bucket_clause("marin-us-east-02a", 825.9, "2026-09-23T1201", since, SITE) == (
+        f"[02a]({SITE}/marin-us-east-02a?d=260923-1201-1d#over-time): 90.8% of 1P (84.1 Ti free)"
+    )
+    assert D._bucket_clause("hero-checkpoints", 82.0, "2026-09-23T1201", since, SITE) == (
+        f"[hero]({SITE}/hero-checkpoints?d=260923-1201-1d#over-time): 82.0% of 100Ti (18.0 Ti free)"
+    )
+    assert D._bucket_clause("marin-us-west-04a", 1.9, "2026-09-23T1201", None, SITE) == (
+        f"[marin-us-west-04a]({SITE}/marin-us-west-04a?d=260923-1201#over-time): 2 Ti"
+    )
 
 
 def _meta2(primary_tib: float, hero_tib: float, objs: int = 1_000_000) -> dict:
@@ -92,15 +107,20 @@ def test_rows_from_meta_buckets_switch():
     d1, d2 = D.day_rows(month, "body")
     assert (d1.extra, d1.dextra) == ({"hero-checkpoints": 89.2}, {"hero-checkpoints": None})
     assert (d2.extra, d2.dextra) == ({"hero-checkpoints": 90.8}, {"hero-checkpoints": 1.6})
-    assert D.reply(d1, "body").body == f":arrow_deg0: [9/1]({SITE}/?d=260901-1200#over-time) — **713 TiB (+0.0, 0.0%)** · 78.4% of 1 PB · 196.5 TiB free · hero-checkpoints 89 TiB"
+    assert D.reply(d1, "body").body == (
+        f":arrow_deg0: [9/1]({SITE}/?d=260901-1200#over-time) — **713 TiB (+0.0, 0.0%)** · "
+        f"[02a]({SITE}/marin-us-east-02a?d=260901-1200#over-time): 78.4% of 1P (197.0 Ti free) · "
+        f"[hero]({SITE}/hero-checkpoints?d=260901-1200#over-time): 89.2% of 100Ti (10.8 Ti free)"
+    )
     assert D.reply(d2, "sender") == D.Reply(
         "9/2 — 712 TiB (−1.0, 0.1%)",
-        f"78.3% of 1 PB · 197.5 TiB free · hero-checkpoints 91 TiB (+1.6) [↗︎]({SITE}/?d=260902-0000-12h#over-time)",
+        f"[02a]({SITE}/marin-us-east-02a?d=260902-0000-12h#over-time): 78.2% of 1P (198.0 Ti free) · "
+        f"[hero]({SITE}/hero-checkpoints?d=260902-0000-12h#over-time): 90.8% of 100Ti (9.2 Ti free)",
         icon_url=f"{AV}-30.png?v=4",
     )
     # the OP headline carries the clause too, Δ vs the month's base scan
     assert D.op_body(month, SEP, None).split("\n")[0] == (
-        f":arrow_deg30: **+2.0 TiB** [month-to-date]({SITE}/?d=260902-0000-1d#over-time) · 712 TiB · 78.3% of 1 PB · hero-checkpoints 91 TiB · [dashboard]({SITE}/)"
+        f":arrow_deg30: **+2.0 TiB** [month-to-date]({SITE}/?d=260902-0000-1d#over-time) · 712 TiB · 78.2% of 1 PB · hero-checkpoints 91 TiB · [dashboard]({SITE}/)"
     )
 
 
@@ -167,7 +187,7 @@ def test_op_body_two_weeks():
     month = D.Month(lead=rows[:2], rows=rows[2:])
     bullets = D.op_body(month, SEP, None).split("\n")[3:]
     assert bullets == [
-        f":arrow_deg20: [wk of 8/31]({SITE}/?d=260906-1200-6d#over-time): **+7.0 TiB** → 712 TiB · 78.3% of 1 PB",
+        f":arrow_deg20: [wk of 8/31]({SITE}/?d=260906-1200-6d#over-time): **+7.0 TiB** → 712 TiB · 78.2% of 1 PB",
         f":arrow_deg0: [wk of 9/7]({SITE}/?d=260907-1200-1d#over-time) _(partial)_: **+2.0 TiB** → 714 TiB · 78.5% of 1 PB",
     ]
 
@@ -177,12 +197,12 @@ def test_reply_sender_variant():
     # +8.0 on 705 in 24 h → 1.13%·7 = 7.9%/wk → deg50; +2.0 on 713 → 0.28%·7 = 2.0% → deg30
     assert D.reply(d1, "sender") == D.Reply(
         "9/1 — 713 TiB (+8.0, 1.1%)",
-        f"78.4% of 1 PB · 196.5 TiB free [↗︎]({SITE}/?d=260901-1200-1d#over-time)",
+        f"[02a]({SITE}/marin-us-east-02a?d=260901-1200-1d#over-time): 78.4% of 1P (197.0 Ti free)",
         icon_url=f"{AV}50.png?v=4",
     )
     assert D.reply(d2, "sender") == D.Reply(
         "9/2 — 715 TiB (+2.0, 0.3%)",
-        f"78.6% of 1 PB · 194.5 TiB free [↗︎]({SITE}/?d=260902-1200-1d#over-time)",
+        f"[02a]({SITE}/marin-us-east-02a?d=260902-1200-1d#over-time): 78.6% of 1P (195.0 Ti free)",
         icon_url=f"{AV}30.png?v=4",
     )
 
@@ -192,12 +212,14 @@ def test_reply_body_variant():
     # +8.0 on 705 in 24 h → 1.13%·7 = 7.9%/wk → deg50; +2.0 on 713 → deg30
     assert D.reply(d1, "body") == D.Reply(
         "CoreWeave usage",
-        f":arrow_deg50: [9/1]({SITE}/?d=260901-1200-1d#over-time) — **713 TiB (+8.0, 1.1%)** · 78.4% of 1 PB · 196.5 TiB free",
+        f":arrow_deg50: [9/1]({SITE}/?d=260901-1200-1d#over-time) — **713 TiB (+8.0, 1.1%)** · "
+        f"[02a]({SITE}/marin-us-east-02a?d=260901-1200-1d#over-time): 78.4% of 1P (197.0 Ti free)",
         icon_emoji=":calendar:",
     )
     assert D.reply(d2, "body") == D.Reply(
         "CoreWeave usage",
-        f":arrow_deg30: [9/2]({SITE}/?d=260902-1200-1d#over-time) — **715 TiB (+2.0, 0.3%)** · 78.6% of 1 PB · 194.5 TiB free",
+        f":arrow_deg30: [9/2]({SITE}/?d=260902-1200-1d#over-time) — **715 TiB (+2.0, 0.3%)** · "
+        f"[02a]({SITE}/marin-us-east-02a?d=260902-1200-1d#over-time): 78.6% of 1P (195.0 Ti free)",
         icon_emoji=":calendar:",
     )
 
@@ -205,7 +227,7 @@ def test_reply_body_variant():
 def test_reply_first_day_ever():
     # no prior scan: zero delta, flat arrow, link without a look-back
     day = D.day_rows(D.Month(lead=[], rows=MONTH.rows[:2]), "sender")[0]
-    assert D.reply(day, "sender") == D.Reply("9/1 — 713 TiB (+0.0, 0.0%)", f"78.4% of 1 PB · 196.5 TiB free [↗︎]({SITE}/?d=260901-1200#over-time)", icon_url=f"{AV}0.png?v=4")
+    assert D.reply(day, "sender") == D.Reply("9/1 — 713 TiB (+0.0, 0.0%)", f"[02a]({SITE}/marin-us-east-02a?d=260901-1200#over-time): 78.4% of 1P (197.0 Ti free)", icon_url=f"{AV}0.png?v=4")
 
 
 def test_state_path():
@@ -317,14 +339,14 @@ def test_post_digest_body_variant(tmp_path: Path):
         ("post", None, "CoreWeave usage — September 2026", None, ":calendar:"),
         ("post", "m1", "CoreWeave usage", None, ":calendar:"),
     ]
-    assert fake.calls[1][1] == f":arrow_deg50: [9/1]({SITE}/?d=260901-0000-12h#over-time) — **710 TiB (+5.0, 0.7%)** · 78.1% of 1 PB · 199.5 TiB free"
+    assert fake.calls[1][1] == f":arrow_deg50: [9/1]({SITE}/?d=260901-0000-12h#over-time) — **710 TiB (+5.0, 0.7%)** · [02a]({SITE}/marin-us-east-02a?d=260901-0000-12h#over-time): 78.0% of 1P (200.0 Ti free)"
 
     # 9/1 12:00 lands: the OP AND the day's reply are edited to the latest scan (now a 24 h Δ)
     _publish(root, SEPT[1:2])
     fake.calls.clear()
     state = D.post_digest(str(root), SEP, "xoxb", "C1", "body", client=fake)
     assert fake.calls[0][:2] == ("edit", "m1")
-    assert fake.calls[1] == ("edit", "m2", f":arrow_deg50: [9/1]({SITE}/?d=260901-1200-1d#over-time) — **713 TiB (+8.0, 1.1%)** · 78.4% of 1 PB · 196.5 TiB free")
+    assert fake.calls[1] == ("edit", "m2", f":arrow_deg50: [9/1]({SITE}/?d=260901-1200-1d#over-time) — **713 TiB (+8.0, 1.1%)** · [02a]({SITE}/marin-us-east-02a?d=260901-1200-1d#over-time): 78.4% of 1P (197.0 Ti free)")
     assert state["posted"] == {"2026-09-01": {"ts": "m2", "scan": "2026-09-01T1200"}}
 
     # same scans again: nothing but the OP refresh (the reply already reflects the latest scan)
