@@ -7,6 +7,7 @@ import { defaultAsc, diffTableRows, fmtPct, sortDiffRows } from './diffRows'
 import type { DiffTableRow, SortKey } from './diffRows'
 import { Tooltip } from './Tooltip'
 import { usePerfCommit } from './perf'
+import { pathText } from './pathCrumbs'
 
 // The diff map's tabular twin (like ChildrenTable under the main map): one
 // row per cell of the drilled node — before / after / Δ bytes and objects,
@@ -22,9 +23,11 @@ const STATUS_LABEL: Record<DiffTableRow['status'], string> = {
   added: 'added', first: 'first scanned', removed: 'removed', changed: 'changed', unchanged: 'unchanged',
 }
 
-export function DiffTable({ model, scheme, segs, onDrill, onOpen }: {
+export function DiffTable({ model, scheme, home, segs, onDrill, onOpen }: {
   model: DiffModel
   scheme: string
+  /** The store home, read as `~` (`Store.home`). */
+  home?: string[]
   /** The page's drill: path segments from the store root to the diffed node. */
   segs: string[]
   /** A named directory row was opened: its segments below the diffed node
@@ -103,7 +106,7 @@ export function DiffTable({ model, scheme, segs, onDrill, onOpen }: {
         </thead>
         <tbody>
           {shown.map(r => {
-            const uri = scheme + [...segs, ...r.segs].join('/')
+            const uri = pathText(scheme, [...segs, ...r.segs], home)
             const go = () => (r.kind === 'file' ? onOpen : onDrill)(r.segs)
             return (
               <tr key={r.key}>

@@ -19,6 +19,7 @@ import type { TreeNode } from './types'
 import { fmtN } from './types'
 import { useUnits } from './units'
 import { usePerfCommit } from './perf'
+import { pathText } from './pathCrumbs'
 
 // Sortable, paged listing of the treemap's current node's children — the
 // tabular twin of the map above it: every named row is a link, a directory
@@ -34,12 +35,14 @@ const PAGE_SIZES = [20, 50, 100, 200]
  *  tooltip); ~60 chars fills the column's 480px at 12px mono. */
 const NAME_MAX = 60
 
-export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUser, onOpen, onOpenObject }: {
+export function ChildrenTable({ node, segs, scheme, home, ownerIdx, userIdx, onPickUser, onOpen, onOpenObject }: {
   /** The treemap's currently-viewed node. */
   node: TreeNode
   /** Path segments from the tree root to `node` (no scheme, no root). */
   segs: string[]
   scheme: string
+  /** The store home, read as `~` in row tooltips (`Store.home`). */
+  home?: string[]
   /** The ownership ledger (`Store.owners`): assignments show as the row's
    *  owner, and admins assign from the actions column. */
   ownerIdx?: OwnerIndex | null
@@ -241,7 +244,7 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
               <tr key={k.n} ref={si >= 0 ? sel.rowRef(si) : undefined} {...(si >= 0 && showSel ? sel.rowProps(si) : {})}>
                 {showSel && <td className="col-sel">{!synthetic && <input type="checkbox" checked={sel.isSelected(k)} onChange={() => sel.toggle(si)} />}</td>}
                 <td className="prefix">
-                  <Tooltip content={<code className="elide-full">{uri}</code>}>
+                  <Tooltip content={<code className="elide-full">{pathText(scheme, kidSegs, home)}</code>}>
                     {to ? (
                       <a role="link" tabIndex={0}
                         onClick={() => (to.kind === 'open' ? onOpenObject : onOpen)(to.segs)}

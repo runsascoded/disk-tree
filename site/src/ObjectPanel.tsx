@@ -23,6 +23,7 @@ import { Tooltip } from './Tooltip'
 import type { TreeNode } from './types'
 import { CLASS_NAMES, fmtN } from './types'
 import { useUnits } from './units'
+import { pathCopy, pathText } from './pathCrumbs'
 
 // The deployment's `/v1/files` proxy (a CF Pages Function behind the site's
 // viewer gate): which bucket it reads and which prefixes it allows is the
@@ -175,6 +176,7 @@ export default function ObjectPanel({ segs, node, onClose }: {
   [src?.kind, src && 'base' in src ? src.base : null, store, sfetch])
   const key = src?.key ?? segs.slice(1).join('/')
   const uri = store.scheme + segs.join('/')
+  const shown = pathText(store.scheme, segs, store.home)
   const dl = ft?.getUrl?.(key)
   // Opening scrolls the panel into view; Escape closes it.
   useEffect(() => { ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [uri])
@@ -186,7 +188,7 @@ export default function ObjectPanel({ segs, node, onClose }: {
   return (
     <section className="object-panel" id="object" ref={ref} aria-label={`object ${segs[segs.length - 1]}`}>
       <header>
-        <CopyName text={uri}><b className="obj-name">{segs[segs.length - 1]}</b></CopyName>
+        <CopyName text={pathCopy(store.scheme, segs)}><b className="obj-name">{segs[segs.length - 1]}</b></CopyName>
         <span className="obj-meta">
           {node && <>{fmtBytes(node.b)}</>}
           {node?.d != null && <> · created {epochDaysToDate(node.d)}</>}
@@ -194,7 +196,7 @@ export default function ObjectPanel({ segs, node, onClose }: {
         {dl && <a className="obj-dl" href={dl} download={segs[segs.length - 1]} target="_blank" rel="noreferrer">download</a>}
         <button type="button" className="obj-close" aria-label="Close the object (Esc)" title="Close (Esc)" onClick={onClose}>×</button>
       </header>
-      <div className="obj-uri"><code>{uri}</code></div>
+      <div className="obj-uri"><code>{shown}</code></div>
       {!src ? <p className="loading">resolving where this object is read from…</p>
         : src.kind === 'none' ? <p className="hint">No preview: <code>{src.bucket}</code> isn’t readable from this site — it has no public URL the browser may read here, and the site’s file proxy reads {proxyQ.data ? <code>{proxyQ.data.uri}</code> : 'another bucket'}. Its size and date are above.</p>
         : ft && <div className="obj-body"><Body store={ft} path={key} /></div>}
