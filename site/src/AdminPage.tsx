@@ -56,6 +56,12 @@ const linkFor = (token: string): string => `${window.location.origin}/?key=${tok
 /** `POST /api/auth/grants`' allowlist outcome for a link minted with `allowlist: true`. */
 interface Allowed { email: string; status: 'added' | 'widened' | 'already' }
 
+/** What a link (and, with an email, its holder's account) may do: view; view
+ *  and stage deletes; or — the account only, never the link — administer. */
+type Access = 'read' | 'view' | 'admin'
+/** The admin step's outcome (an `admin_emails` row for the account). */
+type AdminResult = 'added' | 'already' | { error: string }
+
 /** Who a link is for: the person (`subject.name`, then their email), else the
  * grant's admin `name` — the fallback for CLI/agent-token grants. */
 const holderName = (g: Grant): string | null => g.subject?.name || g.subject?.email || g.name || null
@@ -69,9 +75,10 @@ interface Draft {
   email: string
   /** A face's `data:` URI (null: none). */
   avatar: string | null
-  allowSignIn: boolean
+  access: Access
   days: string
-  readOnly: boolean
+  /** Pre-`access` drafts. */
+  readOnly?: boolean
 }
 const loadDraft = (): Partial<Draft> => {
   try {
@@ -100,21 +107,21 @@ export function AdminPage() {
   // A face as the `data:` URI `<AvatarField>` produced (copied server-side at
   // mint, never a hotlink); null = none.
   const [avatar, setAvatar] = useState<string | null>(draft.avatar || null)
-  // With an email: also put it on the sign-in allowlist (`allowlist: true`).
-  const [allowSignIn, setAllowSignIn] = useState(draft.allowSignIn ?? true)
   const [days, setDays] = useState(draft.days ?? '30')
-  const [readOnly, setReadOnly] = useState(draft.readOnly ?? true)
-  const [minted, setMinted] = useState<{ label: string; url: string; allowed: Allowed | null } | null>(null)
+  const [access, setAccess] = useState<Access>(draft.access ?? (draft.readOnly === false ? 'view' : 'read'))
+  // Admin is an account's, so it needs an email; without one it reads as Viewer.
+  const effAccess: Access = access === 'admin' && !email.trim() ? 'view' : access
+  const [minted, setMinted] = useState<{ label: string; url: string; allowed: Allowed | null; admin: AdminResult | null } | null>(null)
 
   useEffect(() => {
     try {
       // A face is a few-KB `data:` URI; keep it in the draft unless it's oversized.
       const face = avatar && avatar.length <= 32_000 ? avatar : null
-      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ memo, name, email, avatar: face, allowSignIn, days, readOnly }))
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify({ memo, name, email, avatar: face, access, days }))
     } catch {
       // sessionStorage can throw (private mode / disabled) — a lost draft is cosmetic.
     }
-  }, [memo, name, email, avatar, allowSignIn, days, readOnly])
+  }, [memo, name, email, avatar, access, days])
 
   const grantsQ = useQuery<{ grants: Grant[] }, Error>({
     queryKey: ['auth', 'grants'],
@@ -142,8 +149,11 @@ export function AdminPage() {
           subjectName: name.trim() || null,
           email: email.trim() || null,
           avatar,
-          allowlist: !!email.trim() && allowSignIn,
-          scopes: [readOnly ? `${DEFAULT_STORE.key}:read` : DEFAULT_STORE.key],
+          // An email makes it a person's link: their account is created (or
+          // updated) with the link's access, so they can also sign in directly.
+          allowlist: !!email.trim(),
+          // The link itself is never admin: an admin account still has to sign in.
+          scopes: [effAccess === 'read' ? `${DEFAULT_STORE.key}:read` : DEFAULT_STORE.key],
           expiresInS,
         }),
       })
@@ -152,16 +162,28 @@ export function AdminPage() {
         const body = await r.json().catch(() => null) as { error?: string; detail?: string } | null
         throw new Error(body?.detail ? `${body.error ?? 'create failed'}: ${body.detail}` : `create failed: ${r.status}`)
       }
-      return r.json() as Promise<{ grant: Grant; token: string; allowed?: Allowed }>
+      const out = await r.json() as { grant: Grant; token: string; allowed?: Allowed }
+      // Admin: the account's `admin_emails` row (409 = already one). The link
+      // stands either way; a failure here is reported beside it.
+      let admin: AdminResult | null = null
+      if (effAccess === 'admin') {
+        const a = await fetch('/api/db/admin_emails', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ values: { email: email.trim(), note: memo.trim() ? `with link "${memo.trim()}"` : 'with a share link' } }),
+        })
+        admin = a.ok ? 'added' : a.status === 409 ? 'already' : { error: `admin: ${a.status}` }
+      }
+      return { ...out, admin }
     },
-    onSuccess: ({ grant, token, allowed }) => {
-      setMinted({ label: holderName(grant) ?? grant.note ?? 'unnamed', url: linkFor(token), allowed: allowed ?? null })
+    onSuccess: ({ grant, token, allowed, admin }) => {
+      setMinted({ label: holderName(grant) ?? grant.note ?? 'unnamed', url: linkFor(token), allowed: allowed ?? null, admin })
       setMemo('')
       setName('')
       setEmail('')
       setAvatar(null)
-      setAllowSignIn(true)
-      setReadOnly(true)
+      setAccess('read')
       try {
         sessionStorage.removeItem(DRAFT_KEY)
       } catch {
@@ -194,7 +216,7 @@ export function AdminPage() {
       return r.json() as Promise<{ id: string; token: string }>
     },
     onSuccess: ({ token }) => {
-      setMinted({ label: 'rotated link', url: linkFor(token), allowed: null })
+      setMinted({ label: 'rotated link', url: linkFor(token), allowed: null, admin: null })
       void qc.invalidateQueries({ queryKey: ['auth', 'grants'] })
     },
   })
@@ -221,7 +243,7 @@ export function AdminPage() {
       <p>
         Revocable view links for people outside the SSO/whitelist set. The raw link is shown{' '}
         <strong>once</strong>, when it's created; revoking a link signs out everyone using it, on their next request.{' '}
-        Per-email access lives in the <Link to="/admin/db/allowed_emails">allowlist table</Link> (all tables:{' '}
+        A link with an email is a person's: it also creates their account, listed under <Link to="/admin/db/allowed_emails">users</Link> (all tables:{' '}
         <Link to="/admin/db">/admin/db</Link>).
       </p>
       <form
@@ -239,18 +261,11 @@ export function AdminPage() {
         <div className="field">
           <label htmlFor="mint-email">Email</label>
           <input id="mint-email" type="email" value={email} onChange={e => setEmail(e.target.value)} />
-          <span className="hint">optional — binds the link to this address on first redeem (magic-link semantics)</span>
+          <span className="hint">
+            optional — makes it a person's link: binds it to this address, and creates their account so they can also sign in directly (Google or an emailed code).
+            The account doesn't expire or get revoked with the link; remove it from <Link to="/admin/db/allowed_emails">users</Link>
+          </span>
         </div>
-        {email.trim() && (
-          <div className="field">
-            <label htmlFor="mint-allow">Allowlist</label>
-            <input id="mint-allow" type="checkbox" checked={allowSignIn} onChange={e => setAllowSignIn(e.target.checked)} />
-            <span className="hint">
-              also add this email to the allowlist, so they can sign in themselves (Google or an emailed code) — {readOnly ? 'read-only' : 'full viewer'}, like the link.
-              Revoking the link doesn't remove it
-            </span>
-          </div>
-        )}
         <div className="field avatar">
           <label htmlFor="mint-avatar">Face</label>
           <AvatarField id="mint-avatar" endpoint="/api/auth/avatar" value={avatar} onChange={setAvatar} email={email.trim() || null} name={name.trim() || null} size={40} />
@@ -262,9 +277,17 @@ export function AdminPage() {
           <span className="hint">optional — a label for you (e.g. where it's shared); with the holder and creator shown below, a person link needs none</span>
         </div>
         <div className="field">
-          <label htmlFor="mint-ro">Read-only</label>
-          <input id="mint-ro" type="checkbox" checked={readOnly} onChange={e => setReadOnly(e.target.checked)} />
-          <span className="hint">on = view only (recommended for guests); off = a full viewer that can also stage deletions</span>
+          <label htmlFor="mint-access">Access</label>
+          <select id="mint-access" value={effAccess} onChange={e => setAccess(e.target.value as Access)}>
+            <option value="read">Read-only</option>
+            <option value="view">Viewer — can also stage deletions</option>
+            <option value="admin" disabled={!email.trim()}>Admin{email.trim() ? '' : ' (needs an email)'}</option>
+          </select>
+          <span className="hint">
+            {effAccess === 'admin'
+              ? <><b>Admin applies to their account only</b>: the link itself is a Viewer; signed in as this email, they can dispatch deletes and mint links</>
+              : <>the link's access{email.trim() ? ', and their account’s' : ''}; Read-only is right for most guests</>}
+          </span>
         </div>
         <div className="field">
           <label htmlFor="mint-days">Expiry</label>
@@ -289,9 +312,12 @@ export function AdminPage() {
           {minted.allowed && (
             <p className="allowed">
               <code>{minted.allowed.email}</code>{' '}
-              {minted.allowed.status === 'added' ? 'added to the allowlist: they can also sign in directly'
-                : minted.allowed.status === 'widened' ? 'already on the allowlist (widened to this link’s access)'
-                : 'already on the allowlist'}
+              {minted.allowed.status === 'added' ? 'now has an account: they can also sign in directly'
+                : minted.allowed.status === 'widened' ? 'already had an account, upgraded to this link’s access'
+                : 'already has an account'}
+              {minted.admin === 'added' && <>, and is now an <b>admin</b></>}
+              {minted.admin === 'already' && <>, and was already an admin</>}
+              {minted.admin && typeof minted.admin === 'object' && <span className="err"> — couldn’t make them admin ({minted.admin.error})</span>}
             </p>
           )}
         </div>
