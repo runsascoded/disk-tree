@@ -29,7 +29,7 @@
  * `f = n_children(P) − kept` — objects and dirs alike.
  */
 import type { Env } from './auth.js'
-import { type IndexHandle, isStore, type Lens, openIndex, readAsks, readRects, readRows, readSizeRects, type Rect, type Row, sizeVariant, type Trace, withTrace } from './index.js'
+import { type IndexHandle, isStore, type Lens, openIndex, planRects, planSizeRects, readAsks, readRects, readRows, readSizeRects, type Rect, type Row, sizeVariant, type Span, type Trace, withTrace } from './index.js'
 import { ownerLens, type OwnerLens } from './owners.js'
 import { type ClassScope, classRow, nameFilter, type NamePred, ownerOk, type OwnerScope } from './scope.js'
 import { filterThreshold, looseThreshold, matchRoots, pickTier, rebasedThreshold, rootRects } from './filter.js'
@@ -48,10 +48,12 @@ export const QUANT = 128 // px quantization for w/h → cache-key stability
 const HARD_CAP = 50_000 // response nodes; way above any real canvas budget
 // Coarse tiers the version-1 job wrote, coarsest first (viz.py COARSE_EXPS).
 const COARSE_EXPS = [16, 20, 24]
-/** A store subtree with fewer rows than this reads `path` whole (a few
- * 8k-row groups) instead of paying `bysize`'s one-group-per-bucket floor
- * (specs/path-store.md §1.2, §1.3 "bucket width"). */
-export const SMALL_SUBTREE_ROWS = 3 * 8192
+/** A store subtree with at most this many rows reads `path` without planning
+ * `bysize` too. 0: always plan both — a subtree's `path` read decodes ~one
+ * group per depth whatever its `n_desc`, so a row count can't say which sort
+ * is cheaper (gcs's 32K-row groups: a 2K-row dir 20 levels deep decoded
+ * ~1.3M rows from `path`). The two span queries cost ~20 ms. */
+export const SMALL_SUBTREE_ROWS = 0
 
 /** A node of the served tree. `k`: what the path is — an object (`file`) or
  * a directory; a v1 generation only has directories, and a fold (`(other)`)
@@ -224,11 +226,11 @@ async function tryOpen(env: Env, date: string, variant: string): Promise<IndexHa
   const ck = `${storeKey(env)}:${date}:${variant}`
   const at = missing.get(ck)
   if (at != null && Date.now() - at < MISS_TTL) return null
-  // A coarse tier is a version-1 artifact: when the date's `path` sort is a
-  // store generation, any coarse pointer left for that date is an earlier
-  // generation's (index-sync now retires them; older D1s still hold some) and
-  // must not answer.
-  if (variant.startsWith('coarse')) {
+  // Coarse tiers and the `user` sort are version-1 artifacts: when the date's
+  // `path` sort is a store generation, any such pointer left for that date is
+  // an earlier generation's (index-sync now retires them; older D1s still hold
+  // some) and must not answer.
+  if (variant.startsWith('coarse') || variant === 'user') {
     const path = await tryOpen(env, date, 'path')
     if (path && isStore(path)) {
       missing.set(ck, Date.now())
@@ -262,9 +264,22 @@ async function readSubtree(
   smallRows: number,
   tr?: Trace,
 ): Promise<{ rows: Row[]; variant: string }> {
+  // A store generation: plan the read on both sorts (span queries only, no
+  // decode) and decode whichever holds fewer rows. The cost of a `path` read
+  // is ~one group per depth of the subtree, of a `bysize` read ~one group per
+  // size bucket above the threshold — neither predicts the other from
+  // `n_desc` alone, and with large row groups the wrong pick decodes 4×
+  // more (gcs at 32K-row groups: small drills over the 700K-row cap).
+  // `smallRows`: below it the `path` read is taken without planning `bysize`.
   if (isStore(pathIdx) && (nDesc == null || nDesc > smallRows)) {
     const sized = await tryOpen(env, date, sizeVariant(pathIdx.variant))
-    if (sized) return { rows: await readSizeRects(withTrace(sized, tr), rects, thrAt, lens), variant: sized.variant }
+    if (sized) {
+      const sh = withTrace(sized, tr)
+      const [pp, sp] = await Promise.all([planRects(pathIdx, rects, thrAt, lens), planSizeRects(sh, rects, thrAt, lens)])
+      const held = (plan: Span[]) => plan.reduce((n, x) => n + (x.rowEnd - x.rowStart), 0)
+      if (held(sp) < held(pp)) return { rows: await readSizeRects(sh, rects, thrAt, lens, sp), variant: sized.variant }
+      return { rows: await readRects(pathIdx, rects, thrAt, lens, pp), variant: pathIdx.variant }
+    }
   }
   return { rows: await readRects(pathIdx, rects, thrAt, lens), variant: pathIdx.variant }
 }
@@ -325,7 +340,7 @@ export async function readRootAgg(env: Env, o: { date: string; path: string; len
     return fine ? readRoot(fine, l) : null
   }
   const ol = lens ? await ownerLensFor(env, date, lens, o.by) : null
-  const rows = await rootRows(lens ? 'user' : 'path', lens)
+  const rows = await rootRows(lens ? await lensSort(env, date) : 'path', lens)
   // No tier at all → null. No rows for an *unlensed* path (its `path`-tier read
   // came back empty) → the path isn't in this scan, so null (a gap on the
   // over-time chart — e.g. a bucket's scans before it joined the scan set),
@@ -411,7 +426,7 @@ interface Read {
 async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
   const { date, path, w, h, minArea, atten, lens, owner, query, maxDepth, classes } = o
   const dP = path === '' ? 0 : path.split('/').length
-  const sort = lens ? 'user' : 'path'
+  const sort = lens ? await lensSort(env, date) : 'path'
   const readRoot = (idx: IndexHandle) =>
     path === '' ? readRows(idx, 1, 1, '', '￿', undefined, lens) : readRows(idx, dP, dP, path, path, undefined, lens)
   // A user lens applies the ownership ledger: claims repaint attribution, so
@@ -912,7 +927,6 @@ const LOOKUP_CAP = 240
 export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
   const { from, to, path, lens, owner, query } = o
   const dP = path === '' ? 0 : path.split('/').length
-  const sort = lens ? 'user' : 'path'
   const tr = o.trace
   let t0 = performance.now()
   const [ra, rb] = await Promise.all([
@@ -963,7 +977,7 @@ export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
   const fineOf = new Map<string, Promise<IndexHandle>>()
   const fine = (date: string) => {
     let h = fineOf.get(date)
-    if (!h) fineOf.set(date, (h = openFine(env, date, sort, lens).then(x => withTrace(x, tr))))
+    if (!h) fineOf.set(date, (h = (lens ? lensSort(env, date) : Promise.resolve('path')).then(s => openFine(env, date, s, lens)).then(x => withTrace(x, tr))))
     return h
   }
   const fineAllOf = new Map<string, Promise<IndexHandle>>()
@@ -1141,6 +1155,15 @@ export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
     lookups,
     lookups_capped: capped,
   }
+}
+
+/** The sort a lens view reads on `date`: a store generation serves the lens
+ * from its own `path` sort (and `bysize` beside it), filtered per row — it
+ * writes no `user` sort on gcs (`path-index -U`), and one left by an earlier
+ * v1 generation of the date must not answer; a version-1 scan reads `user`. */
+export async function lensSort(env: Env, date: string): Promise<string> {
+  const p = await tryOpen(env, date, 'path')
+  return p && isStore(p) ? 'path' : 'user'
 }
 
 async function openFine(env: Env, date: string, sort: string, lens?: Lens): Promise<IndexHandle> {

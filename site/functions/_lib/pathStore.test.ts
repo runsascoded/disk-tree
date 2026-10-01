@@ -5,7 +5,7 @@ import { blobKey, columnsFor, groupMatchesSize, indexKey, type IndexHandle, open
 import { storeEnv } from './stores'
 import { sqliteD1 } from './testD1'
 import { type D1Variant, fixture, FILES, readJson, seedGeneration } from './testStore'
-import { buildDiff, buildView, type DiffRow, SMALL_SUBTREE_ROWS, type ViewNode } from './view'
+import { buildDiff, buildView, type DiffRow, lensSort, SMALL_SUBTREE_ROWS, type ViewNode } from './view'
 
 vi.mock('@rdub/file-tree/stores/s3', async () => ({ S3Store: (await import('./testStore')).S3Store }))
 
@@ -30,6 +30,9 @@ const V2_BLOB = '2026-09-30T0002'
 /** A store generation synced over an earlier v1 one of the same date: the
  *  v1's coarse pointer is still in D1 (r2.rbw.sh, 2026-09-30). */
 const V2_STALE = '2026-09-30T0003'
+/** A labeled store generation (`usr`: nest → alice, flat → bob), `path` +
+ *  `bysize` only, with an earlier v1 generation's `user` pointer left on it. */
+const V2_LENS = '2026-09-30T0004'
 const V2_DIR = `cw-l2/${V2}/index/g2`
 const KiB = 1024
 const MiB = 1 << 20
@@ -213,22 +216,40 @@ describe('buildView on a store generation', () => {
     expect(v.tree).toEqual(want.tree)
   })
 
+  it('a lens on a store generation reads the store’s own sorts, filtered per row — not a missing or stale v1 `user` sort', async () => {
+    const { db, raw } = await sqliteD1('gcs')
+    const v1 = await readJson<Record<string, D1Variant>>('path-index-zstd.d1.json')
+    const v2Lens = await readJson<Record<string, D1Variant>>('v2-lens/d1.json')
+    seedGeneration(raw, { date: V2_LENS, gen: 'g0', dir: `listing/${V2_LENS}/index/g0`, variants: { user: v1.path }, files: { user: { parquet: 'path-index-zstd.parquet', groups: 'path-index-zstd.groups.json' } } })
+    seedGeneration(raw, { date: V2_LENS, gen: 'g5', dir: `cw-l2/${V2_LENS}/index/g5`, variants: v2Lens, files: { path: { parquet: 'v2-lens/path-index.parquet', groups: 'v2-lens/path-index.groups.json' }, bysize: { parquet: 'v2-lens/path-index-bysize.parquet', groups: 'v2-lens/path-index-bysize.groups.json' } } })
+    const env = { DB: db, ROOT_LABEL: 'root', BASE_SCOPE: 'gcs', GCS_HMAC_KEY_ID: 'k', GCS_HMAC_SECRET: 's' } as Env
+    expect(await lensSort(env, V2_LENS)).toBe('path')
+    expect(await lensSort(env, V1)).toBe('user')
+    const alice = { key: 'alice' }
+    const root: Rect = { dLo: 1, dHi: 1e9, pLo: '', pHi: '\uffff' }
+    const all = await readRects(await openIndex(env, V2_LENS, 'path'), [root])
+    const want = byPath(all.filter(r => r.usr === 'alice'))
+    expect(want.map(r => r.path)).toEqual(['bk/nest', 'bk/nest/a', 'bk/nest/a/b', 'bk/nest/a/b/c0', 'bk/nest/a/b/c1', 'bk/nest/a/b/c2', 'bk/nest/a/b/c3', 'bk/nest/a/z'])
+    expect(byPath(await readRects(await openIndex(env, V2_LENS, 'path'), [root], undefined, alice))).toEqual(want)
+    expect(byPath(await readSizeRects(await openIndex(env, V2_LENS, 'bysize'), [root], () => 0, alice))).toEqual(want)
+  })
+
   it('the same view from path (a small subtree by the default cutoff), the blob-served copy, and the secondary store', async () => {
     const want = await buildView(env, { ...base, date: V2, path: '', threshold: 32 * KiB, smallRows: 4096 })
     for (const [e, date, tier, index] of [[env, V2, 'path', 'd1'], [env, V2_BLOB, 'bysize', 'blob'], [meta, V2, 'bysize', 'd1']] as const) {
-      const v = await buildView(e, { ...base, date, path: '', threshold: 32 * KiB, ...(tier === 'path' ? {} : { smallRows: 4096 }) })
+      const v = await buildView(e, { ...base, date, path: '', threshold: 32 * KiB, smallRows: tier === 'path' ? 1e12 : 4096 })
       expect([v.tier, v.index, v.nodes]).toEqual([tier, index, 510])
       expect(v.tree).toEqual({ ...want.tree, n: e === meta ? 'meta root' : 'root' })
     }
-    expect(SMALL_SUBTREE_ROWS).toBe(24576)
+    expect(SMALL_SUBTREE_ROWS).toBe(0)
   })
 
-  it('a flat directory: its objects are the children; a tiny one reads path whole', async () => {
+  it('a flat directory: its objects are the children; a tiny one reads whichever sort holds fewer rows', async () => {
     const flat = await buildView(env, { ...base, date: V2, path: 'bk/flat', threshold: 32 * KiB, smallRows: 0 })
     expect([flat.tier, flat.nodes]).toEqual(['bysize', 500])
     expect(flat.tree).toEqual(node('flat', 'dir', 32767500, 8000, { c: flatKids() }))
     const small = await buildView(env, { ...base, date: V2, path: 'bk/small', threshold: 1 })
-    expect([small.tier, small.nodes]).toEqual(['path', 3])
+    expect([small.tier, small.nodes]).toEqual(['bysize', 3])
     expect(small.tree).toEqual(node('small', 'dir', 6000, 3, { c: [node('s2', 'file', 3000, 1), node('s1', 'file', 2000, 1), node('s0', 'file', 1000, 1)] }))
   })
 
@@ -242,7 +263,7 @@ describe('buildView on a store generation', () => {
 
   it('a depth cap: rows at the cap come back childless, from the band read alone', async () => {
     const v = await buildView(env, { ...base, date: V2, path: '', threshold: 32 * KiB, maxDepth: 2, smallRows: 0 })
-    expect([v.tier, v.nodes]).toEqual(['bysize', 3])
+    expect([v.tier, v.nodes]).toEqual(['path', 3])
     expect(v.tree).toEqual(node('root', 'dir', 37229948, 8009, { c: [
       node('bk', 'dir', 37229948, 8009, { c: [node('flat', 'dir', 32767500, 8000), node('nest', 'dir', 4456448, 5)] }),
     ] }))
@@ -262,7 +283,7 @@ describe('buildView on a store generation', () => {
     expect(descs(st.header())).toEqual({ groups: 'path+bysize', rows: 'bysize' })
     const st2 = serverTiming()
     await buildView(env, { ...base, date: V2, path: 'bk/small', threshold: 1, trace: st2.trace })
-    expect(descs(st2.header())).toEqual({ groups: 'path', rows: 'path' })
+    expect(descs(st2.header())).toEqual({ groups: 'path+bysize', rows: 'bysize' })
   })
 })
 
@@ -287,7 +308,7 @@ describe('buildDiff', () => {
     })
     const removed = await buildDiff(env, { ...base, from: V2, to: V2_BLOB, path: 'bk/small', threshold: 1 })
     expect(removed.rows).toEqual([])
-    expect([removed.total_a, removed.total_b, removed.tier]).toEqual([6000, 6000, 'path'])
+    expect([removed.total_a, removed.total_b, removed.tier]).toEqual([6000, 6000, 'bysize'])
     const gone = await buildDiff(env, { ...base, from: V2, to: V1, path: 'bk/small', threshold: 1 })
     expect(gone.rows).toEqual([
       row('s2', 1, 'file', 'removed', 3000, 0, 1, 0),
@@ -338,8 +359,11 @@ it('fixtures are registered', () => {
     `cw-l2/${V2_BLOB}/index/g3/path-index.groups.json`, `cw-l2/${V2_BLOB}/index/g3/path-index.parquet`,
     `cw-l2/${V2_STALE}/index/g4/path-index-bysize.groups.json`, `cw-l2/${V2_STALE}/index/g4/path-index-bysize.parquet`,
     `cw-l2/${V2_STALE}/index/g4/path-index.groups.json`, `cw-l2/${V2_STALE}/index/g4/path-index.parquet`,
+    `cw-l2/${V2_LENS}/index/g5/path-index-bysize.groups.json`, `cw-l2/${V2_LENS}/index/g5/path-index-bysize.parquet`,
+    `cw-l2/${V2_LENS}/index/g5/path-index.groups.json`, `cw-l2/${V2_LENS}/index/g5/path-index.parquet`,
     `listing/${V1}/index/g1/path-index.groups.json`, `listing/${V1}/index/g1/path-index.parquet`,
     `listing/${V2_STALE}/index/g0/path-index-coarse20.groups.json`, `listing/${V2_STALE}/index/g0/path-index-coarse20.parquet`,
+    `listing/${V2_LENS}/index/g0/path-index-user.groups.json`, `listing/${V2_LENS}/index/g0/path-index-user.parquet`,
     `meta-l2/${V2}/index/g2/path-index-bysize.groups.json`, `meta-l2/${V2}/index/g2/path-index-bysize.parquet`, `meta-l2/${V2}/index/g2/path-index.groups.json`, `meta-l2/${V2}/index/g2/path-index.parquet`,
   ])
   expect(fixture('v2/d1.json').endsWith('/functions/_lib/fixtures/v2/d1.json')).toBe(true)

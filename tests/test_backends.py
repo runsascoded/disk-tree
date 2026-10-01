@@ -3,8 +3,9 @@ with the bucket's endpoint, and a loud refusal for `gcs://` (which used to
 fall through to the *local* backend and "succeed" with an empty scan).
 """
 
+import sys
 from io import StringIO
-from os.path import dirname, join
+from os.path import dirname, exists, join
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,6 +13,9 @@ import pytest
 from disk_tree import find
 from disk_tree.backends import LocalBackend, S3Backend, UnsupportedBackend, backend_for
 from disk_tree.blobfs import R2_ENDPOINT_VAR
+
+#: The Tauri app's native walker (`apps/tauri`, on the app's branch); its seam test skips where it isn't built.
+DT_WALKER = join(dirname(dirname(__file__)), 'apps', 'tauri', 'target', 'release', 'dt-walker')
 
 TESTDATA = join(dirname(__file__), 'data')
 EP = 'https://acct.r2.cloudflarestorage.com'
@@ -142,3 +146,35 @@ def test_one_fs_prunes_mounts_below_the_root_in_the_gfind_cmd(monkeypatch):
          *prune('/System/Volumes/Data'), *prune('/Volumes/ext'), *prune('/dev'), *printf],
         [local.FIND, '/', *prune(local.CLOUDSTORAGE_PATHS[0]), *prune(local.CLOUDSTORAGE_PATHS[1]), *printf],
     ]
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='dt-walker is a macOS getattrlistbulk walker')
+@pytest.mark.skipif(not exists(DT_WALKER), reason='dt-walker not built (cargo build --release in apps/tauri)')
+def test_dt_walker_seam_matches_gfind(tmp_path, monkeypatch):
+    """`DISK_TREE_WALKER` swaps the scan source from `gfind` to the native walker
+    and produces a byte-identical aggregated scan — the drop-in guarantee."""
+    tree = tmp_path / 'tree'
+    (tree / 'sub').mkdir(parents=True)
+    (tree / 'a.txt').write_text('hello world\n')
+    (tree / 'big.bin').write_bytes(b'\0' * 100_000)
+    (tree / 'sub' / 'b.txt').write_text('x\n')
+
+    monkeypatch.delenv('DISK_TREE_WALKER', raising=False)
+    via_gfind = find.index(str(tree)).df
+
+    monkeypatch.setenv('DISK_TREE_WALKER', DT_WALKER)
+    via_walker = find.index(str(tree)).df
+
+    # Same rows, same order, same every column (path/size/mtime/kind/parent/uri/
+    # n_desc/n_children/depth). mtime is int-truncated identically by both paths.
+    assert via_walker.equals(via_gfind)
+
+
+def test_one_fs_passes_through_to_the_walker(monkeypatch):
+    from disk_tree.backends import local
+    monkeypatch.setenv('DISK_TREE_WALKER', '/bin/dt-walker')
+    monkeypatch.setattr(local, 'mount_points', lambda: pytest.fail('the walker checks mounts itself'))
+    cmds = []
+    monkeypatch.setattr(local, 'run_gfind', lambda cmd, *a, **kw: cmds.append(cmd) or iter(()))
+    list(LocalBackend().list('/Users/x', one_fs=True))
+    assert cmds == [['/bin/dt-walker', '--no-default-excludes', '--one-fs', '/Users/x']]

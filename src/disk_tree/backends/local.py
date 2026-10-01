@@ -69,7 +69,6 @@ class LocalBackend(Backend):
         progress: bool = True,
     ) -> Iterator[dict]:
         path0 = abspath(url)
-        cmd = [FIND, path0]
 
         if excludes is None:
             excludes = CLOUDSTORAGE_PATHS
@@ -84,17 +83,31 @@ class LocalBackend(Backend):
                 or path0.startswith(abs_pattern.rstrip('/') + '/')
                 or abs_pattern == path0)
         ]
+
+        # Opt-in native walker (see specs/tauri-native-app.md): a drop-in for the
+        # `gfind` subprocess that emits the same `%y %b %T@ %p\0` stream, so the
+        # `run_gfind` parser below consumes it unchanged. The gfind path stays the
+        # default; `DISK_TREE_WALKER=<path-to-dt-walker>` swaps only the source cmd.
         # `one_fs`: don't descend into other filesystems mounted below the root
-        # (gfind prunes the current mount points — equivalent for a walk's duration).
-        if one_fs:
+        # (the walker checks each dir's mount status; gfind prunes the current
+        # mount points, which is equivalent for a walk's duration).
+        walker = os.environ.get('DISK_TREE_WALKER')
+        if one_fs and not walker:
             applicable_excludes = [*applicable_excludes, *mounts_below(path0, mount_points())]
-        # %b = 512-byte blocks actually allocated (handles sparse files correctly)
-        fmt = r'%y %b %T@ %p\0'
-        for abs_pattern in applicable_excludes:
-            # Print the pruned dir itself (an empty leaf), as `find -xdev` does:
-            # the tree shows a mount / excluded dir is there.
-            cmd.extend(['-path', abs_pattern, '-printf', fmt, '-prune', '-o'])
-        cmd.extend(['-printf', fmt])
+        if walker:
+            cmd = [walker, '--no-default-excludes', *(['--one-fs'] if one_fs else [])]
+            for abs_pattern in applicable_excludes:
+                cmd.extend(['--exclude', abs_pattern])
+            cmd.append(path0)
+        else:
+            # %b = 512-byte blocks actually allocated (handles sparse files correctly)
+            fmt = r'%y %b %T@ %p\0'
+            cmd = [FIND, path0]
+            for abs_pattern in applicable_excludes:
+                # Print the pruned dir itself (an empty leaf), as the walker and
+                # `find -xdev` do: the tree shows a mount / excluded dir is there.
+                cmd.extend(['-path', abs_pattern, '-printf', fmt, '-prune', '-o'])
+            cmd.extend(['-printf', fmt])
         if sudo:
             cmd = ['sudo', *cmd]
 
