@@ -1,9 +1,9 @@
 """`disk-tree iac` — generate executor deployment config from buckets.yml (spec
 ``specs/staged-delete.md``, CP8).
 
-- ``iac r2-bindings`` — the ``wrangler.toml`` R2 bindings that activate the edge
-  CFN executor (CP7) for the configured R2 buckets.
 - ``iac config`` — the ``CfnDashboard`` Pulumi component config (``iac/``).
+- ``iac aws-batch`` — the Terraform tfvars for the AWS Batch delete executor
+  (``iac/aws/``).
 """
 from __future__ import annotations
 
@@ -17,17 +17,6 @@ from disk_tree.cli.base import cli
 @cli.group("iac")
 def iac():
     """Infrastructure-as-code helpers: derive deployment config from buckets.yml."""
-
-
-@iac.command("r2-bindings")
-@option("-c", "--config", "config_path", default=None, help="buckets.yml path (default: <DISK_TREE_ROOT>/buckets.yml)")
-def r2_bindings(config_path: str | None):
-    """Emit the `[[r2_buckets]]` wrangler.toml blocks binding each configured R2
-    bucket for the edge CFN executor (CP7)."""
-    from disk_tree.cli.sync import load_config
-    from disk_tree.iac import r2_bindings_toml
-
-    echo(r2_bindings_toml(load_config(config_path)), nl=False)
 
 
 @iac.command("config")

@@ -47,11 +47,9 @@ new CfnDashboard('demo', {
 ## The generator (`disk-tree iac`, tested in `tests/test_iac.py`)
 
 ```bash
-disk-tree iac r2-bindings   # [[r2_buckets]] wrangler.toml blocks — activates the CP7 CFN
 disk-tree iac config        # the CfnDashboard component config (JSON) for this deployment
+disk-tree iac aws-batch     # Terraform tfvars for the AWS Batch delete executor (iac/aws/)
 ```
-
-`iac r2-bindings` is immediately usable: paste its output into `ui/wrangler.toml` and redeploy to bind your R2 buckets (each `r2://<bucket>` in `buckets.yml` → an `R2_<bucket>` binding), which turns small R2 dispatches from drainer-deferred into edge-inline.
 
 ## Applying
 
