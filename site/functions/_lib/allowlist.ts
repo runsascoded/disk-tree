@@ -13,7 +13,7 @@
  * (`replaceSource`) is refused.
  */
 import type { AllowEntry, AllowlistStore } from '@open-athena/auth'
-import { baseReadScope, baseScope, type Env } from './auth.js'
+import { allowedRow, baseReadScope, baseScope, type Env } from './auth.js'
 
 interface Row { email: string; note: string | null; who: string; ts: number; read_only: number }
 
@@ -24,7 +24,7 @@ export function siteAllowlist(env: Env): AllowlistStore {
   const entry = (r: Row): AllowEntry => ({ email: r.email, scopes: scopesOf(r.read_only), source: 'manual', note: r.note, addedBy: r.who, updatedAt: r.ts })
   return {
     async lookup(email) {
-      const row = await db.prepare('SELECT read_only FROM allowed_emails WHERE email = ?').bind(email.toLowerCase()).first<{ read_only: number }>()
+      const row = await allowedRow(db, email.toLowerCase())
       return row ? scopesOf(row.read_only) : null
     },
     async list() {
