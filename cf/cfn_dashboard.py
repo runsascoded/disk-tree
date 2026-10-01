@@ -2,10 +2,10 @@
 
 EXTRACTION-READY / marin-agnostic. This module carries no account ids, no zone
 ids, and no store literals — only the reusable *shape*. It's written to move
-verbatim to the disk-tree `cfn` reference-deploy branch (`specs/two-reference-
-deploys.md`) and be reused by any GCS / R2 / AWS-S3-backed deployment; the
+verbatim to the disk-tree `cfn` reference-deploy branch (`specs/done/two-
+reference-deploys.md`) and be reused by any GCS / R2 / AWS-S3-backed deployment; the
 instance wiring (which stores, which account/zone) stays in the consuming
-`__main__.py`. See ../specs/cf-iac.md.
+`__main__.py`. See gcs:specs/cf-iac.md.
 
 `CfnDashboard` stands up the Cloudflare resources a dashboard needs and that its
 deploy tool (`wrangler pages deploy`) does NOT own:
@@ -81,10 +81,10 @@ class Store:
     # PagesDomain + a proxied CNAME to `<branch>.<project>.pages.dev`.
     branch_aliases: tuple[BranchAlias, ...] = ()
     # Zero Trust Access gate, or None when the deployment does its own identity
-    # (gcs.oa.dev: own Google OIDC client + emailed codes — specs/done/oidc-cutover.md).
+    # (gcs.oa.dev: own Google OIDC client + emailed codes — gcs:specs/done/oidc-cutover.md).
     access: AccessApp | None = None
     kv_name: str | None = None        # bind a CACHE_KV namespace, or None
-    # R2 serving (cw's specs/r2-serving-migration.md; the base's r2.rbw.sh
+    # R2 serving (specs/done/r2-serving-migration.md; the base's r2.rbw.sh
     # already serves this way): the bucket the served artifacts are published
     # to, read by the site through the `STORE_*` seam (S3-over-R2). None = the
     # deployment serves straight from its cloud store (GCS).
