@@ -59,7 +59,7 @@ async function setup(env: Partial<ExecEnv> = {}) {
     await db.prepare("INSERT INTO plan_items (plan_id, prefix, added_by, added_ts) VALUES (1, ?, 'ann@openathena.ai', 1)").bind(p).run()
   }
   const calls: string[] = []
-  const executors = { 'plan-sweep': fake('plan-sweep', db, calls), sweep: fake('sweep', db, calls), laptop: EXECUTORS.laptop }
+  const executors = { 'plan-sweep': fake('plan-sweep', db, calls), sweep: fake('sweep', db, calls) }
   return { db, calls, executors, env: { DB: db, GCP_SA_KEY: 'test', ...env } as ExecEnv }
 }
 
@@ -67,12 +67,12 @@ const req = (o: Partial<DispatchReq>): DispatchReq => ({ planId: 1, mode: 'dry',
 
 describe('executorOf — the deployment\'s `EXECUTOR`', () => {
   it('defaults to plan-sweep, accepts sweep, throws on anything else', () => {
-    expect([executorOf({}), executorOf({ EXECUTOR: 'plan-sweep' }), executorOf({ EXECUTOR: 'sweep' }), executorOf({ EXECUTOR: 'laptop' })]).toEqual(['plan-sweep', 'plan-sweep', 'sweep', 'laptop'])
-    expect(() => executorOf({ EXECUTOR: 'Sweep' })).toThrow('unknown EXECUTOR "Sweep" (expected plan-sweep | sweep | laptop)')
+    expect([executorOf({}), executorOf({ EXECUTOR: 'plan-sweep' }), executorOf({ EXECUTOR: 'sweep' })]).toEqual(['plan-sweep', 'plan-sweep', 'sweep'])
+    expect(() => executorOf({ EXECUTOR: 'Sweep' })).toThrow('unknown EXECUTOR "Sweep" (expected plan-sweep | sweep)')
   })
 
   it('planFirstKind — the /api/plan-sweep routes dispatch to the deployment\'s plan-first executor', () => {
-    expect([planFirstKind({}), planFirstKind({ EXECUTOR: 'sweep' }), planFirstKind({ EXECUTOR: 'laptop' })]).toEqual(['plan-sweep', 'plan-sweep', 'laptop'])
+    expect([planFirstKind({}), planFirstKind({ EXECUTOR: 'sweep' })]).toEqual(['plan-sweep', 'plan-sweep'])
   })
 })
 

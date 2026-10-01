@@ -90,7 +90,6 @@ describe('objectSource', () => {
   const [r2] = resolveStores('r2', '')
   const [cw, meta] = resolveStores('cw', 'meta')
   const [gcs] = resolveStores('gcs', '')
-  const [laptop] = resolveStores('laptop', '')
   it('r2: a bucket with a public domain is read from it; jc-taxes (its CORS admits only jct.rbw.sh) is not, and the proxy reads the index bucket', () => {
     const proxy = { uri: 'r2://disk-tree-demo', prefixes: ['listing/', 'snapshots/', 'sweep/'] }
     expect([
@@ -107,11 +106,9 @@ describe('objectSource', () => {
     expect([
       objectSource(cw, ['marin-us-east-02a', 'ckpt', 'model.safetensors'], { uri: 'r2://oa-cw-s3-usage-index', prefixes: ['listing/', 'cw-l2/'] }),
       objectSource(gcs, ['marin-us-central2', 'tokenized', 'x.jsonl.gz'], { uri: 'gs://oa-gcs-usage-dvx', prefixes: ['listing/', 'snapshots/', 'sweep/'] }),
-      objectSource(laptop, ['Users', 'ryan', 'notes.md'], { uri: 'gs://oa-gcs-usage-dvx', prefixes: ['listing/'] }),
     ]).toEqual([
       { kind: 'none', bucket: 'marin-us-east-02a', key: 'ckpt/model.safetensors' },
       { kind: 'none', bucket: 'marin-us-central2', key: 'tokenized/x.jsonl.gz' },
-      { kind: 'none', bucket: 'Users', key: 'ryan/notes.md' },
     ])
   })
   it('gcs: a scanned bucket the deployment serves to members reads through `/v1/objects/<bucket>`; others, and a guest (no `objectBuckets`), get size and dates', () => {

@@ -171,7 +171,7 @@ export default function ObjectPanel({ segs, node, onClose }: {
   [src?.kind, src && 'base' in src ? src.base : null, src && 'api' in src ? src.api : null, store, sfetch])
   const key = src?.key ?? segs.slice(1).join('/')
   const uri = store.scheme + segs.join('/')
-  const shown = pathText(store.scheme, segs, store.home)
+  const shown = pathText(store.scheme, segs)
   const dl = ft?.getUrl?.(key)
   // Opening scrolls the panel into view; Escape closes it.
   useEffect(() => { ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [uri])

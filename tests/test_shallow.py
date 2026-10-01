@@ -156,26 +156,3 @@ def test_remote_scans_dir_gets_the_sidecar_too():
     assert blobfs.exists(shallow.shallow_path(root))
     direct = blobfs.read_parquet(blobfs.join(scans_dir, chunk_ref), filters=[('depth', '==', 1)])
     assert_frame_equal(_sorted(shallow.chunk_top_rows(root, chunk_ref, b._resolve)), _sorted(direct))
-
-
-def test_chunk_map_reads_only_pointer_row_groups(tmp_path, monkeypatch):
-    """`_chunk_map` pushes `child_scan_id IS NOT NULL` down: an all-null row
-    group is pruned from its footer stats, and a chunk whose column is Arrow
-    type `null` (no stats at all) is answered from the schema alone — reading
-    a 1.4M-row chunk's `path` column to find zero pointers cost ~16 s over R2."""
-    import pyarrow as pa
-    from disk_tree import resolve
-    n = 3 * BLOB_ROW_GROUP_SIZE
-    ids = [None] * n
-    ids[1] = 'c.parquet'
-    root = str(tmp_path / 'root.parquet')
-    blobfs.write_table(pa.table({'path': [f'p{i:06d}' for i in range(n)], 'child_scan_id': pa.array(ids, pa.string())}), root, BLOB_ROW_GROUP_SIZE)
-    chunk = str(tmp_path / 'chunk.parquet')
-    blobfs.write_table(pa.table({'path': ['a', 'b'], 'child_scan_id': pa.nulls(2)}), chunk, BLOB_ROW_GROUP_SIZE)
-    reads: list[int] = []
-    real = blobfs.read_table
-    monkeypatch.setattr(blobfs, 'read_table', lambda *a, **kw: reads.append(real(*a, **kw).num_rows) or real(*a, **kw))
-    resolve._chunk_map_cached.cache_clear()
-    assert resolve._chunk_map(root) == {'p000001': 'c.parquet'}
-    assert resolve._chunk_map(chunk) is None
-    assert reads == [1]

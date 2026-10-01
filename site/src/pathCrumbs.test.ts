@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fromUrlSegs, isFold, pathCopy, pathCrumbs, pathDisplay, pathText, pathUri, toUrlSegs } from './pathCrumbs'
+import { isFold, pathCopy, pathCrumbs, pathLead, pathText, pathUri } from './pathCrumbs'
 import type { Crumb } from './pathCrumbs'
 
 describe('pathCrumbs', () => {
@@ -35,43 +35,17 @@ describe('pathUri', () => {
   })
 })
 
-describe('pathDisplay / pathText / pathCopy', () => {
-  const home = ['Users', 'ryan']
-  it('folds the store home to `~`, at and below it', () => {
-    expect(pathDisplay('file:///', ['Users', 'ryan', 'c'], home)).toEqual({ lead: '~', leadSegs: 2, rest: ['c'] })
-    expect(pathText('file:///', ['Users', 'ryan'], home)).toBe('~')
-    expect(pathText('file:///', ['Users', 'ryan', 'c', 'disky'], home, true)).toBe('~/c/disky/')
+describe('pathLead / pathText / pathCopy', () => {
+  it('a file store reads as a plain absolute path', () => {
+    expect([pathLead('file:///'), pathText('file:///', ['Applications', 'Slack.app']), pathText('file:///', ['Users', 'ryan', 'c'], true), pathText('file:///', [])])
+      .toEqual(['/', '/Applications/Slack.app', '/Users/ryan/c/', '/'])
   })
-  it('a file store outside home reads as a plain absolute path', () => {
-    expect(pathDisplay('file:///', ['Users'], home)).toEqual({ lead: '/', leadSegs: 0, rest: ['Users'] })
-    expect(pathText('file:///', ['Applications', 'Slack.app'], home)).toBe('/Applications/Slack.app')
-    expect(pathText('file:///', ['Users', 'ryanw'], home)).toBe('/Users/ryanw')
-    expect(pathText('file:///', [], home)).toBe('/')
-  })
-  it('other schemes read as their URI, home or not', () => {
-    expect(pathText('gs://', ['b', 'x'], undefined, true)).toBe('gs://b/x/')
-    expect(pathText('r2://', [])).toBe('r2://')
+  it('other schemes read as their URI', () => {
+    expect([pathLead('gs://'), pathText('gs://', ['b', 'x'], true), pathText('r2://', [])]).toEqual(['gs://', 'gs://b/x/', 'r2://'])
   })
   it('copies a file store as an absolute path, other stores as the URI', () => {
     expect(pathCopy('file:///', ['Users', 'ryan', 'c'], true)).toBe('/Users/ryan/c/')
     expect(pathCopy('file:///', [])).toBe('/')
     expect(pathCopy('gs://', ['b', 'x'])).toBe('gs://b/x')
-  })
-})
-
-describe('toUrlSegs / fromUrlSegs', () => {
-  const home = ['Users', 'ryan']
-  it('home folds to a leading `~` and expands back', () => {
-    expect(toUrlSegs(['Users', 'ryan', 'c', 'disky'], home)).toEqual(['~', 'c', 'disky'])
-    expect(toUrlSegs(['Users', 'ryan'], home)).toEqual(['~'])
-    expect(fromUrlSegs(['~', 'c', 'disky'], home)).toEqual(['Users', 'ryan', 'c', 'disky'])
-    expect(fromUrlSegs(['~'], home)).toEqual(['Users', 'ryan'])
-  })
-  it('paths outside home, and stores without one, pass through', () => {
-    expect(toUrlSegs(['Applications', 'Slack.app'], home)).toEqual(['Applications', 'Slack.app'])
-    expect(toUrlSegs(['Users'], home)).toEqual(['Users'])
-    expect(toUrlSegs(['b', 'x'])).toEqual(['b', 'x'])
-    expect(fromUrlSegs(['~', 'x'])).toEqual(['~', 'x'])
-    expect(fromUrlSegs(['Users', 'ryan', 'c'], home)).toEqual(['Users', 'ryan', 'c'])
   })
 })

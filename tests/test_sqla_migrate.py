@@ -1,7 +1,6 @@
 """Specs for the schema catch-up pass (`disk_tree.sqla.migrate`): a model gains a
-column, an existing DB is missing it, and the pass adds it — the gap that broke
-`/api/staged` (`no such column: deletion_run.batch_job`) when `batch_job` landed
-without a migration."""
+column, an existing DB is missing it, and the pass adds it — otherwise every ORM
+select against the older DB fails with `no such column`."""
 from __future__ import annotations
 
 import pytest
@@ -9,9 +8,9 @@ from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from disk_tree.sqla import DeletionRun
 from disk_tree.sqla.base import Base
 from disk_tree.sqla.migrate import add_missing_columns, missing_columns
+from disk_tree.sqla.model import Scan, ScanProgress
 
 
 def _cols(eng, table: str) -> list[str]:
@@ -32,29 +31,27 @@ def test_fresh_db_has_nothing_missing(eng):
 
 def test_adds_a_nullable_column_an_older_db_lacks(eng):
     with eng.begin() as c:
-        c.exec_driver_sql("ALTER TABLE deletion_run DROP COLUMN batch_job")
-    # the repro: the ORM selects every mapped column, so the server's query fails
-    with Session(eng) as s, pytest.raises(OperationalError, match="no such column: deletion_run.batch_job"):
-        s.scalars(select(DeletionRun)).all()
-    assert missing_columns(eng) == [("deletion_run", "batch_job")]
+        c.exec_driver_sql("ALTER TABLE scan DROP COLUMN mtime")
+    # the repro: the ORM selects every mapped column, so the query fails
+    with Session(eng) as s, pytest.raises(OperationalError, match="no such column: scan.mtime"):
+        s.scalars(select(Scan)).all()
+    assert missing_columns(eng) == [("scan", "mtime")]
 
-    assert add_missing_columns(eng) == [("deletion_run", "batch_job")]
-    assert _cols(eng, "deletion_run") == [c.name for c in DeletionRun.__table__.columns]
+    assert add_missing_columns(eng) == [("scan", "mtime")]
+    assert _cols(eng, "scan") == [c.name for c in Scan.__table__.columns]
     with Session(eng) as s:
-        assert s.scalars(select(DeletionRun)).all() == []
+        assert s.scalars(select(Scan)).all() == []
     assert add_missing_columns(eng) == []   # idempotent
 
 
 def test_adds_a_not_null_column_with_its_scalar_default(eng):
     with eng.begin() as c:
-        c.exec_driver_sql("INSERT INTO plan (name, created_by, created_ts, state) VALUES ('Staged', 'ryan', '2026-09-23 00:00:00', 'open')")
-        c.exec_driver_sql("INSERT INTO deletion_run (run_id, plan_id, mode, actor, started_ts, deleted_bytes, deleted_objects, skipped_gone, undo_state) VALUES ('r1', 1, 'dry', 'ryan', '2026-09-23 00:00:00', 0, 0, 0, 'none')")
-        c.exec_driver_sql("ALTER TABLE deletion_run DROP COLUMN skipped_gone")
-        c.exec_driver_sql("ALTER TABLE deletion_run DROP COLUMN batch_job")
-    assert add_missing_columns(eng) == [("deletion_run", "skipped_gone"), ("deletion_run", "batch_job")]
+        c.exec_driver_sql("INSERT INTO scan_progress (path, pid, started, items_found, error_count, status) VALUES ('/x', 1, '2026-09-23 00:00:00', 5, 2, 'running')")
+        c.exec_driver_sql("ALTER TABLE scan_progress DROP COLUMN error_count")
+    assert add_missing_columns(eng) == [("scan_progress", "error_count")]
     with Session(eng) as s:
-        run = s.get(DeletionRun, "r1")
-        assert (run.skipped_gone, run.batch_job) == (0, None)   # existing row got the model default
+        row = s.scalars(select(ScanProgress)).one()
+        assert (row.path, row.items_found, row.error_count) == ("/x", 5, 0)   # existing row got the model default
 
 
 def test_a_table_the_db_lacks_is_created_not_altered(tmp_path):

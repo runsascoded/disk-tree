@@ -1,14 +1,13 @@
 """Schema catch-up: add the columns a model has that an existing DB lacks.
 
 ``Base.metadata.create_all`` creates missing *tables* but never alters an
-existing one, so a column added to a model (``DeletionRun.batch_job``, CP8)
-silently broke every ORM select against an older ``disk-tree.db`` (the ORM
-names every mapped column: ``no such column: deletion_run.batch_job``). This
-pass diffs each model against ``PRAGMA table_info`` and ``ALTER TABLE … ADD
-COLUMN`` the gaps, so the next added column needs no hand-written migration.
+existing one, so a column added to a model silently breaks every ORM select
+against an older ``disk-tree.db`` (the ORM names every mapped column: ``no such
+column: …``). This pass diffs each model against ``PRAGMA table_info`` and
+``ALTER TABLE … ADD COLUMN`` the gaps, so the next added column needs no
+hand-written migration.
 
-Runs after every ``create_all`` (``sqla.db.init``, ``staged_backend``) and from
-``disk-tree migrate``. Only additive: a column the DB has that the model
+Runs after every ``create_all`` (``sqla.db.init``). Only additive: a column the DB has that the model
 doesn't is left alone; a NOT NULL column without a scalar default can't be
 added to a populated SQLite table and raises rather than guessing.
 """

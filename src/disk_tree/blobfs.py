@@ -368,9 +368,9 @@ def put(local_path: str, path: str) -> None:
     _known.add(path)
 
 
-#: Parquet files beside a blob that annotate it (`sidecar.py`, `extents.py`,
-#: `shallow.py`) — not scans, so never listed as blobs; kept/moved with it.
-SIDECAR_SUFFIXES = ('.vocab.parquet', '.reclaim.parquet', '.shallow.parquet')
+#: Parquet files beside a blob that annotate it (`sidecar.py`, `shallow.py`) —
+#: not scans, so never listed as blobs; kept/moved with it.
+SIDECAR_SUFFIXES = ('.vocab.parquet', '.shallow.parquet')
 
 
 def list_parquets(d: str) -> list[str]:

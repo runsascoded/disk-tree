@@ -72,13 +72,7 @@ export interface Row {
   cls2: number
   cls3: number
   cls4: number
-  /** Bytes by age at the scan date, `AGE_COLS` order (<1d … ≥3y;
-   *  specs/row-age-strata.md); null where the generation has no age columns. */
-  ages: number[] | null
 }
-
-/** The store's bytes-by-age columns (`dt_cloud.index.AGE_COLS`). */
-export const AGE_COLS = ['age_b0', 'age_b1', 'age_b2', 'age_b3', 'age_b4', 'age_b5', 'age_b6']
 
 interface GroupSpan {
   rowStart: number
@@ -379,7 +373,7 @@ export async function openIndex(env: Env, date: string, variant = 'path'): Promi
  * names on a v1 index, the layer-2's on a store sort (§1.1). `usr` and the
  * class pivots only where the file has them (cw has neither). */
 export const V1_ROW_COLUMNS = ['path', 'depth', 'usr', 'b', 'o', 'wts', 'wb', 'c2', 'c3', 'c4', 'a']
-export const V2_ROW_COLUMNS = ['path', 'depth', 'usr', 'kind', 'size', 'n_files', 'n_children', 'n_desc', 'mtime', 'mtime_mean', 'last_read', 'sum_storage_class_id_2', 'sum_storage_class_id_3', 'sum_storage_class_id_4', ...AGE_COLS]
+export const V2_ROW_COLUMNS = ['path', 'depth', 'usr', 'kind', 'size', 'n_files', 'n_children', 'n_desc', 'mtime', 'mtime_mean', 'last_read', 'sum_storage_class_id_2', 'sum_storage_class_id_3', 'sum_storage_class_id_4']
 
 /** What a shaped read projects: a v1 index reads every column (its columns
  * are the row); a store sort reads the `Row` columns it has, so a bridge
@@ -593,7 +587,6 @@ const toRowV1 = (r: Record<string, unknown>): Row => {
     cls2: num(r.c2),
     cls3: num(r.c3),
     cls4: num(r.c4),
-    ages: null,
   }
 }
 
@@ -617,7 +610,6 @@ const toRowV2 = (r: Record<string, unknown>): Row => {
     cls2: num(r.sum_storage_class_id_2),
     cls3: num(r.sum_storage_class_id_3),
     cls4: num(r.sum_storage_class_id_4),
-    ages: r.age_b0 == null ? null : AGE_COLS.map(c => num(r[c])),
   }
 }
 

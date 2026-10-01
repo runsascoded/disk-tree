@@ -148,7 +148,6 @@ def index(
     progress_interval: float = 1.0,
     excludes: list[str] | None = None,
     progress: bool = True,
-    one_fs: bool = False,
 ) -> IndexResult:
     path0 = path.rstrip('/') or '/'
     errors = ErrorCollector()
@@ -169,8 +168,6 @@ def index(
     def collect():
         nonlocal last_progress_time, items_count
         kwargs = dict(errors=errors, excludes=excludes, sudo=sudo, progress=progress)
-        if one_fs:  # local-only option; other backends don't take it
-            kwargs['one_fs'] = True
         for e in backend.list(path0, **kwargs):
             items_count += 1
             now = time_module.time()

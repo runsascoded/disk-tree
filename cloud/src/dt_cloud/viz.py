@@ -19,7 +19,7 @@ from pathlib import Path
 
 import duckdb
 
-from .index import AGE_COLS, STORE_L2, age_bucket_sql, duckdb_codec, store_columns
+from .index import STORE_L2, duckdb_codec, store_columns
 
 err = partial(print, file=sys.stderr)
 
@@ -124,8 +124,6 @@ def _write_store(
     user_sorts: bool = True,
     row_group_rows: int | None = None,
     user_sort_tiers: tuple[str, ...] | None = None,
-    asof_day: int = 0,
-    age_cols: tuple[str, ...] = (),
 ) -> dict[str, dict]:
     """The store's sorts beside ``path_index`` (specs/path-store.md §4.3) from
     the rolled-up dir slices (``ptu``, ``dir_stats``, ``dir_attr`` when
@@ -171,7 +169,7 @@ def _write_store(
             """
         )
     _rss("dstruct")
-    columns = store_columns([([*STORE_L2_SHAPE[0], *age_cols], STORE_L2_SHAPE[1])])
+    columns = store_columns([STORE_L2_SHAPE])
     dir_exprs = {
         "path": "p.path", "usr": "p.usr", "size": "p.b::BIGINT", "depth": "p.depth::INTEGER", "kind": "'dir'",
         "n_files": "p.o::BIGINT", "n_children": "(d.own_o + d.n_subdirs)::BIGINT", "n_desc": "n.n_desc::BIGINT",
@@ -181,7 +179,6 @@ def _write_store(
         "sum_storage_class_id_2": "coalesce(p.c2, 0)::BIGINT",
         "sum_storage_class_id_3": "coalesce(p.c3, 0)::BIGINT",
         "sum_storage_class_id_4": "coalesce(p.c4, 0)::BIGINT",
-        **{c: f"coalesce(p.{c}, 0)::BIGINT" for c in age_cols},
     }
     # An object is attributed to its dir's owner (the same deepest-prefix join
     # `dir_attr` resolved per dir; a leaf needs no explosion). The access log is
@@ -196,7 +193,6 @@ def _write_store(
         "mtime_mean": "floor(epoch(x.created))::DOUBLE",
         "created": "floor(epoch(x.created))::BIGINT", "last_read": "NULL::INTEGER",
         **{f"sum_storage_class_id_{c}": f"(CASE WHEN x.storage_class_id = {c} THEN x.size_bytes ELSE 0 END)::BIGINT" for c in (2, 3, 4)},
-        **{c: f"(CASE WHEN x.created IS NOT NULL AND {age_bucket_sql('x.created', str(asof_day))} = {i} THEN x.size_bytes ELSE 0 END)::BIGINT" for i, c in enumerate(age_cols)},
     }
     sel = lambda exprs: ", ".join(f"{exprs[c]} AS {c}" for c in columns)  # noqa: E731
     store = path_index.with_name(STORE_L2)
@@ -244,7 +240,6 @@ def write_path_index(
     path_index: Path | None = None,
     user_sorts: bool = True,
     row_group_rows: int | None = None,
-    age_strata: bool = False,
     user_sort_tiers: tuple[str, ...] | None = None,
 ) -> dict:
     """Write age.json / meta.json under ``out_dir`` (+ the path store's sorts
@@ -296,20 +291,7 @@ def write_path_index(
     con.execute(f"SET threads={os.environ.get('DUCKDB_THREADS', '4')}")
     if tmp := os.environ.get("DUCKDB_TMP"):
         con.execute(f"SET temp_directory='{tmp}'")
-    # A local capture's `bucket` is its scan root (`/Users/ryan`); drop the
-    # leading slash so it tiles like a bucket name (`Users/ryan`). Kept, it
-    # yields an empty first segment: a depth-1 node at path '' — the root's own
-    # path — whose parent walk never terminates. The filesystem root (`/`)
-    # strips to '' outright, so its rows re-split on their first segment
-    # (`Applications`, `Users`, … become the roots); files directly under `/`
-    # (`.file`, `.VolumeIcon.icns`) have no root to sit in and are dropped.
-    src = f"""(
-        SELECT * REPLACE (
-          CASE WHEN bucket = '' THEN split_part(name, '/', 1) ELSE bucket END AS bucket,
-          CASE WHEN bucket = '' THEN substr(name, strpos(name, '/') + 1) ELSE name END AS name)
-        FROM (SELECT * REPLACE (ltrim(bucket, '/') AS bucket) FROM {prepare_listing(con, listings)})
-        WHERE bucket <> '' OR strpos(name, '/') > 0
-    )"""
+    src = prepare_listing(con, listings)
 
     # --- layer-2 dir rollups (attribution-independent; cached when dir_cache) ---
     # Everything downstream needs objects only via these two aggregates:
@@ -320,17 +302,9 @@ def write_path_index(
     # object scans to two (attr dirs + storage classes now derive from these).
     fp_dir = "CASE WHEN name LIKE '%/%' THEN regexp_replace(name, '/[^/]*$', '') ELSE '' END"
     fp = f"CASE WHEN ({fp_dir}) = '' THEN bucket ELSE bucket || '/' || ({fp_dir}) END"
-    asof_day = (dt.date.fromisoformat(asof[:10]) - dt.date(1970, 1, 1)).days
-    # Bytes by age (`age_strata`, specs/done/row-age-strata.md): off by default,
-    # so a store that hasn't opted in keeps its schema, cache and cost.
-    age_cols = AGE_COLS if age_strata else ()
-    age_sums = "".join(
-        f"sum(CASE WHEN created IS NOT NULL AND {age_bucket_sql('created', str(asof_day))} = {i} THEN size_bytes END)::BIGINT AS {c}, "
-        for i, c in enumerate(age_cols)
-    )
     stats_pq = dir_cache / "dir-stats.parquet" if dir_cache else None
     age_pq = dir_cache / "age-days.parquet" if dir_cache else None
-    if stats_pq is not None and _cache_hit(con, stats_pq, (*DIR_STATS_COLS, *age_cols)):
+    if stats_pq is not None and _cache_hit(con, stats_pq, DIR_STATS_COLS):
         con.execute(f"CREATE TEMP VIEW dir_stats AS SELECT * FROM read_parquet('{stats_pq}')")
         err(f"dir-stats: cache hit ({stats_pq})")
     else:
@@ -352,7 +326,6 @@ def write_path_index(
               sum(CASE WHEN storage_class_id = 2 THEN size_bytes END)::BIGINT AS c2,
               sum(CASE WHEN storage_class_id = 3 THEN size_bytes END)::BIGINT AS c3,
               sum(CASE WHEN storage_class_id = 4 THEN size_bytes END)::BIGINT AS c4,
-              {age_sums}
               -- the store's two native stamps (path-store.md §1.1), max over the
               -- dir's own objects: `mtime` = `updated` where the platform has it
               -- (GCS), else `created` (S3/R2's LastModified lands there)
@@ -474,9 +447,6 @@ def write_path_index(
     # link them parent->child. No d1..d4 cap — the tree is as deep as the data.
 
     attr_join_s = "LEFT JOIN dir_attr t ON t.bucket = s.bucket AND t.dir = s.dir" if attr else ""
-    ages = "".join(f", {c}" for c in age_cols)
-    ages_s = "".join(f", s.{c}" for c in age_cols)
-    age_rollup = "".join(f", sum({c})::BIGINT AS {c}" for c in age_cols)
     user_sel = 't."user"' if attr else "CAST(NULL AS VARCHAR)"
     # Attribution is a join over the cached per-dir rollups — a few million
     # rows — never over objects. dir_agg also feeds the class-mix and
@@ -485,7 +455,7 @@ def write_path_index(
         f"""
         CREATE TEMP TABLE dir_agg AS
         SELECT s.fp, {user_sel} AS usr,
-          s.b, s.o, s.wts, s.wb, s.c2, s.c3, s.c4, xa.aday AS a, s.mtime_max, s.created_max{ages_s}
+          s.b, s.o, s.wts, s.wb, s.c2, s.c3, s.c4, xa.aday AS a, s.mtime_max, s.created_max
         FROM dir_stats s {attr_join_s}
         LEFT JOIN access_agg xa ON xa.bucket = s.bucket AND xa.dir = s.dir
         """
@@ -520,7 +490,7 @@ def write_path_index(
         ),
         exploded AS (
           SELECT array_to_string(segs[1:r.k], '/') AS path, r.k AS depth,
-            b, o, wts, wb, c2, c3, c4, a, usr, mtime_max, created_max{ages}
+            b, o, wts, wb, c2, c3, c4, a, usr, mtime_max, created_max
           FROM da, range(1, {maxseg} + 1) r(k)
           WHERE len(segs) >= r.k
         )
@@ -529,14 +499,14 @@ def write_path_index(
           sum(wts)::DECIMAL(38,0) AS wts, sum(wb)::BIGINT AS wb,
           sum(c2)::BIGINT AS c2, sum(c3)::BIGINT AS c3, sum(c4)::BIGINT AS c4,
           max(a) AS a,  -- subtree-max last-read epoch day (NULL = never read)
-          max(mtime_max)::BIGINT AS mtime, max(created_max)::BIGINT AS created{age_rollup}
+          max(mtime_max)::BIGINT AS mtime, max(created_max)::BIGINT AS created
         FROM exploded GROUP BY path, depth, usr
         """
     )
     _rss("ptu")
     sorts: dict[str, dict] = {}
     if path_index is not None:
-        sorts = _write_store(con, src, path_index, attr=attr, fp_dir=fp_dir, maxseg=maxseg, user_sorts=user_sorts, row_group_rows=row_group_rows, user_sort_tiers=user_sort_tiers, asof_day=asof_day, age_cols=age_cols)
+        sorts = _write_store(con, src, path_index, attr=attr, fp_dir=fp_dir, maxseg=maxseg, user_sorts=user_sorts, row_group_rows=row_group_rows, user_sort_tiers=user_sort_tiers)
         _rss("store")
         # Provenance sidecar: the attributing prefixes' user/source/evidence.
         from .extras import write_extras

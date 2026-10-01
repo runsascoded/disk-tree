@@ -15,9 +15,8 @@ from disk_tree import time
 from .base import ErrorCollector, ProgressCallback
 
 
-# gfind / find (and the native dt-walker) emit permission errors with straight
-# or Unicode curly quotes (' ')
-PERMISSION_DENIED_RE = re.compile(r"^(?:g?find|dt-walker): ['\u2018]([^'\u2019]+)['\u2019]: Permission denied$")
+# gfind / find emit permission errors with straight or Unicode curly quotes (' ')
+PERMISSION_DENIED_RE = re.compile(r"^g?find: ['\u2018]([^'\u2019]+)['\u2019]: Permission denied$")
 
 
 def run_gfind(

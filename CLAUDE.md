@@ -42,14 +42,9 @@ disk-tree index [URL]     # Scan a directory, an s3:// bucket, or an r2:// bucke
                           # buckets.yml `endpoint_url` — with `r2://` uris). gcs:// has no live lister
                           # and refuses (`UnsupportedBackend`): use `bulk-list` + `import` for it
   -C, --no-cache-read     # Force fresh scan (`index` otherwise returns any cached scan unconditionally)
-  -e, --require-external  # Skip (exit 0) if the write target is the boot disk (no opted-in external
-                          # volume mounted). For scheduled scans that must land on external media
   -g, --gc                # Garbage collect old scans
   -m, --mean-mtime        # Emit `mtime_mean` (size-weighted mean mtime; feeds the UI age lens)
   -M, --measure-memory    # Track peak memory
-  -o, --one-fs            # Don't descend into filesystems mounted below URL. `index -o /` on macOS = the
-                          # System volume + the Data volume via its firmlinks, once (the whole machine:
-                          # 8.74M entries / 457 GiB vs `~`'s 7.49M / 398 GiB, 2026-09-30). `capture -o` too
   -q, --no-progress       # Suppress the tqdm progress bar (scheduled/redirected runs — keeps logs small)
   -R, --auto-remote       # If the local write dir is low on space (< $DISK_TREE_LOW_SPACE_BYTES, 5 GiB)
                           # and $DISK_TREE_REMOTE_SCAN_TARGET is set, write the blob there instead
@@ -57,23 +52,8 @@ disk-tree index [URL]     # Scan a directory, an s3:// bucket, or an r2:// bucke
   -s, --sudo              # Run gfind with sudo (implies `-C`: a cached scan can't be known to be sudo)
   -t, --to TARGET         # Write this scan's blob to a dir or fsspec URL (r2://bucket/prefix, s3://…,
                           # gs://…) instead of the configured write dir; it joins the search path for
-                          # this run, so the scan reads back through it (spec `remote-scan-targets.md`)
-  -x, --extents           # Map physical extents → per-dir reclaimable bytes (APFS clones/hardlinks),
-                          # written as a `<blob>.reclaim.parquet` sidecar. macOS + local scans only;
-                          # exact when the scan root contains the sharing sources (home/full scan),
-                          # else an upper bound. `du` shows a `frees` column when the sidecar exists
-
-disk-tree capture PATH -t URL  # The split pipeline for a ~full disk (spec `cloud-reduce.md`): gfind →
-                          # layer-1 listing shards streamed straight to a dir/URL (`r2://…`), bounded
-                          # memory, zero local disk. Files only (dirs implied; APFS dirs hold 0 blocks).
-                          # Prints the capture dir `<to>/<host>/<root>/<stamp>` (+ `_SUCCESS.json`);
-                          # m3's AWS Batch ingest (`dt-cloud path-index`) aggregates it
-disk-tree scans register SRC  # Import `*.scan.json` manifests (one file, or a dir/URL of them) into
-                          # this DB. `index --to <url>` writes one beside each remote blob (the Scan
-                          # row, portable). Idempotent; put the blobs' dir on `DISK_TREE_SCAN_DIRS`
-                          # so they resolve
-
-disk-tree scans           # List cached scans (JSON)
+                          # this run, so the scan reads back through it (spec `remote-scan-targets.md`).
+                          # A URL target also gets a `<blob>.scan.json` manifest (the Scan row, portable)
 
 disk-tree recompress PATH…  # Rewrite v1 layer-2 listings as v2 in place, lossless (spec `listing-slim.md`
                           # phase 2): files, dirs (recursive `*.parquet`, sidecars skipped) or fsspec URLs
@@ -113,61 +93,12 @@ disk-tree tiers plan SIDECAR P THR  # The reader's span selection run offline ov
                           # attenuation, `-d` max depth, `-t` tier (default: from the name), `-C` skips the
                           # count, `-j` JSON. Measured on a 20K-child flat dir at 2048-row groups: `path`
                           # decodes 10 groups / 20,015 rows for 1,250 answers, `bysize` 1 group / 2,048
-
-disk-tree du URI          # Top-N heaviest children per level, from the freshest covering scan —
-                          # `du -d1 | sort -rh` without a filesystem walk (-d depth, -n top-N,
-                          # -a to include files, -j for JSON). Sizes are per-path block counts,
-                          # so extents shared via APFS clones/hardlinks are charged to every
-                          # linking path — see the caveat under Performance.
-                          # Shows a `frees` column (true reclaim) when a `-x` reclaim sidecar exists
-
-disk-tree reclaim PATH…   # What deleting PATHs would *actually* free: maps each file's physical
-                          # extents (`fcntl(F_LOG2PHYS_EXT)`) and subtracts blocks the surviving
-                          # partner roots still reference (`-p` adds one, `-P` drops the
-                          # auto-detected uv/pnpm caches). macOS-only. Measured 2026-08-29:
-                          # `oa/marin/.venv` reports 2.84 GiB, frees 249 MiB (91% cloned from
-                          # `~/.cache/uv`); ~43 s, dominated by walking 756K partner files
-
-disk-tree repos ROOT      # Delete-safety audit of git repos under ROOT (cleanup companion to `du`):
-                          # size + dirty/untracked counts + whether every local branch is on a
-                          # github/gitlab remote. `recoverable` = clean tree + all branches hosted;
-                          # DELETABLE also requires zero untracked. `-r` filters to recoverable,
-                          # `-m` sets a size floor (default 200M), `-j` for JSON
-
-disk-tree overcount URI   # How much URI's apparent size overstates physical bytes (APFS clones +
-                          # hardlinks). Per top-level child: apparent vs `exclusive`
-                          # (ATTR_CMNEXT_PRIVATESIZE — bytes only this subtree holds, i.e. what a
-                          # delete frees) vs `shared`. No open() per file; ~32K files/s. macOS-only.
-                          # Measured 2026-08-29: `oa/marin` 18.7 GiB apparent → 3.92 GiB exclusive
-
-disk-tree volumes [PATH]  # The APFS container PATH (default `/`) lives on: each volume's used bytes, mount
-                          # point and snapshots, plus free space — what no walk shows (Preboot, VM/swap,
-                          # Recovery, the sealed System volume, OS-update snapshots). `-j` JSON. macOS-only
-
-disk-tree stage URI…      # Stage URIs for deletion into a shared open plan (spec staged-delete.md,
-                          # CP1). The opt-in "delete" model: nothing dies by inaction
-disk-tree staged          # List open plans (staged sets) + recent runs (-j for JSON)
-disk-tree unstage URI…    # Remove URIs from every open plan
-disk-tree undo RUN_ID     # Undo a deletion run: restore the objects it deleted where the store allows
-                          # it (S3/R2 versioning — remove the delete-markers; local has no undo).
-                          # Dry by default (report restorable scope); `-f`/`--for-real` restores. Records
-                          # the run's `undo_state` (spec staged-delete.md CP5)
-
-disk-tree dispatch [PLAN] # Execute a plan (id/name; default the open `Staged` plan): delete its
-                          # staged URIs via the backend, or (default) dry-run + report bytes/objects.
-                          # `-f`/`--for-real` deletes + closes the plan; records a run + per-URI bands.
-                          # `-s`/`--serve` instead runs the CP4 drainer: poll the edge's D1 (the
-                          # browser dispatched runs there; the edge can't reach user buckets) via the
-                          # `CLOUDFLARE_API_TOKEN` and execute each enqueued run here, deleting through
-                          # `backend_for` (`-i` base poll secs, `-o` once, Ctrl-C stops). Announces
-                          # per-run results to Slack/Discord per the `delete:` block in buckets.yml
-                          # (`chat`/`undo`/`database_id` + secret ENV VAR NAMES); needs `notify` for chat
 ```
 
 ### Site (`site/`) and widget packages
 
 `site/` is the hosted/serverless app: Vite + React + TypeScript, with Pages Functions over R2 / GCS +
-D1 (disk.rbw.sh, r2.rbw.sh, the gcs/cw deployments). Its chart-lib-free DIY-SVG/canvas widgets come
+D1 (r2.rbw.sh, the gcs/cw deployments). Its chart-lib-free DIY-SVG/canvas widgets come
 from two workspace packages:
 - **`@rdub/treemap`** (`packages/treemap/`) — the SOTA treemap core + layout/color primitives:
   `<Treemap>` (SVG + canvas renderers, shared-edge tiling, dust texturing, per-cell `ring`
@@ -183,7 +114,6 @@ One gate (`_lib/auth.ts`, `@open-athena/auth` over D1): `identify` → `Identity
 - `/auth/google` (+ `/callback`, `/onetap`) — Google OIDC → email session; `/auth/email/*` — emailed code / magic link → email session
 - `/api/auth/*` — the package's routes: `whoami`, `exchange` (`?key=` share link → grant session), `logout`, request-access, admin grant/request/log console
 - `/api/token` — a session's personal agent token (a non-expiring Bearer grant, the base scope only; grants can't mint one)
-- `POST /api/app-link` → `GET /auth/app-link?token=` — the macOS app's sign-in hand-off ("Open in disky" in the user menu): a session mints a single-use, 60 s grant for its own email + scopes (same-origin POST only); the app's webview redeems it into an ordinary email session and the grant is revoked. Contract: `specs/app-link.md`
 
 ## Development
 
@@ -206,8 +136,8 @@ cd site && pnpm dev
 
 ## Data Flow
 
-1. `disk-tree index /path` runs `gfind` or `aws s3 ls` (`capture` / `bulk-list` → `import` for the
-   split and bulk pipelines)
+1. `disk-tree index /path` runs `gfind` or `aws s3 ls` (`bulk-list` → `import` for the bulk
+   pipeline)
 2. Output parsed into DataFrame, aggregated by directory
 3. Saved as Parquet, metadata recorded in SQLite
 4. `dt-cloud path-index` / `disk-tree tiers` cut the path store; `dt-cloud index-sync` publishes its
@@ -222,12 +152,9 @@ Default paths (override with `DISK_TREE_ROOT`):
 
 **Blob storage is a search path, not a single directory.** The DB stays on the boot disk (small, always mounted); blobs may live anywhere on `config.scan_read_dirs()`, since `Scan.blob` holds a basename. Creating `<volume>/disk-tree/scans` on an external volume opts it in — no config needed — and it becomes the *write* target while mounted; unplugging simply drops it out of the search path. `DISK_TREE_SCAN_DIRS` (colon-separated, priority order) overrides discovery, and an explicit `DISK_TREE_ROOT` disables it entirely so tests and alternate profiles stay self-contained. A candidate under an unmounted `/Volumes/<name>` is never written to — that would silently create the directory on the boot disk.
 
-A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — the remote-target story for a boot disk too full to hold scan output (spec `remote-scan-targets.md`). `index --to <url>` (or `DISK_TREE_REMOTE_SCAN_TARGET` + `-R`) writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam); the reclaim sidecar and `--extents` are local-only and skip remote blobs. The shallow sidecar (`<root-stem>.shallow.parquet`, each chunk's top level, written by every hybrid save) follows the blob anywhere, and scan blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
+A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — the remote-target story for a boot disk too full to hold scan output (spec `remote-scan-targets.md`). `index --to <url>` (or `DISK_TREE_REMOTE_SCAN_TARGET` + `-R`) writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam). The shallow sidecar (`<root-stem>.shallow.parquet`, each chunk's top level, written by every hybrid save) follows the blob anywhere, and scan blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
 
 **Cross-account credentials** — a `buckets.yml` entry (or `defaults`) may carry a `profile:` naming an AWS credential profile (`blobfs.bucket_profile`), so a source and a target in *different* accounts each authenticate with their own key inside one `index --to` run. It threads to every S3/R2 seam: the `s3fs` blob IO (`_s3fs(endpoint, profile)`), the `aws`-CLI lister (`S3Backend(profile=…)`), and the `boto3` bulk lister (`S3BulkLister(profile=…)`, `bulk-list -f`). No profile → ambient credentials (env / default profile), the single-account default. Cross-account needs per-bucket endpoints too, so leave `DISK_TREE_R2_ENDPOINT_URL` unset (it globally overrides all per-bucket endpoints).
-
-- `disk-tree scans dirs` — show the write target and every read dir, with blob counts (URL entries show reachability)
-- `disk-tree scans move [DEST]` — relocate blobs between local dirs (no DB rewrite). Keeps each path's newest scan **and its chunk closure** on the boot disk by default (`-L` to move those too), so browsing the latest scan doesn't depend on the volume being plugged in
 
 Stream-engine tuning knobs (env, all with measured defaults — see the constants block in `find/aggregate_stream.py`):
 - `DISK_TREE_FLUSH_ROWS` — output row-group size (read-side: smaller = less fetched per directory browse, bigger footer)
@@ -246,10 +173,10 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet). CI a
 ## Performance
 
 - Depth column enables parquet predicate pushdown (only load needed rows)
-- `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning (rows sorted `(depth, path)`); wired into `du` / `scans` / staged-delete reads
+- `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning (rows sorted `(depth, path)`)
 - Denormalized stats avoid parquet reads for the scan list
 
-**Sizes are per-path, not per-extent.** `gfind -printf '%b'` reports blocks allocated to a *path*; APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount. So a subtree's reported size is an upper bound on what deleting it frees. Measured 2026-08-29: deleting 35 dormant `.venv` dirs totalling 16.9 GiB freed 9 GiB — uv's default macOS link mode is `clone`, so the remainder stayed live in `~/.cache/uv`. Clones are invisible to `stat` (distinct inodes, `nlink == 1`), so inode/link-count bookkeeping catches hardlinks only — and hardlinks are nearly irrelevant here: a census of `$HOME` found `nlink > 1` over-counting just **4.3 GiB of 385.9 GiB (1.1%)**, which is why `%i`/`%n` are *not* indexed. `disk-tree reclaim` (extent intersection, for a custom keep-set) and `disk-tree overcount` (`ATTR_CMNEXT_PRIVATESIZE`, no open per file, for apparent-vs-exclusive) answer the question properly, on demand. The whole-*volume* overcount is free without either — `df` counts shared blocks once, so `apparent_total − df_used` is the number, but only for a scan that covers the entire volume (a subtree's apparent can't be compared to the volume's `df`); for a subtree, `overcount`'s `Σexclusive` is the physical footprint.
+**Sizes are per-path, not per-extent.** `gfind -printf '%b'` reports blocks allocated to a *path*; APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount. So a subtree's reported size is an upper bound on what deleting it frees. Measured 2026-08-29: deleting 35 dormant `.venv` dirs totalling 16.9 GiB freed 9 GiB — uv's default macOS link mode is `clone`, so the remainder stayed live in `~/.cache/uv`. Clones are invisible to `stat` (distinct inodes, `nlink == 1`), so inode/link-count bookkeeping catches hardlinks only — and hardlinks are nearly irrelevant here: a census of `$HOME` found `nlink > 1` over-counting just **4.3 GiB of 385.9 GiB (1.1%)**, which is why `%i`/`%n` are *not* indexed. The whole-*volume* overcount is free — `df` counts shared blocks once, so `apparent_total − df_used` is the number, but only for a scan that covers the entire volume (a subtree's apparent can't be compared to the volume's `df`).
 
 ## TODOs / Known Issues
 

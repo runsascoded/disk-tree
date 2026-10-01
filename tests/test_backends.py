@@ -4,9 +4,8 @@ fall through to the *local* backend and "succeed" with an empty scan).
 """
 
 import re
-import sys
 from io import StringIO
-from os.path import dirname, exists, join
+from os.path import dirname, join
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,9 +13,6 @@ import pytest
 from disk_tree import find
 from disk_tree.backends import LocalBackend, S3Backend, UnsupportedBackend, backend_for
 from disk_tree.blobfs import R2_ENDPOINT_VAR
-
-#: The Tauri app's native walker (`apps/tauri`, on the app's branch); its seam test skips where it isn't built.
-DT_WALKER = join(dirname(dirname(__file__)), 'apps', 'tauri', 'target', 'release', 'dt-walker')
 
 TESTDATA = join(dirname(__file__), 'data')
 EP = 'https://acct.r2.cloudflarestorage.com'
@@ -90,92 +86,19 @@ def test_gcs_refuses_live_operations():
     msg = "live scanning of gcs:// isn't implemented; import a listing instead (`disk-tree bulk-list` + `disk-tree import -l <listing>`)"
     with pytest.raises(NotImplementedError, match=re.escape(msg)):
         list(gcs.list('gcs://bk/p'))
-    with pytest.raises(NotImplementedError, match=r'delete of gcs://'):
-        gcs.delete('gcs://bk/p')
     with pytest.raises(NotImplementedError, match=r'existence check of gcs://'):
         gcs.exists('gcs://bk/p')
 
 
-MACOS_MOUNT = """\
-/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)
-devfs on /dev (devfs, local, nobrowse)
-/dev/disk3s6 on /System/Volumes/VM (apfs, local, noexec, journaled, noatime, nobrowse)
-/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled, nobrowse, protect, root data)
-/dev/disk3s3 on /Volumes/Recovery (apfs, local, journaled, nobrowse)
-/dev/disk5s1 on /Volumes/crucial x6 (apfs, local, nodev, nosuid, journaled, noowners)
-map auto_home on /System/Volumes/Data/home (autofs, automounted, nobrowse)
-"""
-LINUX_MOUNT = """\
-/dev/nvme0n1p1 on / type ext4 (rw,relatime,discard)
-proc on /proc type proc (rw,nosuid,nodev,noexec,relatime)
-/dev/nvme1n1 on /home/ubuntu/data type xfs (rw,relatime)
-"""
-
-
-def test_mount_points_parses_macos_and_linux(monkeypatch):
+def test_gfind_cmd_prunes_cloudstorage(monkeypatch):
+    """The gfind command prunes the CloudStorage dirs under the root (printing
+    each pruned dir itself as an empty leaf)."""
     from disk_tree.backends import local
-    for out, expected in [
-        (MACOS_MOUNT, ['/', '/dev', '/System/Volumes/VM', '/System/Volumes/Data', '/Volumes/Recovery', '/Volumes/crucial x6', '/System/Volumes/Data/home']),
-        (LINUX_MOUNT, ['/', '/proc', '/home/ubuntu/data']),
-    ]:
-        monkeypatch.setattr(local.subprocess, 'run', lambda *a, out=out, **kw: MagicMock(stdout=out))
-        assert local.mount_points() == expected
-
-
-def test_mounts_below():
-    from disk_tree.backends.local import mounts_below
-    mounts = ['/', '/dev', '/System/Volumes/Data', '/System/Volumes/Data/home', '/Volumes/crucial x6', '/Users/x/mnt/fuse']
-    assert mounts_below('/', mounts) == ['/System/Volumes/Data', '/System/Volumes/Data/home', '/Users/x/mnt/fuse', '/Volumes/crucial x6', '/dev']
-    assert mounts_below('/Users/x', mounts) == ['/Users/x/mnt/fuse']
-    assert mounts_below('/Users/x/mnt/fuse', mounts) == []
-
-
-def test_one_fs_prunes_mounts_below_the_root_in_the_gfind_cmd(monkeypatch):
-    """`one_fs` on the gfind path: every mount strictly below the root becomes a
-    `-prune` (CloudStorage stays pruned too); without it, only CloudStorage."""
-    from disk_tree.backends import local
-    monkeypatch.delenv('DISK_TREE_WALKER', raising=False)
-    monkeypatch.setattr(local, 'mount_points', lambda: ['/', '/dev', '/System/Volumes/Data', '/Volumes/ext'])
     cmds = []
     monkeypatch.setattr(local, 'run_gfind', lambda cmd, *a, **kw: cmds.append(cmd) or iter(()))
-    list(LocalBackend().list('/', one_fs=True))
     list(LocalBackend().list('/'))
     printf = ['-printf', r'%y %b %T@ %p\0']
     prune = lambda p: ['-path', p, *printf, '-prune', '-o']
     assert cmds == [
-        [local.FIND, '/', *prune(local.CLOUDSTORAGE_PATHS[0]), *prune(local.CLOUDSTORAGE_PATHS[1]),
-         *prune('/System/Volumes/Data'), *prune('/Volumes/ext'), *prune('/dev'), *printf],
         [local.FIND, '/', *prune(local.CLOUDSTORAGE_PATHS[0]), *prune(local.CLOUDSTORAGE_PATHS[1]), *printf],
     ]
-
-
-@pytest.mark.skipif(sys.platform != 'darwin', reason='dt-walker is a macOS getattrlistbulk walker')
-@pytest.mark.skipif(not exists(DT_WALKER), reason='dt-walker not built (cargo build --release in apps/tauri)')
-def test_dt_walker_seam_matches_gfind(tmp_path, monkeypatch):
-    """`DISK_TREE_WALKER` swaps the scan source from `gfind` to the native walker
-    and produces a byte-identical aggregated scan — the drop-in guarantee."""
-    tree = tmp_path / 'tree'
-    (tree / 'sub').mkdir(parents=True)
-    (tree / 'a.txt').write_text('hello world\n')
-    (tree / 'big.bin').write_bytes(b'\0' * 100_000)
-    (tree / 'sub' / 'b.txt').write_text('x\n')
-
-    monkeypatch.delenv('DISK_TREE_WALKER', raising=False)
-    via_gfind = find.index(str(tree)).df
-
-    monkeypatch.setenv('DISK_TREE_WALKER', DT_WALKER)
-    via_walker = find.index(str(tree)).df
-
-    # Same rows, same order, same every column (path/size/mtime/kind/parent/uri/
-    # n_desc/n_children/depth). mtime is int-truncated identically by both paths.
-    assert via_walker.equals(via_gfind)
-
-
-def test_one_fs_passes_through_to_the_walker(monkeypatch):
-    from disk_tree.backends import local
-    monkeypatch.setenv('DISK_TREE_WALKER', '/bin/dt-walker')
-    monkeypatch.setattr(local, 'mount_points', lambda: pytest.fail('the walker checks mounts itself'))
-    cmds = []
-    monkeypatch.setattr(local, 'run_gfind', lambda cmd, *a, **kw: cmds.append(cmd) or iter(()))
-    list(LocalBackend().list('/Users/x', one_fs=True))
-    assert cmds == [['/bin/dt-walker', '--no-default-excludes', '--one-fs', '/Users/x']]

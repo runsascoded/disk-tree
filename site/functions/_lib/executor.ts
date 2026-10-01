@@ -15,13 +15,12 @@ import type { D1Database } from '@cloudflare/workers-types'
 import { type DispatchErr, type DispatchReq, type ExecEnv, type Executor, refuse } from './dispatch.js'
 import { planDigest, planRuns, realGate, type RunRow } from './plans.js'
 import { announceFinished, notifyPlan, runEvent } from './stagedSlack.js'
-import { laptop } from './laptopDispatch.js'
 import { planSweep } from './planDispatch.js'
 import { sweep } from './sweepDispatch.js'
 
 export type { DispatchReq, ExecEnv }
 
-export const EXECUTOR_KINDS = ['plan-sweep', 'sweep', 'laptop'] as const
+export const EXECUTOR_KINDS = ['plan-sweep', 'sweep'] as const
 export type ExecutorKind = typeof EXECUTOR_KINDS[number]
 
 /** The deployment's executor: `EXECUTOR`, default `plan-sweep`. Anything else
@@ -32,10 +31,10 @@ export function executorOf(env: { EXECUTOR?: string }): ExecutorKind {
   return e as ExecutorKind
 }
 
-export const EXECUTORS: Record<ExecutorKind, Executor> = { 'plan-sweep': planSweep, sweep, laptop }
+export const EXECUTORS: Record<ExecutorKind, Executor> = { 'plan-sweep': planSweep, sweep }
 
 /** The plan-first executor an HTTP route under `/api/plan-sweep/` dispatches
- * to: the deployment's own (`laptop` on m3), never gcs's `sweep`. */
+ * to: the deployment's own, never gcs's `sweep`. */
 export const planFirstKind = (env: { EXECUTOR?: string }): ExecutorKind => {
   const k = executorOf(env)
   return k === 'sweep' ? 'plan-sweep' : k
@@ -69,7 +68,7 @@ export async function dispatchPlan(
 ): Promise<DispatchResult> {
   if (!env.DB) return refuse(503, 'plans store not configured (no D1 binding)')
   // Each executor checks its own credentials in `prepare` (the GCP ones need
-  // `GCP_SA_KEY`; `laptop` needs a live drainer).
+  // `GCP_SA_KEY`).
   const ex = executors[kind]
   if (req.date !== undefined && !ex.dateRe.test(req.date)) return refuse(400, `date must be a scan id (${ex.dateHint})`)
   if (req.mode === 'dry' && req.date === undefined) return refuse(400, `date required for a dry run (${ex.dateHint})`)

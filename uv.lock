@@ -730,9 +730,6 @@ gcs = [
 mem = [
     { name = "memray" },
 ]
-notify = [
-    { name = "thrds" },
-]
 r2 = [
     { name = "boto3" },
     { name = "fsspec" },
@@ -778,11 +775,10 @@ requires-dist = [
     { name = "s3fs", marker = "extra == 'r2'", specifier = ">=2024.10" },
     { name = "s3fs", marker = "extra == 's3'", specifier = ">=2024.10" },
     { name = "sqlalchemy" },
-    { name = "thrds", marker = "extra == 'notify'" },
     { name = "tqdm" },
     { name = "utz" },
 ]
-provides-extras = ["dev", "mem", "notify", "gcs", "s3", "r2", "bulk"]
+provides-extras = ["dev", "mem", "gcs", "s3", "r2", "bulk"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest" }]

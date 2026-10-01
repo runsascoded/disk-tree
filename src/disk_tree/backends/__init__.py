@@ -26,9 +26,6 @@ class UnsupportedBackend(Backend):
     def list(self, url: str, **kwargs):
         raise self._refuse('live scanning')
 
-    def delete(self, url: str) -> None:
-        raise self._refuse('delete')
-
     def exists(self, url: str) -> bool:
         raise self._refuse('existence check')
 

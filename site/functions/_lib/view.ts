@@ -141,11 +141,9 @@ interface Agg {
   nc: number | null
   /** All descendants (rows under the path in the `path` sort); null on v1. */
   nd: number | null
-  /** Bytes by age bucket (`Row.ages`), summed over rows; null when none had them. */
-  ag: number[] | null
 }
 
-const newAgg = (): Agg => ({ b: 0, o: 0, wts: 0, wb: 0, a: null, cb: {}, ub: {}, kind: null, nc: null, nd: null, ag: null })
+const newAgg = (): Agg => ({ b: 0, o: 0, wts: 0, wb: 0, a: null, cb: {}, ub: {}, kind: null, nc: null, nd: null })
 
 function merge(a: Agg, r: Row): void {
   a.b += r.size
@@ -162,7 +160,6 @@ function merge(a: Agg, r: Row): void {
   a.kind = r.kind
   if (r.n_children != null) a.nc = r.n_children
   if (r.n_desc != null) a.nd = r.n_desc
-  if (r.ages) a.ag = a.ag ? a.ag.map((v, i) => v + r.ages![i]) : [...r.ages]
 }
 
 function subtract(parent: Agg, kids: Agg[]): Agg {
@@ -173,7 +170,6 @@ function subtract(parent: Agg, kids: Agg[]): Agg {
   out.o = Math.max(0, parent.o - sum(a => a.o))
   out.wts = parent.wts - sum(a => a.wts)
   out.wb = Math.max(0, parent.wb - sum(a => a.wb))
-  if (parent.ag) out.ag = parent.ag.map((v, i) => Math.max(0, v - kids.reduce((s, k) => s + (k.ag?.[i] ?? 0), 0)))
   for (const key of ['cb', 'ub'] as const) {
     for (const [k, v] of Object.entries(parent[key])) {
       const r = v - kids.reduce((s, kid) => s + (kid[key][k] ?? 0), 0)
@@ -197,7 +193,6 @@ function scale(a: Agg, frac: number): Agg {
   out.kind = a.kind
   out.nc = a.nc
   out.nd = a.nd
-  out.ag = a.ag && a.ag.map(v => v * frac)
   for (const key of ['cb', 'ub'] as const) for (const [k, v] of Object.entries(a[key])) out[key][k] = v * frac
   return out
 }
@@ -206,7 +201,6 @@ function display(a: Agg): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   if (a.wb) out.d = Math.round(a.wts / a.wb / 86400)
   if (a.a != null) out.a = a.a
-  if (a.ag?.some(v => v > 0)) out.ag = a.ag.map(v => Math.round(v))
   const desc = (m: Record<string, number>) =>
     Object.fromEntries(Object.entries(m).sort((x, y) => y[1] - x[1]))
   if (Object.keys(a.cb).length) out.cb = desc(a.cb)

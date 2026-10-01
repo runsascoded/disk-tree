@@ -41,8 +41,6 @@ disk-tree index --help
 #   -s, --sudo             Run gfind with sudo
 #   -m, --measure-memory   Track peak memory usage
 #   --help                 Show this message and exit.
-
-disk-tree scans           # List cached scans (JSON)
 ```
 
 ### Examples

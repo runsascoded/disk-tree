@@ -63,13 +63,13 @@ def test_to_writes_the_blob_to_the_url_target_and_reads_it_back(src: Path, tmp_p
     ]
 
     # A later process finds the blob through the search path — no `--to` needed.
-    r2 = _run(['scans', 'dirs'], root, **{config.DISK_TREE_SCAN_DIRS_VAR: f'{target}:{root / "scans"}'})
+    env = {**os.environ, config.DISK_TREE_ROOT_VAR: str(root), config.DISK_TREE_SCAN_DIRS_VAR: f'{target}:{root / "scans"}'}
+    r2 = subprocess.run(
+        [sys.executable, '-c', f'from disk_tree.resolve import resolve_blob; print(resolve_blob({blobs[0]!r}))'],
+        env=env, capture_output=True, text=True, check=False,
+    )
     assert r2.returncode == 0, r2.stderr
-    assert r2.stdout.rstrip('\n').split('\n') == [
-        f'write: {target}',
-        f'  * {target}  (1 blobs, remote)',
-        f'    {root / "scans"}  (absent)',
-    ]
+    assert r2.stdout == f'{target}/{blobs[0]}\n'
 
 
 def test_to_writes_a_groups_json_footer_sidecar(src: Path, tmp_path: Path):
