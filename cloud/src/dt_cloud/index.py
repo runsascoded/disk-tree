@@ -214,6 +214,7 @@ def write_sorts(
     sort_variants: tuple[tuple[str, ...], ...] = (),
     groups: bool = True,
     row_group_rows: int = ROW_GROUP_SIZE,
+    variant_tiers: tuple[str, ...] | None = None,
 ) -> dict[str, dict]:
     """Cut the store's two sorts (+ ``sort_variants`` of each) from the union
     at ``store`` into ``out_dir`` under their served names, with the
@@ -231,11 +232,11 @@ def write_sorts(
     stem = str(out / "path-index")
     written = write_tiers(
         store, stem, tiers=TIERS, row_group_rows=row_group_rows,
-        sort_variants=sort_variants, con=con, groups=groups,
+        sort_variants=sort_variants, con=con, groups=groups, variant_tiers=variant_tiers,
     )
     result: dict[str, dict] = {}
     for tier in TIERS:
-        for variant in ((), *sort_variants):
+        for variant in ((), *(sort_variants if variant_tiers is None or tier in variant_tiers else ())):
             src = tier_path(stem, tier, variant)
             dst = str(out / variant_file(tier, variant))
             os.replace(src, dst)
@@ -408,6 +409,7 @@ def write_index(
     age_only: bool = False,
     sort_variants: tuple[tuple[str, ...], ...] = (),
     row_group_rows: int = ROW_GROUP_SIZE,
+    variant_tiers: tuple[str, ...] | None = None,
 ) -> dict:
     """Write the store's sorts (`path-index.parquet`, `path-index-bysize.parquet`,
     + `sort_variants` copies) and the age pyramid under ``out_dir`` from
@@ -434,7 +436,7 @@ def write_index(
                 "pyramid": pyramid,
                 "files": {AGE_PYRAMID_VARIANTS[b]: s["file"] for b, s in pyramid["bins"].items()},
             }
-        sorts = write_sorts(con, store, out, sort_variants=sort_variants, row_group_rows=row_group_rows)
+        sorts = write_sorts(con, store, out, sort_variants=sort_variants, row_group_rows=row_group_rows, variant_tiers=variant_tiers)
         n = sorts["path"]["rows"]
         err(f"store: {n:,} rows ({', '.join(columns)}) over {buckets}")
         pyramid = write_age_pyramid(con, store, out)

@@ -86,8 +86,13 @@ export function seedGeneration(raw: Sqlite, o: {
     }
     raw.exec(`INSERT INTO index_schema (${storeCol}date, variant, version, schema_json, floor_bytes, gen, dir) VALUES (${storeVal}${q(o.date)}, ${q(d1v)}, ${v.schema.version}, ${q(JSON.stringify(v.schema.schema))}, ${v.schema.floor_bytes == null ? 'NULL' : v.schema.floor_bytes}, ${q(o.gen)}, ${q(o.dir)})`)
     const f = o.files[variant]
-    const base = variant === 'path' ? 'path-index' : `path-index-${variant}`
-    FILES.set(`${o.dir}/${base}.parquet`, fixture(f.parquet))
-    FILES.set(`${o.dir}/${base}.groups.json`, fixture(f.groups))
+    // Where the reader looks for it — `index.ts` `indexKey`'s names, spelled
+    // out: importing `./index` here would cycle through the mocked S3 module
+    // (whose factory imports this file) and hang the test file at load.
+    const tier = variant.endsWith('-user') ? variant.slice(0, -'-user'.length) : variant
+    const sort = variant === 'user' || variant.endsWith('-user') ? '-by-user' : ''
+    const key = `${o.dir}/path-index${tier === 'path' || tier === 'user' ? '' : `-${tier}`}${sort}.parquet`
+    FILES.set(key, fixture(f.parquet))
+    FILES.set(key.replace(/\.parquet$/, '.groups.json'), fixture(f.groups))
   }
 }

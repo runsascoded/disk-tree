@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Env } from './auth'
 import { serverTiming } from './edgeCache'
-import { blobKey, columnsFor, groupMatchesSize, indexKey, type IndexHandle, openIndex, pathGens, planRects, planSizeRects, readAsks, readRects, readSizeRects, type Rect, type Row, rowColumns, sizeVariant } from './index'
+import { blobKey, columnsFor, groupMatchesSize, indexKey, type IndexHandle, lensSorted, openIndex, pathGens, planRects, planSizeRects, readAsks, readRects, readSizeRects, type Rect, type Row, rowColumns, sizeVariant } from './index'
 import { storeEnv } from './stores'
 import { sqliteD1 } from './testD1'
 import { type D1Variant, fixture, FILES, readJson, seedGeneration } from './testStore'
@@ -221,7 +221,7 @@ describe('buildView on a store generation', () => {
     const v1 = await readJson<Record<string, D1Variant>>('path-index-zstd.d1.json')
     const v2Lens = await readJson<Record<string, D1Variant>>('v2-lens/d1.json')
     seedGeneration(raw, { date: V2_LENS, gen: 'g0', dir: `listing/${V2_LENS}/index/g0`, variants: { user: v1.path }, files: { user: { parquet: 'path-index-zstd.parquet', groups: 'path-index-zstd.groups.json' } } })
-    seedGeneration(raw, { date: V2_LENS, gen: 'g5', dir: `cw-l2/${V2_LENS}/index/g5`, variants: v2Lens, files: { path: { parquet: 'v2-lens/path-index.parquet', groups: 'v2-lens/path-index.groups.json' }, bysize: { parquet: 'v2-lens/path-index-bysize.parquet', groups: 'v2-lens/path-index-bysize.groups.json' } } })
+    seedGeneration(raw, { date: V2_LENS, gen: 'g5', dir: `cw-l2/${V2_LENS}/index/g5`, variants: v2Lens, files: { path: { parquet: 'v2-lens/path-index.parquet', groups: 'v2-lens/path-index.groups.json' }, bysize: { parquet: 'v2-lens/path-index-bysize.parquet', groups: 'v2-lens/path-index-bysize.groups.json' }, 'bysize-user': { parquet: 'v2-lens/path-index-bysize-by-user.parquet', groups: 'v2-lens/path-index-bysize-by-user.groups.json' } } })
     const env = { DB: db, ROOT_LABEL: 'root', BASE_SCOPE: 'gcs', GCS_HMAC_KEY_ID: 'k', GCS_HMAC_SECRET: 's' } as Env
     expect(await lensSort(env, V2_LENS)).toBe('path')
     expect(await lensSort(env, V1)).toBe('user')
@@ -232,6 +232,10 @@ describe('buildView on a store generation', () => {
     expect(want.map(r => r.path)).toEqual(['bk/nest', 'bk/nest/a', 'bk/nest/a/b', 'bk/nest/a/b/c0', 'bk/nest/a/b/c1', 'bk/nest/a/b/c2', 'bk/nest/a/b/c3', 'bk/nest/a/z'])
     expect(byPath(await readRects(await openIndex(env, V2_LENS, 'path'), [root], undefined, alice))).toEqual(want)
     expect(byPath(await readSizeRects(await openIndex(env, V2_LENS, 'bysize'), [root], () => 0, alice))).toEqual(want)
+    // The user-first copy gcs keeps (`path-index -u bysize`): the same rows, from the user's own groups.
+    const byUser = await openIndex(env, V2_LENS, 'bysize-user')
+    expect([byUser.version, lensSorted(byUser.variant)]).toEqual([2, true])
+    expect(byPath(await readSizeRects(byUser, [root], () => 0, alice))).toEqual(want)
   })
 
   it('the same view from path (a small subtree by the default cutoff), the blob-served copy, and the secondary store', async () => {
@@ -359,11 +363,12 @@ it('fixtures are registered', () => {
     `cw-l2/${V2_BLOB}/index/g3/path-index.groups.json`, `cw-l2/${V2_BLOB}/index/g3/path-index.parquet`,
     `cw-l2/${V2_STALE}/index/g4/path-index-bysize.groups.json`, `cw-l2/${V2_STALE}/index/g4/path-index-bysize.parquet`,
     `cw-l2/${V2_STALE}/index/g4/path-index.groups.json`, `cw-l2/${V2_STALE}/index/g4/path-index.parquet`,
+    `cw-l2/${V2_LENS}/index/g5/path-index-bysize-by-user.groups.json`, `cw-l2/${V2_LENS}/index/g5/path-index-bysize-by-user.parquet`,
     `cw-l2/${V2_LENS}/index/g5/path-index-bysize.groups.json`, `cw-l2/${V2_LENS}/index/g5/path-index-bysize.parquet`,
     `cw-l2/${V2_LENS}/index/g5/path-index.groups.json`, `cw-l2/${V2_LENS}/index/g5/path-index.parquet`,
     `listing/${V1}/index/g1/path-index.groups.json`, `listing/${V1}/index/g1/path-index.parquet`,
     `listing/${V2_STALE}/index/g0/path-index-coarse20.groups.json`, `listing/${V2_STALE}/index/g0/path-index-coarse20.parquet`,
-    `listing/${V2_LENS}/index/g0/path-index-user.groups.json`, `listing/${V2_LENS}/index/g0/path-index-user.parquet`,
+    `listing/${V2_LENS}/index/g0/path-index-by-user.groups.json`, `listing/${V2_LENS}/index/g0/path-index-by-user.parquet`,
     `meta-l2/${V2}/index/g2/path-index-bysize.groups.json`, `meta-l2/${V2}/index/g2/path-index-bysize.parquet`, `meta-l2/${V2}/index/g2/path-index.groups.json`, `meta-l2/${V2}/index/g2/path-index.parquet`,
   ])
   expect(fixture('v2/d1.json').endsWith('/functions/_lib/fixtures/v2/d1.json')).toBe(true)

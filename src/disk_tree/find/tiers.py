@@ -123,6 +123,7 @@ def write_tiers(
     mem: str = DEFAULT_MEM,
     threads: int | None = None,
     tmp_dir: str | None = None,
+    variant_tiers: tuple[str, ...] | None = None,
 ) -> dict[str, int]:
     """Cut `tiers` (+ `sort_variants` of each) from the local layer-2 parquet
     at `layer2` into `<stem>.<tier>[-by-<cols>].parquet`.
@@ -137,6 +138,9 @@ def write_tiers(
     metadata. With `groups`, each tier also gets its group manifest
     `<tier>.groups.json` beside it (:mod:`disk_tree.find.groups`) — the
     precomputed footer a serverless reader plans range reads from.
+
+    `variant_tiers` limits the sort variants to those tiers (None: every
+    tier) — gcs keeps one user-first copy, `bysize` by `usr`, for lens reads.
     """
     own_tmp = None
     if con is None:
@@ -204,8 +208,9 @@ def write_tiers(
     for tier in tiers:
         base = TIER_SORTS[tier]
         copy(tier, order((), base), ())
-        for variant in sort_variants:
-            copy(tier, order(variant, base), variant)
+        if variant_tiers is None or tier in variant_tiers:
+            for variant in sort_variants:
+                copy(tier, order(variant, base), variant)
     if own_tmp:
         shutil.rmtree(own_tmp, ignore_errors=True)
     return written

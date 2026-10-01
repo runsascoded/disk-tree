@@ -531,3 +531,18 @@ def test_access_aggregates_mix_day_and_hour_grain(tmp_path: Path, listing: str, 
     assert (a_by_path["b1/users/rw/ckpt"], a_by_path["b1/datasets/raw"], a_by_path["b1/datasets"], a_by_path["b1"]) == (
         epoch_day(TS["d0703"]), epoch_day(TS["d0702"]), epoch_day(TS["d0702"]), epoch_day(TS["d0703"]),
     )
+
+
+def test_store_with_only_the_bysize_user_sort(tmp_path: Path, listing: str, attribution: str):
+    """`user_sort_tiers=("bysize",)` writes the two sorts plus one user-first
+    copy, `bysize` by `usr` — what a lens view's root reads (gcs writes this
+    shape: `path-index -u bysize`)."""
+    identities_path = tmp_path / "identities.yaml"
+    identities_path.write_text(IDENTITIES_YAML)
+    pidx = tmp_path / "path-index.parquet"
+    meta = write_path_index((listing,), tmp_path / "out", "2026-07-20", (attribution,), identities_path, path_index=pidx, user_sort_tiers=("bysize",))
+    assert meta["index"] == {"rows": 12, "sorts": {"path": {"rows": 12, "groups": 1}, "bysize": {"rows": 12, "groups": 1}, "bysize-user": {"rows": 12, "groups": 1}}}
+    assert sorted(p.name for p in tmp_path.glob("path-index*.parquet")) == [
+        "path-index-bysize-by-user.parquet", "path-index-bysize.parquet", "path-index.parquet",
+    ]
+    assert _kv(pidx.with_name("path-index-bysize-by-user.parquet")) == {"tier": "bysize", "sort": "usr,size_bucket desc,path", "bucket": "log2"}

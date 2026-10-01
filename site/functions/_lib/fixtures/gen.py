@@ -120,7 +120,8 @@ def write_v2_lens(here: str) -> None:
     """`v2-lens/`: the v2 generation with an owner label (`usr`) — `nest`'s
     subtree is `alice`'s, `flat`'s `bob`'s, the rest unclaimed — so a lens view
     on a store generation (which writes no `user` sort; `path-index -U`) has
-    rows to filter. `path` + `bysize` only, as gcs writes them."""
+    rows to filter. `path` + `bysize` + the one user-first copy, `bysize-user`,
+    as gcs writes them (`path-index -u bysize`)."""
     out_dir = join(here, 'v2-lens')
     shutil.rmtree(out_dir, ignore_errors=True)
     with tempfile.TemporaryDirectory() as tmp:
@@ -147,15 +148,15 @@ def write_v2_lens(here: str) -> None:
             ) TO '{l2}' (FORMAT parquet)
         """)
         ix.ROW_GROUP_SIZE = 2048
-        ix.write_index([('bk', l2)], join(tmp, 'out'), mem='1GB', threads=1)
+        ix.write_index([('bk', l2)], join(tmp, 'out'), mem='1GB', threads=1, sort_variants=(('usr',),), variant_tiers=('bysize',))
         shutil.os.makedirs(out_dir)
         files = {}
-        for variant, stem in SORTS.items():
+        for variant, stem in {**SORTS, 'bysize-user': 'path-index-bysize-by-user'}.items():
             dst = join(out_dir, f'{stem}.parquet')
             shutil.copy(join(tmp, 'out', f'{stem}.parquet'), dst)
             files[variant] = dst
     d1 = d1_json(files)
-    for variant, stem in SORTS.items():
+    for variant, stem in {**SORTS, 'bysize-user': 'path-index-bysize-by-user'}.items():
         write_text(join(out_dir, f'{stem}.groups.json'), groups_blob(d1[variant]['schema'], d1[variant]['rows']))
     write_text(join(out_dir, 'd1.json'), json.dumps(d1, separators=(',', ':')))
 

@@ -123,6 +123,7 @@ def _write_store(
     maxseg: int,
     user_sorts: bool = True,
     row_group_rows: int | None = None,
+    user_sort_tiers: tuple[str, ...] | None = None,
     asof_day: int = 0,
     age_cols: tuple[str, ...] = (),
 ) -> dict[str, dict]:
@@ -213,7 +214,7 @@ def _write_store(
     _rss("store-l2")
     try:
         kw = {"row_group_rows": row_group_rows} if row_group_rows else {}
-        return write_sorts(con, str(store), path_index.parent, sort_variants=((("usr",),) if attr and user_sorts else ()), **kw)
+        return write_sorts(con, str(store), path_index.parent, sort_variants=((("usr",),) if attr and user_sorts else ()), variant_tiers=user_sort_tiers, **kw)
     finally:
         store.unlink()
 
@@ -244,14 +245,16 @@ def write_path_index(
     user_sorts: bool = True,
     row_group_rows: int | None = None,
     age_strata: bool = False,
+    user_sort_tiers: tuple[str, ...] | None = None,
 ) -> dict:
     """Write age.json / meta.json under ``out_dir`` (+ the path store's sorts
     beside ``path_index``); returns meta.
 
-    ``user_sorts=False`` skips the ``-by-user`` copies: the reader prunes a
-    lens by the footer's ``u_min``/``u_max`` on the two sorts, so the copies
-    are an optimization — and on gcs (777M rows) they doubled bytes and D1
-    footer rows. ``row_group_rows`` overrides the 8K default (gcs: 32K).
+    ``user_sorts=False`` skips the ``-by-user`` copies; ``user_sort_tiers``
+    keeps the copy for some sorts only. A lens view reads a user-first sort
+    when one exists — on the mixed-user sorts a user's root view decodes the
+    fleet's top rows (gcs 9/30: 413) — so gcs keeps ``("bysize",)``: one
+    copy instead of two. ``row_group_rows`` overrides the 8K default.
 
     ``path_index`` (``<dir>/path-index.parquet``) writes the store
     (specs/path-store.md §4.3): every dir row — every ancestor path ×
@@ -533,7 +536,7 @@ def write_path_index(
     _rss("ptu")
     sorts: dict[str, dict] = {}
     if path_index is not None:
-        sorts = _write_store(con, src, path_index, attr=attr, fp_dir=fp_dir, maxseg=maxseg, user_sorts=user_sorts, row_group_rows=row_group_rows, asof_day=asof_day, age_cols=age_cols)
+        sorts = _write_store(con, src, path_index, attr=attr, fp_dir=fp_dir, maxseg=maxseg, user_sorts=user_sorts, row_group_rows=row_group_rows, user_sort_tiers=user_sort_tiers, asof_day=asof_day, age_cols=age_cols)
         _rss("store")
         # Provenance sidecar: the attributing prefixes' user/source/evidence.
         from .extras import write_extras
