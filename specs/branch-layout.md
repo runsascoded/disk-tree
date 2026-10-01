@@ -1,6 +1,6 @@
 # Branch layout: each long-lived branch carries exactly what its deployments run
 
-**Status:** proposal, 2026-10-01, for Ryan's review. Nothing has moved yet.
+**Status:** decided 2026-10-01 (Ryan), in progress. Decisions: (1) delete the Flask server + `ui/` + the interactive CLI; (2) **no `oa` branch** — Slack/Discord posting, healthcheck, warm-cache, lifecycle and GCP helpers stay on `cloud` as a shared toolkit (gcs's and cw's Slack styles as templates); (3) intra-file persistent diffs are intrinsic and their conflicts are wanted — no hooks to avoid them; generic owner/lens machinery stays on `cloud` as bones, gcs's owner *policy* moves to `gcs`; (4) delete the §3 list after re-verifying no branch uses each item; (5) order: deletions → create `local` → removals with `merge -s ours` → retarget m3/app to `local`. The tree is `cloud` → {`gcs`, `cw-s3`, `local` → {`m3`, `tauri-native-app`}}.
 
 Ryan: *"each with exactly the code (and migrations) they need, and nothing they don't … diffs between branches should reflect exactly the changes in both directions, nothing more and nothing less."*
 
