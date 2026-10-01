@@ -117,9 +117,19 @@ interface D1Handle {
  * objects included, and a `bysize` sort exists beside `path`. */
 export const isStore = (h: IndexHandle): boolean => h.version >= 2
 
-/** A user lens filter: `usr` column = `key`, applied on the by-user index
- * variant (the only sort besides path — ownership has no group facet). */
+/** A user lens filter: `usr` column = `key`. On a version-1 scan it reads the
+ * by-user variant (rows keyed by `usr` first); on a store generation it reads
+ * the store's own sorts, whose groups mix users, filtered per row. */
 export type Lens = { key: string }
+
+/** A variant whose rows are sorted by `usr` first (`user`, `bysize-user`,
+ * `coarse<E>-user`, store-prefixed or not): its group's path stats only hold
+ * inside a single-user group, so a lens tests the user range first. Every
+ * other sort keeps its path rect, and a lens is one more condition on it. */
+export const lensSorted = (variant: string): boolean => {
+  const v = variant.slice(variant.indexOf(':') + 1)
+  return v === 'user' || v.endsWith('-user')
+}
 /** Blob-backed: the same stats + compact metadata D1 holds for a tier, as
  * one document beside its parquet (`<tier>.groups.json`, written by
  * `index-sync`), held in memory. What a scan whose row groups retention
@@ -551,12 +561,12 @@ async function mapLimit<T, R>(items: T[], limit: number, f: (t: T) => Promise<R>
 /** The span query's predicate, for a blob handle's in-memory groups — the
  * same test `selectSpans` sends D1, SQL NULL semantics included (a group with
  * no usr stats never matches a lens). */
-export function groupMatches(g: { dMin: number; dMax: number; pMin: string; pMax: string; bMax: number; uMin?: string | null; uMax?: string | null }, rects: Rect[], bMin = 0, lens?: Lens): boolean {
+export function groupMatches(g: { dMin: number; dMax: number; pMin: string; pMax: string; bMax: number; uMin?: string | null; uMax?: string | null }, rects: Rect[], bMin = 0, lens?: Lens, keyed = true): boolean {
   if (bMin > 0 && g.bMax < Math.floor(bMin)) return false
   const rect = (r: Rect) => g.dMax >= r.dLo && g.dMin <= r.dHi && (g.dMin !== g.dMax || (g.pMax >= r.pLo && g.pMin <= r.pHi))
   if (!lens) return rects.some(rect)
   if (g.uMin == null || g.uMax == null || !(g.uMin <= lens.key && g.uMax >= lens.key)) return false
-  return g.uMin !== g.uMax || rects.some(rect)
+  return keyed ? g.uMin !== g.uMax || rects.some(rect) : rects.some(rect)
 }
 
 /** Candidate row groups for a set of (depth, path-range) rectangles — one SQL
@@ -565,7 +575,7 @@ export function groupMatches(g: { dMin: number; dMax: number; pMin: string; pMax
  * the path test only applies within a single depth (`d_min = d_max`). */
 async function selectSpans(h: IndexHandle, rects: Rect[], cap = 4000, bMin = 0, lens?: Lens): Promise<Span[]> {
   if (h.mode === 'blob') {
-    const out = h.groups.filter(g => groupMatches(g, rects, bMin, lens))
+    const out = h.groups.filter(g => groupMatches(g, rects, bMin, lens, lensSorted(h.variant)))
     if (out.length > cap) throw new Error(`query too wide: >${cap} row groups (drill deeper or raise minArea)`)
     return out
   }
@@ -574,12 +584,19 @@ async function selectSpans(h: IndexHandle, rects: Rect[], cap = 4000, bMin = 0, 
   // The (depth, path) rect; valid within a single primary-key group only
   // (single-depth for the path index, single-user for the lens index).
   const rectSql = '(d_max >= ? AND d_min <= ? AND (d_min <> d_max OR (p_max >= ? AND p_min <= ?)))'
+  const keyed = lensSorted(h.variant)
   for (const r of rects) {
-    if (lens) {
-      // Prune to groups whose usr range covers the lens key; the rect is a
-      // secondary test that only holds inside a single-key group.
+    if (lens && keyed) {
+      // A `usr`-first sort: prune to groups whose usr range covers the lens
+      // key; the rect is a secondary test that only holds inside a
+      // single-key group.
       where.push(`(u_min <= ? AND u_max >= ? AND (u_min <> u_max OR ${rectSql}))`)
       binds.push(lens.key, lens.key, r.dLo, r.dHi, r.pLo, r.pHi)
+    } else if (lens) {
+      // A path-first sort (a store generation's `path`): the rect holds, and
+      // the usr range is one more condition (groups mix users).
+      where.push(`(${rectSql} AND u_min <= ? AND u_max >= ?)`)
+      binds.push(r.dLo, r.dHi, r.pLo, r.pHi, lens.key, lens.key)
     } else {
       where.push(rectSql)
       binds.push(r.dLo, r.dHi, r.pLo, r.pHi)

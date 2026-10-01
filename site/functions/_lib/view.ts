@@ -218,11 +218,11 @@ async function tryOpen(env: Env, date: string, variant: string): Promise<IndexHa
   const ck = `${storeKey(env)}:${date}:${variant}`
   const at = missing.get(ck)
   if (at != null && Date.now() - at < MISS_TTL) return null
-  // A coarse tier is a version-1 artifact: when the date's `path` sort is a
-  // store generation, any coarse pointer left for that date is an earlier
-  // generation's (index-sync now retires them; older D1s still hold some) and
-  // must not answer.
-  if (variant.startsWith('coarse')) {
+  // Coarse tiers and the `user` sort are version-1 artifacts: when the date's
+  // `path` sort is a store generation, any such pointer left for that date is
+  // an earlier generation's (index-sync now retires them; older D1s still hold
+  // some) and must not answer.
+  if (variant.startsWith('coarse') || variant === 'user') {
     const path = await tryOpen(env, date, 'path')
     if (path && isStore(path)) {
       missing.set(ck, Date.now())
@@ -319,7 +319,7 @@ export async function readRootAgg(env: Env, o: { date: string; path: string; len
     return fine ? readRoot(fine, l) : null
   }
   const ol = lens ? await ownerLensFor(env, date, lens, o.by) : null
-  const rows = await rootRows(lens ? 'user' : 'path', lens)
+  const rows = await rootRows(lens ? await lensSort(env, date) : 'path', lens)
   // No tier at all → null. No rows for an *unlensed* path (its `path`-tier read
   // came back empty) → the path isn't in this scan, so null (a gap on the
   // over-time chart — e.g. a bucket's scans before it joined the scan set),
@@ -405,7 +405,7 @@ interface Read {
 async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
   const { date, path, w, h, minArea, atten, lens, owner, query, maxDepth, classes } = o
   const dP = path === '' ? 0 : path.split('/').length
-  const sort = lens ? 'user' : 'path'
+  const sort = lens ? await lensSort(env, date) : 'path'
   const readRoot = (idx: IndexHandle) =>
     path === '' ? readRows(idx, 1, 1, '', '￿', undefined, lens) : readRows(idx, dP, dP, path, path, undefined, lens)
   // A user lens applies the ownership ledger: claims repaint attribution, so
@@ -906,7 +906,6 @@ const LOOKUP_CAP = 240
 export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
   const { from, to, path, lens, owner, query } = o
   const dP = path === '' ? 0 : path.split('/').length
-  const sort = lens ? 'user' : 'path'
   const tr = o.trace
   let t0 = performance.now()
   const [ra, rb] = await Promise.all([
@@ -957,7 +956,7 @@ export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
   const fineOf = new Map<string, Promise<IndexHandle>>()
   const fine = (date: string) => {
     let h = fineOf.get(date)
-    if (!h) fineOf.set(date, (h = openFine(env, date, sort, lens).then(x => withTrace(x, tr))))
+    if (!h) fineOf.set(date, (h = (lens ? lensSort(env, date) : Promise.resolve('path')).then(s => openFine(env, date, s, lens)).then(x => withTrace(x, tr))))
     return h
   }
   const fineAllOf = new Map<string, Promise<IndexHandle>>()
@@ -1135,6 +1134,15 @@ export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
     lookups,
     lookups_capped: capped,
   }
+}
+
+/** The sort a lens view reads on `date`: a store generation serves the lens
+ * from its own `path` sort (and `bysize` beside it), filtered per row — it
+ * writes no `user` sort on gcs (`path-index -U`), and one left by an earlier
+ * v1 generation of the date must not answer; a version-1 scan reads `user`. */
+export async function lensSort(env: Env, date: string): Promise<string> {
+  const p = await tryOpen(env, date, 'path')
+  return p && isStore(p) ? 'path' : 'user'
 }
 
 async function openFine(env: Env, date: string, sort: string, lens?: Lens): Promise<IndexHandle> {

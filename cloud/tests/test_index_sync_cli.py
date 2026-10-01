@@ -87,20 +87,26 @@ def test_index_sync_fails_when_nothing_is_there(tmp_path: Path, synced, logged):
 
 @pytest.mark.parametrize("version, variant, store, retired", [
     (2, "path", "primary", [
-        "DELETE FROM index_schema WHERE date='2026-09-30' AND variant LIKE 'coarse%';",
         "DELETE FROM index_row_groups WHERE date='2026-09-30' AND variant LIKE 'coarse%';",
+        "DELETE FROM index_row_groups WHERE date='2026-09-30' AND variant='user' AND gen IN (SELECT gen FROM index_schema WHERE date='2026-09-30' AND variant='user' AND version < 2);",
+        "DELETE FROM index_schema WHERE date='2026-09-30' AND variant LIKE 'coarse%';",
+        "DELETE FROM index_schema WHERE date='2026-09-30' AND variant='user' AND version < 2;",
     ]),
     (2, "path", "meta", [
-        "DELETE FROM index_schema WHERE store='meta' AND date='2026-09-30' AND variant LIKE 'meta:coarse%';",
         "DELETE FROM index_row_groups WHERE store='meta' AND date='2026-09-30' AND variant LIKE 'meta:coarse%';",
+        "DELETE FROM index_row_groups WHERE store='meta' AND date='2026-09-30' AND variant='meta:user' AND gen IN (SELECT gen FROM index_schema WHERE store='meta' AND date='2026-09-30' AND variant='meta:user' AND version < 2);",
+        "DELETE FROM index_schema WHERE store='meta' AND date='2026-09-30' AND variant LIKE 'meta:coarse%';",
+        "DELETE FROM index_schema WHERE store='meta' AND date='2026-09-30' AND variant='meta:user' AND version < 2;",
     ]),
     (2, "bysize", "primary", []),
     (1, "path", "primary", []),
 ])
 def test_sync_d1_retires_coarse_tiers_after_a_store_flip(monkeypatch, version, variant, store, retired):
     """A store generation's `path` sort replaces the dir-only index: after the
-    pointer flip, the same date's coarse pointers (an earlier v1 generation's)
-    go, then their rows. Nothing is retired for a v1 sync or another sort."""
+    pointer flip, the same date's coarse tiers and v1 `user` sort (an earlier
+    generation's) go — their rows first (the `user` rows are found through its
+    pointer), then the pointers. Nothing is retired for a v1 sync or another
+    sort."""
     sent: list[str] = []
     monkeypatch.setattr(F, "extract", lambda p: ({"version": version, "schema": [], "floor_bytes": None}, []))
     monkeypatch.setattr(F, "write_groups_blob", lambda *a: ("", 0))
