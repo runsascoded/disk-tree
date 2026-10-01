@@ -40,7 +40,7 @@ def main() -> None:
     # refresh only needs the `site/` index to move).
     if '--capture-only' not in sys.argv[1:]:
         log('index')
-        run(str(BIN / 'disk-tree'), 'index', '-C', '-D', '--no-progress', '--to', 'r2://disk-tree/scans', '/Users/ryan',
+        run(str(BIN / 'disk-tree'), 'index', '-C', '--no-progress', '--to', 'r2://disk-tree/scans', '/Users/ryan',
             profile='m3', DISK_TREE_SCAN_DIRS='r2://disk-tree/scans:/Users/ryan/.config/disk-tree/scans')
     log('capture')
     # The scan's scope (disky's setting: whole machine or home only) arrives as
