@@ -271,17 +271,17 @@ function UserMenu() {
               <hr />
               <Explain text="Byte units, site-wide: binary (TiB) ↔ decimal (TB)">
                 <button type="button" role="menuitem" className="mi" onClick={() => toggleUnits()}>
-                  units: <b>{(units === 'iec' ? 'Ti' : 'T') + (suffixB ? 'B' : '')}</b> → {(units === 'iec' ? 'T' : 'Ti') + (suffixB ? 'B' : '')}
+                  Units: <b>{(units === 'iec' ? 'Ti' : 'T') + (suffixB ? 'B' : '')}</b> → {(units === 'iec' ? 'T' : 'Ti') + (suffixB ? 'B' : '')}
                 </button>
               </Explain>
               <Explain text="Show or hide the trailing B (Ti vs TiB), site-wide">
                 <button type="button" role="menuitem" className="mi" onClick={() => toggleSuffixB()}>
-                  trailing B: <b>{suffixB ? 'on' : 'off'}</b> <span className="dim">({units === 'iec' ? 'Ti' : 'T'}{suffixB ? 'B' : ''})</span>
+                  Trailing B: <b>{suffixB ? 'On' : 'Off'}</b> <span className="dim">({units === 'iec' ? 'Ti' : 'T'}{suffixB ? 'B' : ''})</span>
                 </button>
               </Explain>
               {canAssign && (
                 <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setTokenOpen(true) }}>
-                  agent / CLI token…
+                  Agent / CLI Token…
                 </button>
               )}
               {showAppLink && (
@@ -289,7 +289,7 @@ function UserMenu() {
                   <button type="button" role="menuitem" className="mi" onClick={openApp}>Open in disky</button>
                 </Explain>
               )}
-              <button type="button" role="menuitem" className="mi" onClick={signOut}>log out</button>
+              <button type="button" role="menuitem" className="mi" onClick={signOut}>Log Out</button>
             </div>
           </FloatingFocusManager>
         </FloatingPortal>
@@ -324,14 +324,14 @@ function SessionLines({ email, user, emails }: { email: string; user: string | n
   const others = user && emails ? Object.keys(emails).filter(e => emails[e] === user && e !== email.toLowerCase()) : []
   return (
     <div className="uc-session">
-      <div>signed in as <code>{email}</code></div>
+      <div>Signed in as <code>{email}</code></div>
       {user ? (
         <>
           {aliases.length > 0 && <div>aliases: {aliases.map(a => <code key={a}>{a}</code>)}</div>}
           {others.length > 0 && <div>also signs in as: {others.map(e => <code key={e}>{e}</code>)}</div>}
         </>
       ) : (
-        <div className="uc-warn">not mapped to a user in the identity registry — the “me” owner filter won't resolve; ping Ryan.</div>
+        <div className="uc-warn">Not mapped to a user in the identity registry — the “me” owner filter won't resolve; ping Ryan.</div>
       )}
     </div>
   )
