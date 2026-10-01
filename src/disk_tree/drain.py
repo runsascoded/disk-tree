@@ -32,7 +32,6 @@ SizeFn = Callable[[str], "tuple[int, int]"]
 DeleteFn = Callable[[str], None]
 TrashFn = Callable[[str, str], str]  # (uri, run_id) -> where it went
 Announce = Callable[[dict], None]
-SubmitFn = Callable[[str, list[str]], str]  # (run_id, uris) -> batch job id
 AfterFn = Callable[[dict], None]  # a real run that deleted something just finished
 
 AGENT = "drainer"
@@ -103,8 +102,6 @@ def execute_run(
     undo_state: str = "none",
     hold_s: Optional[int] = None,
     now: Callable[[], int] = _now,
-    submit_fn: Optional[SubmitFn] = None,
-    batch_threshold: Optional[int] = None,
     reclaim_fn: Optional[Callable[[list[str]], int]] = None,
 ) -> dict:
     """Execute one enqueued run. A dry run sizes every staged URI and records
@@ -112,10 +109,7 @@ def execute_run(
     `trash_fn` (a rename into the run's trash dir; the site's `undo_deadline`
     = finish + `hold_s` and `purge_state = 'pending'` say so) or `delete_fn` —
     records a band per URI, and finishes the run; a single URI's failure is
-    recorded, not fatal. Large (scope over `batch_threshold`, on a schema with
-    the hand-off): hand the run to Batch (`submit_fn`) and record its
-    `batch_job` instead, leaving it unfinished for the Batch job to complete.
-    A dry run on a schema with `freed_bytes` also measures what the set as a
+    recorded, not fatal. A dry run on a schema with `freed_bytes` also measures what the set as a
     whole would free (`reclaim_fn`: extents shared with a clone or hardlink
     outside it don't count); a failed measurement leaves it unset.
     Returns a summary."""
@@ -124,18 +118,6 @@ def execute_run(
     # a staged dir covers staged items under it: size + delete each byte once
     uris = uncovered(run_items(db, run["plan_id"], schema))
     sized = [(uri, *size_fn(uri)) for uri in uris]  # (uri, bytes, objects)
-
-    if (
-        not dry and schema.batch_job and submit_fn is not None and batch_threshold is not None
-        and sum(o for _, _, o in sized) > batch_threshold
-    ):
-        job = submit_fn(run["run_id"], uris)
-        db.query("UPDATE deletion_runs SET batch_job = ? WHERE run_id = ?", [job, run["run_id"]])
-        return {
-            "run_id": run["run_id"], "plan_id": run["plan_id"], "actor": run.get("actor"), "mode": run.get("mode"),
-            "items": len(uris), "deleted_paths": 0, "deleted_bytes": 0, "deleted_objects": 0, "errors": [],
-            "submitted": True, "batch_job": job, "trashed": False,
-        }
 
     deleted_bytes = deleted_objects = deleted_paths = 0
     errors: list[tuple[str, str]] = []
@@ -188,7 +170,7 @@ def execute_run(
     return {
         "run_id": run["run_id"], "plan_id": run["plan_id"], "actor": run.get("actor"), "mode": run.get("mode"),
         "items": len(uris), "deleted_paths": deleted_paths, "deleted_bytes": deleted_bytes, "deleted_objects": deleted_objects,
-        "errors": errors, "submitted": False, "finished_ts": finished, "trashed": trashed,
+        "errors": errors, "finished_ts": finished, "trashed": trashed,
         **({"freed_bytes": freed} if freed is not None else {}),
     }
 
@@ -205,13 +187,10 @@ def drain_once(
     announce: Optional[Announce] = None,
     after: Optional[AfterFn] = None,
     now: Callable[[], int] = _now,
-    submit_fn: Optional[SubmitFn] = None,
-    batch_threshold: Optional[int] = None,
     host: Optional[str] = None,
     reclaim_fn: Optional[Callable[[list[str]], int]] = None,
 ) -> list[dict]:
-    """Check in, then execute every pending run once (inline, or submit
-    oversized ones to Batch). `after` runs once per real run that deleted
+    """Check in, then execute every pending run once. `after` runs once per real run that deleted
     something (the laptop re-captures so the map reflects it). Returns a
     summary per run."""
     schema = schema or Schema.detect(db)
@@ -220,12 +199,11 @@ def drain_once(
     for run in pending_runs(db, schema):
         summary = execute_run(
             db, run, size_fn=size_fn, delete_fn=delete_fn, schema=schema, trash_fn=trash_fn,
-            undo_state=undo_state, hold_s=hold_s, now=now, submit_fn=submit_fn, batch_threshold=batch_threshold,
-            reclaim_fn=reclaim_fn,
+            undo_state=undo_state, hold_s=hold_s, now=now, reclaim_fn=reclaim_fn,
         )
         out.append(summary)
         if announce:
             announce(summary)
-        if after and not summary["submitted"] and summary["deleted_paths"]:
+        if after and summary["deleted_paths"]:
             after(summary)
     return out
