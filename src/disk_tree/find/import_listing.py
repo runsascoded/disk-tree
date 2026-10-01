@@ -1,11 +1,10 @@
 """Import a pre-made object listing → canonical layer-2 scan.
 
-Alternative producer to :func:`disk_tree.find.index` (the live walker): reads
-one or more parquet globs conforming to the layer-1 listing schema (raw
+Reads one or more parquet globs conforming to the layer-1 listing schema (raw
 object listing, GCS Storage Insights, or S3 Inventory — schema-normalized by
-:mod:`disk_tree.listing`), filters to a single bucket, and runs the same
-bottom-up aggregation as ``index()`` to produce a canonical per-path
-DataFrame.
+:mod:`disk_tree.listing`), filters to a single bucket, and runs the pandas
+bottom-up aggregation (:func:`disk_tree.find.index.aggregate`) to produce a
+canonical per-path DataFrame.
 
 Phase-0 aggregation is in-memory pandas — fine for laptop-scale or
 subsampled cloud listings; the multi-PB regime needs the out-of-core DuckDB
@@ -99,13 +98,11 @@ def import_listing(
             [int(m) * int(s) for m, s in zip(files['mtime'], files['size'])],
             dtype=object,
         )
-    # Synthesize dir rows for every unique parent path in the listing — walk
-    # backends emit these inline (see backends/s3.py:84-92), and their absence
-    # would leave `n_children` under-counted (it counts input rows per parent,
+    # Synthesize dir rows for every unique parent path in the listing — their
+    # absence would leave `n_children` under-counted (it counts input rows per parent,
     # so missing sub-dir rows means the sub-dir wouldn't count toward its
     # parent's direct-child tally).
-    # Include '' (scan root) so root's n_desc includes-self, matching walk
-    # backends (the S3 lister emits `path='' kind='dir'` for the scan root).
+    # Include '' (scan root) so root's n_desc includes-self.
     dir_paths = {''}
     for p in files['parent']:
         while p and p not in dir_paths:

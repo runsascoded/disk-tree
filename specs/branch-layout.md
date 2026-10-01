@@ -10,7 +10,7 @@ Today `cloud` is the union of everything: every `[base]` pick from gcs, cw-s3, m
 
 | deployment | branch | what actually runs |
 |---|---|---|
-| r2 demo (r2.rbw.sh) | `cloud` | `deploy-r2.yml` (site, `wrangler.r2.toml`), `daily-ingest.yml` (`disk-tree bulk-list r2://` → `dt-cloud path-index` → `index-sync`), `rescan-demo.yml` (`disk-tree index r2://`); public, read-only, no staging |
+| r2 demo (r2.rbw.sh) | `cloud` | `deploy-r2.yml` (site, `wrangler.r2.toml`), `daily-ingest.yml` (`disk-tree bulk-list r2://` → `dt-cloud path-index` → `index-sync`), public, read-only, no staging |
 | gcs.oa.dev | `gcs` | Batch `job/run.sh`: `dt-cloud` `access ingest`, `job submit-listing` (`disk-tree bulk-list gcs://`), `stage`, `labels`, `path-index`, `rules`, `lifecycle pull`, `index-sync`, `healthcheck`, `warm-cache`, `digest`, `index-gc`, `sweep`; site with owners/claims/lens, sweep executor, Slack |
 | cw-s3.oa.dev | `cw-s3` | Batch `job/cw-run.sh`: `disk-tree bulk-list -a s3://`, `import -e stream`, `dt-cloud` `lifecycle pull`, `index-write`, `index-sync`, `index-gc`, `publish-r2`, `warm-cache`, `cw-digest`, `over-time-groups`, `plan-sweep`; site with the meta store, plan-sweep executor, Slack |
 | disk.rbw.sh (laptop) | `m3` | LaunchAgents via disky.app: `disk-tree index` / `capture`, AWS Batch `dt-cloud path-index -g` + `index-sync`, drainer `disk-tree dispatch -s --trash`; site with `EXECUTOR=laptop`, `STORE=laptop`, `HOME` |
@@ -36,7 +36,7 @@ Mechanics (once per move): each removal from a parent is one commit there; each 
 
 ## 3. Classification (abridged; the full audit is in this session's log)
 
-**Stays on `cloud`** — engine core (`blobfs`, `listing`, `listing_format`, `config`, `find/{groups,tiers,bulk*,import_listing,aggregate_duckdb,aggregate_stream,index}`, `backends/{base,gfind,local,s3,url}`, `storage/{base,parquet,hybrid}`, `scan_manifest`), `dt_cloud` `path-index` / `index-sync` / `index_footer` / `viz` / `secrets`, site viewer (`subtree`, `diff`, `series`, `age-pyramid`, `store`, `data`, `v1/files`, `_lib/{index,view,scope,filter,series,shared,zstd,agePyramid,edgeCache,auth}`, `src` viewer components), `packages/treemap`, `TimeSeries`, the r2 workflows, migrations `0001`–`0006`.
+**Stays on `cloud`** — engine core (`blobfs`, `listing`, `listing_format`, `config`, `find/{groups,tiers,bulk*,import_listing,aggregate_duckdb,aggregate_stream,index}` (`index.py` = the pandas `aggregate` only), `backends/url`, `storage/{base,parquet,hybrid}` + `sqla` `Scan` (what `import` writes, read back by cw-s3's jobs)), `dt_cloud` `path-index` / `index-sync` / `index_footer` / `viz` / `secrets`, site viewer (`subtree`, `diff`, `series`, `age-pyramid`, `store`, `data`, `v1/files`, `_lib/{index,view,scope,filter,series,shared,zstd,agePyramid,edgeCache,auth}`, `src` viewer components), `packages/treemap`, `TimeSeries`, the r2 workflows, migrations `0001`–`0006`.
 
 **→ `oa`** (gcs + cw only) — `dt_cloud` `healthcheck`, `warm`, `lifecycle`, `index-gc`, `site.py`; site `gcp.ts`, `slack.ts`, `stagedSlack.ts`, `slack/actions`, lifecycle UI; `health.yml`; `site/deploy`, `cf-status`.
 
@@ -44,7 +44,7 @@ Mechanics (once per move): each removal from a parent is one commit there; each 
 
 **→ `cw-s3`** — `dt_cloud` `index-write`, `over-time-groups`, `publish-r2`, `cw-digest`, `plan-sweep`, `overtime`, `sweep`; site `overTime`, `planDispatch`, `runReflect`, `cwBatch`, `stores.ts` meta store; `tiers cut|plan`, `recompress`, `listing-format` (cw one-shots).
 
-**→ `local`** — `apfs`, `extents`, `reclaim`, `overcount`, `volumes`, `repos`, `capture`, `staged*`, `drain`, `d1`, `trash`, walker seam + `dt-walker` regex, site `appLink`, `laptopDispatch`, `~` path display, migrations `0007_agents`, `0008_freed_bytes`; and (decision 1) the Flask server + `ui/`.
+**→ `local`** — `apfs`, `extents`, `reclaim`, `overcount`, `volumes`, `repos`, `capture`, `staged*`, `drain`, `d1`, `trash`, walker seam + `dt-walker` regex, site `appLink`, `laptopDispatch`, `~` path display, migrations `0007_agents`, `0008_freed_bytes`; `disk-tree index` (+ the `aws s3 ls` lister, `ScanProgress`, `resolve`, `scan_manifest`, `rescan-demo.yml`, retired: its blobs had no reader); and (decision 1) the Flask server + `ui/`.
 
 **Delete (dead everywhere)** — `disk_tree.notify` + `digest` CLI, `batch.py` + `iac*` + `iac/`, `access/{state,schema}` + `parsers/{s3,r2}` + `cli/access`, `tree_build`, `backends/ssh`, `storage/{duckdb,sqlite}` + `/api/backend*`, legacy `migrate*`, `desktop.py` + `packaging/macos`, `reduce` (+ `reduce.yml`), `snapshots`, `fetch|pull|sync`; `dt_cloud` `reactive`, `listing`, `weekly`, `compare`, `census`, `over-time-write`, `index-compact`, `prune-r2-listings`, `stamp-published`; site `api/{age,claims,bench}.ts`, `cw.ts`, stale e2e/assets; `ui/` `auth.tsx` + `AccessPage` + `@open-athena/auth` dep + OG capture; `extra-mp4s.py`, `scripts/r2-ingest.sh`, broken `release*.yml`. Each with its tests.
 

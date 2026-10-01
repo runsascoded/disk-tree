@@ -99,14 +99,6 @@ def _find_blob(name: str, prefer: str | None = None) -> str | None:
     return None
 
 
-def blob_reachable(name: str, prefer: str | None = None) -> bool:
-    """Whether blob `name` resolves to an existing file/object in some read dir.
-    False when its scan's blob lives only in an unreachable dir (or was never
-    written), so callers can fall back or raise a clear message instead of
-    hitting a raw `FileNotFoundError` on the write-dir fallback path."""
-    return _find_blob(name, prefer) is not None
-
-
 def on_write_target_change(cb: Callable[[], None]) -> None:
     """Register a callback to run after `set_write_target` repoints the write dir."""
     _write_target_hooks.append(cb)

@@ -39,6 +39,6 @@ def reset_backend():
     _backend_instance = None
 
 
-# `index --to` repoints the write dir; the backend must be rebuilt against it.
+# `import --to` repoints the write dir; the backend must be rebuilt against it.
 from .. import config as _config  # noqa: E402
 _config.on_write_target_change(reset_backend)

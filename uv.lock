@@ -700,13 +700,11 @@ dependencies = [
     { name = "duckdb" },
     { name = "flask" },
     { name = "flask-sqlalchemy" },
-    { name = "humanize" },
     { name = "pandas" },
     { name = "pyarrow" },
     { name = "python-dateutil" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
-    { name = "tqdm" },
     { name = "utz" },
 ]
 
@@ -763,7 +761,6 @@ requires-dist = [
     { name = "gcsfs", marker = "extra == 'gcs'" },
     { name = "google-cloud-storage", marker = "extra == 'bulk'" },
     { name = "google-cloud-storage", marker = "extra == 'gcs'" },
-    { name = "humanize" },
     { name = "memray", marker = "extra == 'mem'" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "pandas" },
@@ -775,7 +772,6 @@ requires-dist = [
     { name = "s3fs", marker = "extra == 'r2'", specifier = ">=2024.10" },
     { name = "s3fs", marker = "extra == 's3'", specifier = ">=2024.10" },
     { name = "sqlalchemy" },
-    { name = "tqdm" },
     { name = "utz" },
 ]
 provides-extras = ["dev", "mem", "gcs", "s3", "r2", "bulk"]
@@ -1332,15 +1328,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/91/83/42d1d813822ed016d77aabadc99b09de3b5bd68532fd6bae23fd62347c41/gspread-6.2.1.tar.gz", hash = "sha256:2c7c99f7c32ebea6ec0d36f2d5cbe8a2be5e8f2a48bde87ad1ea203eff32bd03", size = 82590, upload-time = "2025-05-14T15:56:25.254Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/27/76/563fb20dedd0e12794d9a12cfe0198458cc0501fdc7b034eee2166d035d5/gspread-6.2.1-py3-none-any.whl", hash = "sha256:6d4ec9f1c23ae3c704a9219026dac01f2b328ac70b96f1495055d453c4c184db", size = 59977, upload-time = "2025-05-14T15:56:24.014Z" },
-]
-
-[[package]]
-name = "humanize"
-version = "4.16.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0a/ea/13a1ef3c12d12662905801495283530251918b70d62d368f1d2e0272c70d/humanize-4.16.0.tar.gz", hash = "sha256:7dc2244a2f84a4bfb1d36c37bac80cd78e35cdc5c119206d87b018e1445f3a3f", size = 89515, upload-time = "2026-06-30T16:17:29.859Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/aa/0b7365d30fed43e7a3449aba1fe20a0a7174d9cf13e282af4e69ac825441/humanize-4.16.0-py3-none-any.whl", hash = "sha256:353eb2f34c09d098b2880eee8bef21832eae6d174f48c5762fff7e5fcb74d01d", size = 137209, upload-time = "2026-06-30T16:17:28.36Z" },
 ]
 
 [[package]]
@@ -3033,18 +3020,6 @@ requires-dist = [
     { name = "utz", specifier = ">=0.21.3" },
 ]
 provides-extras = ["slack", "discord", "bsky", "all", "test"]
-
-[[package]]
-name = "tqdm"
-version = "4.70.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl", hash = "sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73", size = 80199, upload-time = "2026-09-11T07:25:14.599Z" },
-]
 
 [[package]]
 name = "typing-extensions"

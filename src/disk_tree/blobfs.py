@@ -101,9 +101,8 @@ def r2_endpoint(bucket: str) -> str | None:
 def bucket_profile(bucket: str) -> str | None:
     """The AWS credential profile a bucket authenticates with, from `buckets.yml`
     (per-bucket, else `defaults`). This is how a source and a target in *different*
-    accounts each pick their own key within one `index --to` run — every S3/R2
-    seam (this module's `s3fs`, the `aws` CLI lister, the `boto3` bulk lister)
-    honors a named profile. `None` → ambient credentials (env / default profile),
+    accounts each pick their own key within one `import --to` run — every S3/R2
+    seam (this module's `s3fs`, the `boto3` bulk lister) honors a named profile. `None` → ambient credentials (env / default profile),
     the single-account default."""
     return _bucket_field(bucket, 'profile')
 

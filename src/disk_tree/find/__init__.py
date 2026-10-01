@@ -1,1 +1,1 @@
-from .index import aggregate, index, IndexResult
+from .index import aggregate, IndexResult

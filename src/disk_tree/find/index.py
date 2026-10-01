@@ -1,18 +1,11 @@
-from array import array
+"""The pandas aggregation: leaf rows → canonical layer-2 frame (`import -e pandas`)."""
 from dataclasses import dataclass, field
 from os.path import dirname
-import time as time_module
-from typing import Callable
 
 import pandas as pd
 
 from disk_tree import time
-from ..backends import backend_for, ErrorCollector
 from ..listing_format import uri_of
-
-
-# Type for progress callback: (items_found, items_per_sec, error_count) -> None
-ProgressCallback = Callable[[int, float | None, int], None]
 
 
 @dataclass
@@ -138,98 +131,3 @@ def aggregate(
             out = out.drop(columns=[MT_WSUM])
         # Sort by depth first (breadth-first order) for efficient parquet row group filtering
         return out.sort_values(['depth', 'path']).reset_index(drop=True)
-
-
-def index(
-    path: str,
-    mean_mtime: bool = False,
-    progress_callback: ProgressCallback | None = None,
-    progress_interval: float = 1.0,
-    progress: bool = True,
-) -> IndexResult:
-    """List `path` (an `s3://` / `r2://` URL) through its backend and aggregate."""
-    path0 = path.rstrip('/')
-    errors = ErrorCollector()
-    backend = backend_for(path0)
-
-    last_progress_time = time_module.time()
-    items_count = 0
-    start_time = last_progress_time
-
-    # Accumulate columns in parallel lists (much cheaper than 7M dict objects).
-    path_l: list[str] = []
-    size_l = array('q')  # signed int64
-    mtime_l = array('q')
-    kind_l: list[str] = []
-    parent_l: list[str | None] = []
-    uri_l: list[str] = []
-
-    def collect():
-        nonlocal last_progress_time, items_count
-        for e in backend.list(path0, errors=errors, progress=progress):
-            items_count += 1
-            now = time_module.time()
-            if progress_callback and (now - last_progress_time) >= progress_interval:
-                elapsed = now - start_time
-                items_per_sec = items_count / elapsed if elapsed > 0 else None
-                progress_callback(items_count, items_per_sec, errors.count)
-                last_progress_time = now
-            path_l.append(e['path'])
-            size_l.append(e['size'])
-            mtime_l.append(e['mtime'])
-            kind_l.append(e['kind'])
-            parent_l.append(e['parent'])
-            uri_l.append(e['uri'])
-
-    with time("files_iter"):
-        collect()
-
-    if progress_callback:
-        elapsed = time_module.time() - start_time
-        items_per_sec = items_count / elapsed if elapsed > 0 else None
-        progress_callback(items_count, items_per_sec, errors.count)
-
-    # Handle an empty bucket/prefix: return early with just a root row
-    if not path_l:
-        df = pd.DataFrame([{
-            'path': '.',
-            'size': 0,
-            'mtime': 0,
-            'n_desc': 0,
-            'n_children': 0,
-            'kind': 'dir',
-            'parent': '',
-            'uri': path0,
-            'depth': 0,
-        }])
-        if mean_mtime:
-            from .agg_ext import MTIME_MEAN
-            df[MTIME_MEAN] = pd.array([None], dtype='float64')
-        return IndexResult(
-            df=df,
-            error_count=errors.count,
-            error_paths=errors.paths,
-        )
-
-    df = pd.DataFrame({
-        'path': path_l,
-        'size': size_l,
-        'mtime': mtime_l,
-        'kind': kind_l,
-        'parent': parent_l,
-        'uri': uri_l,
-    })
-    if mean_mtime:
-        from .agg_ext import MT_WSUM
-        # Every row contributes size·mtime (dir rows are size 0, so nothing),
-        # keeping the weights summing to exactly `size`. Python bigints
-        # (object dtype): Σ mtime·size overflows int64 at PB scale.
-        df[MT_WSUM] = pd.array([int(s) * int(m) for s, m in zip(size_l, mtime_l)], dtype=object)
-    # Free the per-column lists now that the DataFrame owns the data — peak memory
-    # otherwise has both representations resident through the aggregation passes.
-    del path_l, size_l, mtime_l, kind_l, parent_l, uri_l
-    return IndexResult(
-        df=aggregate(df, scan_root=path0, mean_mtime=mean_mtime),
-        error_count=errors.count,
-        error_paths=errors.paths,
-    )

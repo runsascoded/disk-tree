@@ -8,44 +8,35 @@ Track storage usage across object stores: S3, R2 and GCS buckets.
 
 Key goals:
 - **Always-ready index**: Scheduled scans (the r2 demo's daily ingest) so the index is there when you need it
-- **Fast indexing**: Shell out to `aws s3 ls`, or shard a bucket's listing across workers (`bulk-list`)
+- **Fast indexing**: Shard a bucket's listing across workers (`bulk-list`), aggregate out of core (`import`)
 - **Site**: Treemap visualizations, diffs and an age lens over each scan's path index
 
 ## Architecture
 
 ### Python Backend (`src/disk_tree/`)
 
-**Indexing** (`find/index.py`):
-- S3 / R2: `aws s3 ls --recursive` → parses listing format (a local path refuses: `UnsupportedBackend`)
-- Builds DataFrame with columns: `path`, `size`, `mtime`, `kind`, `parent`, `uri`, `n_desc`, `n_children`, `depth`
-- `depth` column enables predicate pushdown when loading parquet (major performance win)
-- Aggregates sizes upward through directory tree
-- Returns `IndexResult(df, error_count, error_paths)`
+**Listing** (`find/bulk*.py`): `bulk-list` shards a bucket's object listing (`gcs://`, `s3://`,
+`r2://` via its S3 endpoint) across worker processes into layer-1 listing parquet shards.
 
-**Data Model** (`sqla/model.py`):
-- `Scan` table: `id`, `path`, `time`, `blob`, `error_count`, `error_paths`, `size`, `n_children`, `n_desc`
-  - Root stats (`size`, `n_children`, `n_desc`) denormalized to avoid parquet reads on scan list
-- `ScanProgress` table: real-time tracking of active scans
-- Results stored as Parquet in `~/.config/disk-tree/scans/<uuid>.parquet`
-- SQLite metadata DB at `~/.config/disk-tree/disk-tree.db`
-- Index on `(path, time)` for efficient latest-scan-per-path queries
+**Aggregation** (`find/import_listing.py`, `find/index.py`, `find/aggregate_{duckdb,stream}.py`):
+`import` aggregates a listing bottom-up into the canonical layer-2 frame — columns `path`, `size`,
+`mtime`, `kind`, `parent`, `uri`, `n_desc`, `n_children`, `n_files`, `depth` (+ opt-in pivots,
+`mtime_mean`, labels), sorted `(depth, path)` so parquet pushdown prunes by depth and path prefix.
+Three engines, byte-identical output: `pandas` (in memory), `duckdb` (out of core), `stream`
+(O(depth) over sorted listings).
+
+**Output** (`storage/`, `sqla/model.py`): each imported bucket's layer-2 is adopted into the write
+dir (`<DISK_TREE_ROOT>/scans/<uuid>.parquet`, or `--to <dir|url>`) and recorded as a `Scan` row
+(`path`, `time`, `blob`, root `size`/`n_children`/`n_desc`/`mtime`) in `<DISK_TREE_ROOT>/disk-tree.db`.
+cw-s3's jobs read that blob back (`ls $DISK_TREE_ROOT/scans/*.parquet`) as `dt-cloud index-write`'s input.
 
 **CLI** (`cli/`):
 ```bash
-disk-tree index URL       # Scan an s3:// bucket, or an r2:// bucket (S3-compatible: lists
-                          # through the bucket's endpoint — `DISK_TREE_R2_ENDPOINT_URL` or its
-                          # buckets.yml `endpoint_url` — with `r2://` uris). gcs:// and local paths
-                          # have no live lister and refuse (`UnsupportedBackend`): use `bulk-list` +
-                          # `import` for gcs://
-  -C, --no-cache-read     # Force fresh scan (`index` otherwise returns any cached scan unconditionally)
-  -g, --gc                # Garbage collect old scans
-  -m, --mean-mtime        # Emit `mtime_mean` (size-weighted mean mtime; feeds the UI age lens)
-  -M, --measure-memory    # Track peak memory
-  -q, --no-progress       # Suppress the tqdm progress bar (scheduled/redirected runs — keeps logs small)
-  -t, --to TARGET         # Write this scan's blob to a dir or fsspec URL (r2://bucket/prefix, s3://…,
-                          # gs://…) instead of the configured write dir; it joins the search path for
-                          # this run, so the scan reads back through it (spec `remote-scan-targets.md`).
-                          # A URL target also gets a `<blob>.scan.json` manifest (the Scan row, portable)
+disk-tree bulk-list URI    # Shard URI's object listing (gcs:// | s3:// | r2:// with `-E <endpoint>`) into
+                          # layer-1 parquet shards at `-o` (`-a` adaptive range-splitting, `-P` procs)
+disk-tree import -l GLOB…  # Aggregate listing(s) into a canonical layer-2 per bucket (`-b`; default every
+                          # bucket in the listings): `-e pandas|duckdb|stream`, `-p` pivot sums, `-m`
+                          # mtime_mean, `-i` also cut the path-store tiers, `-w/--to` write dir or URL
 
 disk-tree recompress PATH…  # Rewrite v1 layer-2 listings as v2 in place, lossless (spec `listing-slim.md`
                           # phase 2): files, dirs (recursive `*.parquet`, sidecars skipped) or fsspec URLs
@@ -114,7 +105,8 @@ One gate (`_lib/auth.ts`, `@open-athena/auth` over D1): `identify` → `Identity
 # (`cloud/`, package `dt-cloud`) share ONE `uv.lock` and one `.venv`.
 uv sync                                                 # engine only
 uv sync --all-packages --all-extras --all-groups        # engine + dt-cloud, every extra, test groups
-disk-tree index s3://<bucket>/<prefix>
+disk-tree bulk-list -a s3://<bucket> -o work/listing/<bucket>
+disk-tree import -e stream -s s3 -b <bucket> -l 'work/listing/<bucket>/shard-*.parquet'
 
 # Site
 pnpm install
@@ -128,24 +120,23 @@ cd site && pnpm dev
 
 ## Data Flow
 
-1. `disk-tree index s3://…` runs `aws s3 ls` (`bulk-list` → `import` for the bulk pipeline)
-2. Output parsed into DataFrame, aggregated by directory
-3. Saved as Parquet, metadata recorded in SQLite
-4. `dt-cloud path-index` / `disk-tree tiers` cut the path store; `dt-cloud index-sync` publishes its
-   footers to D1
-5. `site/`'s Pages Functions read the path store (row-group range reads) and render treemaps / diffs
+1. `disk-tree bulk-list` writes a bucket's sharded object listing
+2. `disk-tree import` aggregates it by directory into a layer-2 parquet (+ a `Scan` row), or
+   `dt-cloud path-index` aggregates the listings directly (gcs, the r2 demo's daily ingest)
+3. `dt-cloud path-index` / `index-write` / `disk-tree tiers` cut the path store; `dt-cloud index-sync`
+   publishes its footers to D1
+4. `site/`'s Pages Functions read the path store (row-group range reads) and render treemaps / diffs
 
 ## Config
 
 Default paths (override with `DISK_TREE_ROOT`):
-- `~/.config/disk-tree/disk-tree.db` — SQLite metadata
-- `~/.config/disk-tree/scans/` — Parquet blob storage
+- `~/.config/disk-tree/disk-tree.db` — SQLite `Scan` rows (`import`)
+- `~/.config/disk-tree/scans/` — `import`'s layer-2 blobs
+- `~/.config/disk-tree/buckets.yml` — per-bucket `endpoint_url` / `profile`
 
-**Blob storage is a search path, not a single directory.** The DB lives under the root; blobs may live anywhere on `config.scan_read_dirs()`, since `Scan.blob` holds a basename. `DISK_TREE_SCAN_DIRS` (colon-separated, priority order; the first is the *write* target) sets the path, else it is the root's `scans/`.
+`import --to <dir|url>` (`config.set_write_target`) writes the blobs elsewhere — a local dir or an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`); `DISK_TREE_SCAN_DIRS` (colon-separated, the first is the write target) sets it from the env. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet read/write goes through `blobfs.py` (the local-vs-URL seam), and blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
 
-A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — spec `remote-scan-targets.md`. `index --to <url>` writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam). The shallow sidecar (`<root-stem>.shallow.parquet`, each chunk's top level, written by every hybrid save) follows the blob anywhere, and scan blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
-
-**Cross-account credentials** — a `buckets.yml` entry (or `defaults`) may carry a `profile:` naming an AWS credential profile (`blobfs.bucket_profile`), so a source and a target in *different* accounts each authenticate with their own key inside one `index --to` run. It threads to every S3/R2 seam: the `s3fs` blob IO (`_s3fs(endpoint, profile)`), the `aws`-CLI lister (`S3Backend(profile=…)`), and the `boto3` bulk lister (`S3BulkLister(profile=…)`, `bulk-list -f`). No profile → ambient credentials (env / default profile), the single-account default. Cross-account needs per-bucket endpoints too, so leave `DISK_TREE_R2_ENDPOINT_URL` unset (it globally overrides all per-bucket endpoints).
+**Cross-account credentials** — a `buckets.yml` entry (or `defaults`) may carry a `profile:` naming an AWS credential profile (`blobfs.bucket_profile`), so a source and a target in *different* accounts each authenticate with their own key. It threads to every S3/R2 seam: the `s3fs` blob IO (`_s3fs(endpoint, profile)`) and the `boto3` bulk lister (`S3BulkLister(profile=…)`, `bulk-list -f`). No profile → ambient credentials (env / default profile), the single-account default. Cross-account needs per-bucket endpoints too, so leave `DISK_TREE_R2_ENDPOINT_URL` unset (it globally overrides all per-bucket endpoints).
 
 Stream-engine tuning knobs (env, all with measured defaults — see the constants block in `find/aggregate_stream.py`):
 - `DISK_TREE_FLUSH_ROWS` — output row-group size (read-side: smaller = less fetched per directory browse, bigger footer)
@@ -159,14 +150,9 @@ pytest tests/                    # engine
 cd cloud && pytest               # dt-cloud (same venv; sync with --all-packages first)
 ```
 
-Test fixtures in `tests/data/` (mock `aws s3 ls` output → expected parquet); `tests/conftest.py`'s `fake_aws` puts a canned-listing `aws` on `PATH` for end-to-end `index` runs. CI and the job images install `--frozen` from the workspace lock (`deploy/sheet-mirror/Dockerfile` is the reference recipe: `uv sync --frozen --no-dev --no-editable --package dt-cloud --extra …` into `UV_PROJECT_ENVIRONMENT=/usr/local`); a plain `pip install .` resolves fresh and ships pins the tests never ran.
+Tests build their listing fixtures inline (`tmp_path` parquets). CI and the job images install `--frozen` from the workspace lock (`deploy/sheet-mirror/Dockerfile` is the reference recipe: `uv sync --frozen --no-dev --no-editable --package dt-cloud --extra …` into `UV_PROJECT_ENVIRONMENT=/usr/local`); a plain `pip install .` resolves fresh and ships pins the tests never ran.
 
 ## Performance
 
 - Depth column enables parquet predicate pushdown (only load needed rows)
-- `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning (rows sorted `(depth, path)`)
-- Denormalized stats avoid parquet reads for the scan list
-
-## TODOs / Known Issues
-
-- S3 pagination not explicitly handled (relies on aws cli)
+- The site reads the path store by row-group range reads, planned from footers in D1 (`index-sync`)

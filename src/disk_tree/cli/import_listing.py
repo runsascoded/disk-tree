@@ -52,7 +52,7 @@ from disk_tree.find.aggregate_duckdb import DEFAULT_PARTITION_FILES
 @option('-s', '--scheme', default='gcs', help='URI scheme for the scan root (gcs / s3 / r2)')
 @option('-T', '--temp-dir', default=None, help='DuckDB spill directory (duckdb engine only; the stream engine is sort-free). Default: fresh per-invocation temp dir (safe under concurrent imports).')
 @option('-t', '--time', 'time_str', default=None, help='Snapshot time (ISO 8601) recorded on each Scan; default: now')
-@option('-w', '--to', default=None, help='Write the scan blob(s) to a dir or fsspec URL (`r2://bucket/prefix`) instead of the configured write dir — same as `index --to`')
+@option('-w', '--to', default=None, help='Write the scan blob(s) to a dir or fsspec URL (`r2://bucket/prefix`) instead of the configured write dir')
 @option('-x', '--max-temp-size', default=None, help="DuckDB `max_temp_directory_size` (duckdb engine only; e.g. `500GiB`). Default: DuckDB's auto-cap = free disk at launch, a stale snapshot under concurrent writers.")
 def import_cmd(
     max_cols: tuple[str, ...],
@@ -196,8 +196,7 @@ def import_bucket(
         raise ValueError(f"--size-hist is a duckdb-engine feature; got engine={engine!r}")
     if tier_opts is not None and engine == 'pandas':
         raise ValueError("--tiers needs a blob on disk: use the duckdb or stream engine")
-    # A `file` root collapses to the bare path, so a reduced capture's
-    # `Scan.path` is byte-identical to what `index` records for the same dir.
+    # A `file` root collapses to the bare path (a reduced capture's root).
     scan_path = canonical(f'{scheme}://{bucket}')
 
     if engine == 'pandas':
