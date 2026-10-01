@@ -41,7 +41,7 @@ class HybridBackend(StorageBackend):
 
     def _resolve(self, blob_ref: str) -> str:
         # Legacy absolute paths are honored; new refs are basenames.
-        # Blobs may live on an external volume; search every read dir.
+        # Blobs may live in any search-path dir (or URL); search every read dir.
         return blob_ref if isabs(blob_ref) else _config.resolve_scan_blob(blob_ref, self.scans_dir)
 
     def _exists(self, blob_ref: str) -> bool:

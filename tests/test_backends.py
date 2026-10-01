@@ -1,6 +1,7 @@
 """`backend_for`: scheme → backend, including `r2://` through the S3 backend
 with the bucket's endpoint, and a loud refusal for `gcs://` (which used to
-fall through to the *local* backend and "succeed" with an empty scan).
+fall through to a filesystem walk and "succeed" with an empty scan) and for
+local paths (this engine scans object stores only).
 """
 
 import re
@@ -11,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from disk_tree import find
-from disk_tree.backends import LocalBackend, S3Backend, UnsupportedBackend, backend_for
+from disk_tree.backends import S3Backend, UnsupportedBackend, backend_for
 from disk_tree.blobfs import R2_ENDPOINT_VAR
 
 TESTDATA = join(dirname(__file__), 'data')
@@ -20,13 +21,14 @@ EP = 'https://acct.r2.cloudflarestorage.com'
 
 def test_dispatch_by_scheme(monkeypatch):
     monkeypatch.setenv(R2_ENDPOINT_VAR, EP)
-    assert type(backend_for('/Users/x')) is LocalBackend
+    local = backend_for('/Users/x')
+    assert (type(local), local.scheme) == (UnsupportedBackend, 'file')
     s3 = backend_for('s3://bk/p')
     assert (type(s3), s3.scheme, s3.endpoint_url) == (S3Backend, 's3', None)
     r2 = backend_for('r2://bk/p')
     assert (type(r2), r2.scheme, r2.endpoint_url) == (S3Backend, 'r2', EP)
     gcs = backend_for('gcs://bk')
-    assert (type(gcs), gcs.scheme, gcs.is_local) == (UnsupportedBackend, 'gcs', False)
+    assert (type(gcs), gcs.scheme) == (UnsupportedBackend, 'gcs')
 
 
 def test_r2_lists_through_the_endpoint_with_r2_uris(monkeypatch):
@@ -90,15 +92,14 @@ def test_gcs_refuses_live_operations():
         gcs.exists('gcs://bk/p')
 
 
-def test_gfind_cmd_prunes_cloudstorage(monkeypatch):
-    """The gfind command prunes the CloudStorage dirs under the root (printing
-    each pruned dir itself as an empty leaf)."""
-    from disk_tree.backends import local
-    cmds = []
-    monkeypatch.setattr(local, 'run_gfind', lambda cmd, *a, **kw: cmds.append(cmd) or iter(()))
-    list(LocalBackend().list('/'))
-    printf = ['-printf', r'%y %b %T@ %p\0']
-    prune = lambda p: ['-path', p, *printf, '-prune', '-o']
-    assert cmds == [
-        [local.FIND, '/', *prune(local.CLOUDSTORAGE_PATHS[0]), *prune(local.CLOUDSTORAGE_PATHS[1]), *printf],
-    ]
+@pytest.mark.parametrize('url', ['/Users/x', 'file:///Users/x', 'rel/dir'])
+def test_local_paths_refuse_live_operations(url):
+    local = backend_for(url)
+    msg = (
+        "live scanning of local paths isn't supported; index an `s3://` or `r2://` URL, "
+        "or import a listing (`disk-tree bulk-list` + `disk-tree import -l <listing>`)"
+    )
+    with pytest.raises(NotImplementedError, match=re.escape(msg)):
+        list(local.list(url))
+    with pytest.raises(NotImplementedError, match=r'existence check of local paths'):
+        local.exists(url)

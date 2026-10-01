@@ -44,18 +44,20 @@ def _scans(root: Path) -> list[dict]:
         con.close()
 
 
+SRC = 's3://bkt/src'
+
+
 @pytest.fixture
-def tree(tmp_path: Path) -> Path:
-    d = tmp_path / 'src'
-    (d / 'sub').mkdir(parents=True)
-    (d / 'a.txt').write_bytes(b'a' * 5000)
-    (d / 'sub' / 'b.txt').write_bytes(b'b' * 100)
-    return d
+def aws_env(fake_aws) -> dict[str, str]:
+    return fake_aws(
+        '2026-01-02 03:04:05       5000 src/a.txt\n'
+        '2026-01-02 03:04:06        100 src/sub/b.txt\n'
+    )
 
 
-def test_index_to_url_writes_a_manifest(tree: Path, tmp_path: Path):
+def test_index_to_url_writes_a_manifest(aws_env: dict[str, str], tmp_path: Path):
     root, blobs = tmp_path / 'root', f'file://{tmp_path / "blobs"}'
-    r = _ok(_run(['index', '-C', '-q', '-t', blobs, str(tree)], root))
+    r = _ok(_run(['index', '-C', '-q', '-t', blobs, SRC], root, **aws_env))
     (scan,) = _scans(root)
     manifest = f'{blobs}/{scan["blob"]}{SUFFIX}'
     assert [l for l in r.stdout.split('\n') if l.startswith('Scan manifest: ')] == [f'Scan manifest: {manifest}']
@@ -66,14 +68,14 @@ def test_index_to_url_writes_a_manifest(tree: Path, tmp_path: Path):
     assert m == {
         'format': 'disk-tree-scan', 'version': 1,
         'time': m['time'],
-        'path': str(tree), 'blob': scan['blob'],
+        'path': SRC, 'blob': scan['blob'],
         'size': scan['size'], 'n_children': scan['n_children'], 'n_desc': scan['n_desc'],
         'mtime': scan['mtime'], 'error_count': scan['error_count'],
         'error_paths': json.loads(scan['error_paths']) if scan['error_paths'] else None,
     }
 
 
-def test_index_to_local_dir_writes_no_manifest(tree: Path, tmp_path: Path):
+def test_index_to_local_dir_writes_no_manifest(aws_env: dict[str, str], tmp_path: Path):
     root, blobs = tmp_path / 'root', tmp_path / 'blobs'
-    _ok(_run(['index', '-C', '-q', '-t', str(blobs), str(tree)], root))
+    _ok(_run(['index', '-C', '-q', '-t', str(blobs), SRC], root, **aws_env))
     assert sorted(p.suffix for p in blobs.iterdir()) == ['.parquet']

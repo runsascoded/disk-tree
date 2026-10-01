@@ -1,7 +1,6 @@
 import re
-from glob import glob
-from os import environ as env, makedirs, pathsep, sep
-from os.path import expanduser, exists, ismount, join
+from os import environ as env, makedirs, pathsep
+from os.path import expanduser, exists, join
 from typing import Callable
 
 from disk_tree.blobfs import exists as blob_exists, is_url, join as blob_join
@@ -12,42 +11,16 @@ HOME = env['HOME']
 CONFIG_DIR = join(HOME, '.config')
 DEFAULT_ROOT_DIR = join(CONFIG_DIR, 'disk-tree')
 
-#: Volumes are probed here for an opted-in `disk-tree/scans` directory.
-VOLUMES = join(sep, 'Volumes')
-
 #: Callbacks fired after `set_write_target` repoints the blob write dir (the
 #: backend singleton must be rebuilt against it).
 _write_target_hooks: list[Callable[[], None]] = []
 
 
-def _volume_mounted(path: str) -> bool:
-    """False when `path` sits under a `/Volumes/<name>` that isn't mounted.
-
-    Creating a directory under an absent mount point silently writes to the
-    boot disk — the very disk an external scans dir exists to spare — and the
-    files vanish from view the moment the volume comes back. So an unmounted
-    candidate is never a write target.
-    """
-    if is_url(path):
-        return True  # reachability is an IO-time concern, not a mount
-    parts = path.split(sep)
-    if len(parts) > 2 and parts[1] == 'Volumes':
-        return ismount(join(VOLUMES, parts[2]))
-    return True
-
-
 def _ensure_dir(path: str) -> None:
-    """`makedirs(path)`, but never on the boot disk behind an unmounted volume.
-
-    Guards the makedirs-on-boot-disk trap (see specs/macos-app.md): a root under
-    an absent `/Volumes/<name>` would otherwise be created on the boot disk.
-    """
+    """`makedirs(path)` for a local dir; a no-op for a URL (object stores have
+    no directories to create)."""
     if is_url(path):
-        return  # object stores have no directories to create
-    if not _volume_mounted(path):
-        raise RuntimeError(
-            f'{path!r} is under an unmounted volume; refusing to create it on the boot disk'
-        )
+        return
     if not exists(path):
         makedirs(path)
 
@@ -62,15 +35,6 @@ def _apply_root(path: str) -> None:
     SCANS_DIR = scan_write_dir()
 
 
-def discovered_scan_dirs() -> list[str]:
-    """External scans dirs, opted in by existing on a mounted volume.
-
-    Creating `<volume>/disk-tree/scans` is the whole opt-in: no config file, and
-    an unplugged volume simply drops out of the search path.
-    """
-    return sorted(d for d in glob(join(VOLUMES, '*', 'disk-tree', 'scans')) if _volume_mounted(d))
-
-
 #: `:` separates entries, but `://` opens a URL — split only on a `:` that
 #: doesn't. (Object-store URLs carry no port, so that's the only case.)
 _DIRS_SEP = re.compile(re.escape(pathsep) + r'(?!//)')
@@ -82,23 +46,16 @@ def split_dirs(raw: str) -> list[str]:
 
 
 def configured_scan_dirs() -> list[str]:
-    """Scan dirs in priority order — first writable one wins for new blobs."""
+    """Scan dirs in priority order — the first is the write target for new blobs."""
     raw = env.get(DISK_TREE_SCAN_DIRS_VAR)
     if raw:
         return [p if is_url(p) else expanduser(p) for p in split_dirs(raw)]
-    if DISK_TREE_ROOT_VAR in env:
-        # An explicit root is a deliberate choice; discovery must not silently
-        # redirect writes out of it.
-        return [DEFAULT_SCANS_DIR]
-    return [*discovered_scan_dirs(), DEFAULT_SCANS_DIR]
+    return [DEFAULT_SCANS_DIR]
 
 
 def scan_write_dir() -> str:
-    """Where new blobs go: the first configured dir on a mounted volume."""
-    for d in configured_scan_dirs():
-        if _volume_mounted(d):
-            return d
-    return DEFAULT_SCANS_DIR
+    """Where new blobs go: the first configured dir."""
+    return configured_scan_dirs()[0]
 
 
 def scan_read_dirs() -> list[str]:
@@ -106,7 +63,7 @@ def scan_read_dirs() -> list[str]:
 
     `SCANS_DIR` leads so that a monkeypatched (or env-overridden) write dir is
     always searched first, and the internal default always trails so blobs
-    written before an external volume existed stay reachable.
+    written there before `DISK_TREE_SCAN_DIRS` was set stay reachable.
     """
     seen, out = set(), []
     for d in [SCANS_DIR, *configured_scan_dirs(), DEFAULT_SCANS_DIR]:
@@ -144,7 +101,7 @@ def _find_blob(name: str, prefer: str | None = None) -> str | None:
 
 def blob_reachable(name: str, prefer: str | None = None) -> bool:
     """Whether blob `name` resolves to an existing file/object in some read dir.
-    False when its scan's blob lives only on an unmounted volume (or was never
+    False when its scan's blob lives only in an unreachable dir (or was never
     written), so callers can fall back or raise a clear message instead of
     hitting a raw `FileNotFoundError` on the write-dir fallback path."""
     return _find_blob(name, prefer) is not None
@@ -180,6 +137,5 @@ def set_write_target(target: str) -> str:
 
 #: Bind the root-derived globals (`ROOT_DIR`, `DEFAULT_SCANS_DIR`, `SQLITE_PATH`,
 #: `SCANS_DIR`) from the env at import.
-#: `SCANS_DIR` is the write target, resolved once here; re-plugging a volume
-#: mid-run won't be noticed, but a new blob never lands somewhere unreadable.
+#: `SCANS_DIR` is the write target, resolved once here.
 _apply_root(env.get(DISK_TREE_ROOT_VAR, DEFAULT_ROOT_DIR))

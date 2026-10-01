@@ -11,7 +11,7 @@ def resolve_blob(blob_ref: str) -> str:
     """Resolve a parquet blob ref to its absolute path.
 
     Honors legacy absolute refs. Searches every configured scans dir (blobs
-    may sit on an external volume), reading config at call time so tests can
+    may sit in any of them, or behind a URL), reading config at call time so tests can
     monkeypatch it.
     """
     if not blob_ref:

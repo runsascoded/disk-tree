@@ -1,17 +1,14 @@
 # disk-tree
 
-Disk/cloud space usage analyzer: a scanning/indexing CLI (`disk-tree`), a cloud overlay (`dt-cloud`), and a Cloudflare-hosted site (`site/`) over the indexes.
+Cloud storage usage analyzer: a scanning/indexing CLI (`disk-tree`), a cloud overlay (`dt-cloud`), and a Cloudflare-hosted site (`site/`) over the indexes.
 
 ## Project Vision
 
-Track disk space usage across:
-- Local filesystems (laptop, external SSDs)
-- S3 buckets
+Track storage usage across object stores: S3, R2 and GCS buckets.
 
 Key goals:
-- **Always-ready index**: Run overnight scans so you don't wait when running out of space
-- **External media snapshots**: Keep cached views of SSDs even when unplugged
-- **Fast indexing**: Shell out to `gfind`/`aws s3 ls` instead of slow Python stat calls
+- **Always-ready index**: Scheduled scans (the r2 demo's daily ingest) so the index is there when you need it
+- **Fast indexing**: Shell out to `aws s3 ls`, or shard a bucket's listing across workers (`bulk-list`)
 - **Site**: Treemap visualizations, diffs and an age lens over each scan's path index
 
 ## Architecture
@@ -19,9 +16,7 @@ Key goals:
 ### Python Backend (`src/disk_tree/`)
 
 **Indexing** (`find/index.py`):
-- Local: `gfind -printf '%y %b %T@ %p\0'` → null-terminated, 512-byte block sizes (handles sparse files)
-- S3: `aws s3 ls --recursive` → parses listing format
-- Excludes CloudStorage paths (`~/Library/CloudStorage`) to avoid blocking on cloud I/O
+- S3 / R2: `aws s3 ls --recursive` → parses listing format (a local path refuses: `UnsupportedBackend`)
 - Builds DataFrame with columns: `path`, `size`, `mtime`, `kind`, `parent`, `uri`, `n_desc`, `n_children`, `depth`
 - `depth` column enables predicate pushdown when loading parquet (major performance win)
 - Aggregates sizes upward through directory tree
@@ -37,19 +32,16 @@ Key goals:
 
 **CLI** (`cli/`):
 ```bash
-disk-tree index [URL]     # Scan a directory, an s3:// bucket, or an r2:// bucket (S3-compatible: lists
+disk-tree index URL       # Scan an s3:// bucket, or an r2:// bucket (S3-compatible: lists
                           # through the bucket's endpoint — `DISK_TREE_R2_ENDPOINT_URL` or its
-                          # buckets.yml `endpoint_url` — with `r2://` uris). gcs:// has no live lister
-                          # and refuses (`UnsupportedBackend`): use `bulk-list` + `import` for it
+                          # buckets.yml `endpoint_url` — with `r2://` uris). gcs:// and local paths
+                          # have no live lister and refuse (`UnsupportedBackend`): use `bulk-list` +
+                          # `import` for gcs://
   -C, --no-cache-read     # Force fresh scan (`index` otherwise returns any cached scan unconditionally)
   -g, --gc                # Garbage collect old scans
   -m, --mean-mtime        # Emit `mtime_mean` (size-weighted mean mtime; feeds the UI age lens)
   -M, --measure-memory    # Track peak memory
   -q, --no-progress       # Suppress the tqdm progress bar (scheduled/redirected runs — keeps logs small)
-  -R, --auto-remote       # If the local write dir is low on space (< $DISK_TREE_LOW_SPACE_BYTES, 5 GiB)
-                          # and $DISK_TREE_REMOTE_SCAN_TARGET is set, write the blob there instead
-                          # (default: warn and suggest `--to`)
-  -s, --sudo              # Run gfind with sudo (implies `-C`: a cached scan can't be known to be sudo)
   -t, --to TARGET         # Write this scan's blob to a dir or fsspec URL (r2://bucket/prefix, s3://…,
                           # gs://…) instead of the configured write dir; it joins the search path for
                           # this run, so the scan reads back through it (spec `remote-scan-targets.md`).
@@ -122,7 +114,7 @@ One gate (`_lib/auth.ts`, `@open-athena/auth` over D1): `identify` → `Identity
 # (`cloud/`, package `dt-cloud`) share ONE `uv.lock` and one `.venv`.
 uv sync                                                 # engine only
 uv sync --all-packages --all-extras --all-groups        # engine + dt-cloud, every extra, test groups
-disk-tree index .
+disk-tree index s3://<bucket>/<prefix>
 
 # Site
 pnpm install
@@ -136,8 +128,7 @@ cd site && pnpm dev
 
 ## Data Flow
 
-1. `disk-tree index /path` runs `gfind` or `aws s3 ls` (`bulk-list` → `import` for the bulk
-   pipeline)
+1. `disk-tree index s3://…` runs `aws s3 ls` (`bulk-list` → `import` for the bulk pipeline)
 2. Output parsed into DataFrame, aggregated by directory
 3. Saved as Parquet, metadata recorded in SQLite
 4. `dt-cloud path-index` / `disk-tree tiers` cut the path store; `dt-cloud index-sync` publishes its
@@ -150,9 +141,9 @@ Default paths (override with `DISK_TREE_ROOT`):
 - `~/.config/disk-tree/disk-tree.db` — SQLite metadata
 - `~/.config/disk-tree/scans/` — Parquet blob storage
 
-**Blob storage is a search path, not a single directory.** The DB stays on the boot disk (small, always mounted); blobs may live anywhere on `config.scan_read_dirs()`, since `Scan.blob` holds a basename. Creating `<volume>/disk-tree/scans` on an external volume opts it in — no config needed — and it becomes the *write* target while mounted; unplugging simply drops it out of the search path. `DISK_TREE_SCAN_DIRS` (colon-separated, priority order) overrides discovery, and an explicit `DISK_TREE_ROOT` disables it entirely so tests and alternate profiles stay self-contained. A candidate under an unmounted `/Volumes/<name>` is never written to — that would silently create the directory on the boot disk.
+**Blob storage is a search path, not a single directory.** The DB lives under the root; blobs may live anywhere on `config.scan_read_dirs()`, since `Scan.blob` holds a basename. `DISK_TREE_SCAN_DIRS` (colon-separated, priority order; the first is the *write* target) sets the path, else it is the root's `scans/`.
 
-A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — the remote-target story for a boot disk too full to hold scan output (spec `remote-scan-targets.md`). `index --to <url>` (or `DISK_TREE_REMOTE_SCAN_TARGET` + `-R`) writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam). The shallow sidecar (`<root-stem>.shallow.parquet`, each chunk's top level, written by every hybrid save) follows the blob anywhere, and scan blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
+A search-path entry may also be an **fsspec URL** (`r2://bucket/prefix`, `s3://…`, `gs://…`) — spec `remote-scan-targets.md`. `index --to <url>` writes a scan's blob there, and reads resolve it through the same search path — local dirs are checked first, so a local blob never costs a round-trip. `r2://` rides s3fs with the bucket's endpoint from `DISK_TREE_R2_ENDPOINT_URL` or its `buckets.yml` entry. Every parquet blob read/write goes through `blobfs.py` (the local-vs-URL seam). The shallow sidecar (`<root-stem>.shallow.parquet`, each chunk's top level, written by every hybrid save) follows the blob anywhere, and scan blobs are written in 64K-row groups so a `depth`/`path` pushdown over R2 fetches kilobytes.
 
 **Cross-account credentials** — a `buckets.yml` entry (or `defaults`) may carry a `profile:` naming an AWS credential profile (`blobfs.bucket_profile`), so a source and a target in *different* accounts each authenticate with their own key inside one `index --to` run. It threads to every S3/R2 seam: the `s3fs` blob IO (`_s3fs(endpoint, profile)`), the `aws`-CLI lister (`S3Backend(profile=…)`), and the `boto3` bulk lister (`S3BulkLister(profile=…)`, `bulk-list -f`). No profile → ambient credentials (env / default profile), the single-account default. Cross-account needs per-bucket endpoints too, so leave `DISK_TREE_R2_ENDPOINT_URL` unset (it globally overrides all per-bucket endpoints).
 
@@ -168,7 +159,7 @@ pytest tests/                    # engine
 cd cloud && pytest               # dt-cloud (same venv; sync with --all-packages first)
 ```
 
-Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet). CI and the job images install `--frozen` from the workspace lock (`deploy/sheet-mirror/Dockerfile` is the reference recipe: `uv sync --frozen --no-dev --no-editable --package dt-cloud --extra …` into `UV_PROJECT_ENVIRONMENT=/usr/local`); a plain `pip install .` resolves fresh and ships pins the tests never ran.
+Test fixtures in `tests/data/` (mock `aws s3 ls` output → expected parquet); `tests/conftest.py`'s `fake_aws` puts a canned-listing `aws` on `PATH` for end-to-end `index` runs. CI and the job images install `--frozen` from the workspace lock (`deploy/sheet-mirror/Dockerfile` is the reference recipe: `uv sync --frozen --no-dev --no-editable --package dt-cloud --extra …` into `UV_PROJECT_ENVIRONMENT=/usr/local`); a plain `pip install .` resolves fresh and ships pins the tests never ran.
 
 ## Performance
 
@@ -176,9 +167,6 @@ Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet). CI a
 - `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning (rows sorted `(depth, path)`)
 - Denormalized stats avoid parquet reads for the scan list
 
-**Sizes are per-path, not per-extent.** `gfind -printf '%b'` reports blocks allocated to a *path*; APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount. So a subtree's reported size is an upper bound on what deleting it frees. Measured 2026-08-29: deleting 35 dormant `.venv` dirs totalling 16.9 GiB freed 9 GiB — uv's default macOS link mode is `clone`, so the remainder stayed live in `~/.cache/uv`. Clones are invisible to `stat` (distinct inodes, `nlink == 1`), so inode/link-count bookkeeping catches hardlinks only — and hardlinks are nearly irrelevant here: a census of `$HOME` found `nlink > 1` over-counting just **4.3 GiB of 385.9 GiB (1.1%)**, which is why `%i`/`%n` are *not* indexed. The whole-*volume* overcount is free — `df` counts shared blocks once, so `apparent_total − df_used` is the number, but only for a scan that covers the entire volume (a subtree's apparent can't be compared to the volume's `df`).
-
 ## TODOs / Known Issues
 
-- No scheduled/overnight indexing yet
 - S3 pagination not explicitly handled (relies on aws cli)

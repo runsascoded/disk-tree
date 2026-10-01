@@ -33,10 +33,6 @@ def test_url_entries_are_kept_verbatim(monkeypatch, tmp_path: Path):
     assert config.configured_scan_dirs() == [m, str(tmp_path)]
 
 
-def test_url_entry_counts_as_mounted():
-    assert config._volume_mounted('memory://x/y') is True
-
-
 def test_url_first_entry_is_the_write_target(monkeypatch, tmp_path: Path):
     m = _mem()
     monkeypatch.setenv(config.DISK_TREE_SCAN_DIRS_VAR, f'{m}:{tmp_path}')

@@ -1,5 +1,4 @@
 import json
-import os
 from datetime import datetime
 from typing import Optional
 
@@ -100,7 +99,6 @@ class Scan(Base):
         cls,
         path: str,
         gc: bool = False,
-        sudo: bool = False,
         mean_mtime: bool = False,
         track_progress: bool = True,
         progress: bool = True,
@@ -120,7 +118,7 @@ class Scan(Base):
                 ScanProgress.update(path, items_found, items_per_sec, error_count)
 
         try:
-            result = find.index(path, sudo=sudo, mean_mtime=mean_mtime, progress_callback=progress_callback, progress=progress)
+            result = find.index(path, mean_mtime=mean_mtime, progress_callback=progress_callback, progress=progress)
         except Exception as e:
             if track_progress:
                 ScanProgress.finish(path, status='failed')
@@ -165,7 +163,7 @@ class Scan(Base):
         db.session.commit()
         err(f"{path}: saved {len(df)} rows to {blob_ref} ({backend.name})")
         if result.error_count > 0:
-            err(f"{path}: {result.error_count} permission errors")
+            err(f"{path}: {result.error_count} listing errors")
         if gc:
             cls.gc(path, now)
 
@@ -196,8 +194,8 @@ class Scan(Base):
     ) -> 'Scan | None':
         from .db import db
 
-        abspath = os.path.abspath(path).rstrip('/')
-        return db.session.query(cls).filter_by(path=abspath).order_by(cls.time.desc()).first()
+        from disk_tree.backends import canonical
+        return db.session.query(cls).filter_by(path=canonical(path)).order_by(cls.time.desc()).first()
 
     def df(self) -> pd.DataFrame:
         backend = get_backend()
@@ -208,9 +206,11 @@ class Scan(Base):
     @classmethod
     def load_reachable(cls, path: str) -> 'Scan | None':
         """The freshest scan of `path` whose blob is reachable now — skips scans
-        whose parquet is on an unmounted volume (spec `r2-scan-target.md`)."""
+        whose parquet is unreachable (spec `r2-scan-target.md`)."""
+        from .db import db
+        from disk_tree.backends import canonical
         from disk_tree.config import blob_reachable
-        scans = db.session.query(cls).filter_by(path=os.path.abspath(path).rstrip('/')).order_by(cls.time.desc()).all()
+        scans = db.session.query(cls).filter_by(path=canonical(path)).order_by(cls.time.desc()).all()
         return next((s for s in scans if blob_reachable(s.blob)), None)
 
     @classmethod
@@ -218,7 +218,6 @@ class Scan(Base):
         cls,
         path: str,
         gc: bool = False,
-        sudo: bool = False,
         mean_mtime: bool = False,
         track_progress: bool = True,
         progress: bool = True,
@@ -226,23 +225,23 @@ class Scan(Base):
         from disk_tree.config import blob_reachable
         scan = cls.load(path)
         if scan and not blob_reachable(scan.blob):
-            # Freshest cached scan's blob is unreachable (e.g. on an unmounted
-            # volume). Prefer an older reachable scan; if none, scan fresh rather
+            # Freshest cached scan's blob is unreachable (e.g. its search-path
+            # dir is gone). Prefer an older reachable scan; if none, scan fresh rather
             # than crashing on the missing blob (spec `r2-scan-target.md`).
             older = cls.load_reachable(path)
             if older:
                 err(f"{path}: freshest scan's blob {scan.blob} is unreachable, using scan {older.id} instead")
                 scan = older
             else:
-                err(f"{path}: cached scan's blob {scan.blob} is unreachable (unmounted volume?), rescanning")
+                err(f"{path}: cached scan's blob {scan.blob} is unreachable, rescanning")
                 scan = None
         if not scan:
-            return cls.create(path, gc=gc, sudo=sudo, mean_mtime=mean_mtime, track_progress=track_progress, progress=progress)
+            return cls.create(path, gc=gc, mean_mtime=mean_mtime, track_progress=track_progress, progress=progress)
         df = scan.df()
         if mean_mtime and 'mtime_mean' not in df.columns:
             # Cached scan predates the flag — rescan rather than silently
             # serving a frame without the requested column.
             err(f"{path}: cached scan lacks `mtime_mean`, rescanning")
-            return cls.create(path, gc=gc, sudo=sudo, mean_mtime=True, track_progress=track_progress, progress=progress)
+            return cls.create(path, gc=gc, mean_mtime=True, track_progress=track_progress, progress=progress)
         cls.gc(path=path, cutoff=scan.time)
         return scan, df

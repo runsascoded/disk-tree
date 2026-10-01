@@ -1,14 +1,12 @@
 """Tests for multi-directory blob storage (`disk_tree.config` search path).
 
 Blobs are referenced by basename, so they may live on any dir in the search
-path — typically an external volume, which can be unplugged.
+path (`DISK_TREE_SCAN_DIRS`, else the root's `scans/`).
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-
-import pytest
 
 from disk_tree import config
 
@@ -20,39 +18,11 @@ def test_explicit_scan_dirs_win(monkeypatch, tmp_path: Path):
     assert config.scan_write_dir() == str(a)
 
 
-def test_explicit_root_disables_discovery(monkeypatch, tmp_path: Path):
-    """An explicit root is a deliberate choice; discovery must not redirect it."""
+def test_default_is_the_roots_scans_dir(monkeypatch, tmp_path: Path):
     monkeypatch.delenv(config.DISK_TREE_SCAN_DIRS_VAR, raising=False)
-    monkeypatch.setenv(config.DISK_TREE_ROOT_VAR, str(tmp_path))
     monkeypatch.setattr(config, 'DEFAULT_SCANS_DIR', str(tmp_path / 'scans'))
-    monkeypatch.setattr(config, 'discovered_scan_dirs', lambda: ['/Volumes/x/disk-tree/scans'])
     assert config.configured_scan_dirs() == [str(tmp_path / 'scans')]
-
-
-def test_discovery_used_when_no_explicit_config(monkeypatch, tmp_path: Path):
-    monkeypatch.delenv(config.DISK_TREE_SCAN_DIRS_VAR, raising=False)
-    monkeypatch.delenv(config.DISK_TREE_ROOT_VAR, raising=False)
-    monkeypatch.setattr(config, 'DEFAULT_SCANS_DIR', str(tmp_path / 'scans'))
-    monkeypatch.setattr(config, 'discovered_scan_dirs', lambda: ['/Volumes/x6/disk-tree/scans'])
-    assert config.configured_scan_dirs() == ['/Volumes/x6/disk-tree/scans', str(tmp_path / 'scans')]
-
-
-def test_unmounted_volume_is_never_a_write_target(monkeypatch, tmp_path: Path):
-    """Writing under an absent mount point would land on the boot disk."""
-    monkeypatch.setenv(config.DISK_TREE_SCAN_DIRS_VAR, f'/Volumes/gone/disk-tree/scans:{tmp_path}')
-    monkeypatch.setattr(config, 'ismount', lambda p: False)
-    assert config._volume_mounted('/Volumes/gone/disk-tree/scans') is False
-    assert config.scan_write_dir() == str(tmp_path)
-
-
-def test_mounted_volume_is_preferred(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv(config.DISK_TREE_SCAN_DIRS_VAR, f'/Volumes/here/disk-tree/scans:{tmp_path}')
-    monkeypatch.setattr(config, 'ismount', lambda p: p == '/Volumes/here')
-    assert config.scan_write_dir() == '/Volumes/here/disk-tree/scans'
-
-
-def test_non_volume_paths_are_always_available():
-    assert config._volume_mounted('/Users/someone/.config/disk-tree/scans') is True
+    assert config.scan_write_dir() == str(tmp_path / 'scans')
 
 
 def test_resolve_finds_a_blob_in_a_secondary_dir(monkeypatch, tmp_path: Path):

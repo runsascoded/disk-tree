@@ -142,14 +142,13 @@ def aggregate(
 
 def index(
     path: str,
-    sudo: bool = False,
     mean_mtime: bool = False,
     progress_callback: ProgressCallback | None = None,
     progress_interval: float = 1.0,
-    excludes: list[str] | None = None,
     progress: bool = True,
 ) -> IndexResult:
-    path0 = path.rstrip('/') or '/'
+    """List `path` (an `s3://` / `r2://` URL) through its backend and aggregate."""
+    path0 = path.rstrip('/')
     errors = ErrorCollector()
     backend = backend_for(path0)
 
@@ -167,8 +166,7 @@ def index(
 
     def collect():
         nonlocal last_progress_time, items_count
-        kwargs = dict(errors=errors, excludes=excludes, sudo=sudo, progress=progress)
-        for e in backend.list(path0, **kwargs):
+        for e in backend.list(path0, errors=errors, progress=progress):
             items_count += 1
             now = time_module.time()
             if progress_callback and (now - last_progress_time) >= progress_interval:
@@ -191,7 +189,7 @@ def index(
         items_per_sec = items_count / elapsed if elapsed > 0 else None
         progress_callback(items_count, items_per_sec, errors.count)
 
-    # Handle empty bucket/directory: return early with just a root row
+    # Handle an empty bucket/prefix: return early with just a root row
     if not path_l:
         df = pd.DataFrame([{
             'path': '.',
@@ -223,10 +221,8 @@ def index(
     })
     if mean_mtime:
         from .agg_ext import MT_WSUM
-        # Every row contributes size·mtime — including dir/symlink inodes,
-        # whose own block sizes cascade into `size`; matching them here keeps
-        # weights summing to exactly `size` (an empty dir would otherwise get
-        # wsum=0 over size>0, i.e. a nonsense epoch-1970 mean). Python bigints
+        # Every row contributes size·mtime (dir rows are size 0, so nothing),
+        # keeping the weights summing to exactly `size`. Python bigints
         # (object dtype): Σ mtime·size overflows int64 at PB scale.
         df[MT_WSUM] = pd.array([int(s) * int(m) for s, m in zip(size_l, mtime_l)], dtype=object)
     # Free the per-column lists now that the DataFrame owns the data — peak memory

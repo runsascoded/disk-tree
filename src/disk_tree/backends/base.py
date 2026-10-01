@@ -28,23 +28,12 @@ class Backend(ABC):
     def scheme(self) -> str:
         ...
 
-    @property
-    def is_local(self) -> bool:
-        """True if the backend points at a local filesystem (enables Finder reveal, etc)."""
-        return False
-
-    @property
-    def supports_sudo(self) -> bool:
-        return False
-
     @abstractmethod
     def list(
         self,
         url: str,
         *,
         errors: ErrorCollector | None = None,
-        excludes: list[str] | None = None,
-        sudo: bool = False,
         progress: bool = True,
     ) -> Iterator[dict]:
         """Recursive bulk listing.

@@ -1,4 +1,4 @@
-"""The in-memory (pandas) listing writers — local `index`, `import -e pandas`,
+"""The in-memory (pandas) listing writers — `index`, `import -e pandas`,
 the hybrid backend's chunk and delete rewrites — all go through
 `listing_format.write_listing` (spec `listing-slim.md` phase 1): each blob is
 v2 (no `uri`, single-valued pivots implied, the format keys, the switch
@@ -20,7 +20,7 @@ import pytest
 from disk_tree import listing_format as lf
 from disk_tree.blobfs import read_parquet
 from disk_tree.find.import_listing import import_listing
-from disk_tree.find.index import aggregate, index as index_local
+from disk_tree.find.index import aggregate, index as index_url
 from disk_tree.storage.base import PathStats
 from disk_tree.storage.hybrid import HybridBackend
 from disk_tree.storage.parquet import ParquetBackend
@@ -44,7 +44,7 @@ def _columns_kv(columns) -> str:
 
 
 def _walk_rows(uri_for, entries: list[tuple[str, str, int, int]]) -> pd.DataFrame:
-    """Rows as a walk backend emits them (`backends/gfind.py`, `backends/s3.py`):
+    """Rows as a walk backend emits them (`backends/s3.py`):
     `path` relative to the root (`''` for the root itself), `uri` from `uri_for`."""
     return pd.DataFrame([
         {'path': p, 'size': s, 'mtime': m, 'kind': k, 'parent': None if p == '' else os.path.dirname(p), 'uri': uri_for(p)}
@@ -61,7 +61,7 @@ AGG_COLUMNS = ['path', 'size', 'mtime', 'n_desc', 'n_files', 'n_children', 'kind
 
 
 @pytest.mark.parametrize('root, expected_uris', [
-    # local: `uri` is the absolute path (gfind's `%p`); the scan root is the `abspath`ed dir.
+    # local-path roots (scans made elsewhere): `uri` is the absolute path.
     ('/Users/ryan', ['/Users/ryan', '/Users/ryan/a.txt', '/Users/ryan/sub', '/Users/ryan/sub/b.txt', '/Users/ryan/sub/deep', '/Users/ryan/sub/deep/c.txt']),
     # local, the filesystem root: `/foo`, never `//foo`.
     ('/', ['/', '/a.txt', '/sub', '/sub/b.txt', '/sub/deep', '/sub/deep/c.txt']),
@@ -95,20 +95,20 @@ def test_scan_root_reproduces_uri_per_scheme(tmp_path: Path, codec, root, expect
 
 
 @patch('subprocess.Popen')
-def test_local_index_saves_v2(mock_popen, tmp_path: Path, codec):
-    """`disk-tree index` of a local dir: gfind → `find.index` → `HybridBackend.save`."""
-    raw = ''.join(f'{k} {b} {m}.0000000000 {p}\0' for k, b, m, p in [
-        ('d', 8, 1_000, '/root'), ('d', 8, 2_000, '/root/a'), ('f', 2, 3_000, '/root/a/x.bin'), ('f', 6, 4_000, '/root/y.bin'),
-    ]).encode()
+def test_index_saves_v2(mock_popen, tmp_path: Path, codec):
+    """`disk-tree index` of a bucket prefix: `aws s3 ls` → `find.index` → `HybridBackend.save`."""
     proc = MagicMock()
-    proc.stdout, proc.stderr, proc.wait.return_value = io.BytesIO(raw), io.BytesIO(b''), 0
+    proc.stdout = io.StringIO(
+        '1970-01-01 00:50:00       1024 root/a/x.bin\n'
+        '1970-01-01 01:06:40       3072 root/y.bin\n'
+    )
     mock_popen.return_value = proc
-    df = index_local('/root').df
-    assert df['uri'].tolist() == ['/root', '/root/a', '/root/y.bin', '/root/a/x.bin']
-    blob = str(tmp_path / HybridBackend(scans_dir=str(tmp_path)).save(df, '/root'))
+    df = index_url('s3://bkt/root').df
+    assert df['uri'].tolist() == ['s3://bkt/root', 's3://bkt/root/a', 's3://bkt/root/y.bin', 's3://bkt/root/a/x.bin']
+    blob = str(tmp_path / HybridBackend(scans_dir=str(tmp_path)).save(df, 's3://bkt/root'))
     # `save` adds `child_scan_id` to the frame it is handed (all None: no chunks).
     assert list(df.columns) == [*AGG_COLUMNS, 'child_scan_id']
-    assert lf.format_of(blob) == lf.slim('/root', list(df.columns))
+    assert lf.format_of(blob) == lf.slim('s3://bkt/root', list(df.columns))
     assert pq.read_schema(blob).names == [c for c in df.columns if c != 'uri']
     assert _codecs(blob) == {codec}
     pd.testing.assert_frame_equal(read_parquet(blob), _v1_roundtrip(df))

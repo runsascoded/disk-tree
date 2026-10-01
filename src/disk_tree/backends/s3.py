@@ -61,8 +61,6 @@ class S3Backend(Backend):
         url: str,
         *,
         errors: ErrorCollector | None = None,
-        excludes: list[str] | None = None,
-        sudo: bool = False,
         progress: bool = True,
     ) -> Iterator[dict]:
         cmd = self._aws_cmd(['s3', 'ls', '--recursive', self._s3_url(url)])

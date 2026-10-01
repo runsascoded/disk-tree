@@ -1,6 +1,7 @@
-"""`disk-tree index --to` and the low-space warn / `--auto-remote` redirect, end
-to end through the CLI over a `file://` target — a real fsspec URL that survives
+"""`disk-tree index --to`, end to end through the CLI (an `s3://` source listed
+by a fake `aws`) over a `file://` target — a real fsspec URL that survives
 across processes, unlike `memory://`. Spec `remote-scan-targets.md`, Phase 1.
+Plus the refusal of a local path (this engine scans object stores only).
 """
 
 from __future__ import annotations
@@ -15,18 +16,20 @@ import pytest
 from utz import iec
 
 from disk_tree import config
-from disk_tree.cli.index import LOW_SPACE_VAR, REMOTE_TARGET_VAR
 
 pytest.importorskip('fsspec')
 
 UUID_PARQUET = r'[0-9a-f-]{36}\.parquet'
-LOW = str(10**18)  # any disk is "low" against 888 PiB
+SRC = 's3://bkt/src'
+LISTING = (
+    '2026-01-02 03:04:05          4 src/a.txt\n'
+    '2026-01-02 03:04:06          2 src/sub/b.txt\n'
+)
 
 
 def _run(args: list[str], root: Path, **env_extra: str) -> subprocess.CompletedProcess:
     env = {**os.environ, config.DISK_TREE_ROOT_VAR: str(root)}
-    for k in (config.DISK_TREE_SCAN_DIRS_VAR, LOW_SPACE_VAR, REMOTE_TARGET_VAR):
-        env.pop(k, None)
+    env.pop(config.DISK_TREE_SCAN_DIRS_VAR, None)
     env.update(env_extra)
     return subprocess.run(
         [sys.executable, '-m', 'disk_tree.cli.main', *args],
@@ -39,18 +42,14 @@ def _stderr_lines(r: subprocess.CompletedProcess) -> list[str]:
 
 
 @pytest.fixture
-def src(tmp_path: Path) -> Path:
-    d = tmp_path / 'src'
-    (d / 'sub').mkdir(parents=True)
-    (d / 'a.txt').write_text('aaaa')
-    (d / 'sub' / 'b.txt').write_text('bb')
-    return d
+def aws_env(fake_aws) -> dict[str, str]:
+    return fake_aws(LISTING)
 
 
-def test_to_writes_the_blob_to_the_url_target_and_reads_it_back(src: Path, tmp_path: Path):
+def test_to_writes_the_blob_to_the_url_target_and_reads_it_back(aws_env: dict[str, str], tmp_path: Path):
     root, remote = tmp_path / 'root', tmp_path / 'remote'
     target = f'file://{remote}'
-    r = _run(['index', '-C', '-t', target, str(src)], root)
+    r = _run(['index', '-C', '-t', target, SRC], root, **aws_env)
     assert r.returncode == 0, r.stderr
     assert _stderr_lines(r)[0] == f'--to: writing blobs to {target}'
 
@@ -72,7 +71,7 @@ def test_to_writes_the_blob_to_the_url_target_and_reads_it_back(src: Path, tmp_p
     assert r2.stdout == f'{target}/{blobs[0]}\n'
 
 
-def test_to_writes_a_groups_json_footer_sidecar(src: Path, tmp_path: Path):
+def test_to_writes_a_groups_json_footer_sidecar(aws_env: dict[str, str], tmp_path: Path):
     """`index --to <url>` precomputes the `.groups.json` footer beside the blob,
     so the serverless reader (`site/functions/_lib/index.ts`) plans range
     reads without a cold thrift-footer parse (`find/groups.py`). Absent-safe:
@@ -85,7 +84,7 @@ def test_to_writes_a_groups_json_footer_sidecar(src: Path, tmp_path: Path):
 
     root, remote = tmp_path / 'root', tmp_path / 'remote'
     target = f'file://{remote}'
-    r = _run(['index', '-C', '-t', target, str(src)], root)
+    r = _run(['index', '-C', '-t', target, SRC], root, **aws_env)
     assert r.returncode == 0, r.stderr
 
     blob = next(remote.glob('*.parquet'))
@@ -105,38 +104,28 @@ def test_to_writes_a_groups_json_footer_sidecar(src: Path, tmp_path: Path):
     ]
 
 
-def test_low_space_warns_and_suggests(src: Path, tmp_path: Path):
-    root = tmp_path / 'root'
-    r = _run(['index', '-C', str(src)], root, **{LOW_SPACE_VAR: LOW})
+def test_index_scans_the_listing(aws_env: dict[str, str], tmp_path: Path):
+    """The blob is the aggregated listing: the root, `sub`, and both objects."""
+    from disk_tree.blobfs import read_parquet
+
+    root, remote = tmp_path / 'root', tmp_path / 'remote'
+    r = _run(['index', '-C', '-q', '-t', f'file://{remote}', SRC], root, **aws_env)
     assert r.returncode == 0, r.stderr
-    first = re.sub(r'only .+? free', 'only <free> free', _stderr_lines(r)[0])
-    assert first == (
-        f'warning: only <free> free on {root / "scans"} (< {iec(10**18)}); '
-        f'consider --to r2://<bucket>/<prefix> (or set {REMOTE_TARGET_VAR})'
+    df = read_parquet(str(next(remote.glob('*.parquet'))))
+    assert df[['path', 'kind', 'size', 'uri']].values.tolist() == [
+        ['.', 'dir', 6, SRC],
+        ['a.txt', 'file', 4, f'{SRC}/a.txt'],
+        ['sub', 'dir', 2, f'{SRC}/sub'],
+        ['sub/b.txt', 'file', 2, f'{SRC}/sub/b.txt'],
+    ]
+
+
+@pytest.mark.parametrize('url', ['/some/local/dir', 'file:///some/local/dir'])
+def test_local_path_refuses(url: str, tmp_path: Path):
+    r = _run(['index', '-C', url], tmp_path / 'root')
+    assert r.returncode == 2
+    assert _stderr_lines(r)[-1] == (
+        "Error: live scanning of local paths isn't supported; index an `s3://` or `r2://` URL, "
+        "or import a listing (`disk-tree bulk-list` + `disk-tree import -l <listing>`)"
     )
-    assert len(list((root / 'scans').glob('*.parquet'))) == 1
-
-
-def test_low_space_names_the_configured_remote(src: Path, tmp_path: Path):
-    root, remote = tmp_path / 'root', f'file://{tmp_path / "remote"}'
-    r = _run(['index', '-C', str(src)], root, **{LOW_SPACE_VAR: LOW, REMOTE_TARGET_VAR: remote})
-    assert r.returncode == 0, r.stderr
-    first = re.sub(r'only .+? free', 'only <free> free', _stderr_lines(r)[0])
-    assert first == (
-        f'warning: only <free> free on {root / "scans"} (< {iec(10**18)}); consider --to {remote}'
-        ' — pass -R/--auto-remote to redirect automatically'
-    )
-    assert not (tmp_path / 'remote').exists()
-
-
-def test_auto_remote_redirects_when_low(src: Path, tmp_path: Path):
-    root, remote_dir = tmp_path / 'root', tmp_path / 'remote'
-    remote = f'file://{remote_dir}'
-    r = _run(['index', '-C', '-R', str(src)], root, **{LOW_SPACE_VAR: LOW, REMOTE_TARGET_VAR: remote})
-    assert r.returncode == 0, r.stderr
-    first = re.sub(r'low space: .+? free', 'low space: <free> free', _stderr_lines(r)[0])
-    assert first == (
-        f'low space: <free> free on {root / "scans"} (< {iec(10**18)}); --auto-remote: writing blobs to {remote}'
-    )
-    assert len(list(remote_dir.glob('*.parquet'))) == 1
-    assert list((root / 'scans').glob('*.parquet')) == []
+    assert not (tmp_path / 'root' / 'disk-tree.db').exists()  # refused before the DB opens
