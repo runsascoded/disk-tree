@@ -30,7 +30,7 @@ STORE_BUCKET = "disk-tree"
 STORE_REGION = "auto"
 EXECUTOR = "laptop"
 STORE_SCHEME = "file:///"
-STORE_BUCKETS = "Users"
+STORE_BUCKETS = "*"               # every top-level dir is a root (a `capture /`: Applications, Users, …)
 HOME = "Users/ryan"               # paths under it read as `~/…` (site/src/pathCrumbs.ts)
 # Secrets (Pages secrets, per project): STORE_ENDPOINT, STORE_ACCESS_KEY_ID,
 # STORE_SECRET_ACCESS_KEY, SESSION_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET.
