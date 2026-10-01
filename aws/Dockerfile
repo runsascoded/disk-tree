@@ -4,9 +4,9 @@
 # Built by Pulumi (`aws/__main__.py`) from THIS worktree — `m3` isn't pushed
 # (it's a laptop deployment; `log.md` names local paths), so there's no
 # public ref to clone. Context is the repo root; `Dockerfile.dockerignore`
-# allowlists the Python sources. Both lockfiles are `--frozen`, as in
-# `.github/workflows/daily-ingest.yml`: root venv = the `disk-tree` engine,
-# `cloud/` venv = `dt-cloud`.
+# allowlists the Python sources. `cloud/` is a member of the root uv
+# workspace: one lockfile (`--frozen`), one venv holding `dt-cloud` and the
+# `disk-tree` engine it depends on.
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
 # GNU time: ingest.sh reports path-index's peak RSS (the spike's question).
@@ -17,11 +17,10 @@ WORKDIR /app
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-# The wheel force-includes the built UI; the ingest never serves it.
-RUN mkdir -p ui/dist && uv sync --frozen --no-dev --extra r2
-COPY cloud/pyproject.toml cloud/uv.lock ./cloud/
+COPY cloud/pyproject.toml ./cloud/
 COPY cloud/src ./cloud/src
-RUN cd cloud && uv sync --frozen --no-dev
+# The wheel force-includes the built UI; the ingest never serves it.
+RUN mkdir -p ui/dist && uv sync --frozen --no-dev --package dt-cloud
 
 # chmod: the source zip (Pulumi `AssetArchive`) doesn't carry file modes.
 COPY aws/ingest.sh /ingest.sh

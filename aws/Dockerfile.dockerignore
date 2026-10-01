@@ -4,7 +4,6 @@
 !README.md
 !src
 !cloud/pyproject.toml
-!cloud/uv.lock
 !cloud/src
 !aws/ingest.sh
 **/__pycache__

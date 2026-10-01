@@ -90,7 +90,7 @@ aws.ecr.LifecyclePolicy(
 # --- The image, built on CodeBuild (not the laptop's Docker): Pulumi zips the
 #     files the Dockerfile needs (content-hashed), uploads them, and
 #     `aws/build-image` runs one build per new hash, printing the pinned digest. ---
-SOURCES = ["pyproject.toml", "uv.lock", "README.md", "src", "cloud/pyproject.toml", "cloud/uv.lock", "cloud/src", "aws/Dockerfile", "aws/ingest.sh"]
+SOURCES = ["pyproject.toml", "uv.lock", "README.md", "src", "cloud/pyproject.toml", "cloud/src", "aws/Dockerfile", "aws/ingest.sh"]
 
 
 def _source_files() -> list[Path]:

@@ -30,7 +30,7 @@ s3 cp "s3://$bucket/$key/" "$work/listing/" --recursive --exclude '*' --include 
 echo "[ingest] fetched $(find "$work/listing" -name '*.parquet' | wc -l) shards, $(du -sh "$work/listing" | cut -f1) in $(( $(date +%s) - t0 ))s"
 
 t0=$(date +%s)
-( cd /app/cloud && /usr/bin/time -v -o "$work/time.txt" .venv/bin/dt-cloud path-index -d "$date" \
+( cd /app/cloud && /usr/bin/time -v -o "$work/time.txt" /app/.venv/bin/dt-cloud path-index -d "$date" \
     -l "$work/listing/*.parquet" -P "$work/index/path-index.parquet" -o "$work/snap" )
 echo "[ingest] path-index: $(( $(date +%s) - t0 ))s, peak RSS $(awk -F': ' '/Maximum resident/{printf "%.2f GiB", $2/1048576}' "$work/time.txt")"
 echo "[ingest] outputs: index $(du -sh "$work/index" | cut -f1), snap $(du -sh "$work/snap" | cut -f1)"
@@ -42,6 +42,6 @@ echo "[ingest] uploaded to s3://$bucket/{listing/$store/$date/index/$gen,snapsho
 
 t0=$(date +%s)
 : "${D1_DB_ID:?}" "${CLOUDFLARE_API_TOKEN:?}" "${CLOUDFLARE_ACCOUNT_ID:?}"
-( cd /app/cloud && .venv/bin/dt-cloud index-sync "$date" -g "$gen" -b "$bucket" -k "listing/$store/$date/index/$gen" \
+( cd /app/cloud && /app/.venv/bin/dt-cloud index-sync "$date" -g "$gen" -b "$bucket" -k "listing/$store/$date/index/$gen" \
     -d "$work/index" -v path -v coarse16 -v coarse20 -v coarse24 )
 echo "[ingest] footers → D1 $D1_DB_NAME in $(( $(date +%s) - t0 ))s"
