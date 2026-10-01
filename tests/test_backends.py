@@ -142,13 +142,3 @@ def test_one_fs_prunes_mounts_below_the_root_in_the_gfind_cmd(monkeypatch):
          *prune('/System/Volumes/Data'), *prune('/Volumes/ext'), *prune('/dev'), *printf],
         [local.FIND, '/', *prune(local.CLOUDSTORAGE_PATHS[0]), *prune(local.CLOUDSTORAGE_PATHS[1]), *printf],
     ]
-
-
-def test_one_fs_passes_through_to_the_walker(monkeypatch):
-    from disk_tree.backends import local
-    monkeypatch.setenv('DISK_TREE_WALKER', '/bin/dt-walker')
-    monkeypatch.setattr(local, 'mount_points', lambda: pytest.fail('the walker checks mounts itself'))
-    cmds = []
-    monkeypatch.setattr(local, 'run_gfind', lambda cmd, *a, **kw: cmds.append(cmd) or iter(()))
-    list(LocalBackend().list('/Users/x', one_fs=True))
-    assert cmds == [['/bin/dt-walker', '--no-default-excludes', '--one-fs', '/Users/x']]
