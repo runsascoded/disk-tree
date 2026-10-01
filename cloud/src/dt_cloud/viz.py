@@ -298,8 +298,17 @@ def write_path_index(
     # A local capture's `bucket` is its scan root (`/Users/ryan`); drop the
     # leading slash so it tiles like a bucket name (`Users/ryan`). Kept, it
     # yields an empty first segment: a depth-1 node at path '' — the root's own
-    # path — whose parent walk never terminates.
-    src = f"(SELECT * REPLACE (ltrim(bucket, '/') AS bucket) FROM {prepare_listing(con, listings)})"
+    # path — whose parent walk never terminates. The filesystem root (`/`)
+    # strips to '' outright, so its rows re-split on their first segment
+    # (`Applications`, `Users`, … become the roots); files directly under `/`
+    # (`.file`, `.VolumeIcon.icns`) have no root to sit in and are dropped.
+    src = f"""(
+        SELECT * REPLACE (
+          CASE WHEN bucket = '' THEN split_part(name, '/', 1) ELSE bucket END AS bucket,
+          CASE WHEN bucket = '' THEN substr(name, strpos(name, '/') + 1) ELSE name END AS name)
+        FROM (SELECT * REPLACE (ltrim(bucket, '/') AS bucket) FROM {prepare_listing(con, listings)})
+        WHERE bucket <> '' OR strpos(name, '/') > 0
+    )"""
 
     # --- layer-2 dir rollups (attribution-independent; cached when dir_cache) ---
     # Everything downstream needs objects only via these two aggregates:
