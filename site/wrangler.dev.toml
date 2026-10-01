@@ -24,6 +24,7 @@ AUTH_MODE = "app"
 ROOT_LABEL = "m3 (dev)"          # distinguishes dev.disk.rbw.sh from prod at a glance
 BASE_SCOPE = "laptop"
 STAFF_DOMAIN = "runsascoded.com"
+ADMIN_EMAILS = "1"                # the `admin_emails` table grants admin (share links can make an account admin)
 SNAPSHOTS_SUBDIR = "laptop"
 INDEX_VARIANTS = "path"
 STORE_BUCKET = "disk-tree"

@@ -25,6 +25,7 @@ AUTH_MODE = "app"
 ROOT_LABEL = "m3"
 BASE_SCOPE = "laptop"
 STAFF_DOMAIN = "runsascoded.com"
+ADMIN_EMAILS = "1"                # the `admin_emails` table grants admin (share links can make an account admin)
 SNAPSHOTS_SUBDIR = "laptop"      # snapshots/laptop/ (_lib/shared.ts)
 INDEX_VARIANTS = "path"          # no ownership → no by-user tiers
 STORE_BUCKET = "disk-tree"
