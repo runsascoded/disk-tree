@@ -7,7 +7,7 @@ import type { CellCtx, CellStyle } from '@disk-tree/react'
 import { Avatar } from './Avatar'
 import { CopyName, copyText } from './CopyName'
 import { FaRegCopy } from 'react-icons/fa6'
-import { pathCrumbs, pathUri } from './pathCrumbs'
+import { pathCopy, pathCrumbs, pathDisplay, pathText } from './pathCrumbs'
 import { cellAction } from './objects'
 import { canonId, UserChip, ghHandle, shortName } from './UserChip'
 import { dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonth, inkFor, slotColor, userColor } from './colors'
@@ -37,17 +37,24 @@ const LI_METRIC_CHIPS: [LiMetric, string, string][] = [
  * to the CLI (via `copyText`, which also works off the tailnet dev server's
  * insecure origin). Its own component so the copy state has somewhere to live
  * (renderTooltip is a plain function). */
-function PathBar({ path, scheme, onDrill }: { path: TreeNode[]; scheme: string; onDrill?: (p: TreeNode[]) => void }) {
+function PathBar({ path, scheme, home, onDrill }: { path: TreeNode[]; scheme: string; home?: string[]; onDrill?: (p: TreeNode[]) => void }) {
   const [copied, setCopied] = useState(false)
-  const crumbs = pathCrumbs(path.slice(1).map(n => n.n))
-  const uri = pathUri(scheme, crumbs.map(c => c.name))
+  const names = path.slice(1).map(n => n.n)
+  const uri = pathCopy(scheme, names)
+  // A store home folds to a `~` lead (drilling to the home dir); a file
+  // store's other paths lead with `/`, not `file:///`.
+  const { lead, leadSegs } = pathDisplay(scheme, names, home)
+  const crumbs = pathCrumbs(names).slice(leadSegs)
+  const homeNode = leadSegs ? path.slice(0, leadSegs + 1) : null
   return (
     <div className="path" onClick={e => e.stopPropagation()}>
       <span className="crumbs">
-        <span className="dirname">{scheme}</span>
+        {homeNode && onDrill && crumbs.length
+          ? <button type="button" className="seg" onClick={() => onDrill(homeNode)}>~</button>
+          : <span className={'dirname' + (homeNode && !crumbs.length ? ' basename' : '')}>{lead}</span>}
         {crumbs.map(({ name, segs, drillable, last }, i) => (
           <span key={i}>
-            {i > 0 && <span className="sep">/</span>}
+            {(i > 0 || homeNode) && <span className="sep">/</span>}
             {onDrill && drillable
               ? <button type="button" className="seg" onClick={() => onDrill(path.slice(0, segs.length + 1))}>{name}</button>
               : <span className={'seg' + (last ? ' basename' : '')}>{name}</span>}
@@ -162,7 +169,7 @@ const scaleMix = (mix: Record<string, number>, b: number): Record<string, number
   return tot ? Object.fromEntries(Object.entries(mix).map(([c, x]) => [c, (x * b) / tot])) : mix
 }
 
-export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRange, hl, onPickUser, onPickUnclaimed, onClearHl, pricing, lens, ownerLensed, scheme = 'gs://', redact, ownerIdx, initialPath, path, onPathChange, objects = false, onOpen }: {
+export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRange, hl, onPickUser, onPickUnclaimed, onClearHl, pricing, lens, ownerLensed, scheme = 'gs://', home, redact, ownerIdx, initialPath, path, onPathChange, objects = false, onOpen }: {
   root: TreeNode
   mode: ColorMode
   /** Secondary color axis — see `ShadeMode`. Default `none`. */
@@ -185,6 +192,8 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
   ownerLensed?: boolean
   // URI scheme for cell paths — `gs://` for GCS, `s3://` for CoreWeave.
   scheme?: string
+  /** The store home, shown as `~` in the path bar (`Store.home`). */
+  home?: string[]
   // OG-image mode: hide every text detail (cell labels, crumb/rollup bars, hint)
   // and render just the colored cells. Never set by the live app.
   redact?: boolean
@@ -586,7 +595,7 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
     )
     return (
       <>
-        <PathBar path={path} scheme={scheme} onDrill={onPathChange} />
+        <PathBar path={path} scheme={scheme} home={home} onDrill={onPathChange} />
         <div className="nums">
           {fmtBytes(n.b)} · {fmtN(n.o)} objects · {((100 * n.b) / root.b).toFixed(2)}% of total
           {n.d != null && <> · mean created {epochDaysToMonth(n.d)}</>}
@@ -663,7 +672,7 @@ export function Treemap({ root, mode, shade = 'none', userIdx, dateRange, readRa
       // current view, so the panel never collapses to an empty stub.
       renderTipDefault={(n, p) => (
         <div className="tip-viewcard">
-          <div className="vc-scope">{p.length > 1 ? uriOf(p) : n.n}</div>
+          <div className="vc-scope">{p.length > 1 ? pathText(scheme, p.slice(1).map(x => x.n), home) : n.n}</div>
           <div className="nums">
             {fmtBytes(n.b)} · {fmtN(n.o)} objects · {root.b ? ((100 * n.b) / root.b).toFixed(2) : 0}% of total
             {n.d != null && <> · mean created {epochDaysToMonth(n.d)}</>}
