@@ -1,6 +1,6 @@
 # The laptop agents as a macOS app (TCC identity)
 
-**Status:** proposed (2026-09-29). Follow-up to `m3-site.md` Phase 3.
+**Status:** superseded (2026-10-01): folded into `wt/app`'s `specs/tauri-native-app.md` Phase 5. disky.app's `agent` launcher spawns (never execs) the agents, so TCC charges them to the app; after an SMAppService launch-constraint failure on rebuild, the app writes plain `com.runsascoded.disky.{scan,drain}` plists.
 
 ## Problem
 
