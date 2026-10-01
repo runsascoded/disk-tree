@@ -114,6 +114,21 @@ describe('objectSource', () => {
       { kind: 'none', bucket: 'Users', key: 'ryan/notes.md' },
     ])
   })
+  it('gcs: a scanned bucket the deployment serves to members reads through `/v1/objects/<bucket>`; others, and a guest (no `objectBuckets`), get size and dates', () => {
+    const proxy = { uri: 'gs://oa-gcs-usage-dvx', prefixes: ['listing/', 'snapshots/', 'sweep/'] }
+    const member = { ...proxy, objectBuckets: ['marin-us-central2', 'marin-us-east1'] }
+    expect([
+      objectSource(gcs, ['marin-us-central2', 'tokenized', 'x.jsonl.gz'], member),
+      objectSource(gcs, ['marin-eu-west4', 'raw', 'y.parquet'], member),
+      objectSource(gcs, ['marin-us-central2', 'tokenized', 'x.jsonl.gz'], proxy),
+      objectSource(gcs, ['oa-gcs-usage-dvx', 'snapshots', 'rules.json'], member),
+    ]).toEqual([
+      { kind: 'proxy', key: 'tokenized/x.jsonl.gz', api: '/v1/objects/marin-us-central2' },
+      { kind: 'none', bucket: 'marin-eu-west4', key: 'raw/y.parquet' },
+      { kind: 'none', bucket: 'marin-us-central2', key: 'tokenized/x.jsonl.gz' },
+      { kind: 'proxy', key: 'snapshots/rules.json', api: '/v1/files' },
+    ])
+  })
   it('meta: the proxy reads the object’s bucket — under an allowed prefix only', () => {
     const proxy = { uri: 'gs://oa-gcs-usage-dvx', prefixes: ['meta-l2/', 'snapshots/meta/'] }
     expect([
@@ -122,7 +137,7 @@ describe('objectSource', () => {
       objectSource(meta, ['oa-cw-s3-usage-index', 'meta-l2', 'a.parquet'], proxy),
       objectSource(meta, ['oa-gcs-usage-dvx', 'meta-l2', 'a.parquet'], null),
     ]).toEqual([
-      { kind: 'proxy', key: 'snapshots/meta/2026-09-30/meta.json' },
+      { kind: 'proxy', key: 'snapshots/meta/2026-09-30/meta.json', api: '/v1/files' },
       { kind: 'none', bucket: 'oa-gcs-usage-dvx', key: 'listing/2026-09-30/x.parquet' },
       { kind: 'none', bucket: 'oa-cw-s3-usage-index', key: 'meta-l2/a.parquet' },
       { kind: 'none', bucket: 'oa-gcs-usage-dvx', key: 'meta-l2/a.parquet' },

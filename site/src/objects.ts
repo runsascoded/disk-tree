@@ -67,22 +67,30 @@ export function openHref(storePath: string, segs: string[], search: string): { p
   return { pathname: dir.length ? `${base}/${dir.join('/')}` : storePath, search: `?${q}` }
 }
 
+/** The deployment's scan-store proxy (one bucket, a prefix allow-list). */
+export const FILES_API = '/v1/files'
+/** The scanned-bucket object proxy: `/v1/objects/<bucket>`. */
+export const OBJECTS_API = '/v1/objects'
+
 /** What `/api/store` reports for a deployment's `/v1/files` proxy: the one
- * bucket it reads (`<scheme>://<bucket>`) and the key prefixes it allows. */
+ * bucket it reads (`<scheme>://<bucket>`) and the key prefixes it allows —
+ * plus, for a member, the scanned buckets `/v1/objects` serves whole. */
 export interface ProxyInfo {
   uri: string
   prefixes: string[]
+  objectBuckets?: string[]
 }
 
 /** Where an opened object's bytes come from:
  * - `public`: the bucket is publicly readable at a base URL (the store's
  *   `objectBases`): the browser range-reads `<base>/<key>` directly.
- * - `proxy`: the deployment's gated `/v1/files` proxy reads this bucket and
- *   the key is under one of its prefixes: `/v1/files/get?path=<key>`.
+ * - `proxy`: a gated proxy at `api` reads it: the scan-store proxy
+ *   (`/v1/files`, its bucket, under an allowed prefix) or, for a scanned
+ *   bucket the deployment serves to members, `/v1/objects/<bucket>`.
  * - `none`: neither — the panel shows the object's size and dates only. */
 export type ObjectSource =
   | { kind: 'public'; base: string; key: string }
-  | { kind: 'proxy'; key: string }
+  | { kind: 'proxy'; key: string; api: string }
   | { kind: 'none'; bucket: string; key: string }
 
 const proxyBucket = (uri: string): string | null => uri.match(/^[a-z0-9]+:\/\/([^/]+)/)?.[1] ?? null
@@ -92,7 +100,8 @@ export function objectSource(store: Pick<Store, 'objectBases'>, segs: string[], 
   const key = rest.join('/')
   const base = store.objectBases?.[bucket]
   if (base) return { kind: 'public', base: base.replace(/\/+$/, ''), key }
-  if (proxy && proxyBucket(proxy.uri) === bucket && proxy.prefixes.some(p => key.startsWith(p))) return { kind: 'proxy', key }
+  if (proxy && proxyBucket(proxy.uri) === bucket && proxy.prefixes.some(p => key.startsWith(p))) return { kind: 'proxy', key, api: FILES_API }
+  if (proxy?.objectBuckets?.includes(bucket)) return { kind: 'proxy', key, api: `${OBJECTS_API}/${bucket}` }
   return { kind: 'none', bucket, key }
 }
 
