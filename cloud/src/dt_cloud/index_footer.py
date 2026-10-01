@@ -266,10 +266,11 @@ def _sql_escape(s: str) -> str:
 
 # The D1 database `/query` runs one SQL string; we send multi-row INSERTs.
 # Deployment config (specs/denovo-factor.md): the site's D1, as `site/wrangler.toml`
-# binds it — `D1_DB_ID` / `D1_DB_NAME` in the job's environment (`job/cw-run.sh`
-# exports the CoreWeave pair); the defaults are the GCS deployment's.
-D1_DB_ID = os.environ.get("D1_DB_ID", "e52398b7-5538-4bc4-83db-3355a1b5ef9a")  # oa-gcs-usage-auth
-D1_DB_NAME = os.environ.get("D1_DB_NAME", "oa-gcs-usage-auth")
+# binds it — `D1_DB_ID` / `D1_DB_NAME` in the job's environment. No default:
+# every deployment names its own D1 (a default once pointed at gcs's production
+# D1, so a run that forgot it wrote there).
+D1_DB_ID = os.environ.get("D1_DB_ID", "")
+D1_DB_NAME = os.environ.get("D1_DB_NAME", "")
 
 
 def _creds() -> tuple[str, str]:
@@ -314,7 +315,9 @@ INSERT_BYTES = 64_000
 def _d1_query(sql: str, acct: str, tok: str, db_id: str = D1_DB_ID) -> list[dict]:
     """Run one SQL string against D1 over the HTTP API (no Node/wrangler).
     Returns the statement's result rows (`[]` for writes); `meta` per row batch
-    is dropped."""
+    is dropped. Refuses without a database id (`$D1_DB_ID`)."""
+    if not db_id:
+        raise RuntimeError("no D1 database: set $D1_DB_ID (and $D1_DB_NAME) to this deployment's D1")
     import time
     import urllib.error
     import urllib.request

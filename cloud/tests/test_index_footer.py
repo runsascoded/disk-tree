@@ -40,9 +40,9 @@ def test_d1_query_retries_transient_401(monkeypatch):
         return _Resp()
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-    _d1_query("SELECT 1", acct="acct", tok="tok")
+    _d1_query("SELECT 1", acct="acct", tok="tok", db_id="db")
     assert calls == [
-        "https://api.cloudflare.com/client/v4/accounts/acct/d1/database/" + index_footer.D1_DB_ID + "/query",
+        "https://api.cloudflare.com/client/v4/accounts/acct/d1/database/db/query",
     ] * 3
 
 
@@ -56,7 +56,7 @@ def test_d1_query_persistent_401_raises_after_all_retries(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     with pytest.raises(RuntimeError) as ei:
-        _d1_query("SELECT 1", acct="acct", tok="tok")
+        _d1_query("SELECT 1", acct="acct", tok="tok", db_id="db")
     assert str(ei.value) == (
         'D1 query failed (401): {"success":false,"errors":'
         '[{"code":10000,"message":"Authentication error"}]}'
@@ -75,7 +75,7 @@ def test_d1_query_non_retryable_status_fails_fast(monkeypatch):
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
     with pytest.raises(RuntimeError):
-        _d1_query("SELECT 1", acct="acct", tok="tok")
+        _d1_query("SELECT 1", acct="acct", tok="tok", db_id="db")
     assert calls == [1]
 
 
@@ -467,3 +467,13 @@ def test_index_blob_backfills_the_cold_footer_from_json(tmp_path, monkeypatch):
     assert (d / "path-index.groups.parquet").read_bytes() == (tmp_path / "ref.groups.parquet").read_bytes()
     assert ref == str(tmp_path / "ref.groups.parquet")
     assert read_groups_parquet(str(d / "path-index.groups.parquet")) == (schema, rows)
+
+
+def test_d1_query_refuses_without_a_database(monkeypatch):
+    """No default D1: a deployment that forgot `$D1_DB_ID` fails instead of
+    writing into another deployment's database (it once defaulted to gcs prod)."""
+    calls: list[object] = []
+    monkeypatch.setattr("urllib.request.urlopen", lambda *a, **k: calls.append(a) or None)
+    with pytest.raises(RuntimeError, match=r"^no D1 database: set \$D1_DB_ID"):
+        _d1_query("SELECT 1", acct="acct", tok="tok", db_id="")
+    assert calls == []
