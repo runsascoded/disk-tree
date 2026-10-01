@@ -23,7 +23,7 @@ The CLI already answers this on demand (`overcount`: per-file `ATTR_CMNEXT_PRIVA
 | fresh `cp -c` pair (3 MB) | 2 | 6.0 MB | **0** | — |
 | + a hardlink of one | 3 | 9.0 MB | **0** | — |
 
-So: **one extra 8-byte attribute per file, no extra syscalls.** Not yet timed on a whole-`~` walk (next: add it to `dt-walker`, compare walk time).
+So: **one extra 8-byte attribute per file, no extra syscalls** — but not free in time: APFS computes it per file. Measured by `app` (`dt-walker --private`, 2026-09-30) over `~`, 7.49M entries: walk **127 s → 199 s (+55%)**; **Σalloc 398 GiB, Σprivate 288 GiB**, so ~110 GiB of `~`'s apparent size is clone/hardlink-shared. +72 s on a twice-daily background walk is affordable; it could also run on every Nth scan, since sharing moves slowly. Emitting it per record needs a walker record-format extension plus the parser (`tauri-native-app.md` item 6).
 
 What per-file private size means: bytes of *this file* no other file references. Consequences, visible in the last two rows:
 
