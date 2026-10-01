@@ -48,9 +48,6 @@ jobs:
       - name: Set up Python
         run: uv python install 3.12
 
-      - name: Create empty ui/dist for editable install
-        run: mkdir -p ui/dist
-
       - name: Install disk-tree (+ R2 driver)
         run: uv sync --frozen --extra r2
 

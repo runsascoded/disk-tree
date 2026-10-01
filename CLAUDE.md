@@ -1,6 +1,6 @@
 # disk-tree
 
-Disk/cloud space usage analyzer with caching, CLI, and web UI.
+Disk/cloud space usage analyzer: a scanning/indexing CLI (`disk-tree`), a cloud overlay (`dt-cloud`), and a Cloudflare-hosted site (`site/`) over the indexes.
 
 ## Project Vision
 
@@ -12,8 +12,7 @@ Key goals:
 - **Always-ready index**: Run overnight scans so you don't wait when running out of space
 - **External media snapshots**: Keep cached views of SSDs even when unplugged
 - **Fast indexing**: Shell out to `gfind`/`aws s3 ls` instead of slow Python stat calls
-- **Fresher child patching**: When viewing a parent, newer child scans automatically patch in updated stats
-- **Web UI**: Treemap visualizations and directory browsing
+- **Site**: Treemap visualizations, diffs and an age lens over each scan's path index
 
 ## Architecture
 
@@ -34,28 +33,7 @@ Key goals:
 - `ScanProgress` table: real-time tracking of active scans
 - Results stored as Parquet in `~/.config/disk-tree/scans/<uuid>.parquet`
 - SQLite metadata DB at `~/.config/disk-tree/disk-tree.db`
-- Index on `(path, time)` for efficient fresher child queries
-
-**Server API** (`server.py`):
-- Flask server on port 5001
-- `GET /api/scans` — List all scans (most recent per path, with denormalized stats)
-- `GET /api/scan?uri=<path>&depth=N` — Get scan details for a path
-  - Uses depth filtering for parquet predicate pushdown
-  - Patches in fresher child scans automatically (uses SQLite stats, avoids parquet reads)
-  - Falls back to filesystem listing if no scan exists
-- `GET /api/s3/buckets` — List S3 buckets with scan stats
-- `POST /api/scan/start` — Start a new scan (background thread)
-- `GET /api/scans/progress` — Current progress of active scans
-- `GET /api/scans/progress/stream` — SSE stream for real-time progress
-- `GET /api/compare?uri=<path>&scan1=&scan2=[&recursive=1&budget=N&max_depth=N]` — per-child Δ table; `recursive=1` returns the delta frontier across depths (added/removed dirs not descended). Served as a slice of the pair's persisted **diff index** when one exists (`index.status == 'done'`, complete, ~1 s at the root); otherwise a best-first walk (|Δsize| priority, `budget` expansions) answers and a background build starts — the UI polls and refetches when it lands. Statuses: `added | removed | changed | touched` (same size & count, mtime moved) `| unchanged`; `unchanged: {top, rest}` carries each expanded dir's biggest unchanged children + an aggregate of the rest
-- `GET /api/diff/status?scan1=&scan2=` — diff-index build state for a pair (`none | building | done | failed`, counts, seconds)
-  - index-served responses accept `min_frac` (default 2e-5): drop rows whose bytes and |Δ| are both under that fraction of the compared subtree (undrawable cells), their parents marked `pruned`; `min_frac=0` serves everything the row budget allows
-- `GET /api/filter?uri=<path>&q=<query>&depth=N` — recursive filter with true re-aggregation (matched bytes only, outermost matches, rolled up to a depth-N slice). Slash-free queries match path segments; with a fresh vocab sidecar the query is answered from the index (`indexed: true` in the response)
-- `GET /api/filter/stream` — SSE variant: one cumulative snapshot per depth (iterative deepening), final event `done: true`
-- `GET /api/histogram?uri=<path>&bins=N&limit=N` — Byte-weighted mtime histogram per child
-  - Loads every descendant file row (no depth pushdown possible; path-prefix pushdown prunes sibling subtrees); response cached, UI fetches lazily
-- `POST /api/delete` — Delete a file/directory and update scan parquets
-- Static file serving for bundled UI (SPA with catch-all routing)
+- Index on `(path, time)` for efficient latest-scan-per-path queries
 
 **CLI** (`cli/`):
 ```bash
@@ -255,45 +233,20 @@ disk-tree iac aws-batch   # `config` emits the `CfnDashboard` Pulumi component c
 
 disk-tree migrate         # Backfill SQLite stats from parquet files
 disk-tree migrate-depth   # Add depth column to existing parquets
-
-disk-tree-server          # Start Flask API server
 ```
 
-### Web UI (`ui/`)
+### Site (`site/`) and widget packages
 
-Vite + React + TypeScript with Material-UI, TanStack Query, and chart-lib-free DIY-SVG/canvas
-widgets from two workspace packages:
+`site/` is the hosted/serverless app: Vite + React + TypeScript, with Pages Functions over R2 / GCS +
+D1 (disk.rbw.sh, r2.rbw.sh, the gcs/cw deployments). Its chart-lib-free DIY-SVG/canvas widgets come
+from two workspace packages:
 - **`@rdub/treemap`** (`packages/treemap/`) — the SOTA treemap core + layout/color primitives:
   `<Treemap>` (SVG + canvas renderers, shared-edge tiling, dust texturing, per-cell `ring`
   emphasis, hover/pin events), `<VoronoiTreemap>` (`/voronoi` subpath), `useHoverPin`, `squarify`,
   `DEFAULT_PALETTE`/`ageFade`/`parseQuery`, `styles.css`. Disk-agnostic; the intended external
   consumer (e.g. file-tree) pins this.
-- **`@disk-tree/react`** (`packages/react/`) — disk-flavored widgets built on the core (which it
-  re-exports for back-compat): `<TimeSeries>`/`<BytesOverTime>`, `<StalenessScatter>`,
-  `<AgeHistograms>`, `sumTbYears`.
-
-**Key features**:
-- Directory listing with size, mtime, n_children, n_desc columns
-- Breadcrumb navigation
-- Rescan button with real-time progress (SSE)
-- Multi-select with keyboard navigation (Shift+arrows)
-- Bulk delete for selected items
-- Viz panel with a `View:` toggle — Treemap (+ age lens), Staleness scatter, Age histograms
-- Treemap drills past the response's depth: unloaded dirs fetch their subtree
-  (`<Treemap hasChildren/loadChildren>`), one request per drill, cached per node
-- Filter box: display-only dimming by default; the footer label toggles **re-aggregate**
-  mode (`/api/filter`) — treemap shows matched bytes only, matched dirs stay drillable
-- Pagination and search/filter
-- S3 bucket list with treemap visualization
-
-**Key files**:
-- `src/App.tsx` — Main layout with routing
-- `src/components/ScanList.tsx` — Scans list with pagination
-- `src/components/ScanDetails.tsx` — Directory listing component
-- `src/components/S3BucketList.tsx` — S3 bucket browser with treemap
-- `src/hooks/useScanProgress.ts` — SSE-based progress tracking
-
-The hosted/serverless app is `site/` (Pages Functions over R2 + D1; disk.rbw.sh, r2.rbw.sh, the gcs/cw deployments); `ui/` is the Flask server's SPA only.
+- **`@disk-tree/react`** (`packages/react/`) — `<TimeSeries>`/`<BytesOverTime>` built on the core
+  (which it re-exports for back-compat).
 
 ### Cloud site auth routes (`site/functions/`)
 
@@ -312,43 +265,25 @@ uv sync                                                 # engine only
 uv sync --all-packages --all-extras --all-groups        # engine + dt-cloud, every extra, test groups
 disk-tree index .
 
-# Start API server
-disk-tree-server  # http://localhost:5001
-
-# Web UI
-cd ui
+# Site
 pnpm install
-pnpm dev        # http://localhost:7788
+cd site && pnpm dev
 ```
 
 ## Packaging / Distribution
 
-The package is published to PyPI as `disk-tree` and can include the built web UI:
-
-```bash
-# Build with UI included
-cd ui && pnpm build   # Creates ui/dist/
-uv build              # Wheel includes disk_tree/static/ from ui/dist/
-
-# Install from PyPI
-pip install disk-tree
-disk-tree-server      # Serves both API and UI on :5001
-```
-
-The server auto-detects static assets:
-1. Packaged: `disk_tree/static/` (included in wheel via hatch `force-include`)
-2. Development: `ui/dist/` (relative to source)
-
-If no UI is found, server prints a message and only serves the API.
+The engine is published to PyPI as `disk-tree` (`uv build` → a wheel of `src/disk_tree`; CLI only).
+`dt-cloud` (`cloud/`) is a workspace member installed from the lock, not published.
 
 ## Data Flow
 
-1. `disk-tree index /path` runs `gfind` or `aws s3 ls`
+1. `disk-tree index /path` runs `gfind` or `aws s3 ls` (`capture` / `bulk-list` → `import` for the
+   split and bulk pipelines)
 2. Output parsed into DataFrame, aggregated by directory
 3. Saved as Parquet, metadata recorded in SQLite
-4. API server queries SQLite for scan list
-5. `/api/scan?uri=...` loads Parquet, patches fresher child stats
-6. UI renders directory listing with real-time updates
+4. `dt-cloud path-index` / `disk-tree tiers` cut the path store; `dt-cloud index-sync` publishes its
+   footers to D1
+5. `site/`'s Pages Functions read the path store (row-group range reads) and render treemaps / diffs
 
 ## Config
 
@@ -379,30 +314,15 @@ cd cloud && pytest               # dt-cloud (same venv; sync with --all-packages
 
 Test fixtures in `tests/data/` (mock gfind/s3 output → expected parquet). CI and the job images install `--frozen` from the workspace lock (`deploy/sheet-mirror/Dockerfile` is the reference recipe: `uv sync --frozen --no-dev --no-editable --package dt-cloud --extra …` into `UV_PROJECT_ENVIRONMENT=/usr/local`); a plain `pip install .` resolves fresh and ships pins the tests never ran.
 
-## Current State (www branch)
-
-- CLI indexing works for local + S3
-- Parquet caching with depth column for predicate pushdown
-- SQLite stats denormalization for fast scan listing
-- Flask API with real-time progress (SSE)
-- Fresher child scan patching (non-transitive, one level)
-- Web UI with directory listing, treemap, multi-select, bulk actions
-- S3 bucket list with treemap visualization
-- Delete functionality with scan parquet updates
-- Migration commands for existing data (`migrate`, `migrate-depth`)
-- Static file serving (bundled UI in PyPI wheel)
-
 ## Performance
 
-- `/api/scan?uri=/` optimized from ~4s to ~26ms (154x speedup)
 - Depth column enables parquet predicate pushdown (only load needed rows)
 - `StorageBackend.load(path_prefix=)` pushes a subtree restriction down to parquet row-group pruning / SQL range predicates (rows sorted `(depth, path)`); wired into scan/compare/histogram/path-stats reads — see `specs/diff-and-search.md`
-- Denormalized stats avoid parquet reads for scan list and fresher child patching
+- Denormalized stats avoid parquet reads for the scan list
 
 **Sizes are per-path, not per-extent.** `gfind -printf '%b'` reports blocks allocated to a *path*; APFS clones (reflinks) and hardlinks let several paths share one set of extents, and each linking path is charged the full amount. So a subtree's reported size is an upper bound on what deleting it frees. Measured 2026-08-29: deleting 35 dormant `.venv` dirs totalling 16.9 GiB freed 9 GiB — uv's default macOS link mode is `clone`, so the remainder stayed live in `~/.cache/uv`. Clones are invisible to `stat` (distinct inodes, `nlink == 1`), so inode/link-count bookkeeping catches hardlinks only — and hardlinks are nearly irrelevant here: a census of `$HOME` found `nlink > 1` over-counting just **4.3 GiB of 385.9 GiB (1.1%)**, which is why `%i`/`%n` are *not* indexed. `disk-tree reclaim` (extent intersection, for a custom keep-set) and `disk-tree overcount` (`ATTR_CMNEXT_PRIVATESIZE`, no open per file, for apparent-vs-exclusive) answer the question properly, on demand. The whole-*volume* overcount is free without either — `df` counts shared blocks once, so `apparent_total − df_used` is the number, but only for a scan that covers the entire volume (a subtree's apparent can't be compared to the volume's `df`); for a subtree, `overcount`'s `Σexclusive` is the physical footprint.
 
 ## TODOs / Known Issues
 
-- Fresher child patching is not transitive (grandchild patches don't propagate)
 - No scheduled/overnight indexing yet
 - S3 pagination not explicitly handled (relies on aws cli)
