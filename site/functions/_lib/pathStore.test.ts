@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Env } from './auth'
 import { serverTiming } from './edgeCache'
-import { blobKey, columnsFor, groupMatchesSize, indexKey, type IndexHandle, openIndex, planRects, planSizeRects, readAsks, readRects, readSizeRects, type Rect, type Row, rowColumns, sizeVariant } from './index'
+import { blobKey, columnsFor, groupMatchesSize, indexKey, type IndexHandle, openIndex, pathGens, planRects, planSizeRects, readAsks, readRects, readSizeRects, type Rect, type Row, rowColumns, sizeVariant } from './index'
 import { storeEnv } from './stores'
 import { sqliteD1 } from './testD1'
 import { type D1Variant, fixture, FILES, readJson, seedGeneration } from './testStore'
@@ -343,4 +343,20 @@ it('fixtures are registered', () => {
     `meta-l2/${V2}/index/g2/path-index-bysize.groups.json`, `meta-l2/${V2}/index/g2/path-index-bysize.parquet`, `meta-l2/${V2}/index/g2/path-index.groups.json`, `meta-l2/${V2}/index/g2/path-index.parquet`,
   ])
   expect(fixture('v2/d1.json').endsWith('/functions/_lib/fixtures/v2/d1.json')).toBe(true)
+})
+
+describe('pathGens', () => {
+  it('folds each date’s `path` generation into the cache-key token: a re-sync is a new key', async () => {
+    const { db, raw } = await sqliteD1('cw')
+    const v2 = await readJson<Record<string, D1Variant>>('v2/d1.json')
+    const files = { path: { parquet: 'v2/path-index.parquet', groups: 'v2/path-index.groups.json' }, bysize: { parquet: 'v2/path-index-bysize.parquet', groups: 'v2/path-index-bysize.groups.json' } }
+    seedGeneration(raw, { date: 'd1', gen: 'g1', dir: 'x/d1/g1', variants: v2, files })
+    seedGeneration(raw, { date: 'd2', gen: 'g1', dir: 'x/d2/g1', variants: v2, files })
+    const e = { DB: db, ROOT_LABEL: 'root' } as Env
+    const both = await pathGens(e, ['d2', 'd1'])
+    expect(await pathGens(e, ['d1', 'd2'])).toBe(both)
+    raw.exec("UPDATE index_schema SET gen = 'g2' WHERE date = 'd1' AND variant = 'path'")
+    expect(await pathGens(e, ['d1', 'd2'])).not.toBe(both)
+    expect(await pathGens({ ROOT_LABEL: 'root' } as Env, ['d1'])).toBe('')
+  })
 })
