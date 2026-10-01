@@ -1651,6 +1651,12 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
       // ramp both read against the row — the swatch was invisible at each end.
       i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 35%, transparent); }
     }
+    // Bytes by age (`TreeNode.ag`): one stacked bar per row, newest (yellow) →
+    // oldest (purple), widths ∝ bytes.
+    td.created.agebar {
+      .bar { display: inline-flex; width: 64px; height: 9px; border-radius: 2px; overflow: hidden; vertical-align: middle; box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 25%, transparent); }
+      .bar > span { min-width: 1px; }
+    }
     td.owners { white-space: nowrap; }
     // The row's actions: the trash gesture (a staging store) and the assign
     // select (an attribution store, admins).
@@ -2361,4 +2367,11 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
     b { color: var(--ink-2); font-weight: 500; }
     .srv { color: var(--ink-2); }
   }
+}
+
+// The age bar's tip: one line per non-empty bucket.
+.agebar-tip {
+  font-size: 12px; white-space: nowrap;
+  i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; vertical-align: -1px; margin-right: 3px; }
+  .dim { opacity: 0.7; }
 }
