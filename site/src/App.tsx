@@ -17,7 +17,7 @@ import { ago, buildUserIndex, epochDaysToDate } from './colors'
 import { ChildrenTable } from './ChildrenTable'
 import { FitSelect } from './FitSelect'
 import { PathPopover } from './PathPopover'
-import { pathUri } from './pathCrumbs'
+import { pathCopy, pathDisplay, pathText } from './pathCrumbs'
 import { listsObjects, openHref } from './objects'
 import { Busy, Skeleton } from './Busy'
 import { useRules } from './rules'
@@ -943,16 +943,23 @@ function AppContent() {
   const here = mapPath?.[mapPath.length - 1]
   // The deepest crumb is a tap-to-open path card (the full `<scheme>…/` prefix +
   // copy) rather than another drill link — it's where the page already is.
-  const crumbFullPath = pathUri(store.scheme, segs, true)
+  // A store home (`Users/ryan`) folds to one `~` crumb.
+  const crumbFullPath = pathText(store.scheme, segs, store.home, true)
+  const crumbCopy = pathCopy(store.scheme, segs, true)
+  const disp = pathDisplay(store.scheme, segs, store.home)
+  const crumbItems: { label: string; segs: string[] }[] = [
+    ...(disp.lead === '~' ? [{ label: '~', segs: segs.slice(0, disp.leadSegs) }] : []),
+    ...disp.rest.map((sg, i) => ({ label: sg, segs: segs.slice(0, disp.leadSegs + i + 1) })),
+  ]
   const crumbs = (
     <span className="tb-path" aria-label="Drilled path">
       <Tooltip content={store.rootLabel}><button type="button" className={segs.length ? '' : 'here'} onClick={() => drillTo([])}>{mapTree?.n ?? store.rootLabel}</button></Tooltip>
-      {segs.map((sg, i) => (
+      {crumbItems.map((c, i) => (
         <span key={i}>
           <span className="sep">/</span>
-          {i === segs.length - 1
-            ? <PathPopover label={sg} fullPath={crumbFullPath} />
-            : <Tooltip content={<code>{segs.slice(0, i + 1).join('/')}</code>}><button type="button" onClick={() => drillTo(segs.slice(0, i + 1))}>{sg}</button></Tooltip>}
+          {i === crumbItems.length - 1
+            ? <PathPopover label={c.label} fullPath={crumbFullPath} copy={crumbCopy} />
+            : <Tooltip content={<code>{pathText(store.scheme, c.segs, store.home)}</code>}><button type="button" onClick={() => drillTo(c.segs)}>{c.label}</button></Tooltip>}
         </span>
       ))}
     </span>
@@ -1104,6 +1111,7 @@ function AppContent() {
             pricing={pricing}
             lens={lens}
             scheme={store.scheme}
+            home={store.home}
             ownerIdx={ownersMode ? ownerIdx : undefined}
             path={mapPath}
             onPathChange={onMapPath}

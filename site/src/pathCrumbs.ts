@@ -28,3 +28,30 @@ export function pathCrumbs(names: string[]): Crumb[] {
 export function pathUri(scheme: string, segs: string[], dir = false): string {
   return scheme + segs.join('/') + (dir && segs.length ? '/' : '')
 }
+
+/** How a path reads on screen. A `file:///` store's paths are plain
+ * filesystem paths (`/Applications/…`); a store `home` (its segments, e.g.
+ * `['Users', 'ryan']`) folds to `~`. Other schemes read as their URI. `lead`
+ * stands for the first `leadSegs` segments; `rest` follows it. */
+export interface PathDisplay { lead: string; leadSegs: number; rest: string[] }
+
+export function pathDisplay(scheme: string, segs: string[], home?: string[]): PathDisplay {
+  if (home?.length && segs.length >= home.length && home.every((h, i) => segs[i] === h)) {
+    return { lead: '~', leadSegs: home.length, rest: segs.slice(home.length) }
+  }
+  return { lead: scheme === 'file:///' ? '/' : scheme, leadSegs: 0, rest: segs }
+}
+
+/** {@link pathDisplay} as one string: `~/c/disky`, `/Applications`, `gs://b/x`
+ * — a trailing `/` when `dir` and the path isn't its lead alone. */
+export function pathText(scheme: string, segs: string[], home?: string[], dir = false): string {
+  const { lead, rest } = pathDisplay(scheme, segs, home)
+  const body = rest.join('/') + (dir && rest.length ? '/' : '')
+  return lead === '~' ? (body ? `~/${body}` : '~') : lead + body
+}
+
+/** What a copy button hands the clipboard: a `file:///` store's absolute
+ * filesystem path (shells and `disk-tree` take it as is), else the URI. */
+export function pathCopy(scheme: string, segs: string[], dir = false): string {
+  return scheme === 'file:///' ? '/' + segs.join('/') + (dir && segs.length ? '/' : '') : pathUri(scheme, segs, dir)
+}
