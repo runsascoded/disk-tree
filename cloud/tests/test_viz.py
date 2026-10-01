@@ -18,6 +18,7 @@ from dt_cloud.viz import write_path_index
 
 STORE_COLS = [
     "path", "usr", "size", "depth", "kind", "n_files", "n_children", "n_desc", "mtime", "mtime_mean", "created", "last_read",
+    "age_b0", "age_b1", "age_b2", "age_b3", "age_b4", "age_b5", "age_b6",
     "sum_storage_class_id_2", "sum_storage_class_id_3", "sum_storage_class_id_4",
 ]
 
@@ -470,4 +471,35 @@ def test_filesystem_root_capture_splits_on_first_segment(tmp_path: Path):
         ("Applications", "dir", 1 * GB), ("Users", "dir", 2 * GB),
         ("Applications/X.app", "dir", 1 * GB), ("Users/ryan", "dir", 2 * GB),
         ("Applications/X.app/b", "file", 1 * GB), ("Users/ryan/a.bin", "file", 2 * GB),
+    ]
+
+
+def test_rows_carry_bytes_by_age(tmp_path: Path):
+    """Every row carries `age_b0`..`age_b6`: bytes by age at the scan date in
+    log buckets (<1d, <1w, <1mo, <3mo, <1y, <3y, older), rolled up like
+    `size` — a dir's buckets sum its subtree's objects, a file's one bucket
+    is its own size. The mean alone can't tell `.cargo`'s 2006-stamped
+    sources from its recent files."""
+    listing_path = tmp_path / "listing.parquet"
+    ts = lambda s: pd.Timestamp(s, tz="UTC")  # noqa: E731
+    pd.DataFrame(
+        {
+            "bucket": ["b1"] * 7,
+            "name": ["new/a", "new/b", "new/c", "mid/d", "mid/e", "old/f", "old/g"],
+            "size_bytes": [1, 2, 4, 8, 16, 32, 64],
+            "created": [ts("2026-07-20 03:00"), ts("2026-07-15"), ts("2026-07-01"), ts("2026-05-01"),
+                        ts("2026-01-01"), ts("2024-07-20"), ts("2006-07-24")],
+            "storage_class_id": [1] * 7,
+        }
+    ).to_parquet(listing_path)
+    pidx = tmp_path / "idx" / "path-index.parquet"
+    write_path_index((str(listing_path),), tmp_path / "out", "2026-07-20", path_index=pidx)
+    df = pd.read_parquet(pidx)
+    ages = [f"age_b{i}" for i in range(7)]
+    assert _rows(df, ["path", *ages]) == [
+        ("b1", 1, 2, 4, 8, 16, 32, 64),
+        ("b1/mid", 0, 0, 0, 8, 16, 0, 0), ("b1/new", 1, 2, 4, 0, 0, 0, 0), ("b1/old", 0, 0, 0, 0, 0, 32, 64),
+        ("b1/mid/d", 0, 0, 0, 8, 0, 0, 0), ("b1/mid/e", 0, 0, 0, 0, 16, 0, 0),
+        ("b1/new/a", 1, 0, 0, 0, 0, 0, 0), ("b1/new/b", 0, 2, 0, 0, 0, 0, 0), ("b1/new/c", 0, 0, 4, 0, 0, 0, 0),
+        ("b1/old/f", 0, 0, 0, 0, 0, 32, 0), ("b1/old/g", 0, 0, 0, 0, 0, 0, 64),
     ]

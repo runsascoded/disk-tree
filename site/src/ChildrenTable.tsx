@@ -3,7 +3,7 @@ import type { MouseEvent } from 'react'
 import { intParam, useUrlState } from 'use-prms'
 import { useCanAssign, useCanStage } from './auth'
 import { FaRegTrashCan } from 'react-icons/fa6'
-import { dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonthShort } from './colors'
+import { AGE_BUCKETS, ageBucketColor, dateColor, dateGradientCss, epochDaysToDate, epochDaysToMonthShort } from './colors'
 import type { UserIndexEntry } from './colors'
 import type { OwnerIndex } from './owners'
 import { OwnerBar, ownerShares } from './OwnerBar'
@@ -166,7 +166,12 @@ export function ChildrenTable({ node, segs, scheme, home, ownerIdx, userIdx, onP
   // part lines up down the page; the year column only exists when a listed
   // row is outside the current year.
   const createdParts = (d: number) => epochDaysToMonthShort(d).split(' ')
-  const hasYr = shown.some(k => k.d != null && createdParts(k.d).length > 1)
+  // A generation with bytes-by-age (`ag`) shows each row's age mix as a bar
+  // — a mean of mixed stamps (`.cargo`: 2006 crate sources + this month's
+  // builds) describes neither — else the mean's swatch · month · year.
+  const hasAg = shown.some(k => k.ag)
+  const hasYr = !hasAg && shown.some(k => k.d != null && createdParts(k.d).length > 1)
+  const createdCols = hasAg ? 1 : hasYr ? 3 : 2
   const selBar = showSel && sel.selected.size > 0 && (
     <span className="sel-bar">
       <b>{sel.selected.size}</b> selected · {fmtBytes(selBytes)}
@@ -214,12 +219,12 @@ export function ChildrenTable({ node, segs, scheme, home, ownerIdx, userIdx, onP
             <th className="num">share</th>
             {th('o', 'objects')}
             <th
-              colSpan={hasYr ? 3 : 2}
+              colSpan={createdCols}
               className={'num sortable' + (sort.k === 'd' ? ' on' : '')}
               onClick={() => setSort(s => ({ k: 'd', asc: s.k === 'd' ? !s.asc : false }))}
               title="sort"
             >
-              created{sort.k === 'd' ? (sort.asc ? ' ▲' : ' ▼') : ''}
+              {hasAg ? 'age' : 'created'}{sort.k === 'd' ? (sort.asc ? ' ▲' : ' ▼') : ''}
               {dMax > dMin && (
                 <Tooltip content={<>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
@@ -259,14 +264,15 @@ export function ChildrenTable({ node, segs, scheme, home, ownerIdx, userIdx, onP
                 <td className="num">{fmtBytes(k.b)}</td>
                 <td className="num">{node.b ? ((100 * k.b) / node.b).toFixed(1) : 0}%</td>
                 <td className="num">{fmtN(k.o)}</td>
-                {k.d != null ? (() => {
+                {hasAg ? <td className="created agebar">{k.ag ? <AgeBar ag={k.ag} d={k.d} /> : '—'}</td>
+                : k.d != null ? (() => {
                   const [mon, yr] = createdParts(k.d)
                   return <>
                     <td className="created sw"><i style={{ background: ageInk(k.d) }} /></td>
                     <td className="created mon">{mon}</td>
                     {hasYr && <td className="created yr">{yr ?? ''}</td>}
                   </>
-                })() : <td className="created none num" colSpan={hasYr ? 3 : 2}>—</td>}
+                })() : <td className="created none num" colSpan={createdCols}>—</td>}
                 {hasRead && <td title={k.a != null ? 'most recent GET/HEAD/LIST under this prefix (access logs)' : undefined}>
                   {k.a != null ? epochDaysToDate(k.a) : '—'}
                 </td>}
@@ -308,7 +314,7 @@ export function ChildrenTable({ node, segs, scheme, home, ownerIdx, userIdx, onP
             <td className="num">{fmtBytes(kids.reduce((s, k) => s + k.b, 0))}</td>
             <td className="num">{node.b ? ((100 * kids.reduce((s, k) => s + k.b, 0)) / node.b).toFixed(1) : 0}%</td>
             <td className="num">{kids.reduce((s, k) => s + k.o, 0).toLocaleString('en-US')}</td>
-            <td colSpan={(hasYr ? 3 : 2) + (hasRead ? 1 : 0) + (hasOwners ? 1 : 0) + (showSel ? 1 : 0)} />
+            <td colSpan={createdCols + (hasRead ? 1 : 0) + (hasOwners ? 1 : 0) + (showSel ? 1 : 0)} />
           </tr>
         </tfoot>
       </table>
@@ -320,5 +326,26 @@ export function ChildrenTable({ node, segs, scheme, home, ownerIdx, userIdx, onP
           of the page either. */}
       {showSel && <div className="sel-bar-dock">{selBar}</div>}
     </section>
+  )
+}
+
+/** A row's bytes by age (`TreeNode.ag`) as one stacked bar, newest (yellow)
+ * to oldest (purple), each bucket's width its share of the row's bytes; the
+ * tip lists the buckets and the mean written date. */
+function AgeBar({ ag, d }: { ag: number[]; d?: number }) {
+  const { fmtBytes } = useUnits()
+  const total = ag.reduce((s, v) => s + v, 0)
+  if (!total) return <>—</>
+  return (
+    <Tooltip content={<div className="agebar-tip">
+      {ag.map((v, i) => v > 0 && (
+        <div key={i}><i style={{ background: ageBucketColor(i) }} /> {AGE_BUCKETS[i]} <b>{fmtBytes(v)}</b> <span className="dim">{(100 * v / total).toFixed(v / total < 0.1 ? 1 : 0)}%</span></div>
+      ))}
+      {d != null && <div className="dim">mean written {epochDaysToMonthShort(d)}</div>}
+    </div>}>
+      <span className="bar" role="img" aria-label={ag.map((v, i) => v > 0 ? `${AGE_BUCKETS[i]} ${Math.round(100 * v / total)}%` : '').filter(Boolean).join(', ')}>
+        {ag.map((v, i) => v > 0 && <span key={i} style={{ flexGrow: v, background: ageBucketColor(i) }} />)}
+      </span>
+    </Tooltip>
   )
 }
