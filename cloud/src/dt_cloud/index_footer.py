@@ -265,7 +265,7 @@ def _sql_escape(s: str) -> str:
 
 
 # The D1 database `/query` runs one SQL string; we send multi-row INSERTs.
-# Deployment config (specs/denovo-factor.md): the site's D1, as `site/wrangler.toml`
+# Deployment config (specs/done/denovo-factor.md): the site's D1, as `site/wrangler.toml`
 # binds it — `D1_DB_ID` / `D1_DB_NAME` in the job's environment. No default:
 # every deployment names its own D1 (a default once pointed at gcs's production
 # D1, so a run that forgot it wrote there).
@@ -527,7 +527,7 @@ SORT_VARIANTS = tuple(STORE_SORTS) + (tuple(USER_SORTS) if HAS_USER_SORTS else (
 # this). D1 keys (date, variant).
 INDEX_VARIANTS: dict[str, str] = {**STORE_SORTS, **(USER_SORTS if HAS_USER_SORTS else {})}
 # The age chart's backend: multi-scale path-major pyramid tiers, one per bin
-# (specs/age-index.md, Phase B — supersedes the single-bin `age-index.parquet`).
+# (specs/done/age-index.md, Phase B — supersedes the single-bin `age-index.parquet`).
 # Standalone indexes, own base names; the footer's (depth, path, b) stats prune
 # them as usual, `usr` absent (u_min/u_max NULL). Keep in sync with
 # `AGE_PYRAMID_VARIANTS` in dt_cloud.index.
