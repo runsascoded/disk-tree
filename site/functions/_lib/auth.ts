@@ -135,13 +135,27 @@ async function adminRow(env: Env, email: string): Promise<boolean> {
  * next request. If the DB isn't bound (local dev), non-staff fall back to
  * allowed — local dev has no gate to enforce.
  */
+/** `email`'s `allowed_emails` row as `{ read_only }`, or null. A D1 that
+ * hasn't applied (or dropped) the `read_only` migration still admits its
+ * rows, as full viewers — sign-in must not break on a schema a branch
+ * chose not to carry. */
+export async function allowedRow(db: D1Database, email: string): Promise<{ read_only: number } | null> {
+  try {
+    return await db.prepare('SELECT read_only FROM allowed_emails WHERE email = ?').bind(email).first<{ read_only: number }>()
+  } catch (e) {
+    if (!/no such column: read_only/.test(String((e as Error).message))) throw e
+    const row = await db.prepare('SELECT email FROM allowed_emails WHERE email = ?').bind(email).first()
+    return row ? { read_only: 0 } : null
+  }
+}
+
 export const scopesFor = (env: Env) => async (raw: string): Promise<string[] | null> => {
   const email = raw.toLowerCase()
   const base = baseScope(env)
   if (email.endsWith(`@${staffDomain(env)}`)) return allScopes(env)
   if (!env.DB) return [base]
   const byDomain = viewerDomains(env).some(d => email.endsWith(`@${d}`))
-  const row = byDomain ? null : await env.DB.prepare('SELECT read_only FROM allowed_emails WHERE email = ?').bind(email).first<{ read_only: number }>()
+  const row = byDomain ? null : await allowedRow(env.DB, email)
   if (!byDomain && !row) return null
   if (await adminRow(env, email)) return [base, ADMIN_SCOPE]
   // A `read_only` row is the read-only viewer tier (what a read-only share link carries).

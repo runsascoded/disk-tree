@@ -74,9 +74,9 @@ def test_to_writes_the_blob_to_the_url_target_and_reads_it_back(src: Path, tmp_p
 
 def test_to_writes_a_groups_json_footer_sidecar(src: Path, tmp_path: Path):
     """`index --to <url>` precomputes the `.groups.json` footer beside the blob,
-    so the serverless reader (`ui/cfn`) plans range reads without a cold
-    thrift-footer parse (`find/groups.py`). Absent-safe: a reader without it
-    falls back to the blob's own footer."""
+    so the serverless reader (`site/functions/_lib/index.ts`) plans range
+    reads without a cold thrift-footer parse (`find/groups.py`). Absent-safe:
+    a reader without it falls back to the blob's own footer."""
     import json
 
     import pyarrow.parquet as pq

@@ -162,7 +162,7 @@ def index(
         from disk_tree.scan_manifest import write_scan_manifest
         print(f"Scan manifest: {write_scan_manifest(scan, blob_path)}")
         # Precompute the footer as a `.groups.json` sidecar so the serverless
-        # reader (`ui/cfn`) plans range reads without a cold thrift-footer parse.
+        # reader (`site/functions/_lib/index.ts`) plans range reads without a cold thrift-footer parse.
         from disk_tree.find.groups import write_groups_sidecar
         gs = write_groups_sidecar(blob_path)
         if gs:

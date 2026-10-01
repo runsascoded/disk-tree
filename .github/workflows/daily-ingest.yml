@@ -26,6 +26,9 @@ concurrency:
 
 jobs:
   ingest:
+    # The r2.rbw.sh demo's own job: deployment branches carry this file
+    # through `cloud` merges, but their repos have none of its secrets.
+    if: github.repository == 'runsascoded/disky'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:

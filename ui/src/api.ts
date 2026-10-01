@@ -575,7 +575,7 @@ export async function compareScansRecursive(
 }
 
 /** What this server can do — `GET /api/capabilities`. Keep in sync with
- *  `server.py` (everything on) and `functions/api/capabilities.ts` (static). */
+ *  `server.py` (everything on). */
 export type Capabilities = {
   /** A static deployment: scans served from an object store, no live Python. */
   static: boolean
