@@ -74,6 +74,12 @@ export interface Store {
   /** One sentence on what the listing's time means for this store's objects
    *  (the age chart's subtitle; the read axis adds its own clause when present). */
   objectsNote: string
+  /** Buckets whose objects are publicly readable, by bucket: the base URL an
+   *  opened object is range-read from (`<base>/<key>`, in the browser — so the
+   *  bucket's CORS must admit this site). A bucket not here opens through the
+   *  deployment's `/v1/files` proxy when that reads it, else shows size and
+   *  dates only (`objects.ts` `objectSource`). */
+  objectBases?: Record<string, string>
 }
 
 const REGISTRY: Store[] = [
@@ -139,6 +145,11 @@ const REGISTRY: Store[] = [
     owners: false,
     executor: 'plan-sweep',
     buckets: ['ctbk', 'crashes', 'jc-taxes'],
+    // Each bucket's public custom domain (CORS `*`). `jc-taxes` has one too,
+    // `data.jct.rbw.sh`, but its CORS admits only jct.rbw.sh (jc-taxes
+    // `infra/__main__.py`), so a browser here can't read it: its objects show
+    // size and dates until that rule lists this site.
+    objectBases: { ctbk: 'https://data.ctbk.dev', crashes: 'https://crashes-data.hccs.dev' },
     rootLabel: 'all buckets',
     objectsNote: 'Public R2 buckets scanned daily by disk-tree; created is each object’s upload time.',
     // A public deploy never shows the wall (`AUTH_MODE === 'public'`); copy
