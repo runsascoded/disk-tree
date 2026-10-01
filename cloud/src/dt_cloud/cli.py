@@ -455,7 +455,7 @@ def wandb_mine(
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Output dir for JSON files [default: site/public/data/<asof>]")
 @option("-r", "--row-group-rows", default=None, type=int, help="Parquet row-group size for the store's sorts (default 8192; gcs: 32768 — 4× fewer D1 footer rows, specs/path-store.md §1.6)")
-@option("-U", "--no-user-sorts", "user_sorts", is_flag=True, default=True, help="Skip the `-by-user` sort copies (the reader prunes a lens by the footer's u_min/u_max on the two sorts; halves bytes + footer rows)")
+@option("-U", "--no-user-sorts", "user_sorts", is_flag=True, flag_value=False, default=True, help="Skip the `-by-user` sort copies (the reader prunes a lens by the footer's u_min/u_max on the two sorts; halves bytes + footer rows)")
 @option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the path store here (`<dir>/path-index.parquet`, the `path` sort; `path-index-bysize.parquet` and the by-user copies land beside it — specs/path-store.md §4.3)")
 @option("-x", "--access", "access", multiple=True, help="Access-log layer-2a agg parquet glob(s); adds per-node last-read ('a') for the read-recency lens")
 def build_path_index(
