@@ -51,6 +51,7 @@ class Schema:
     bands_deleted: bool    # deletion_bands.deleted (ui/); site/ has `gone` only
     hold: bool             # deletion_runs.undo_deadline + purge_state (site/)
     agents: bool           # the `agents` heartbeat table
+    freed: bool = False    # deletion_runs.freed_bytes: a dry run's measured reclaim (specs/apfs-sharing.md)
 
     @classmethod
     def detect(cls, db: Any) -> "Schema":
@@ -64,6 +65,7 @@ class Schema:
             bands_deleted="deleted" in bands,
             hold="undo_deadline" in runs and "purge_state" in runs,
             agents=bool(cols("agents")),
+            freed="freed_bytes" in runs,
         )
 
 
@@ -103,6 +105,7 @@ def execute_run(
     now: Callable[[], int] = _now,
     submit_fn: Optional[SubmitFn] = None,
     batch_threshold: Optional[int] = None,
+    reclaim_fn: Optional[Callable[[list[str]], int]] = None,
 ) -> dict:
     """Execute one enqueued run. A dry run sizes every staged URI and records
     the would-delete totals. A real run deletes each URI inline — through
@@ -112,6 +115,9 @@ def execute_run(
     recorded, not fatal. Large (scope over `batch_threshold`, on a schema with
     the hand-off): hand the run to Batch (`submit_fn`) and record its
     `batch_job` instead, leaving it unfinished for the Batch job to complete.
+    A dry run on a schema with `freed_bytes` also measures what the set as a
+    whole would free (`reclaim_fn`: extents shared with a clone or hardlink
+    outside it don't count); a failed measurement leaves it unset.
     Returns a summary."""
     schema = schema or Schema.detect(db)
     dry = run.get("mode") == "dry"
@@ -161,11 +167,20 @@ def execute_run(
                 "VALUES (?, ?, ?, ?, 0)",
                 [run["run_id"], uri, nbytes, nobjs],
             )
+    freed: Optional[int] = None
+    if dry and schema.freed and reclaim_fn is not None and uris:
+        try:
+            freed = reclaim_fn(uris)
+        except Exception as e:  # sizing still stands without it
+            errors.append(("(reclaim)", str(e)))
     finished = now()
     # `deleted_paths` (what actually went), not the scan's object count, keys
     # the undo state and the hold: a path no scan covers sizes as 0.
     sets = "finished_ts = ?, deleted_bytes = ?, deleted_objects = ?, undo_state = ?"
     params: list[Any] = [finished, deleted_bytes, deleted_objects, undo_state if deleted_paths else "none"]
+    if freed is not None:
+        sets += ", freed_bytes = ?"
+        params.append(freed)
     if schema.hold and trashed and deleted_paths:
         sets += ", undo_deadline = ?, purge_state = 'pending'"
         params.append(finished + hold_s if hold_s is not None else None)
@@ -174,6 +189,7 @@ def execute_run(
         "run_id": run["run_id"], "plan_id": run["plan_id"], "actor": run.get("actor"), "mode": run.get("mode"),
         "items": len(uris), "deleted_paths": deleted_paths, "deleted_bytes": deleted_bytes, "deleted_objects": deleted_objects,
         "errors": errors, "submitted": False, "finished_ts": finished, "trashed": trashed,
+        **({"freed_bytes": freed} if freed is not None else {}),
     }
 
 
@@ -192,6 +208,7 @@ def drain_once(
     submit_fn: Optional[SubmitFn] = None,
     batch_threshold: Optional[int] = None,
     host: Optional[str] = None,
+    reclaim_fn: Optional[Callable[[list[str]], int]] = None,
 ) -> list[dict]:
     """Check in, then execute every pending run once (inline, or submit
     oversized ones to Batch). `after` runs once per real run that deleted
@@ -204,6 +221,7 @@ def drain_once(
         summary = execute_run(
             db, run, size_fn=size_fn, delete_fn=delete_fn, schema=schema, trash_fn=trash_fn,
             undo_state=undo_state, hold_s=hold_s, now=now, submit_fn=submit_fn, batch_threshold=batch_threshold,
+            reclaim_fn=reclaim_fn,
         )
         out.append(summary)
         if announce:
