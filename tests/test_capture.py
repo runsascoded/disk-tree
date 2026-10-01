@@ -142,9 +142,9 @@ def test_capture_to_a_url_target(tree: Path, tmp_path: Path):
 def test_reduce_reproduces_index(tree: Path, tmp_path: Path, engine: str):
     """capture → reduce yields the same scan `index` does, minus the empty dir."""
     idx_root, red_root, to = tmp_path / 'idx', tmp_path / 'red', tmp_path / 'cap'
-    _ok(_run(['index', '-C', '-D', '-q', str(tree)], idx_root))
+    _ok(_run(['index', '-C', '-q', str(tree)], idx_root))
     cap = _ok(_run(['capture', '-q', '-t', str(to), str(tree)], red_root)).stdout.rstrip('\n')
-    r = _ok(_run(['reduce', '-D', '-e', engine, cap], red_root))
+    r = _ok(_run(['reduce', '-e', engine, cap], red_root))
     (idx,), (red,) = _scans(idx_root), _scans(red_root)
     assert r.stdout.rstrip('\n') == f'scan 1: {tree} → {red_root / "scans" / red["blob"]}'
     assert red['path'] == idx['path'] == str(tree)
@@ -183,18 +183,10 @@ def test_reduce_from_a_url_capture_writes_a_remote_blob(tree: Path, tmp_path: Pa
     root = tmp_path / 'root'
     to, blobs = f'file://{tmp_path / "cap"}', f'file://{tmp_path / "blobs"}'
     cap = _ok(_run(['capture', '-q', '-t', to, str(tree)], root)).stdout.rstrip('\n')
-    r = _ok(_run(['reduce', '-D', '-e', 'pandas', '-t', blobs, cap], root))
+    r = _ok(_run(['reduce', '-e', 'pandas', '-t', blobs, cap], root))
     lines = r.stderr.rstrip('\n').split('\n')
     assert lines[0] == f'--to: writing blobs to {blobs}'
     assert lines[1] == f'{cap}: fetched 1 shard(s) → ' + lines[1].rsplit(' → ', 1)[1]
     (scan,) = _scans(root)
     assert sorted(p.name for p in (tmp_path / 'blobs').glob('*.parquet')) == [scan['blob']]
     assert not (root / 'scans').exists()
-
-
-def test_reduce_builds_the_diff_index_against_the_previous_scan(tree: Path, tmp_path: Path):
-    root, to = tmp_path / 'root', tmp_path / 'cap'
-    for _ in range(2):
-        cap = _ok(_run(['capture', '-q', '-t', str(to), str(tree)], root)).stdout.rstrip('\n')
-        _ok(_run(['reduce', '-e', 'pandas', cap], root))
-    assert sorted(p.name for p in (root / 'diffs').glob('*.parquet')) == ['1-2.parquet']

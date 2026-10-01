@@ -96,14 +96,12 @@ jobs:
           EOF
 
       - name: Re-scan each demo bucket → disk-tree-demo
-        # `-C` forces a fresh listing (no cache read), `-q` keeps the log small,
-        # `-D` skips the local diff-index build (no prior scan in a stateless
-        # runner; diff indexes are published separately).
+        # `-C` forces a fresh listing (no cache read), `-q` keeps the log small.
         # jc-taxes is omitted until a working RAC read token (rac-ro) is wired.
         run: |
           set -euo pipefail
           for b in crashes ctbk; do
             echo "::group::index r2://$b"
-            uv run disk-tree index -C -q -D "r2://$b" --to r2://disk-tree-demo/scans/
+            uv run disk-tree index -C -q "r2://$b" --to r2://disk-tree-demo/scans/
             echo "::endgroup::"
           done

@@ -166,7 +166,6 @@ def capture_cmd(
 
 
 @cli.command('reduce')
-@option('-D', '--no-diff', is_flag=True, help="Skip building the diff index against the path's previous scan")
 @option('-e', '--engine', type=Choice(['pandas', 'duckdb', 'stream']), default='duckdb', help='Aggregation engine; `duckdb` (out-of-core) handles the unsorted shards `capture` writes')
 @option('-j', '--jobs', default=1, help='Stream engine only: parallel keyspace partitions (0 = all cores)')
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime) per path')
@@ -175,7 +174,6 @@ def capture_cmd(
 @option('-t', '--to', default=None, help='Write the scan blob to a dir or fsspec URL (same as `index --to`)')
 @argument('capture')
 def reduce_cmd(
-    no_diff: bool,
     engine: str,
     jobs: int,
     mean_mtime: bool,
@@ -192,7 +190,7 @@ def reduce_cmd(
 
     from disk_tree import blobfs, config as _config
     from disk_tree.cli.import_listing import import_bucket
-    from disk_tree.diff import resolve_blob
+    from disk_tree.resolve import resolve_blob
     from disk_tree.sqla.db import init
     from disk_tree.storage import get_backend
 
@@ -247,7 +245,4 @@ def reduce_cmd(
         gs = write_groups_sidecar(blob)
         if gs:
             err(f'groups → {gs.path} ({gs.n_groups} groups)')
-    if not no_diff:
-        from disk_tree.cli.diff_index import build_previous
-        build_previous(scan.id)
     print(f'scan {scan.id}: {scan.path} → {blob}')

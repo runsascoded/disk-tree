@@ -71,7 +71,7 @@ def describe(uri: str) -> dict:
         return none
     if scan["path"] == uri:
         return {"bytes": scan["size"] or 0, "objects": (scan["n_desc"] or 0) + 1, "kind": "dir"}
-    from disk_tree.diff import resolve_chunk_for_path
+    from disk_tree.resolve import resolve_chunk_for_path
     from disk_tree.storage import get_backend
 
     rel = uri[len(scan["path"].rstrip("/") + "/"):]

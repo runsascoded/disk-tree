@@ -53,7 +53,7 @@ jobs:
 
       - name: Reduce
         run: >
-          uv run disk-tree reduce -D
+          uv run disk-tree reduce
           -e "${{ inputs.engine }}"
           -M "${{ inputs.memory_limit }}"
           -t "${{ inputs.to }}"

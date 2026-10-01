@@ -58,7 +58,7 @@ def test_reduce_to_url_writes_a_manifest_that_register_imports(tree: Path, tmp_p
     a, b = tmp_path / 'a', tmp_path / 'b'  # two "machines"
     blobs = f'file://{tmp_path / "blobs"}'
     cap = _ok(_run(['capture', '-q', '-t', str(tmp_path / 'cap'), str(tree)], a)).stdout.rstrip('\n')
-    r = _ok(_run(['reduce', '-D', '-e', 'pandas', '-t', blobs, cap], a))
+    r = _ok(_run(['reduce', '-e', 'pandas', '-t', blobs, cap], a))
     (scan_a,) = _scans(a)
     manifest = tmp_path / 'blobs' / f'{scan_a["blob"]}{SUFFIX}'
     # `reduce --to` writes the manifest, then the `.groups.json` footer sidecar
@@ -110,7 +110,7 @@ def test_reduce_to_url_writes_a_manifest_that_register_imports(tree: Path, tmp_p
 def test_register_a_single_manifest_file(tree: Path, tmp_path: Path):
     a, b = tmp_path / 'a', tmp_path / 'b'
     blobs = f'file://{tmp_path / "blobs"}'
-    _ok(_run(['index', '-C', '-D', '-q', '-t', blobs, str(tree)], a))
+    _ok(_run(['index', '-C', '-q', '-t', blobs, str(tree)], a))
     (scan_a,) = _scans(a)
     r = _ok(_run(['scans', 'register', f'{blobs}/{scan_a["blob"]}{SUFFIX}'], b, **{config.DISK_TREE_SCAN_DIRS_VAR: blobs}))
     assert r.stdout.rstrip('\n') == '1 registered, 0 skipped'
@@ -120,7 +120,7 @@ def test_register_a_single_manifest_file(tree: Path, tmp_path: Path):
 
 def test_index_to_url_writes_a_manifest(tree: Path, tmp_path: Path):
     root, blobs = tmp_path / 'root', f'file://{tmp_path / "blobs"}'
-    r = _ok(_run(['index', '-C', '-D', '-q', '-t', blobs, str(tree)], root))
+    r = _ok(_run(['index', '-C', '-q', '-t', blobs, str(tree)], root))
     (scan,) = _scans(root)
     manifest = f'{blobs}/{scan["blob"]}{SUFFIX}'
     assert [l for l in r.stdout.split('\n') if l.startswith('Scan manifest: ')] == [f'Scan manifest: {manifest}']
@@ -130,7 +130,7 @@ def test_index_to_url_writes_a_manifest(tree: Path, tmp_path: Path):
 
 def test_index_to_local_dir_writes_no_manifest(tree: Path, tmp_path: Path):
     root, blobs = tmp_path / 'root', tmp_path / 'blobs'
-    _ok(_run(['index', '-C', '-D', '-q', '-t', str(blobs), str(tree)], root))
+    _ok(_run(['index', '-C', '-q', '-t', str(blobs), str(tree)], root))
     assert sorted(p.suffix for p in blobs.iterdir()) == ['.parquet']
 
 
@@ -142,6 +142,6 @@ def test_reduce_workflow_dispatches_disk_tree_reduce():
     (job,) = wf['jobs'].values()
     assert sorted(job['env']) == ['AWS_ACCESS_KEY_ID', 'AWS_DEFAULT_REGION', 'AWS_SECRET_ACCESS_KEY', 'DISK_TREE_R2_ENDPOINT_URL']
     assert ' '.join(job['steps'][-1]['run'].split()) == (
-        'uv run disk-tree reduce -D -e "${{ inputs.engine }}" -M "${{ inputs.memory_limit }}" '
+        'uv run disk-tree reduce -e "${{ inputs.engine }}" -M "${{ inputs.memory_limit }}" '
         '-t "${{ inputs.to }}" "${{ inputs.capture }}"'
     )

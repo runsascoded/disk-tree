@@ -164,7 +164,7 @@ def test_chunk_map_reads_only_pointer_row_groups(tmp_path, monkeypatch):
     type `null` (no stats at all) is answered from the schema alone — reading
     a 1.4M-row chunk's `path` column to find zero pointers cost ~16 s over R2."""
     import pyarrow as pa
-    from disk_tree import diff
+    from disk_tree import resolve
     n = 3 * BLOB_ROW_GROUP_SIZE
     ids = [None] * n
     ids[1] = 'c.parquet'
@@ -175,7 +175,7 @@ def test_chunk_map_reads_only_pointer_row_groups(tmp_path, monkeypatch):
     reads: list[int] = []
     real = blobfs.read_table
     monkeypatch.setattr(blobfs, 'read_table', lambda *a, **kw: reads.append(real(*a, **kw).num_rows) or real(*a, **kw))
-    diff._chunk_map_cached.cache_clear()
-    assert diff._chunk_map(root) == {'p000001': 'c.parquet'}
-    assert diff._chunk_map(chunk) is None
+    resolve._chunk_map_cached.cache_clear()
+    assert resolve._chunk_map(root) == {'p000001': 'c.parquet'}
+    assert resolve._chunk_map(chunk) is None
     assert reads == [1]

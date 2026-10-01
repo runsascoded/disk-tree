@@ -47,7 +47,6 @@ def _check_local_space(auto_remote: bool) -> None:
 
 @cli.command
 @option('-C', '--no-cache-read', is_flag=True)
-@option('-D', '--no-diff', is_flag=True, help="Skip building the diff index against the path's previous scan")
 @option('-e', '--require-external', is_flag=True, help='Skip (exit 0) if the resolved write target is the boot-disk default — i.e. no opted-in external volume is mounted. For scheduled scans that must land on external media.')
 @option('-g', '--gc', is_flag=True)
 @option('-m', '--mean-mtime', is_flag=True, help='Emit `mtime_mean` (size-weighted mean mtime over descendants) per path')
@@ -61,7 +60,6 @@ def _check_local_space(auto_remote: bool) -> None:
 @argument('url', required=False)
 def index(
     no_cache_read: bool,
-    no_diff: bool,
     require_external: bool,
     gc: bool,
     mean_mtime: bool,
@@ -121,12 +119,6 @@ def index(
             scan, df = Scan.load_or_create(url, gc=gc, sudo=sudo, mean_mtime=mean_mtime, progress=not no_progress, one_fs=one_fs)
 
     elapsed = time['scan']
-    if not no_diff and not gc:
-        # Overnight prep: the "what changed since last time" view is a slice,
-        # not a walk, by the time anyone asks. (`--gc` deleted the previous
-        # scan, so there's nothing to diff against.)
-        from disk_tree.cli.diff_index import build_previous
-        build_previous(scan.id)
     # Find root row: try 'path == "."', fallback to 'parent == ""'
     root_rows = df[df['path'] == '.']
     if root_rows.empty:
@@ -151,7 +143,7 @@ def index(
     # search path — not a naive join with the *write* dir, which stats a path
     # that need not exist (e.g. blob on the boot disk, write target on X6).
     from disk_tree import blobfs
-    from disk_tree.diff import resolve_blob
+    from disk_tree.resolve import resolve_blob
     blob_path = resolve_blob(scan.blob)
     if blobfs.exists(blob_path):
         print(f"Scan cached path: {blob_path} ({iec(blobfs.size(blob_path))})")
