@@ -13,6 +13,7 @@ import { slackApi, slackReady, type SlackEnv } from './slack.js'
 import type { Env } from './auth.js'
 import { pathScans, storeReady } from './index.js'
 import { prefixesAt } from './prefixes.js'
+import { loadRegistry } from './identity.js'
 
 export type { RunRow }
 
@@ -244,8 +245,9 @@ export async function sizeStaged(env: Env & SlackEnv, db: D1Database, prefixes: 
     ? (await db.prepare(`SELECT email, user FROM user_emails WHERE user IN (${top.map(() => '?').join(',')})`).bind(...top.map(t => t[0])).all<{ email: string; user: string }>()).results
     : []
   const emailOf = new Map(rows.map(r => [r.user, r.email]))
-  const [mentions, members] = await Promise.all([slackMentions(env, [...emailOf.values()]), slackMembers(env)])
-  const owners = top.map(([u, ub]) => ({ label: mentions[emailOf.get(u)?.toLowerCase() ?? ''] ?? members.get(u) ?? u, b: ub }))
+  const [mentions, members, reg] = await Promise.all([slackMentions(env, [...emailOf.values()]), slackMembers(env), loadRegistry(env).catch(() => ({}) as Awaited<ReturnType<typeof loadRegistry>>)])
+  // A mention when Slack knows them; else the site's display name.
+  const owners = top.map(([u, ub]) => ({ label: mentions[emailOf.get(u)?.toLowerCase() ?? ''] ?? members.get(u) ?? reg[u]?.name ?? u, b: ub }))
   return { scan, b, o, empty, owners }
 }
 
