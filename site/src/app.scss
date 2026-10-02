@@ -2430,3 +2430,24 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
   color: var(--warn, #e0a030);
   button.danger { color: var(--danger, #e05050); border-color: currentColor; }
 }
+
+.action-log {
+  margin-top: 28px;
+  .hrow { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; h2 { margin: 0; font-size: 18px; } }
+  .pg { margin-left: auto; display: inline-flex; gap: 4px; align-items: center; font-size: 12px; }
+  table.log {
+    border-collapse: collapse;
+    font-size: 12px;
+    margin-top: 8px;
+    th, td { padding: 4px 8px; border-bottom: 1px solid var(--border, #333); text-align: left; vertical-align: top; }
+    td.when { white-space: nowrap; }
+    td.prefix { font-family: var(--mono, ui-monospace, monospace); word-break: break-all; }
+    td.memo { max-width: 360px; color: var(--dim, #999); }
+    tr.retracted td:not(:nth-child(5)), tr.superseded td:not(:nth-child(5)), tr.overridden td:not(:nth-child(5)) { opacity: 0.55; }
+    tr.retracted td.prefix a { text-decoration: line-through; }
+    .status { padding: 1px 6px; border-radius: 8px; font-size: 11px; border: 1px solid currentColor; }
+    .status.live { color: var(--ok, #4caf50); }
+    .status.superseded, .status.overridden { color: var(--dim, #999); }
+    .status.retracted { color: var(--danger, #e05050); }
+  }
+}
