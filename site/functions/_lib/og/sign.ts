@@ -2,46 +2,57 @@
  *
  * - **Anonymous card URL**: `/og/<kind>.png?<view>`, unsigned. Signing it
  *   would protect nothing: any page fetch yields any view's anonymous card.
- * - **Full card URL**: `/og/<kind>.png?<view>&sig=<ee><tag>` (12 chars). The
- *   tag covers kind + canonical view + expiry. A missing, bad or expired `sig`
- *   serves the anonymous card (never an error), so it can't be forged,
- *   re-pointed or extended into labels.
- * - **View token**: `og=<ee><tag>` (12 chars) on a page URL. The tag covers
- *   kind + canonical view + expiry, so a token is good for exactly the view it
- *   was minted for (not a child, parent, sibling or other params). D1 records
- *   each mint by its token, which is how one is revoked.
+ * - **Full card URL**: `/og/<kind>.png?<view>&sig=<ee><tag>` (12 base62
+ *   chars). Images are fetched unauthenticated, so this one is signed: the tag
+ *   is HMAC-SHA256 over kind + canonical view + expiry under a key derived
+ *   from `SESSION_SECRET`, as 10 base62 digits (~59.5 bits; the key never
+ *   leaves the server, so only online guessing applies). A missing, bad or
+ *   expired `sig` serves the anonymous card, never an error.
+ * - **View token** (`og=`): a random 10-char base62 token (`randomToken`), no
+ *   MAC. The `og_tokens` row is the whole truth (`tokens.ts`): valid iff a row
+ *   with that token exists for this exact view, unexpired and unrevoked.
  *
- * Tags are HMAC-SHA256 under one deployment key derived from `SESSION_SECRET`,
- * truncated to 60 bits: exactly 10 base64url chars. The key never leaves the
- * server, so the only attack is online guessing, and 2⁶⁰ guesses is out of
- * reach. Base64url because Slack and linkifiers mangle sub-delims. Expiries
- * are whole days since `EPOCH`, packed as 2 base64url chars (4,096 days ≈ 11
- * years). Image and token tags carry distinct purpose labels, so neither can
- * stand in for the other.
+ * Base62 throughout: no `+` `/` `-` `_`, which Slack and linkifiers mangle.
+ * Expiries are whole days since `EPOCH`; in a `sig` they pack into 2 base62
+ * chars (3,844 days ≈ 10.5 years).
  *
  * Pure WebCrypto: runs in the Worker and in Node tests. */
 
 export type OgTier = 'anon' | 'full'
 
-/** Day 0 of packed expiries: 2026-01-01T00:00Z. */
+/** Day 0 of expiries: 2026-01-01T00:00Z. */
 export const EPOCH = 1_767_225_600
 export const DAY_S = 86400
-/** How long a stamped image URL stays valid (a week of Slack scrollback). */
+/** How long a stamped full image URL stays valid (a week of Slack scrollback). */
 export const IMAGE_TTL_DAYS = 7
 
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+export const B62 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 
-/** A day count as 2 base64url chars (0 ≤ days < 4096). */
+/** A day count as 2 base62 chars (0 ≤ days < 3844). */
 export function packDays(days: number): string {
-  if (!Number.isInteger(days) || days < 0 || days >= 4096) throw new Error(`expiry day out of range: ${days}`)
-  return B64[days >> 6] + B64[days & 63]
+  if (!Number.isInteger(days) || days < 0 || days >= 62 * 62) throw new Error(`expiry day out of range: ${days}`)
+  return B62[Math.floor(days / 62)] + B62[days % 62]
 }
 
 export function unpackDays(s: string): number | null {
   if (s.length !== 2) return null
-  const hi = B64.indexOf(s[0])
-  const lo = B64.indexOf(s[1])
-  return hi < 0 || lo < 0 ? null : (hi << 6) | lo
+  const hi = B62.indexOf(s[0])
+  const lo = B62.indexOf(s[1])
+  return hi < 0 || lo < 0 ? null : hi * 62 + lo
+}
+
+/** `n` uniformly random base62 chars: random bytes, rejecting those ≥ 248
+ * (= 4·62) so `% 62` carries no modulo bias. `rand` is injectable for tests. */
+export function randomToken(n = 10, rand: (b: Uint8Array) => Uint8Array = b => crypto.getRandomValues(b)): string {
+  let out = ''
+  while (out.length < n) {
+    for (const x of rand(new Uint8Array(n * 2))) {
+      if (x >= 248) continue
+      out += B62[x % 62]
+      if (out.length === n) break
+    }
+  }
+  return out
 }
 
 /** The day index (since `EPOCH`) whose end a credential made at `now` (unix s)
@@ -49,7 +60,7 @@ export function unpackDays(s: string): number | null {
 export const expDay = (now: number, ttlDays: number): number => Math.floor((now - EPOCH) / DAY_S) + ttlDays
 
 /** Expired once `now` passes the end of `day`. */
-const expired = (day: number, now: number): boolean => now >= EPOCH + (day + 1) * DAY_S
+export const expired = (day: number, now: number): boolean => now >= EPOCH + (day + 1) * DAY_S
 
 /** The view's params, canonical: keys sorted, empty values dropped,
  * URL-encoded as `URLSearchParams` would. Two URLs for the same view
@@ -69,13 +80,19 @@ async function hmac(key: CryptoKey, msg: string): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(msg)))
 }
 
-/** The first 60 bits of a mac as 10 base64url chars. */
+/** A mac's first 64 bits as 10 base62 digits, most significant first (the
+ * value mod 62¹⁰: ~59.5 bits). */
 export const TAG_CHARS = 10
-const tag60 = (mac: Uint8Array): string =>
-  btoa(String.fromCharCode(...mac.slice(0, 8))).replace(/\+/g, '-').replace(/\//g, '_').slice(0, TAG_CHARS)
+const tag62 = (mac: Uint8Array): string => {
+  let v = 0n
+  for (const x of mac.slice(0, 8)) v = (v << 8n) | BigInt(x)
+  let out = ''
+  for (let i = 0; i < TAG_CHARS; i++) { out = B62[Number(v % 62n)] + out; v /= 62n }
+  return out
+}
 
 /** The OG key: HMAC(`SESSION_SECRET`, `og-card:v1`), imported for HMAC.
- * Rotating the session secret rotates it (and voids every card and token). */
+ * Rotating the session secret rotates it (and voids every full image URL). */
 export async function ogKey(secret: string): Promise<CryptoKey> {
   const base = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const derived = await hmac(base, 'og-card:v1')
@@ -91,7 +108,7 @@ function same(a: string, b: string): boolean {
 }
 
 async function imageTag(key: CryptoKey, kind: string, view: string, day: number): Promise<string> {
-  return tag60(await hmac(key, `img\n${kind}\n${view}\nfull\n${day}`))
+  return tag62(await hmac(key, `img\n${kind}\n${view}\nfull\n${day}`))
 }
 
 /** A card's path (the caller adds the origin): anonymous = the bare view;
@@ -125,23 +142,4 @@ export async function resolveImage(key: CryptoKey | null, url: URL, now: number)
   if (expired(day, now)) return anon('expired')
   if (!same(sig.slice(2), await imageTag(key, m[1], canonical(params), day))) return anon('bad signature')
   return { kind: m[1], params, tier: 'full', day }
-}
-
-async function tokenTag(key: CryptoKey, kind: string, view: string, day: number): Promise<string> {
-  return tag60(await hmac(key, `tok\n${kind}\n${view}\n${day}`))
-}
-
-/** A view token: `<ee><tag>`, 12 chars. Deterministic per (view, expiry day):
- * two mints of one view on one day are one token (D1 logs both mints). */
-export async function mintToken(key: CryptoKey, kind: string, params: Record<string, string | null | undefined>, day: number): Promise<string> {
-  return packDays(day) + await tokenTag(key, kind, canonical(params), day)
-}
-
-/** The token's expiry day when it was minted for exactly this view and hasn't
- * expired; null otherwise. Revocation is the caller's (D1, by token). */
-export async function checkToken(key: CryptoKey, token: string, kind: string, params: Record<string, string | null | undefined>, now: number): Promise<{ day: number } | null> {
-  if (token.length !== 2 + TAG_CHARS || !/^[A-Za-z0-9_-]+$/.test(token)) return null
-  const day = unpackDays(token.slice(0, 2))
-  if (day == null || expired(day, now)) return null
-  return same(token.slice(2), await tokenTag(key, kind, canonical(params), day)) ? { day } : null
 }

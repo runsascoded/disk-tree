@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { canonical, checkToken, EPOCH, expDay, imagePath, mintToken, ogKey, packDays, resolveImage, unpackDays } from './sign'
+import { B62, canonical, EPOCH, expDay, imagePath, ogKey, packDays, randomToken, resolveImage, unpackDays } from './sign'
 
 // 2026-10-02T12:00Z: day 274 since EPOCH (2026-01-01).
 const NOW = EPOCH + 274 * 86400 + 12 * 3600
 const at = (p: string) => new URL(`https://site.example.org${p}`)
-// Vectors cross-checked against Python: base64url(HMAC-SHA256(HMAC(b's3cret', b'og-card:v1'), msg)[:8])[:10].
 const VIEW = { path: 'marin-a/ckpt', d: '261002' }
 
 describe('canonical, days', () => {
@@ -16,14 +15,30 @@ describe('canonical, days', () => {
       canonical({}),
     ]).toEqual(['d=261002&path=b%2Fx+y', 'd=261002&path=b%2Fx+y', 'q=percy%7Cchi-heem', ''])
   })
-  it('expiry days pack to 2 base64url chars', () => {
-    expect([expDay(NOW, 7), packDays(0), packDays(63), packDays(64), packDays(281), packDays(4095), unpackDays('EZ'), unpackDays('E'), unpackDays('E!')])
-      .toEqual([281, 'AA', 'A_', 'BA', 'EZ', '__', 281, null, null])
-    expect(() => packDays(4096)).toThrow('expiry day out of range: 4096')
+  it('expiry days pack to 2 base62 chars', () => {
+    expect([expDay(NOW, 7), packDays(0), packDays(61), packDays(62), packDays(281), packDays(3843), unpackDays('Eh'), unpackDays('E'), unpackDays('E-')])
+      .toEqual([281, 'AA', 'A9', 'BA', 'Eh', '99', 281, null, null])
+    expect(() => packDays(3844)).toThrow('expiry day out of range: 3844')
   })
 })
 
-describe('card URLs: anonymous unsigned, full with a 12-char sig', () => {
+describe('randomToken: base62, uniform', () => {
+  it('maps bytes < 248 by % 62 and skips the rest (no modulo bias)', () => {
+    const bytes = [0, 61, 62, 247, 248, 255, 25, 26, 52, 123, 200, 9]
+    let i = 0
+    const rand = (b: Uint8Array) => { for (let j = 0; j < b.length; j++) b[j] = bytes[i++ % bytes.length]; return b }
+    // 248 and 255 are rejected: 10 chars from the other 10 bytes.
+    expect(randomToken(10, rand)).toBe('A9A9Za09OJ')
+  })
+  it('10 base62 chars from the real RNG, distinct each time', () => {
+    const ts = Array.from({ length: 50 }, () => randomToken())
+    expect([ts.every(t => t.length === 10 && [...t].every(c => B62.includes(c))), new Set(ts).size]).toEqual([true, 50])
+  })
+})
+
+// Vectors cross-checked in Python: HMAC-SHA256 under HMAC(b's3cret', b'og-card:v1'),
+// first 8 bytes big-endian, 10 base62 digits (mod 62¹⁰), most significant first.
+describe('card URLs: anonymous unsigned, full with a 12-char base62 sig', () => {
   it('test vectors', async () => {
     const k = await ogKey('s3cret')
     expect([
@@ -33,9 +48,9 @@ describe('card URLs: anonymous unsigned, full with a 12-char sig', () => {
       await imagePath(k, 'staged', {}, 'full', 281),
     ]).toEqual([
       '/og/map.png?d=261002&path=marin-a%2Fckpt',
-      '/og/map.png?d=261002&path=marin-a%2Fckpt&sig=EZuHk9X_33Kf',
+      '/og/map.png?d=261002&path=marin-a%2Fckpt&sig=Ehz6ybQr7K6n',
       '/og/staged.png',
-      '/og/staged.png?sig=EZeJyGwFNOrU',
+      '/og/staged.png?sig=EhWAtagBytVE',
     ])
   })
   it('full only for the exact signed view and an unexpired sig; anything else is the anonymous card', async () => {
@@ -47,7 +62,7 @@ describe('card URLs: anonymous unsigned, full with a 12-char sig', () => {
       await r(p),
       await r(p.replace('path=marin-a%2Fckpt', 'path=marin-a')),
       await r(p.replace('d=261002', 'd=261001')),
-      await r(p.replace('sig=EZ', 'sig=Ea')),
+      await r(p.replace('sig=Eh', 'sig=Ei')),
       await r(p.replace(/sig=.*/, 'sig=short')),
       await r(p, EPOCH + 282 * 86400),
       await r(p, EPOCH + 282 * 86400 - 1),
@@ -66,27 +81,5 @@ describe('card URLs: anonymous unsigned, full with a 12-char sig', () => {
       anon({ path: 'marin-a/ckpt', d: '261002' }),
       null,
     ])
-  })
-})
-
-describe('view tokens: 12 chars = expiry + 60-bit tag', () => {
-  it('test vector', async () => {
-    expect(await mintToken(await ogKey('s3cret'), 'map', VIEW, 281)).toBe('EZjUobkMrUuF')
-  })
-  it('good for exactly the minted view: not a child, parent, sibling, other params or after expiry', async () => {
-    const k = await ogKey('s3cret')
-    const tok = await mintToken(k, 'map', VIEW, 281)
-    expect([
-      await checkToken(k, tok, 'map', VIEW, NOW),
-      await checkToken(k, tok, 'map', { ...VIEW, path: 'marin-a/ckpt/run-1' }, NOW),
-      await checkToken(k, tok, 'map', { ...VIEW, path: 'marin-a' }, NOW),
-      await checkToken(k, tok, 'map', { ...VIEW, path: 'marin-a/tmp' }, NOW),
-      await checkToken(k, tok, 'map', { ...VIEW, f: 'x' }, NOW),
-      await checkToken(k, tok, 'staged', VIEW, NOW),
-      await checkToken(k, tok, 'map', VIEW, EPOCH + 282 * 86400),
-      await checkToken(k, `Ea${tok.slice(2)}`, 'map', VIEW, NOW),
-      await checkToken(k, `${tok}x`, 'map', VIEW, NOW),
-      await checkToken(k, 'garbage', 'map', VIEW, NOW),
-    ]).toEqual([{ day: 281 }, null, null, null, null, null, null, null, null, null])
   })
 })

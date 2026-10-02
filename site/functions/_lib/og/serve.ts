@@ -49,7 +49,7 @@ const now = () => Math.floor(Date.now() / 1000)
  * exactly this view (live in D1; the image URL never outlives it), or for a
  * live `key=` share link (its bearer gets in anyway); else `anon`. */
 export async function pageTier(env: OgEnv, key: CryptoKey, kind: OgKind, params: Record<string, string>, url: URL, t: number): Promise<{ tier: OgTier; day?: number }> {
-  const tok = await fullTier(env.DB, key, kind, params, url.searchParams.get('og'), t)
+  const tok = await fullTier(env.DB, kind, params, url.searchParams.get('og'), t)
   if (tok) return { tier: 'full', day: Math.min(expDay(t, IMAGE_TTL_DAYS), tok.day) }
   if (await shareKeyLive(env.DB, url.searchParams.get('key'), [baseScope(env), baseReadScope(env)], t)) return { tier: 'full', day: expDay(t, IMAGE_TTL_DAYS) }
   return { tier: 'anon' }

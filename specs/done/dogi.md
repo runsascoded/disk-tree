@@ -86,9 +86,13 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 7. **Warm on unfurl:** serving a map or user card (`waitUntil`) fills the edge cache with the view's first-paint subtree reads (`depth=1` + full, or `full=1` under a filter) at the commonest canvas (1536 px wide; `warm.ts`). That's at most 2 requests, no retries, via `warmSubtree`, the `/api/subtree` body without the viewer gate. Nothing it reads leaves the Worker.
 8. **UI:** one "Share…" dialog replaces "Copy link with preview". It has "Copy link", a "Preview shows details (labels, sizes, owners)" checkbox (adds `og=`), and, for admins, "Grant access to anyone with the link" (mints a read-only `key=` grant via `/api/auth/grants`, 30 days; implies the full preview). The omnibar keeps a direct "Copy link with detailed preview (link-preview card only; grants no access)".
 
+**Revision (Ryan, 2026-10-02, after `0034` reached prod), built:**
+1. **`og=` is a random token:** 10 base62 chars (`randomToken`: `getRandomValues`, rejecting bytes ≥ 248 so `% 62` is unbiased). It has no MAC and no packed expiry. The `og_tokens` row is the whole truth (`fullTier`): good iff a row with that token exists for exactly this kind + canonical view, its `exp_day` hasn't ended, and it isn't revoked. Each mint is a new token, so each mint revokes alone. No new migration: `0034`'s columns suffice.
+2. **Full image `sig`s are base62:** a 2-char expiry plus a 10-digit tag (the mac's first 64 bits mod 62¹⁰, ~59.5 bits), so no `+` `/` `-` `_`. Vectors are re-checked in Python. Anonymous image URLs stay unsigned. These replace items 1–2 above.
+3. **The Share dialog is one choice (radio):** "Detailed preview · sign-in required" (`og=`, the default) or "Anyone with the link can view" (`key=`, implies the full preview; disabled for non-admins with "admins only for now"). There's no plain option, since copying the URL is the browser's job. The dialog stays on every page; the omnibar keeps its direct detailed-preview action. This replaces item 8.
+
 **Open at hand-off (2026-10-02):**
-- gcs D1 `0034_og_tokens` isn't applied anywhere remote. Until it is, `og=` minting answers 501; `key=` links already get full cards (the `grants` table exists). Dev shares prod's D1.
-- Prod isn't deployed. Dev (`dev.gcs.oa.dev`) runs all three phases with `OG_CARDS` on.
+- Prod runs `0034`; this revision isn't on prod yet. Dev (`dev.gcs.oa.dev`) runs it with `OG_CARDS` on, against prod's D1.
 - Measured on dev: cold renders 0.5–2.9 s per card (the view read dominates; the rasterize is ~100–200 ms), cached about 60 ms.
 
 ## Rollout
