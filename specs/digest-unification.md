@@ -57,7 +57,7 @@ The two styles are opinionated but not store-specific: `gcs` = per-scan cost/cla
 
 Quotas are optional: a bucket without one shows raw TiB in the reply tail; a primary without one drops the OP's `· NN% of …` clauses and the plot's quota line/headroom band (y fit to the data). Secrets stay env-only (`SLACK_BOT_TOKEN`, `SLACK_CHANNEL`, `DISCORD_BOT_TOKEN`, the webhook env named by config); the config names env vars, never values.
 
-`-C/--config FILE` (YAML/JSON) overlays the preset its `template:` names; unknown keys are an error; sizes accept `910 TiB` / `1 PB` / ints.
+`-C/--config FILE` (YAML/JSON) overlays the preset its `template:` names (default: `-T`'s); validated — unknown keys at any level (top, `buckets.<b>`, `buckets.<b>.quota`), a wrong-typed value, an unknown `template` or a `reply_hour` outside 0–23 raise; sizes accept `910 TiB` / `1 PB` / ints.
 
 ### CLI
 

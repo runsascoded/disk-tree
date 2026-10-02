@@ -9,6 +9,7 @@ Hand-built series (12-hourly, 00:00Z / 12:00Z): a lead day Mon 8/31 (700,
 the bullet label is unambiguous. Quota (02a) = 910 TiB."""
 import datetime as dt
 import json
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -210,6 +211,40 @@ buckets:
     assert E.load_config("gcs") is E.PRESETS["gcs"]
     with pytest.raises(ValueError, match="unknown digest config keys: \\['colour'\\]"):
         E.config_from_dict({"template": "cw", "colour": "red"})
+
+
+@pytest.mark.parametrize("d, msg", [
+    ({"colour": "red", "title": "x"}, "unknown digest config keys: ['colour']"),
+    ({"buckets": {"b": {"label": "b", "qouta": {}}}}, "unknown digest config keys in buckets.b: ['qouta']"),
+    ({"buckets": {"b": {"quota": {"bytes": "1 PB", "name": "1 PB", "shrt": "1P"}}}}, "unknown digest config keys in buckets.b.quota: ['shrt']"),
+    ({"buckets": {"b": {"quota": {"bytes": "1 PB"}}}}, "digest config buckets.b.quota: missing ['name']"),
+    ({"buckets": {"b": {"label": 2}}}, "digest config buckets.b.label: expected a string, got 2"),
+    ({"buckets": ["b"]}, "digest config buckets: expected a mapping, got list"),
+    ({"buckets": {"b": {"quota": {"bytes": "lots", "name": "x"}}}}, "not a size: 'lots'"),
+    ({"prices": {"1": "cheap"}}, "digest config prices: expected numbers, got {'1': 'cheap'}"),
+    ({"reply_hour": "12"}, "digest config reply_hour: expected int, got '12'"),
+    ({"reply_hour": True}, "digest config reply_hour: expected int, got True"),
+    ({"reply_hour": 24}, "digest config reply_hour: 24 is not a UTC hour (0–23)"),
+    ({"primary": 7}, "digest config primary: expected str or null, got 7"),
+    ({"template": "s3"}, "digest config template: 's3' is not one of ('gcs', 'cw')"),
+])
+def test_config_invalid(d: dict, msg: str):
+    with pytest.raises(ValueError) as e:
+        E.config_from_dict({"template": "cw", **d})
+    assert str(e.value) == msg
+
+
+def test_config_file_invalid(tmp_path: Path):
+    f = tmp_path / "digest.yml"
+    f.write_text("- template: cw\n")
+    with pytest.raises(ValueError) as e:
+        E.load_config("cw", f)
+    assert str(e.value) == f"digest config {f}: expected a mapping, got list"
+    # nulls clear optional fields; an empty file is the preset
+    f.write_text("primary: null\ndiscord_webhook_env: null\n")
+    assert E.load_config("cw", f) == replace(CFG, primary=None)
+    f.write_text("")
+    assert E.load_config("cw", f) == E.PRESETS["cw"]
 
 
 def test_no_quota():

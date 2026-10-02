@@ -177,21 +177,67 @@ def parse_bytes(v: int | str) -> int:
     return round(float(m.group(1)) * _UNITS[(m.group(2) or "").upper()])
 
 
+TEMPLATES = ("gcs", "cw")
+# the scalar fields' accepted YAML types (`buckets` / `prices` are parsed below)
+_SCALAR_TYPES: dict[str, tuple[type, ...]] = {
+    "template": (str,), "title": (str,), "site_url": (str,), "root": (str,), "state": (str,),
+    "discord_state": (str,), "discord_webhook_env": (str, type(None)), "icons_base": (str,),
+    "icons_dir": (str,), "plot_project": (str,), "plot_branch": (str,), "plot_base": (str,),
+    "variant": (str,), "reply_hour": (int,), "primary": (str, type(None)),
+}
+
+
+def _mapping(where: str, d: Any) -> dict:
+    if not isinstance(d, dict):
+        raise ValueError(f"digest config {where}: expected a mapping, got {type(d).__name__}")
+    return d
+
+
+def _keys(where: str, d: Any, allowed: set[str], required: set[str] = frozenset()) -> dict:
+    """``d`` as a mapping with only ``allowed`` keys and every ``required`` one."""
+    if bad := set(_mapping(where or "file", d)) - allowed:
+        raise ValueError(f"unknown digest config keys{f' in {where}' if where else ''}: {sorted(bad)}")
+    if missing := required - set(d):
+        raise ValueError(f"digest config {where}: missing {sorted(missing)}")
+    return d
+
+
+def _bucket(name: str, b: dict | None) -> Bucket:
+    b = _keys(f"buckets.{name}", b or {}, {"label", "quota"})
+    if b.get("label") is not None and not isinstance(b["label"], str):
+        raise ValueError(f"digest config buckets.{name}.label: expected a string, got {b['label']!r}")
+    q = b.get("quota")
+    if q is None:
+        return Bucket(b.get("label"))
+    q = _keys(f"buckets.{name}.quota", q, {"bytes", "name", "short"}, {"bytes", "name"})
+    return Bucket(b.get("label"), Quota(parse_bytes(q["bytes"]), str(q["name"]), None if q.get("short") is None else str(q["short"])))
+
+
 def config_from_dict(d: dict, base: DigestConfig | None = None) -> DigestConfig:
     """A config from a parsed YAML/JSON mapping, overlaid on ``base`` (default:
     the preset its ``template`` names). ``buckets`` map names to ``{label,
-    quota: {bytes, name, short}}`` (``bytes`` may be `910 TiB`); unknown keys
-    are an error."""
-    d = dict(d)
+    quota: {bytes, name, short}}`` (``bytes`` may be `910 TiB`), ``prices``
+    storage-class ids to $/GiB-month. Validated: unknown keys (at any level),
+    a wrong-typed value, an unknown template or an out-of-range ``reply_hour``
+    raise ``ValueError``."""
+    d = dict(_keys("", d, {f.name for f in fields(DigestConfig)}))
+    for k, types in _SCALAR_TYPES.items():
+        # bool is an int subclass; `reply_hour: true` is a typo, not hour 1
+        if k in d and (not isinstance(d[k], types) or isinstance(d[k], bool)):
+            want = " or ".join("null" if t is type(None) else t.__name__ for t in types)
+            raise ValueError(f"digest config {k}: expected {want}, got {d[k]!r}")
+    if d.get("template", "gcs") not in TEMPLATES:
+        raise ValueError(f"digest config template: {d['template']!r} is not one of {TEMPLATES}")
+    if not 0 <= d.get("reply_hour", 0) <= 23:
+        raise ValueError(f"digest config reply_hour: {d['reply_hour']} is not a UTC hour (0–23)")
     base = base or PRESETS[d.get("template", "gcs")]
-    known = {f.name for f in fields(DigestConfig)}
-    if bad := set(d) - known:
-        raise ValueError(f"unknown digest config keys: {sorted(bad)}")
     if "buckets" in d:
-        d["buckets"] = {
-            name: Bucket(b.get("label"), Quota(parse_bytes(b["quota"]["bytes"]), b["quota"]["name"], b["quota"].get("short")) if b.get("quota") else None)
-            for name, b in (d["buckets"] or {}).items()
-        }
+        d["buckets"] = {str(name): _bucket(name, b) for name, b in _mapping("buckets", d["buckets"] or {}).items()}
+    if "prices" in d:
+        prices = _mapping("prices", d["prices"] or {})
+        if bad := {k: v for k, v in prices.items() if not isinstance(v, (int, float)) or isinstance(v, bool)}:
+            raise ValueError(f"digest config prices: expected numbers, got {bad}")
+        d["prices"] = {str(k): float(v) for k, v in prices.items()}
     return replace(base, **d)
 
 
@@ -201,8 +247,7 @@ def load_config(template: str, path: str | Path | None = None) -> DigestConfig:
         return PRESETS[template]
     import yaml
 
-    d = yaml.safe_load(Path(path).read_text()) or {}
-    return config_from_dict(d, PRESETS[d.get("template", template)])
+    return config_from_dict({"template": template, **_mapping(str(path), yaml.safe_load(Path(path).read_text()) or {})})
 
 
 # ---- pure helpers ---------------------------------------------------------------
