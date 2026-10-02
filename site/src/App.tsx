@@ -628,9 +628,12 @@ function AppContent() {
   // First paint: the bucket-level diff (`depth=1` — the two root reads plus
   // one level of lookups, ~2 s cold) stands in for the full walk while it
   // aligns, so the map shows the shape of the change before its detail.
+  // Not under a path filter: its matches are found at every depth either way
+  // (`depth` only caps what's drawn), so without a search index the "first"
+  // paint costs as much as the full walk (gcs 2026-10-02: 9.3 s vs 4.5 s).
   const diffQ1 = useQuery<DiffData, Error>({
     queryKey: ['diff', store.key, diffPrev, asof, graftPath, canW, scopeQs, 'l1'],
-    enabled: !!asof && !!diffPrev,
+    enabled: !!asof && !!diffPrev && !fq,
     staleTime: Infinity,
     retry: false,
     queryFn: async ({ signal }: { signal?: AbortSignal }) => {
