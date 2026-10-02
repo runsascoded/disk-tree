@@ -708,6 +708,42 @@ def over_time_groups(
     print(json.dumps({"groups": built}))
 
 
+@main.command("churn")
+@option("-c", "--column", "columns", multiple=True, help="Only compare these value columns (repeatable; default: every non-key column both files share)")
+@option("-m", "--mem", default="8GB", help="DuckDB memory limit")
+@option("-o", "--out", "out_dir", type=Path, default=None, help="Also write the delta (`delta.parquet`, `delta-objects.parquet`) here and report its bytes")
+@option("-t", "--threads", default=4, type=int, help="DuckDB threads")
+@option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: DuckDB's)")
+@argument("a")
+@argument("b")
+def churn_cmd(columns: tuple[str, ...], mem: str, out_dir: Path | None, threads: int, tmp_dir: Path | None, a: str, b: str) -> None:
+    """Rows added / removed / changed from scan A to scan B (specs/storage-consolidation.md
+    phase 3): A and B are two `path` sorts (or layer-2s) — local paths; stage
+    remote ones first. Keyed `(depth, path)` (+ an owner label both carry),
+    joined one depth at a time; counts per `kind` and per changed column, as
+    JSON on stdout."""
+    from .churn import scan_churn
+
+    con = duckdb.connect()
+    con.execute(f"SET memory_limit='{mem}'; SET threads={threads}")
+    if tmp_dir is not None:
+        con.execute(f"SET temp_directory='{tmp_dir}'")
+    print(json.dumps(scan_churn(a, b, out_dir=out_dir, columns=list(columns) or None, con=con), indent=1))
+
+
+@main.command("over-time-churn")
+@argument("groups", nargs=-1, required=True)
+def over_time_churn_cmd(groups: tuple[str, ...]) -> None:
+    """Per-scan dir churn (changed / added / removed paths at each scan boundary)
+    of sealed over-time groups (`over-time.parquet`, local paths), as JSON lines
+    on stdout — one object per group."""
+    from .churn import group_churn
+
+    con = _connect()
+    for g in groups:
+        print(json.dumps({"group": g, **group_churn(g, con=con)}))
+
+
 @main.command("index-sync")
 @option("-A", "--age-only", is_flag=True, help="Only the age-pyramid variants (a ladder-only backfill; the other variants keep their pointer)")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
