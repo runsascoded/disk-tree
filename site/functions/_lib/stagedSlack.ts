@@ -187,6 +187,8 @@ export const nameSlug = (name: string): string =>
 
 // The workspace's members as slug → `<@U…>`, per isolate (10 min).
 let membersMemo: { at: number; p: Promise<Map<string, string>> } | null = null
+/** The last `users.list` failure, for the refresh route's report. */
+export let membersError: string | null = null
 
 /** Workspace members keyed by their real and display names' slugs (`users.list`,
  *  `users:read`) — how an owner id with no known email still gets a mention.
@@ -200,7 +202,7 @@ export function slackMembers(env: SlackEnv): Promise<Map<string, string>> {
     for (let page = 0; page < 20; page++) {
       const r = await fetch(`https://slack.com/api/users.list?limit=500${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: { authorization: `Bearer ${env.SLACK_BOT_TOKEN}` } })
       const j = (await r.json().catch(() => null)) as { ok?: boolean; members?: { id: string; deleted?: boolean; is_bot?: boolean; real_name?: string; profile?: { real_name?: string; display_name?: string } }[]; response_metadata?: { next_cursor?: string } } | null
-      if (!j?.ok) break
+      if (!j?.ok) { membersError = (j as { error?: string } | null)?.error ?? `http ${r.status}`; break }
       for (const m of j.members ?? []) {
         if (m.deleted || m.is_bot) continue
         const slugs = new Set([m.real_name, m.profile?.real_name, m.profile?.display_name].filter((x): x is string => !!x).map(nameSlug))
@@ -311,12 +313,14 @@ export async function notifyPlan(env: NotifyEnv, db: D1Database, planId: number,
 /** Re-render the plan's parent and the given stage-batch replies in place
  * (`chat.update`: no one is notified). Returns what was updated. */
 export async function refreshThread(env: NotifyEnv, db: D1Database, planId: number, siteUrl: string, replies: Record<number, string>): Promise<{ parent: boolean; replies: Record<string, string> }> {
-  const out = { parent: false, replies: {} as Record<string, string> }
+  const out = { parent: false, replies: {} as Record<string, string>, members: 0, membersError: null as string | null }
   if (!slackReady(env)) return out
   const plan = await db.prepare('SELECT slack_ts, slack_channel FROM plans WHERE id = ?').bind(planId).first<{ slack_ts: string | null; slack_channel: string | null }>()
   if (!plan?.slack_ts || !plan.slack_channel) return out
   await notifyPlan(env, db, planId, siteUrl)
   out.parent = true
+  out.members = (await slackMembers(env)).size
+  out.membersError = membersError
   const full = env as NotifyEnv & Env
   for (const [batch, ts] of Object.entries(replies)) {
     const b = await db.prepare('SELECT id, note, created_by FROM stage_batches WHERE id = ? AND plan_id = ?').bind(Number(batch), planId).first<{ id: number; note: string | null; created_by: string }>()
