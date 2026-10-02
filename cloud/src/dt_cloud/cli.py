@@ -523,8 +523,6 @@ def healthcheck(date: str | None, max_age_days: int, as_json: bool, subdir: str 
     from .site import creds
 
     base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN")
     sub = subdir if subdir is not None else os.environ.get("SNAPSHOTS_SUBDIR", "")
     resolved, checks = run_checks(base, tok, date, max_age_days=max_age_days, subdir=sub)
     err(f"healthcheck {base} @ {resolved or '?'}")
@@ -547,7 +545,7 @@ def healthcheck(date: str | None, max_age_days: int, as_json: bool, subdir: str 
 @option("-q", "--hit", default=None, help="Filter term the filter-hit scenario searches for (default: the largest bucket's largest child)")
 @option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ (default: $SNAPSHOTS_SUBDIR)")
 @option("-S", "--serial", is_flag=True, help="Send each scenario's requests one at a time (default: concurrently, as a page load does)")
-@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
+@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN; none for a public deployment like r2.rbw.sh)")
 @option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
 def probe(budget: float | None, cold: bool, as_json: bool, out: str | None, hit: str | None, subdir: str | None, serial: bool, token: str | None, url: str | None) -> None:
     """Replay the site's page loads (root, largest bucket, a matching and a
@@ -567,8 +565,6 @@ def probe(budget: float | None, cold: bool, as_json: bool, out: str | None, hit:
     from .site import creds
 
     base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN")
     sub = subdir if subdir is not None else os.environ.get("SNAPSHOTS_SUBDIR", "")
     fetch = http_fetch(base, tok)
     t = resolve_targets(fetch, sub, hit)
