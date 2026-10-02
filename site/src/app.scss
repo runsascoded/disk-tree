@@ -2321,9 +2321,8 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
     display: grid; grid-template-columns: 1fr; gap: 16px; margin: 10px 0 14px;
     &.two { grid-template-columns: 1fr 1fr; @media (max-width: 900px) { grid-template-columns: 1fr; } }
     h3 { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--ink-2); }
-    .map-box { height: clamp(260px, 42vh, 460px); display: flex; flex-direction: column; min-width: 0;
-      .treemap { height: 100%; min-height: 0; }
-      .dt-treemap-map { min-height: 0; }
+    .map-box { min-width: 0;
+      .dt-treemap-map { flex-basis: 380px !important; height: 380px; @media (max-width: 640px) { flex-basis: 300px !important; height: 300px; } }
     }
   }
   .fold-all { margin-left: auto; display: inline-flex; gap: 4px; }
@@ -2361,6 +2360,7 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
     // width — past that the table scrolls in its box instead of crushing it.
     td.col-sel { width: 1.6em; padding-right: 0; input { margin: 0; vertical-align: middle; cursor: pointer; } }
     td:nth-child(2) { overflow-wrap: anywhere; min-width: 16em; }
+    td.pfx code { word-break: break-all; }
     tbody tr { cursor: default; }
     tr.sel td { background: color-mix(in srgb, var(--accent, #58a6ff) 14%, transparent); }
     // The cursor is the keyboard row (j/k target) and the anchor a shift-click
