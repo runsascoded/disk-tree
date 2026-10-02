@@ -1420,6 +1420,11 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
       &:hover { border-bottom-color: var(--ink); }
     }
     .memo-input { font: inherit; width: 100%; min-width: 16em; padding: 2px 4px; }
+    // The holder editor: name, the face picker, then Save / Cancel, stacked in the cell.
+    .holder-edit {
+      display: flex; flex-direction: column; gap: 6px; min-width: 18em;
+      .err { margin: 0; color: var(--del, #c33); font-size: 12px; }
+    }
     .grant-avi {
       flex: none;
       width: 20px;
