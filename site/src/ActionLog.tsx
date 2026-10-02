@@ -59,7 +59,7 @@ export function ActionLog() {
               <tr><th>when</th><th>by</th><th>prefix</th><th>owner</th><th>status</th><th>note</th></tr>
             </thead>
             <tbody>
-              {q.data.rows.map(r => (
+              {q.data.rows.map((r, i) => (
                 <tr key={r.id} className={r.status}>
                   <td className="when">{when(r.ts)}</td>
                   <td><UserChip who={emails?.[r.who.toLowerCase()] ?? r.who} size={15} /></td>
@@ -70,7 +70,12 @@ export function ActionLog() {
                       <span className={`status ${r.status}`}>{r.status}</span>
                     </Tooltip>
                   </td>
-                  <td className="memo">{r.memo ?? ''}</td>
+                  <td className="memo">
+                    {/* A batch's rows share one note: show it once, ditto after. */}
+                    {r.memo && (i > 0 && q.data.rows[i - 1].memo === r.memo
+                      ? <span className="dim">〃</span>
+                      : <Tooltip content={r.memo}><span className="clip">{r.memo}</span></Tooltip>)}
+                  </td>
                 </tr>
               ))}
             </tbody>

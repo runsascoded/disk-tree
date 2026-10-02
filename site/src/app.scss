@@ -2441,8 +2441,8 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
     margin-top: 8px;
     th, td { padding: 4px 8px; border-bottom: 1px solid var(--border, #333); text-align: left; vertical-align: top; }
     td.when { white-space: nowrap; }
-    td.prefix { font-family: var(--mono, ui-monospace, monospace); word-break: break-all; }
-    td.memo { max-width: 360px; color: var(--dim, #999); }
+    td.prefix { font-family: var(--mono, ui-monospace, monospace); word-break: break-all; min-width: 360px; }
+    td.memo { max-width: 320px; color: var(--dim, #999); .clip { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
     tr.retracted td:not(:nth-child(5)), tr.superseded td:not(:nth-child(5)), tr.overridden td:not(:nth-child(5)) { opacity: 0.55; }
     tr.retracted td.prefix a { text-decoration: line-through; }
     .status { padding: 1px 6px; border-radius: 8px; font-size: 11px; border: 1px solid currentColor; }
