@@ -812,19 +812,59 @@ def index_sync(
 
 @main.command("index-gc")
 @option("-b", "--base", default="oa-gcs-usage-dvx", help="Where the pointers' dirs live, for -r's cold-footer check: the data bucket (default oa-gcs-usage-dvx), a mounted dir, or an fsspec URL (`r2://bucket`)")
+@option("-F", "--files", "targets", multiple=True, help="Also delete the files of generation dirs no pointer names (repeatable): `gs://<bucket>` (the scan store), `r2` (the R2 serving bucket: `$R2_BUCKET`, via publish-r2's `R2_*` env) or `r2://<bucket>`. Only under scans with a `path` pointer; never a pointed dir; never one younger than -m")
+@option("-m", "--min-age", default="2d", help="-F's grace period: a generation whose newest object is younger is kept, so an in-flight reindex is never raced; e.g. 36h, 2d (default)")
+@option("-n", "--dry-run", is_flag=True, help="Print what would go (D1 rows counted; generation dirs per store with bytes, and totals); delete nothing")
 @option("-r", "--retain", type=int, default=None, help="Retention: also retire the store sorts' row groups of every scan older than the newest N whose `.groups.parquet` exists (their pointers stay; the reader range-reads that cold footer instead). A variant without one keeps its rows (warned): backfill it with `index-blob`")
+@option("-R", "--no-rows", is_flag=True, help="Skip the D1 row sweep (e.g. an -F pass over every scan after the job's per-scan row sweep)")
 @option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
+@option("-w", "--workers", default=8, type=int, help="-F: concurrent listings (default 8)")
 @argument("dates", nargs=-1)
-def index_gc(base: str, retain: int | None, store: str, dates: tuple[str, ...]) -> None:
+def index_gc(
+    base: str,
+    targets: tuple[str, ...],
+    min_age: str,
+    dry_run: bool,
+    retain: int | None,
+    no_rows: bool,
+    store: str,
+    workers: int,
+    dates: tuple[str, ...],
+) -> None:
     """Delete row groups of index generations no pointer names — a REPROC's
     previous generation, or a sync that died before flipping. All synced
-    scans by default; DATES to restrict. With -r, the retention pass too."""
-    from .index_footer import gc_d1, retire_d1, synced_variants
+    scans by default; DATES to restrict. With -r, the retention pass too.
 
-    todo = dates or sorted({d for d, _ in synced_variants(store=store)})
-    for d in todo:
-        n = gc_d1(d, store=store)
-        err(f"index-gc: {d} — {n} stale row groups deleted")
+    With -F, also those generations' files (`<layer-2>/index/<gen>/`) in each
+    target store (`dt_cloud.gen_gc`): dirs no `index_schema` row names, under
+    scans that have a `path` pointer, older than -m. E.g. the backlog over
+    every scan, GCS + R2, dry run first:
+
+        dt-cloud index-gc -R -n -F gs://oa-gcs-usage-dvx -F r2
+    """
+    import time
+
+    from .gen_gc import open_store, parse_age, sweep
+    from .index_footer import d1_variant, gc_d1, pointers, retire_d1, synced_variants
+
+    if dry_run and retain is not None:
+        raise UsageError("-n covers the row sweep and -F, not -r")
+    try:
+        grace = parse_age(min_age)
+    except ValueError as e:
+        raise UsageError(str(e)) from None
+    stores = [open_store(t) for t in targets]
+    if not no_rows:
+        todo = dates or sorted({d for d, _ in synced_variants(store=store)})
+        for d in todo:
+            n = gc_d1(d, store=store, dry_run=dry_run)
+            err(f"index-gc: {d} — {n} stale row groups {'would be ' if dry_run else ''}deleted")
+    if stores:
+        sweep(
+            pointers(), stores,
+            now=time.time(), min_age=grace, dry_run=dry_run, reread=pointers,
+            path_variant=d1_variant("path", store), dates=dates or None, workers=workers,
+        )
     if retain is not None:
         retired, skipped = retire_d1(retain, store=store, base=base)
         for d, v, n in retired:
