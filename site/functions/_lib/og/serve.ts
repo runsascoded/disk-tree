@@ -9,8 +9,14 @@ import { mapCard, type Site } from './data.js'
 import { assignmentsCard, stagedCard, userCard, usersCard } from './pages.js'
 import { ensureWasm, FONT_FILES, svgToPng } from './render.js'
 import { pageView, type OgKind } from './routes.js'
-import { expDay, IMAGE_TTL_DAYS, imagePath, ogKey, verifyImage, type OgTier } from './sign.js'
-import { fullTier } from './tokens.js'
+import { expDay, IMAGE_TTL_DAYS, imagePath, ogKey, resolveImage, type OgTier } from './sign.js'
+import { fullTier, shareKeyLive } from './tokens.js'
+import { warmUrls } from './warm.js'
+import { baseReadScope, baseScope } from '../auth.js'
+import { canonId, loadRegistry } from '../identity.js'
+import { openPlanId, planDigest } from '../plans.js'
+import { resolveScan } from './data.js'
+import { warmSubtree } from '../../api/subtree.js'
 
 export type OgEnv = Env & {
   ASSETS: { fetch: (req: Request) => Promise<Response> }
@@ -39,8 +45,28 @@ export function deploymentKey(env: OgEnv): Promise<CryptoKey> | null {
 
 const now = () => Math.floor(Date.now() / 1000)
 
-/** Stamp a page's HTML with its card when it has one: the anonymous tier for
- * any fetch, the full tier for a URL carrying this view's live token. */
+/** Which card a page fetch earns: `full` for an `og=` token minted for
+ * exactly this view (live in D1; the image URL never outlives it), or for a
+ * live `key=` share link (its bearer gets in anyway); else `anon`. */
+export async function pageTier(env: OgEnv, key: CryptoKey, kind: OgKind, params: Record<string, string>, url: URL, t: number): Promise<{ tier: OgTier; day?: number }> {
+  const tok = await fullTier(env.DB, key, kind, params, url.searchParams.get('og'), t)
+  if (tok) return { tier: 'full', day: Math.min(expDay(t, IMAGE_TTL_DAYS), tok.day) }
+  if (await shareKeyLive(env.DB, url.searchParams.get('key'), [baseScope(env), baseReadScope(env)], t)) return { tier: 'full', day: expDay(t, IMAGE_TTL_DAYS) }
+  return { tier: 'anon' }
+}
+
+/** The open plan's digest (first 8 hex), so `/staged`'s image URL changes
+ * with every staging gesture and Slack / the colo cache never serve a stale
+ * card. Null when there's no plan. */
+async function stagedVersion(env: OgEnv): Promise<string | null> {
+  if (!env.DB) return null
+  const plan = await openPlanId(env.DB).catch(() => null)
+  if (plan == null) return null
+  const items = (await env.DB.prepare('SELECT prefix FROM plan_items WHERE plan_id = ?').bind(plan).all<{ prefix: string }>()).results
+  return (await planDigest(items.map(i => i.prefix))).slice(0, 8)
+}
+
+/** Stamp a page's HTML with its card when it has one. */
 export async function stampPage(env: OgEnv, url: URL, html: Response): Promise<Response> {
   if (!env.OG_CARDS) return html
   const pv = pageView(url, siteOf(env).name)
@@ -48,12 +74,11 @@ export async function stampPage(env: OgEnv, url: URL, html: Response): Promise<R
   const keyP = deploymentKey(env)
   if (!keyP) return html
   const key = await keyP
-  // Full only with an `og=` token minted for exactly this view (and live in
-  // D1); its image URL never outlives the token.
-  const full = await fullTier(env.DB, key, pv.kind, pv.params, url.searchParams.get('og'), now())
-  const tier: OgTier = full ? 'full' : 'anon'
-  const day = Math.min(expDay(now(), IMAGE_TTL_DAYS), full?.day ?? Infinity)
-  const image = url.origin + await imagePath(key, pv.kind, pv.params, tier, day)
+  const { tier, day } = await pageTier(env, key, pv.kind, pv.params, url, now())
+  // The image's view: the page's, plus `/staged`'s plan version.
+  const v = pv.kind === 'staged' ? await stagedVersion(env) : null
+  const imgParams = v ? { ...pv.params, v } : pv.params
+  const image = url.origin + await imagePath(key, pv.kind, imgParams, tier, day)
   if (OWN_TITLES.has(pv.kind)) return stampMeta(html, { image, imageType: 'image/png', page: url.href })
   return stampMeta(html, {
     title: pv.title,
@@ -91,23 +116,38 @@ async function cardData(env: OgEnv, kind: string, params: Record<string, string>
   }
 }
 
-/** `GET /og/<kind>.png?<view>&sig=…`: verify, then render (or serve the
- * colo-cached PNG). The cache key adds the ledger head, so an assignment
- * recolours a card within the URL's lifetime. */
+/** Fill the edge cache with the card view's first-paint reads (`warm.ts`):
+ * at most two subtree requests, no retries, errors swallowed. */
+async function warmView(env: OgEnv, origin: string, kind: string, params: Record<string, string>, waitUntil?: (p: Promise<unknown>) => void): Promise<void> {
+  try {
+    const date = await resolveScan(env, params.d)
+    if (!date) return
+    const reg = await loadRegistry(env).catch(() => ({}) as Awaited<ReturnType<typeof loadRegistry>>)
+    for (const u of warmUrls(kind, params, date, x => canonId(x, reg))) await warmSubtree(env, origin + u, waitUntil).catch(() => null)
+  } catch {
+    // Best-effort: a cold clickthrough is the status quo.
+  }
+}
+
+/** `GET /og/<kind>.png?<view>[&sig=…]`: the full card for a valid `sig`,
+ * the anonymous card otherwise (never an error for a bad or expired one).
+ * Rendered or served from the colo cache, keyed by tier + view + the ledger
+ * head (an assignment recolours a card within the URL's lifetime). */
 export async function serveCard(ctx: { request: Request; env: OgEnv; waitUntil?: (p: Promise<unknown>) => void }): Promise<Response> {
   const { request, env } = ctx
   const url = new URL(request.url)
-  const key = deploymentKey(env)
-  if (!key) return new Response('cards not configured', { status: 503 })
-  const v = await verifyImage(await key, url, now())
-  if ('error' in v) return new Response(v.error, { status: 403 })
+  const keyP = deploymentKey(env)
+  const r = await resolveImage(keyP ? await keyP : null, url, now())
+  if (!r) return new Response('not a card', { status: 404 })
+  const { v: _v, ...view } = r.params
   const head = env.DB ? await ledgerHead(env).catch(() => 0) : 0
-  const cacheKey = new Request(`${url.origin}${url.pathname}${url.search}&h=${head}`)
+  const cacheKey = new Request(`${url.origin}${await imagePath(null, r.kind, r.params, 'anon')}${Object.keys(r.params).length ? '&' : '?'}tier=${r.tier}&h=${head}`)
   const cache = (caches as unknown as { default: Cache }).default
+  if (ctx.waitUntil) ctx.waitUntil(warmView(env, url.origin, r.kind, view, ctx.waitUntil))
   const hit = await cache.match(cacheKey)
   if (hit) return hit
   const t0 = Date.now()
-  const data = await cardData(env, v.kind, v.params, v.tier, url)
+  const data = await cardData(env, r.kind, view, r.tier, url)
   if (!data) return new Response('no such card', { status: 404 })
   const t1 = Date.now()
   await ensureWasm(RESVG)
@@ -116,9 +156,11 @@ export async function serveCard(ctx: { request: Request; env: OgEnv; waitUntil?:
   const res = new Response(png, {
     headers: {
       'content-type': 'image/png',
-      // The URL is signed and expires within days; a day's caching anywhere is fine.
+      // A full URL expires within days and an anonymous card shows no names:
+      // a day's caching anywhere is fine.
       'cache-control': 'public, max-age=86400',
       'server-timing': `data;dur=${t1 - t0}, render;dur=${t2 - t1}`,
+      ...(r.why ? { 'x-og-tier': `anon (${r.why})` } : { 'x-og-tier': r.tier }),
     },
   })
   const put = cache.put(cacheKey, res.clone())

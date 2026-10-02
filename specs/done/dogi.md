@@ -76,8 +76,18 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 
 **Phase 3 (Slack): built.** The staged-plan parent message ends with an `image` block: the plan's full-tier `/staged` card (`stagedCardUrl`, signed for 7 days). The view carries the plan digest (`v=`), so a new batch is a new URL; Slack fetches an image once per URL. Existing threads pick it up on their next event, or on `POST /api/plans/:id/slack`.
 
+**Follow-ups (Ryan, 2026-10-02), built:**
+1. **Anonymous card URLs are unsigned:** `/og/<kind>.png?<view>`, since any page fetch yields any view's anonymous card anyway. Only full URLs carry `sig`. A missing, bad or expired `sig` serves the anonymous card (200, `x-og-tier: anon (<why>)`), never a 403 (`resolveImage`).
+2. **Tags are 60 bits:** exactly 10 base64url chars. `og=` is 12 chars and a full image `sig` is 12 (expiry + tag). Vectors are re-checked against Python `hmac`.
+3. **The client strips `og=`** from the address bar on load (`withoutOg`, `history.replaceState` in `main.tsx`), keeping the rest.
+4. **`og=` has no effect on auth:** `authNeutral.test.ts` runs anonymous, `key=` (good and bad), bearer and session requests through the real gate with and without `og=`, and requires identical outcomes.
+5. **A live `key=` share-link page unfurls with the full card** (`shareKeyLive`). It uses the gate's own presented-token rule (`canRedeem`: unrevoked, enabled, unexpired, with a viewer scope; a used-up redeem cap still serves a bearer, so it counts). It's read-only: nothing is redeemed or touched.
+6. **The stamped `/staged` image carries the plan digest** (`v=`), as the Slack card does, so a new staging gesture means a new image.
+7. **Warm on unfurl:** serving a map or user card (`waitUntil`) fills the edge cache with the view's first-paint subtree reads (`depth=1` + full, or `full=1` under a filter) at the commonest canvas (1536 px wide; `warm.ts`). That's at most 2 requests, no retries, via `warmSubtree`, the `/api/subtree` body without the viewer gate. Nothing it reads leaves the Worker.
+8. **UI:** one "Share…" dialog replaces "Copy link with preview". It has "Copy link", a "Preview shows details (labels, sizes, owners)" checkbox (adds `og=`), and, for admins, "Grant access to anyone with the link" (mints a read-only `key=` grant via `/api/auth/grants`, 30 days; implies the full preview). The omnibar keeps a direct "Copy link with detailed preview (link-preview card only; grants no access)".
+
 **Open at hand-off (2026-10-02):**
-- gcs D1 `0034_og_tokens` isn't applied anywhere remote. Until it is, minting answers 501 and every card is anonymous. Dev shares prod's D1, so the full tier hasn't been seen live; it's covered by tests and a local render.
+- gcs D1 `0034_og_tokens` isn't applied anywhere remote. Until it is, `og=` minting answers 501; `key=` links already get full cards (the `grants` table exists). Dev shares prod's D1.
 - Prod isn't deployed. Dev (`dev.gcs.oa.dev`) runs all three phases with `OG_CARDS` on.
 - Measured on dev: cold renders 0.5–2.9 s per card (the view read dominates; the rasterize is ~100–200 ms), cached about 60 ms.
 

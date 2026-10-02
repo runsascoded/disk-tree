@@ -2,6 +2,8 @@
  * audit trail and the revocation switch. A deployment without the table
  * mints nothing and honours no token (every card stays anonymous). */
 import type { D1Database } from '@cloudflare/workers-types'
+import { canRedeem, hashToken } from '@open-athena/auth'
+import { d1GrantStore } from '@open-athena/auth/d1'
 import { pageView } from './routes.js'
 import { canonical, checkToken, expDay, mintToken } from './sign.js'
 
@@ -68,4 +70,20 @@ export async function listTokens(db: D1Database, limit = 200): Promise<TokenRow[
 export async function revoke(db: D1Database, token: string, by: string, now: number): Promise<number> {
   const r = await db.prepare('UPDATE og_tokens SET revoked_by = ?, revoked_ts = ? WHERE token = ? AND revoked_ts IS NULL').bind(by, now, token).run()
   return r.meta.changes ?? 0
+}
+
+/** A `key=` share link that would let its bearer in right now, by the
+ * gate's own rule for a presented token (`canRedeem`: unrevoked, enabled,
+ * unexpired; the redeem cap only limits new sessions), carrying one of
+ * `scopes`. Read-only: nothing is redeemed or touched. Such a page unfurls
+ * with the full card, since the bearer gets access anyway. */
+export async function shareKeyLive(db: D1Database | undefined, key: string | null, scopes: readonly string[], now: number): Promise<boolean> {
+  if (!db || !key || key.length < 16 || key.length > 256) return false
+  try {
+    const g = await d1GrantStore(db as never).byTokenHash(await hashToken(key))
+    if (!g || !canRedeem(g, now)) return false
+    return g.scopes.some((sc: string) => sc === '*' || scopes.includes(sc))
+  } catch {
+    return false
+  }
 }
