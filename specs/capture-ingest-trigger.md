@@ -40,3 +40,14 @@ Alternative, if a CF→AWS key is unwelcome: an EventBridge-scheduled Lambda (ev
 ```
 
 `aws/laptop-scan` is superseded by this config, and can go once the switch is verified.
+
+## Status (m3, 2026-10-01)
+
+Built, not applied (`3e8e6c3`):
+- `cf/__main__.py`: queue `disk-tree-captures`, and the `disk-tree` bucket's event notification (`PutObject` / `CompleteMultipartUpload` / `CopyObject`, prefix `captures/`, suffix `_SUCCESS.json`).
+- `aws/__main__.py`: IAM user `disk-tree-m3-capture-trigger`, allowed only `batch:SubmitJob` on the queue and the job definition. No access key in Pulumi: `cf/capture-trigger/put-secrets` mints one straight into the Worker secrets.
+- `cf/capture-trigger/`: the Worker. It is a serial consumer (`max_concurrency = 1`). The `_INGEST.json` marker is written `submitting` before the call and `submitted` with the job id after. A failed submit deletes the marker and retries the message.
+
+Apply, in order: `pulumi up` (aws, then cf) → `pnpm -C cf/capture-trigger deploy` → `cf/capture-trigger/put-secrets`. Then drop `then` from disky.json's scan job **at the same time**: `aws/submit` writes no marker, so while both run, a capture is ingested twice.
+
+Not done yet: the `STORE` per `<host>` derivation in `ingest.sh` (only `m3` captures today), and ingest idempotency per capture (the marker covers redelivery, but not a manual `aws/submit` re-run).
