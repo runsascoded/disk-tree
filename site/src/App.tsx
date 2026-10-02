@@ -27,13 +27,15 @@ import { LifecycleFold } from './LifecycleFold'
 import { ClassMixTip, Tooltip } from './Tooltip'
 import { Treemap } from './Treemap'
 import type { DateRange, Highlight, ShadeMode } from './Treemap'
-import { collectFlagged, DEFAULT_SYNTAX, SYNTAXES, syntaxById } from './filterTree'
+import { collectFlagged, DEFAULT_SYNTAX, inMatchRoots, SYNTAXES, syntaxById } from './filterTree'
 import { QueryHelpTip } from './QueryHelp'
 import { FilterFlags, FilterNote } from './FilterNote'
 import { BulkBar } from './BulkBar'
 import { setCurrentScan, useMyUser, useOwnerIndex, useOwners } from './owners'
+import { applyLedger } from './ledgerOverlay'
 import { MultiSelect } from './MultiSelect'
 import { SiteNav, topbarH } from './SiteNav'
+import { canvasWidth } from './canvas'
 import type { MenuEntry } from './SiteNav'
 import { DAY, encodeScan, fmtScan, nearestScan, noScansYet, scanTime, useScan } from './scan'
 import { SizeOverTime } from './SizeOverTime'
@@ -348,7 +350,7 @@ function AppContent() {
   // and a cold deep link fans the whole chain out in parallel.
   // The URL's `~` (a store home) expanded: `/~/c` → `Users/ryan/c`.
   const graftPath = fromUrlSegs(pathname.slice((store.path === '/' ? '' : store.path).length).split('/').filter(Boolean), store.home).join('/')
-  const canW = Math.ceil((typeof window === 'undefined' ? 1280 : window.innerWidth) / 128) * 128
+  const canW = canvasWidth(typeof window === 'undefined' ? 1280 : window.innerWidth)
   // Perf-mark keys (`perf.ts`): what tells one load of a widget from another
   // on this page — path, scan(s), canvas width, scope.
   const viewKey = (p: string, d: string | null | undefined, extra = '') => `${p || '/'}@${d}|w${canW}${scopeQs}${extra}`
@@ -484,7 +486,15 @@ function AppContent() {
   // empty the decorations under a map that is still showing.
   const lastTree = useRef<TreeNode | null>(null)
   if (tree) lastTree.current = tree
-  const mapTree = tree ?? lastTree.current
+  // The live ownership ledger over the scan's attribution (`applyLedger`):
+  // assignments recolor the map and its legend as soon as `/api/actions`
+  // refetches, with no subtree re-read. A user lens is already folded
+  // server-side (`ownerLens`), so it is left as served.
+  const heldTree = tree ?? lastTree.current
+  const mapTree = useMemo(
+    () => (heldTree && ownersMode && ownerMode !== 'user' ? applyLedger(heldTree, ownerIdx, store.scheme, canonId) : heldTree),
+    [heldTree, ownersMode, ownerMode, ownerIdx, store.scheme],
+  )
   // What the map shows vs. what the page asked for: a held previous tree
   // (`mapStale` — dimmed, with a centered marker), or the asked-for tree with
   // a fetch still in flight (`mapBusy` — the full tree filling in behind the
@@ -769,6 +779,7 @@ function AppContent() {
   }, [mapTree, drillPath])
   // The table's path segments, stable while `mapPath` is (a fresh array per
   // render defeated every memo keyed on it).
+  const tblActionable = useMemo(() => inMatchRoots(matchedRoots, !!fq), [matchedRoots, fq])
   const tblSegs = useMemo(() => mapPath?.slice(1).map(n => n.n) ?? [], [mapPath])
   const onMapPath = (p: TreeNode[]) => drillTo(p.slice(1).map(n => n.n))
   // Worklist rows / children table → drill the map to a prefix and show it.
@@ -1212,6 +1223,7 @@ function AppContent() {
               onPickUser={u => pickUser(u, false)}
               onOpen={openPath}
               onOpenObject={openObject}
+              actionable={tblActionable}
             /></div>
           )}
         </>

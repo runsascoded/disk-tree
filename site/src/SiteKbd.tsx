@@ -4,14 +4,18 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { Omnibar, ShortcutsModal, SpeedDial, useActions, type SpeedDialAction } from 'use-kbd'
 import { SpeedDialTip } from './Tooltip'
 import { useRegistry } from './identities'
+import { hostPair, otherHostUrl } from './hosts'
 import { useHelpPref } from './prefs'
 import { useStore } from './store'
 import { STORES } from './stores'
 import { useTheme } from './theme'
 import { useUnits } from './units'
+import { useCanStage } from './auth'
+import { useShare } from './sharePreview'
 
 export const REPO_URL = 'https://github.com/Open-Athena/marin-gcs-usage'
 const CW_URL = 'https://cw-s3.oa.dev/'
+const HOSTS = hostPair(import.meta.env.VITE_PROD_HOST, import.meta.env.VITE_DEV_HOST)
 
 
 /**
@@ -44,7 +48,17 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
     [store.path, 'Map (home)'],
     ['/users', 'Users — storage by owner'],
   ]
+  const canShare = useCanStage()
+  const { share, status: shareStatus } = useShare()
   useActions({
+    ...(canShare ? {
+      'share:preview': {
+        label: shareStatus.state === 'copied' ? 'Copied: link with detailed preview' : shareStatus.state === 'error' ? `Couldn't copy: ${shareStatus.error}` : 'Copy link with detailed preview (link-preview card only; grants no access)',
+        description: 'Copies this page\'s link with a token that makes its unfurl card in Slack, iMessage etc. show labels, sizes and owners. Opening the link still needs sign-in.',
+        group: 'Share',
+        handler: () => void share('preview'),
+      },
+    } : {}),
     'help:toggle': {
       label: `Help line: ${help} (toggle)`,
       group: 'View',
@@ -71,6 +85,14 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
         { label: `${u} — storage breakdown (/user/${u})`, group: 'User pages', handler: () => navigate(`/user/${u}`) },
       ]),
     ),
+    ...(HOSTS ? {
+      'host:toggle': {
+        label: location.hostname === HOSTS.dev ? `This page on prod (${HOSTS.prod})` : `This page on dev (${HOSTS.dev})`,
+        group: 'Pages',
+        defaultBindings: ['g d'],
+        handler: () => location.assign(otherHostUrl(location.href, HOSTS)),
+      },
+    } : {}),
     'theme:cycle': {
       label: `Theme: ${theme} (cycle)`,
       group: 'View',

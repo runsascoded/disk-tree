@@ -97,14 +97,17 @@ importers:
         specifier: ^0.27.20
         version: 0.27.20(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@open-athena/auth':
-        specifier: github:Open-Athena/auth#fa93d1467dcb0072218ce2f951ea3b3d861e11b3
-        version: https://codeload.github.com/Open-Athena/auth/tar.gz/fa93d1467dcb0072218ce2f951ea3b3d861e11b3(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)
+        specifier: github:Open-Athena/auth#64d5544c8a7c3d63d3bef943cdb23258d0c1df56
+        version: https://codeload.github.com/Open-Athena/auth/tar.gz/64d5544c8a7c3d63d3bef943cdb23258d0c1df56(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)
       '@rdub/file-tree':
         specifier: https://github.com/runsascoded/file-tree#9d9bd749469aa4ae76b860ea9a403c3ab18df80b
         version: https://codeload.github.com/runsascoded/file-tree/tar.gz/9d9bd749469aa4ae76b860ea9a403c3ab18df80b(@rdub/treemap@packages+treemap)(highlight.js@11.12.0)(hyparquet@1.30.0)(jq-web@0.6.2)(react-dom@19.2.8(react@19.2.8))(react-markdown@10.1.0(@types/react@19.2.18)(react@19.2.8))(react-router-dom@6.30.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8))(react@19.2.8)(remark-gfm@4.0.1)(use-prms@0.5.0(react@19.2.8))(wa-sqlite@1.0.0)(yaml@2.9.1)
       '@rdub/treemap':
         specifier: workspace:*
         version: link:../packages/treemap
+      '@resvg/resvg-wasm':
+        specifier: ^2.6.2
+        version: 2.6.2
       '@tanstack/react-query':
         specifier: ^5.101.4
         version: 5.101.4(react@19.2.8)
@@ -642,9 +645,9 @@ packages:
     cpu: [x64]
     os: [linux]
 
-  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/fa93d1467dcb0072218ce2f951ea3b3d861e11b3':
-    resolution: {tarball: https://codeload.github.com/Open-Athena/auth/tar.gz/fa93d1467dcb0072218ce2f951ea3b3d861e11b3}
-    version: 0.1.0-dist.7b665e1
+  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/64d5544c8a7c3d63d3bef943cdb23258d0c1df56':
+    resolution: {tarball: https://codeload.github.com/Open-Athena/auth/tar.gz/64d5544c8a7c3d63d3bef943cdb23258d0c1df56}
+    version: 0.1.0-dist.6b12724
     peerDependencies:
       '@cloudflare/workers-types': '*'
       '@tanstack/react-query': ^5.0.0
@@ -778,6 +781,10 @@ packages:
   '@remix-run/router@1.23.4':
     resolution: {integrity: sha512-q7j5geK7xs3UJSdm9/iytUNclBnLmYx1EnSeCFXHPeutdqgIMeFeHtUZgS3EhlKxdBEAu8OwtJCwmLrEzpSs7Q==}
     engines: {node: '>=14.0.0'}
+
+  '@resvg/resvg-wasm@2.6.2':
+    resolution: {integrity: sha512-FqALmHI8D4o6lk/LRWDnhw95z5eO+eAa6ORjVg09YRR7BkcM6oPHU9uyC0gtQG5vpFLvgpeU4+zEAz2H8APHNw==}
+    engines: {node: '>= 10'}
 
   '@rolldown/pluginutils@1.0.0-beta.27':
     resolution: {integrity: sha512-+d0F4MKMCbeVUJwG96uQ4SgAznZNSq93I3V+9NHA4OpvqG8mRCpGdKmK8l/dl02h2CCDHwW2FqilnTyDcAnqjA==}
@@ -2657,7 +2664,7 @@ snapshots:
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
 
-  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/fa93d1467dcb0072218ce2f951ea3b3d861e11b3(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)':
+  '@open-athena/auth@https://codeload.github.com/Open-Athena/auth/tar.gz/64d5544c8a7c3d63d3bef943cdb23258d0c1df56(@cloudflare/workers-types@5.20260906.1)(@tanstack/react-query@5.101.4(react@19.2.8))(react@19.2.8)':
     optionalDependencies:
       '@cloudflare/workers-types': 5.20260906.1
       '@tanstack/react-query': 5.101.4(react@19.2.8)
@@ -2750,6 +2757,8 @@ snapshots:
       react-router-dom: 6.30.6(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
 
   '@remix-run/router@1.23.4': {}
+
+  '@resvg/resvg-wasm@2.6.2': {}
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 

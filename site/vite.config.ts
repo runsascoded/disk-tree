@@ -78,6 +78,10 @@ const AUTH_MODE = process.env.VITE_AUTH_MODE ?? VARS.AUTH_MODE ?? 'app'
 const STORES_EXTRA = process.env.VITE_STORES_EXTRA ?? VARS.STORES_EXTRA ?? ''
 // A file store's home dir (`Users/ryan`), shown as `~` (`HOME` under [vars]).
 const HOME = process.env.VITE_HOME ?? VARS.HOME ?? ''
+// The prod ↔ dev host pair `g d` toggles between (`src/hosts.ts`); a deployment
+// without a dev alias leaves them unset and gets no binding.
+const PROD_HOST = process.env.VITE_PROD_HOST ?? VARS.PROD_HOST ?? ''
+const DEV_HOST = process.env.VITE_DEV_HOST ?? VARS.DEV_HOST ?? ''
 
 export default defineConfig({
   define: {
@@ -85,6 +89,8 @@ export default defineConfig({
     'import.meta.env.VITE_AUTH_MODE': JSON.stringify(AUTH_MODE),
     'import.meta.env.VITE_STORES_EXTRA': JSON.stringify(STORES_EXTRA),
     'import.meta.env.VITE_HOME': JSON.stringify(HOME),
+    'import.meta.env.VITE_PROD_HOST': JSON.stringify(PROD_HOST),
+    'import.meta.env.VITE_DEV_HOST': JSON.stringify(DEV_HOST),
   },
   plugins: [react(), devSeriesIndex],
   server: {

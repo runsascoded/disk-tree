@@ -9,6 +9,7 @@ Hand-built series (12-hourly, 00:00Z / 12:00Z): a lead day Mon 8/31 (700,
 the bullet label is unambiguous. Quota (02a) = 910 TiB."""
 import datetime as dt
 import json
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -186,6 +187,38 @@ def test_day_rows_variants():
         D.day_rows(MONTH, "x", 12)
 
 
+def test_day_rows_provisional():
+    half = D.Month(lead=MONTH.lead, rows=MONTH.rows[:3])  # 9/2 has only its 00:00 scan
+    # the still-open day gets a provisional row over its latest scan, Δ vs the prior day's reply scan
+    assert D.day_rows(half, "sender", 12, provisional=True) == [
+        D.DayRow("2026-09-01", "2026-09-01T1200", 713.0, 8.0, 24.0, E.scan_ts("2026-08-31T1200")),
+        D.DayRow("2026-09-02", "2026-09-02T0000", 712.0, -1.0, 12.0, E.scan_ts("2026-09-01T1200"), provisional=True),
+    ]
+    # a day with its reply scan has none; nor does `body` (its reply is edited intra-day already)
+    assert D.day_rows(MONTH, "sender", 12, provisional=True) == D.day_rows(MONTH, "sender", 12)
+    assert D.day_rows(half, "body", 12, provisional=True) == D.day_rows(half, "body", 12)
+    # a `closed` month (a later month's scan exists): its last day's last scan stands in, no provisional
+    assert D.day_rows(D.Month(lead=half.lead, rows=half.rows, closed=True), "sender", 12, provisional=True)[1] == (
+        D.DayRow("2026-09-02", "2026-09-02T0000", 712.0, -1.0, 12.0, E.scan_ts("2026-09-01T1200"))
+    )
+
+
+def test_provisional_reply():
+    from dataclasses import replace
+
+    half = D.Month(lead=MONTH.lead, rows=MONTH.rows[:3])
+    # a fixed neutral sender + icon (both outlive edits); the numbers so far + their scan's time in the body
+    assert D.Cw(CFG).provisional(half, "sender") == E.Unit("2026-09-02", "2026-09-02T0000", E.Reply(
+        "9/2 · so far",
+        f":arrow_deg-30: **712 TiB (−1.0, 0.1%)** · [as of 00:00Z]({SITE}/?d=260902-0000-12h#over-time) · "
+        f"[02a]({SITE}/marin-us-east-02a?d=260902-0000-12h#over-time): 78.2% of 1P (198.0 Ti free)",
+        icon_emoji=":hourglass_flowing_sand:",
+    ))
+    assert (D.Cw(CFG).provisional(MONTH, "sender"), D.Cw(CFG).provisional(half, "body")) == (None, None)
+    # `reply_hour=0`: every day's first scan is its reply scan, so never a provisional
+    assert D.Cw(replace(CFG, reply_hour=0)).provisional(half, "sender") is None
+
+
 def test_parse_bytes():
     assert [E.parse_bytes(v) for v in (10**15, "910 TiB", "100Ti", "1 PB", "1.5T", "512")] == [10**15, 910 * 1024**4, 100 * 1024**4, 10**15, 15 * 10**11, 512]
     with pytest.raises(ValueError, match="not a size"):
@@ -212,6 +245,41 @@ buckets:
         E.config_from_dict({"template": "cw", "colour": "red"})
 
 
+@pytest.mark.parametrize("d, msg", [
+    ({"colour": "red", "title": "x"}, "unknown digest config keys: ['colour']"),
+    ({"buckets": {"b": {"label": "b", "qouta": {}}}}, "unknown digest config keys in buckets.b: ['qouta']"),
+    ({"buckets": {"b": {"quota": {"bytes": "1 PB", "name": "1 PB", "shrt": "1P"}}}}, "unknown digest config keys in buckets.b.quota: ['shrt']"),
+    ({"buckets": {"b": {"quota": {"bytes": "1 PB"}}}}, "digest config buckets.b.quota: missing ['name']"),
+    ({"buckets": {"b": {"label": 2}}}, "digest config buckets.b.label: expected a string, got 2"),
+    ({"buckets": ["b"]}, "digest config buckets: expected a mapping, got list"),
+    ({"buckets": {"b": {"quota": {"bytes": "lots", "name": "x"}}}}, "not a size: 'lots'"),
+    ({"prices": {"1": "cheap"}}, "digest config prices: expected numbers, got {'1': 'cheap'}"),
+    ({"reply_hour": "12"}, "digest config reply_hour: expected int, got '12'"),
+    ({"reply_hour": True}, "digest config reply_hour: expected int, got True"),
+    ({"reply_hour": 24}, "digest config reply_hour: 24 is not a UTC hour (0–23)"),
+    ({"primary": 7}, "digest config primary: expected str or null, got 7"),
+    ({"provisional": "yes"}, "digest config provisional: expected bool, got 'yes'"),
+    ({"template": "s3"}, "digest config template: 's3' is not one of ('gcs', 'cw')"),
+])
+def test_config_invalid(d: dict, msg: str):
+    with pytest.raises(ValueError) as e:
+        E.config_from_dict({"template": "cw", **d})
+    assert str(e.value) == msg
+
+
+def test_config_file_invalid(tmp_path: Path):
+    f = tmp_path / "digest.yml"
+    f.write_text("- template: cw\n")
+    with pytest.raises(ValueError) as e:
+        E.load_config("cw", f)
+    assert str(e.value) == f"digest config {f}: expected a mapping, got list"
+    # nulls clear optional fields; an empty file is the preset
+    f.write_text("primary: null\ndiscord_webhook_env: null\n")
+    assert E.load_config("cw", f) == replace(CFG, primary=None)
+    f.write_text("")
+    assert E.load_config("cw", f) == E.PRESETS["cw"]
+
+
 def test_no_quota():
     # no quota on the primary (or any bucket): the `% of quota` clauses drop out, the tail shows raw TiB
     from dataclasses import replace
@@ -219,6 +287,7 @@ def test_no_quota():
     cfg = replace(CFG, buckets={})
     assert D.op_body(MONTH, SEP, None, cfg).split("\n") == [
         f":arrow_deg40: **+10.0 TiB** [month-to-date]({SITE}/?d=260902-1200-2d#over-time) · 715 TiB · [dashboard]({SITE}/)",
+        "_as of 9/2 12:00Z_",
         "",
         "*Weekly summaries*",
         f":arrow_deg20: [wk of 8/31]({SITE}/?d=260902-1200-2d#over-time) _(partial)_: **+10.0 TiB** → 715 TiB",
@@ -231,6 +300,7 @@ def test_op_body():
     # the (partial) week +10.0 → 1.4% → deg20, linked over 8/31 12:00 → 9/2 12:00 = 2d
     assert D.op_body(MONTH, SEP, "https://x/p.png", CFG).split("\n") == [
         f":arrow_deg40: **+10.0 TiB** [month-to-date]({SITE}/?d=260902-1200-2d#over-time) · 715 TiB · 78.6% of 1 PB · [dashboard]({SITE}/)",
+        "_as of 9/2 12:00Z_",
         "",
         "*Weekly summaries*",
         f":arrow_deg20: [wk of 8/31]({SITE}/?d=260902-1200-2d#over-time) _(partial)_: **+10.0 TiB** → 715 TiB · 78.6% of 1 PB",
@@ -245,7 +315,7 @@ def test_op_body_two_weeks():
     metas = LEAD + [(f"2026-09-{d:02d}T{h}", _meta(700 + i)) for i, (d, h) in enumerate(((d, h) for d in range(1, 8) for h in ("0000", "1200")), start=1)]
     rows = D.rows_from_meta(metas, P)
     month = D.Month(lead=rows[:2], rows=rows[2:])
-    bullets = D.op_body(month, SEP, None, CFG).split("\n")[3:]
+    bullets = D.op_body(month, SEP, None, CFG).split("\n")[4:]
     assert bullets == [
         f":arrow_deg20: [wk of 8/31]({SITE}/?d=260906-1200-6d#over-time): **+7.0 TiB** → 712 TiB · 78.2% of 1 PB",
         f":arrow_deg0: [wk of 9/7]({SITE}/?d=260907-1200-1d#over-time) _(partial)_: **+2.0 TiB** → 714 TiB · 78.5% of 1 PB",

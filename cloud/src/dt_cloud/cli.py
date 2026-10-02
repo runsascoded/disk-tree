@@ -710,6 +710,42 @@ def over_time_groups(
     print(json.dumps({"groups": built}))
 
 
+@main.command("churn")
+@option("-c", "--column", "columns", multiple=True, help="Only compare these value columns (repeatable; default: every non-key column both files share)")
+@option("-m", "--mem", default="8GB", help="DuckDB memory limit")
+@option("-o", "--out", "out_dir", type=Path, default=None, help="Also write the delta (`delta.parquet`, `delta-objects.parquet`) here and report its bytes")
+@option("-t", "--threads", default=4, type=int, help="DuckDB threads")
+@option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: DuckDB's)")
+@argument("a")
+@argument("b")
+def churn_cmd(columns: tuple[str, ...], mem: str, out_dir: Path | None, threads: int, tmp_dir: Path | None, a: str, b: str) -> None:
+    """Rows added / removed / changed from scan A to scan B (specs/storage-consolidation.md
+    phase 3): A and B are two `path` sorts (or layer-2s) — local paths; stage
+    remote ones first. Keyed `(depth, path)` (+ an owner label both carry),
+    joined one depth at a time; counts per `kind` and per changed column, as
+    JSON on stdout."""
+    from .churn import scan_churn
+
+    con = duckdb.connect()
+    con.execute(f"SET memory_limit='{mem}'; SET threads={threads}")
+    if tmp_dir is not None:
+        con.execute(f"SET temp_directory='{tmp_dir}'")
+    print(json.dumps(scan_churn(a, b, out_dir=out_dir, columns=list(columns) or None, con=con), indent=1))
+
+
+@main.command("over-time-churn")
+@argument("groups", nargs=-1, required=True)
+def over_time_churn_cmd(groups: tuple[str, ...]) -> None:
+    """Per-scan dir churn (changed / added / removed paths at each scan boundary)
+    of sealed over-time groups (`over-time.parquet`, local paths), as JSON lines
+    on stdout — one object per group."""
+    from .churn import group_churn
+
+    con = _connect()
+    for g in groups:
+        print(json.dumps({"group": g, **group_churn(g, con=con)}))
+
+
 @main.command("index-sync")
 @option("-A", "--age-only", is_flag=True, help="Only the age-pyramid variants (a ladder-only backfill; the other variants keep their pointer)")
 @option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
@@ -778,19 +814,59 @@ def index_sync(
 
 @main.command("index-gc")
 @option("-b", "--base", default="oa-gcs-usage-dvx", help="Where the pointers' dirs live, for -r's cold-footer check: the data bucket (default oa-gcs-usage-dvx), a mounted dir, or an fsspec URL (`r2://bucket`)")
+@option("-F", "--files", "targets", multiple=True, help="Also delete the files of generation dirs no pointer names (repeatable): `gs://<bucket>` (the scan store), `r2` (the R2 serving bucket: `$R2_BUCKET`, via publish-r2's `R2_*` env) or `r2://<bucket>`. Only under scans with a `path` pointer; never a pointed dir; never one younger than -m")
+@option("-m", "--min-age", default="2d", help="-F's grace period: a generation whose newest object is younger is kept, so an in-flight reindex is never raced; e.g. 36h, 2d (default)")
+@option("-n", "--dry-run", is_flag=True, help="Print what would go (D1 rows counted; generation dirs per store with bytes, and totals); delete nothing")
 @option("-r", "--retain", type=int, default=None, help="Retention: also retire the store sorts' row groups of every scan older than the newest N whose `.groups.parquet` exists (their pointers stay; the reader range-reads that cold footer instead). A variant without one keeps its rows (warned): backfill it with `index-blob`")
+@option("-R", "--no-rows", is_flag=True, help="Skip the D1 row sweep (e.g. an -F pass over every scan after the job's per-scan row sweep)")
 @option("-s", "--store", default="primary", help="The store these index rows belong to (specs/multi-store.md): `primary` (default) or a secondary store's `STORES_JSON` key")
+@option("-w", "--workers", default=8, type=int, help="-F: concurrent listings (default 8)")
 @argument("dates", nargs=-1)
-def index_gc(base: str, retain: int | None, store: str, dates: tuple[str, ...]) -> None:
+def index_gc(
+    base: str,
+    targets: tuple[str, ...],
+    min_age: str,
+    dry_run: bool,
+    retain: int | None,
+    no_rows: bool,
+    store: str,
+    workers: int,
+    dates: tuple[str, ...],
+) -> None:
     """Delete row groups of index generations no pointer names — a REPROC's
     previous generation, or a sync that died before flipping. All synced
-    scans by default; DATES to restrict. With -r, the retention pass too."""
-    from .index_footer import gc_d1, retire_d1, synced_variants
+    scans by default; DATES to restrict. With -r, the retention pass too.
 
-    todo = dates or sorted({d for d, _ in synced_variants(store=store)})
-    for d in todo:
-        n = gc_d1(d, store=store)
-        err(f"index-gc: {d} — {n} stale row groups deleted")
+    With -F, also those generations' files (`<layer-2>/index/<gen>/`) in each
+    target store (`dt_cloud.gen_gc`): dirs no `index_schema` row names, under
+    scans that have a `path` pointer, older than -m. E.g. the backlog over
+    every scan, GCS + R2, dry run first:
+
+        dt-cloud index-gc -R -n -F gs://oa-gcs-usage-dvx -F r2
+    """
+    import time
+
+    from .gen_gc import open_store, parse_age, sweep
+    from .index_footer import d1_variant, gc_d1, pointers, retire_d1, synced_variants
+
+    if dry_run and retain is not None:
+        raise UsageError("-n covers the row sweep and -F, not -r")
+    try:
+        grace = parse_age(min_age)
+    except ValueError as e:
+        raise UsageError(str(e)) from None
+    stores = [open_store(t) for t in targets]
+    if not no_rows:
+        todo = dates or sorted({d for d, _ in synced_variants(store=store)})
+        for d in todo:
+            n = gc_d1(d, store=store, dry_run=dry_run)
+            err(f"index-gc: {d} — {n} stale row groups {'would be ' if dry_run else ''}deleted")
+    if stores:
+        sweep(
+            pointers(), stores,
+            now=time.time(), min_age=grace, dry_run=dry_run, reread=pointers,
+            path_variant=d1_variant("path", store), dates=dates or None, workers=workers,
+        )
     if retain is not None:
         retired, skipped = retire_d1(retain, store=store, base=base)
         for d, v, n in retired:
@@ -1925,7 +2001,7 @@ def _digest_options(template_default: str):
         option("-D", "--reply-delay", "reply_delay", default=0.0, type=float, help="Seconds to sleep between replies (e.g. 305 for a spaced Slack backfill so per-reply sender chrome survives; Discord needs none)"),
         option("-E", "--edit-replies", is_flag=True, help="Re-edit every already-posted reply to its current body (backfill after a format change; -P discord only)"),
         option("-F", "--for-real", is_flag=True, help="With --redo-replies: actually post the new replies and delete the old ones (default: print the plan)"),
-        option("-H", "--reply-hour", type=int, default=None, help="cw template: UTC hour the sender variant's daily reply is taken from — the day's first scan at/after it (default 12 → the 12:01Z morning scan, 8:01 am ET; 00:01Z scans still feed the OP + plot)"),
+        option("-H", "--reply-hour", type=int, default=None, help="cw template: UTC hour the sender variant's daily reply is taken from — the day's first scan at/after it (default 12 → the 12:01Z morning scan, 8:01 am ET; the day's other scans still feed the OP + plot, and with the config's `provisional: true` its earlier ones post a provisional reply)"),
         option("-i", "--icons-dir", type=Path, default=None, help="Where the plot PNG is written + deployed from (default the config's `icons_dir`: job/icons, job/icons-cw)"),
         option("-m", "--month", help="Month YYYY-MM (default: current UTC month)"),
         option("-n", "--dry-run", is_flag=True, help="Render the plot + print OP/replies; post & host nothing"),
@@ -2030,7 +2106,9 @@ def _digest(
             same = "  (same scan as the old reply)" if isinstance(old.get(day), dict) and old[day]["scan"] == scan else ""
             print(f"    {day}  {scan}  {head!r}{same}")
         return
-    dg.converge_slack(tpl, root, m, client, channel, variant, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay)
+    # the scheduled run (no -m) also closes the previous month's thread if its last day's provisional reply is still up
+    converge = dg.converge_slack if month else dg.converge_slack_now
+    converge(tpl, root, m, client, channel, variant, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay)
     err(f"digest: converged {m:%Y-%m} ({cfg.template}, {variant})")
 
 
@@ -2135,6 +2213,7 @@ def discord_webhook(bot_token: str | None, channel: str, guild: str | None, name
 
 
 @main.command("publish-r2")
+@option("-a", "--all-gens", is_flag=True, help="Copy every `index/<gen>/` under the scan, pointed or not (no D1 read); default: only the generations a D1 `index_schema` row names")
 @option("-b", "--bucket", "src_bucket", default=None, help="Source GCS scan store (default $DATA_BUCKET)")
 @option("-l", "--layer2", default=None, help="Layer-2 dir template, `{scan}` = the scan id (default $LAYER2_PREFIX, else listing/{scan}/index/; cw: cw-l2/{scan}/)")
 @option("-L", "--no-listings", is_flag=True, help="Leave the canonical per-bucket listings (`<layer-2 dir>/<bucket>.parquet`) in GCS only; copy the tiers + snapshot JSONs")
@@ -2143,7 +2222,17 @@ def discord_webhook(bot_token: str | None, channel: str, guild: str | None, name
 @option("-s", "--subdir", default=None, help="Snapshots subdir of this store (default $SNAPSHOTS_SUBDIR, else none)")
 @option("-w", "--workers", default=8, type=int, help="Concurrent HEADs/uploads (default 8)")
 @argument("scan")
-def publish_r2(src_bucket: str | None, layer2: str | None, no_listings: bool, dry_run: bool, prefixes: tuple[str, ...], subdir: str | None, workers: int, scan: str) -> None:
+def publish_r2(
+    all_gens: bool,
+    src_bucket: str | None,
+    layer2: str | None,
+    no_listings: bool,
+    dry_run: bool,
+    prefixes: tuple[str, ...],
+    subdir: str | None,
+    workers: int,
+    scan: str,
+) -> None:
     """Copy one scan's served artifacts GCS → R2.
 
     The final "publish to the serving cloud" stage of an ingest that builds
@@ -2152,9 +2241,19 @@ def publish_r2(src_bucket: str | None, layer2: str | None, no_listings: bool, dr
     Idempotent — same size + md5 already in R2 is skipped — so it doubles as
     the backfill over old scans. R2 via the env: R2_ENDPOINT, R2_BUCKET,
     R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (`s3` extra).
+
+    Only the generations D1 points at are copied (the site reads no other),
+    so a reindex's superseded `index/<gen>/` never reaches R2; that reads D1
+    (`D1_DB_ID` + `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`). `-a`
+    copies every generation without it.
     """
     from . import publish as pub
 
+    pointed = None
+    if not all_gens:
+        from .index_footer import pointers
+
+        pointed = {d for _, _, d in pointers()}
     pub.publish(
         scan,
         src_bucket=src_bucket or pub.DATA_BUCKET,
@@ -2164,4 +2263,5 @@ def publish_r2(src_bucket: str | None, layer2: str | None, no_listings: bool, dr
         dry_run=dry_run,
         workers=workers,
         listings=not no_listings,
+        pointed=pointed,
     )

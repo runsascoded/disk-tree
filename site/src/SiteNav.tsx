@@ -22,10 +22,12 @@ import { Link, useLocation } from 'react-router-dom'
 import { AboutModal } from './About'
 import { offerAppLink, openInApp } from './appLink'
 import { Avatar } from './Avatar'
-import { AUTH_MODE, signInUrl, useCanAssign, useIdent, useSignOut } from './auth'
+import { AUTH_MODE, signInUrl, useCanAssign, useCanStage, useIdent, useSignOut } from './auth'
+import { ShareDialog } from './ShareDialog'
 import { useRegistry } from './identities'
 import { REPO_URL } from './SiteKbd'
 import { useMyUser, useUserEmails } from './owners'
+import ProfileModal from './ProfileModal'
 import TokenModal from './TokenModal'
 import { UserCard, ghHandle, shortName } from './UserChip'
 import { useUnits } from './units'
@@ -157,6 +159,10 @@ function useMenu(placement: 'bottom-start' | 'bottom-end') {
 function NavMenu({ extra }: { extra?: MenuEntry[] }) {
   const { pathname } = useLocation()
   const canAssign = useCanAssign()
+  // Full viewers share with a detailed preview (guest links can't: a token
+  // outlives the session that minted it).
+  const canShare = useCanStage()
+  const [shareOpen, setShareOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const m = useMenu('bottom-start')
   // The subtree's store: its own map (`/meta`), and only the affordances it
@@ -173,6 +179,7 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
   return (
     <>
       {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
+      {shareOpen && <ShareDialog onClose={() => setShareOpen(false)} />}
       <button type="button" className="tb-menu-btn" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label="Site menu" title="Site menu">
         <MdMenu aria-hidden />
       </button>
@@ -198,6 +205,9 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
                 </>
               )}
               <hr />
+              {canShare && (
+                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setShareOpen(true) }}>Share…</button>
+              )}
               <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setAboutOpen(true) }}>About — the data, axes &amp; colors</button>
               {extra?.map(e => (
                 <button key={e.key} type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); e.onClick() }}>{e.label}</button>
@@ -223,6 +233,7 @@ function UserMenu() {
   const emails = useUserEmails(ownersOn)
   const [tokenOpen, setTokenOpen] = useState(false)
   const [appHint, setAppHint] = useState<string | null>(null)
+  const [profileOpen, setProfileOpen] = useState(false)
   const { units, suffixB, toggleUnits, toggleSuffixB } = useUnits()
   const m = useMenu('bottom-end')
   useEffect(() => {
@@ -257,6 +268,7 @@ function UserMenu() {
     <>
       {tokenOpen && <TokenModal onClose={() => setTokenOpen(false)} />}
       {appHint && <div className="app-hint" role="status" onClick={() => setAppHint(null)}>{appHint}</div>}
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
       <button type="button" className="tb-avatar" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label={`Signed in as ${dispName}`} title={dispName}>
         {guest || ident.avatar
           ? <Avatar src={ident.avatar} name={dispName} size={26} />
@@ -280,6 +292,11 @@ function UserMenu() {
                   Trailing B: <b>{suffixB ? 'On' : 'Off'}</b> <span className="dim">({units === 'iec' ? 'Ti' : 'T'}{suffixB ? 'B' : ''})</span>
                 </button>
               </Explain>
+              {!guest && (
+                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setProfileOpen(true) }}>
+                  Profile…
+                </button>
+              )}
               {canAssign && (
                 <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setTokenOpen(true) }}>
                   Agent / CLI Token…
@@ -331,9 +348,9 @@ function SessionLines({ email, user, emails }: { email: string; user: string | n
           {aliases.length > 0 && <div>aliases: {aliases.map(a => <code key={a}>{a}</code>)}</div>}
           {others.length > 0 && <div>also signs in as: {others.map(e => <code key={e}>{e}</code>)}</div>}
         </>
-      ) : (
+      ) : DEFAULT_STORE.owners ? (
         <div className="uc-warn">Not mapped to a user in the identity registry — the “me” owner filter won't resolve; ping Ryan.</div>
-      )}
+      ) : null}
     </div>
   )
 }
