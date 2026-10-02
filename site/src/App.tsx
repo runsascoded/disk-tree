@@ -423,8 +423,13 @@ function AppContent() {
   const subStamp = [...subtreeQs, ...coarseQs].map(q => q.dataUpdatedAt).join(',')
   const tree = useMemo((): TreeNode | null => {
     if (!baseTree) return null
-    const graftAt = (t: TreeNode, segs: string[], sub: TreeNode): TreeNode => {
+    const graftAt = (t: TreeNode, segs: string[], sub: TreeNode, coarse: boolean): TreeNode => {
       const rec = (n: TreeNode, i: number): TreeNode => {
+        // A depth-1 stand-in never replaces deeper children the parent's
+        // tree already carries for this node: a drill into a tile the parent
+        // drew to depth would otherwise flatten it to one level until the
+        // full subtree lands (seconds, on a cold path).
+        if (i === segs.length && coarse && n.c?.some(k => k.c?.length)) return n
         // Keep own totals; adopt the finer children — and the response root's
         // provenance (`pv`), which a parent-level view may have skipped.
         if (i === segs.length) return { ...n, c: sub.c, ...(sub.pv ? { pv: sub.pv } : {}) }
@@ -446,7 +451,7 @@ function AppContent() {
     let t = baseTree
     subtreePaths.forEach((p, i) => {
       const sub = dataFor(i)
-      if (p && sub) t = graftAt(t, p.split('/'), sub)
+      if (p && sub) t = graftAt(t, p.split('/'), sub, !subtreeQs[i]?.data)
     })
     return t
     // eslint-disable-next-line react-hooks/exhaustive-deps
