@@ -10,10 +10,12 @@ import type { TreeNode } from './types'
 export type NamePred = (name: string) => boolean
 export type NodePred = (n: TreeNode) => boolean
 
-/** The path filter's syntax (`text · a|b · a b · -x · *`), the server's own
- * parser (`functions/_lib/pathQuery.ts`): predicates receive the node's full
- * path below the root (`bucket/dir/sub`). */
-export { parseQuery } from '../functions/_lib/pathQuery'
+/** The path filter, the server's own code: the syntaxes and their registry
+ * (`functions/_lib/querySyntax.ts`, text → AST) and the predicate
+ * (`functions/_lib/pathQuery.ts`, AST → test on the node's full path below
+ * the root, `bucket/dir/sub`). */
+export { compileQuery, parseQuery } from '../functions/_lib/pathQuery'
+export { DEFAULT_SYNTAX, SYNTAXES, syntaxById } from '../functions/_lib/querySyntax'
 
 /** Re-aggregate a node's stats (b/o/tm/sh/us/d) from a filtered kid set. */
 export function reaggregate(n: TreeNode, kids: TreeNode[]): TreeNode {

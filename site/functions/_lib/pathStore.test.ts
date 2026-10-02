@@ -373,10 +373,15 @@ describe('filter no-match fallback on a v1 scan', () => {
   it('reads the floor-free tier for a subtree within the cap', async () => {
     const v = await buildView(env, { ...base, date: V1, path: 'bk' })
     expect([v.matches, v.matched]).toEqual([['bk/b'], [{ path: 'bk/b', b: 400, o: 1 }]])
+    expect([v.partial, v.approximate, v.approximateReason]).toEqual([undefined, true, 'this scan has no search index; small matches may be missing'])
   })
   it('skips that unprunable read past the cap: no matches instead of a Worker over its limits', async () => {
     const v = await buildView(env, { ...base, date: V1, path: 'bk', v1ScanObjects: 2 })
     expect([v.tier, v.nodes, v.matches, v.matched]).toEqual(['none', 0, [], []])
+    // …and says so: not a silent "no matches".
+    expect([v.partial, v.approximate, v.approximateReason]).toEqual([
+      undefined, true, 'this scan has no search index; small matches may be missing · this scan has no search index and this view is too big to scan; small matches may be missing',
+    ])
   })
 })
 
@@ -434,6 +439,8 @@ describe('buildDiff', () => {
     expect(d).toEqual({
       rows: [], total_a: 0, total_b: 0, objects_a: 0, objects_b: 0, threshold: 0, tier: 'none', matched: [],
       expansions: 0, truncated: false, lookups: 0, lookups_capped: false,
+      // Neither side has a search index: "no matches" says it may miss small ones.
+      approximate: true, approximateReason: 'this scan has no search index; small matches may be missing',
     })
   })
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { parsePathQuery, parseQuery } from './pathQuery'
+import { parseQuery } from './pathQuery'
+import { regex } from './querySyntax'
 
 const PATHS = [
   'bk/tmp/ttl=14d/run-a/ckpt',
@@ -16,39 +17,6 @@ const PATHS = [
 ]
 /** The paths a query's predicate accepts, in `PATHS` order. */
 const hits = (q: string): string[] => PATHS.filter(parseQuery(q)!)
-
-describe('parsePathQuery: the syntax', () => {
-  const t = (...pieces: string[]) => ({ pieces })
-  it.each([
-    ['tomat', [[t('tomat')]], []],
-    ['TTL', [[t('ttl')]], []],
-    ['a|b', [[t('a')], [t('b')]], []],
-    ['a b|c', [[t('a'), t('b')], [t('c')]], []],
-    ['ckpt -run', [[t('ckpt')]], [t('run')]],
-    ['-x', [[]], [t('x')]],
-    ['-x -y', [[]], [t('x'), t('y')]],
-    ['ckpt*final', [[t('ckpt', 'final')]], []],
-    ['*.pt', [[t('', '.pt')]], []],
-    ['tmp/*/ckpt', [[t('tmp/', '/ckpt')]], []],
-    ['"a b"', [[t('a b')]], []],
-    ['"-draft"', [[t('-draft')]], []],
-    ['-"a b"', [[]], [t('a b')]],
-    ['"a|b"', [[t('a|b')]], []],
-    ['"x*y"', [[t('x*y')]], []],
-    ['a - b', [[t('a'), t('-'), t('b')]], []],
-    ['ttl|', [[t('ttl')]], []],
-    ['a | -x', [[t('a')], []], [t('x')]],
-  ])('%s', (q, alts, neg) => {
-    expect(parsePathQuery(q)).toEqual({ q, alts, neg, regex: null })
-  })
-  it('nothing to filter by', () => {
-    expect(['', '  ', '|', '||', '""', null].map(parsePathQuery)).toEqual([null, null, null, null, null, null])
-  })
-  it('`/…/` is the (undocumented) regex fallback; an invalid one is no filter', () => {
-    expect(parsePathQuery('/ckpt.*final/')).toEqual({ q: '/ckpt.*final/', alts: [], neg: [], regex: /ckpt.*final/i })
-    expect(parsePathQuery('/a(/')).toBeNull()
-  })
-})
 
 describe('parseQuery: the predicate on the full path', () => {
   it.each([
@@ -82,9 +50,27 @@ describe('parseQuery: the predicate on the full path', () => {
   ])('%s', (q, want) => {
     expect(hits(q)).toEqual(want)
   })
-  it('carries its parse and halves: `pos` is monotone along a path, `neg` null without negatives', () => {
+  it('carries its AST and halves: `pos` is monotone along a path, `neg` null without negatives', () => {
     const p = parseQuery('ckpt -run')!
-    expect([p.q, p.pos!('bk/x/ckpt/run'), p.neg!('bk/x/ckpt/run'), p('bk/x/ckpt/run'), p('bk/x/ckpt')]).toEqual(['ckpt -run', true, true, false, true])
+    expect([p.ast, p.pos!('bk/x/ckpt/run'), p.neg!('bk/x/ckpt/run'), p('bk/x/ckpt/run'), p('bk/x/ckpt')]).toEqual([
+      { alts: [[{ kind: 'sub', text: 'ckpt' }]], neg: [{ kind: 'sub', text: 'run' }] }, true, true, false, true,
+    ])
     expect(parseQuery('ckpt')!.neg).toBeNull()
+  })
+})
+
+describe('parseQuery in the `regex` syntax: the whole query is a full-path regex', () => {
+  const rx = (q: string): string[] => PATHS.filter(parseQuery(q, regex)!)
+  it.each([
+    ['ckpt.*final', ['bk/x/ckpt/run/final', 'bk/x/ckpt-final', 'bk/x/ckpt-run-b-final', 'bk/x/ckpt/final.pt']],
+    ['ckpt[^/]*final', ['bk/x/ckpt-final', 'bk/x/ckpt-run-b-final']],
+    ['^bk/models/', ['bk/models/Llama/model-1.safetensors', 'bk/models/tiny.safetensors']],
+    ['LLAMA', ['bk/models/Llama/model-1.safetensors']],
+    // `|` and `-` are regex characters here, not OR / NOT terms
+    ['ttl=7d$|tiny', ['bk/tmp/ttl=7d', 'bk/models/tiny.safetensors']],
+    ['/-draft', ['bk/notes/-draft']],
+    ['a b', ['bk/notes/a b.txt']],
+  ])('%s', (q, want) => {
+    expect(rx(q)).toEqual(want)
   })
 })

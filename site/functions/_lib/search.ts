@@ -31,7 +31,9 @@ export const SEARCH_FILES = {
 } as const
 export const searchKey = (dir: string, role: keyof typeof SEARCH_FILES): string => `${dir}/${SEARCH_FILES[role]}`
 
-/** Per-request read budgets (spec §4.2–4.3). */
+/** Per-request read budgets (spec §4.2–4.3). Hitting `namesRgs`, `pathRgs`
+ * or `liftGroups` stops the search with a `reason` the response carries as
+ * `partial` — never a silent cut. */
 export interface SearchLimits {
   /** Postings row groups a trigram may span and still be read; wider is
    * unselective and treated as no constraint (sound: only widens). */
@@ -43,7 +45,7 @@ export interface SearchLimits {
   /** Row groups the lifted-root point lookup may touch (truncated only). */
   liftGroups: number
 }
-export const SEARCH_LIMITS: SearchLimits = { triRgs: 8, namesRgs: 32, pathRgs: 32, liftGroups: 60 }
+export const SEARCH_LIMITS: SearchLimits = { triRgs: 32, namesRgs: 128, pathRgs: 128, liftGroups: 120 }
 
 interface SchemaElement { type: string; name: string; repetition_type: string; converted_type?: string }
 
@@ -246,6 +248,7 @@ function lowerBound(xs: number[], v: number): number {
   }
   return lo
 }
+const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`
 const anyIn = (xs: number[], lo: number, hi: number): boolean => { const i = lowerBound(xs, lo); return i < xs.length && xs[i] <= hi }
 
 export interface SearchFound {
@@ -255,6 +258,8 @@ export interface SearchFound {
   roots: string[]
   /** A budget cut the search: the roots are those of the heaviest names. */
   truncated: boolean
+  /** Why, when `truncated` (what the response's `partialReason` says). */
+  reason?: string
   stats: {
     /** `trigrams`: candidates from postings; `scan`: the names in id order. */
     mode: 'trigrams' | 'scan'
@@ -309,6 +314,8 @@ export async function searchRoots(env: Env, h: IndexHandle, query: NamePred, pla
 
   // Verification: the candidates' names groups, heaviest ids first.
   let truncated = false
+  const reasons: string[] = []
+  const cut = (why: string) => { truncated = true; if (!reasons.includes(why)) reasons.push(why) }
   let nameGroups: DirRow[]
   if (candidates === null) {
     const got = await dirRows(env, idx,
@@ -329,7 +336,7 @@ export async function searchRoots(env: Env, h: IndexHandle, query: NamePred, pla
     nameGroups = got.rows.sort((a, b) => a.rg - b.rg)
   }
   if (nameGroups.length > limits.namesRgs) {
-    truncated = true
+    cut(`the name search hit its read budget (${plural(limits.namesRgs, 'name group')})`)
     nameGroups = nameGroups.slice(0, limits.namesRgs)
   }
   const want = candidates && new Set(candidates)
@@ -342,9 +349,9 @@ export async function searchRoots(env: Env, h: IndexHandle, query: NamePred, pla
   // The verified names' `path` groups, heaviest first, within the budget.
   const pathRgs = new Set<number>()
   for (const n of names) {
-    if (n.rgs == null) { truncated = true; break }
+    if (n.rgs == null) { cut(`the name “${n.name}” is spread over too many row groups to read`); break }
     const add = n.rgs.split(',').map(Number).filter(rg => !pathRgs.has(rg))
-    if (pathRgs.size + add.length > limits.pathRgs) { truncated = true; break }
+    if (pathRgs.size + add.length > limits.pathRgs) { cut(`the row read hit its budget (${plural(limits.pathRgs, 'path group')})`); break }
     for (const rg of add) pathRgs.add(rg)
   }
   const under = root === '' ? () => true : (p: string) => p.startsWith(root + '/')
@@ -379,7 +386,7 @@ export async function searchRoots(env: Env, h: IndexHandle, query: NamePred, pla
       if (!String((e as Error).message).startsWith('lookup too wide')) throw e
     }
     if (miss.size) {
-      truncated = true
+      cut(`${plural(miss.size, 'match root')} too wide to look up`)
       for (const p of miss) roots.delete(p)
     }
   }
@@ -387,6 +394,7 @@ export async function searchRoots(env: Env, h: IndexHandle, query: NamePred, pla
     rows,
     roots: [...roots].sort(),
     truncated,
+    ...(truncated ? { reason: reasons.join('; ') } : {}),
     stats: { mode: candidates === null ? 'scan' : 'trigrams', trigrams: tris.length, postingsRgs, candidates: candidates?.length ?? 0, dirGroups, namesRgs: nameGroups.length, names: names.length, pathRgs: pathRgs.size, lifted },
   }
 }

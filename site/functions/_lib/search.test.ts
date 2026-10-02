@@ -2,12 +2,13 @@ import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Env } from './auth'
 import { matchRoots } from './filter'
 import { type IndexHandle, openIndex, readRects, type Row } from './index'
-import { type NamePred, parseQuery } from './scope'
+import { type NamePred, parseQuery as parseWith } from './scope'
 import { type SearchLimits, SEARCH_LIMITS, searchKey, searchRoots } from './search'
+import { makeSimple, regex } from './querySyntax'
 import { planPositive } from './searchQuery'
 import { sqliteD1 } from './testD1'
 import { type D1Variant, fixture, FILES, GETS, readJson, seedGeneration } from './testStore'
-import { buildDiff, buildView } from './view'
+import { APPROX_EXCL_NO_INDEX, APPROX_NO_INDEX, APPROX_UNINDEXED, buildDiff, buildView, type View } from './view'
 
 vi.mock('@rdub/file-tree/stores/s3', async () => ({ S3Store: (await import('./testStore')).S3Store }))
 
@@ -26,6 +27,10 @@ const SEARCH_PQ = '2026-10-01T0003'
 const dirOf = (date: string) => `cw-l2/${date}/index/g`
 const files = { path: { parquet: 'v2-search/path-index.parquet', groups: 'v2-search/path-index.groups.json' }, bysize: { parquet: 'v2-search/path-index-bysize.parquet', groups: 'v2-search/path-index-bysize.groups.json' } }
 const MiB = 1 << 20
+// The engine's own cases include short needles (`gr`, `zz`): `simple`
+// without its 3-character minimum (the predicate is the same).
+const LAX = makeSimple({ minTerm: 1 })
+const parseQuery = (q: string, syntax = LAX) => parseWith(q, syntax)
 let env: Env
 
 beforeAll(async () => {
@@ -48,9 +53,12 @@ async function brute(q: string, root: string): Promise<string[]> {
 }
 /** The positive search for `pred` (null: the index declines or has no sidecar). */
 async function find(h: IndexHandle, pred: NamePred, root: string, limits?: SearchLimits) {
-  const plan = planPositive(pred.query!)
+  const plan = planPositive(pred.ast!)
   return plan ? searchRoots(env, h, pred, plan, root, limits) : null
 }
+/** A view without its coverage flags, and the flags' reasons. */
+const bare = ({ partial: _p, partialReason: _pr, approximate: _a, approximateReason: _ar, ...v }: View) => v
+const coverage = (v: View) => ({ partial: v.partialReason, approximate: v.approximateReason })
 const byPath = (rows: Row[]) => [...rows].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.usr! < b.usr! ? -1 : 1))
 
 describe('searchRoots: exactly the outermost matches', () => {
@@ -126,6 +134,7 @@ describe('budgets: a cut search is flagged, heaviest names kept, roots still out
     // in the group it read comes back, lighter names' included.
     const got = (await find(h, parseQuery('0598')!, '', { ...SEARCH_LIMITS, pathRgs: 1 }))!
     expect([got.roots, got.truncated, got.stats.pathRgs, got.stats.lifted]).toEqual([Array.from({ length: 10 }, (_, i) => `bk/fill/f0598${i}`), true, 1, 0])
+    expect(got.reason).toBe('the row read hit its budget (1 path group)')
     expect((await find(h, parseQuery('0598')!, ''))!.roots).toEqual(await brute('0598', ''))
   })
   it('a cut ancestor is lifted: its rows come from one point lookup', async () => {
@@ -136,13 +145,17 @@ describe('budgets: a cut search is flagged, heaviest names kept, roots still out
     const got = (await find(h, parseQuery('zz')!, '', { ...SEARCH_LIMITS, pathRgs: 1 }))!
     expect([got.roots, got.truncated, got.stats.pathRgs, got.stats.lifted]).toEqual([await brute('zz', ''), true, 1, 1])
     expect(got.roots).toEqual(['bk/fill/zz-TTL-b', 'bk/fill/zz-ttl-a', 'zz'])
+    expect(got.reason).toBe('the row read hit its budget (1 path group)')
+    // No lookup budget: the ancestor is dropped, and the reason says so.
+    const dropped = (await find(h, parseQuery('zz')!, '', { ...SEARCH_LIMITS, pathRgs: 1, liftGroups: 0 }))!
+    expect([dropped.roots, dropped.reason]).toEqual([['bk/fill/zz-TTL-b', 'bk/fill/zz-ttl-a'], 'the row read hit its budget (1 path group); 1 match root too wide to look up'])
     expect(byPath(got.rows)).toEqual(byPath((await allRows(PLAIN)).filter(r => got.roots.includes(r.path))))
   })
   it('names groups', async () => {
     const h = await openIndex(env, SEARCH)
     const got = (await find(h, parseQuery('gr')!, '', { ...SEARCH_LIMITS, namesRgs: 1 }))!
     // `grug` is a heavy name (first names group); the rest are not read.
-    expect([got.roots, got.truncated, got.stats.namesRgs]).toEqual([['bk/runs/grug'], true, 1])
+    expect([got.roots, got.truncated, got.stats.namesRgs, got.reason]).toEqual([['bk/runs/grug'], true, 1, 'the name search hit its read budget (1 name group)'])
   })
   it('an unselective trigram is no constraint: same roots, more names verified', async () => {
     const h = await openIndex(env, SEARCH)
@@ -161,15 +174,45 @@ describe('the filter view', () => {
         // The regex fallback never uses the index (and `^` anchors to the
         // full path: no bucket starts with `model-`).
         const tier = q.startsWith('/') ? b.tier.split('+')[0] : 'search'
-        expect([q, path, a.tier.split('+')[0], { ...a, tier: '' }]).toEqual([q, path, tier, { ...b, tier: '' }])
+        expect([q, path, a.tier.split('+')[0], { ...bare(a), tier: '' }]).toEqual([q, path, tier, { ...bare(b), tier: '' }])
+        // The pre-index read (and the regex fallback) can miss small matches,
+        // and says so.
+        const rx = q.startsWith('/')
+        expect([q, path, coverage(a), coverage(b)]).toEqual([q, path, rx ? { approximate: APPROX_UNINDEXED } : {}, { approximate: rx ? APPROX_UNINDEXED : APPROX_NO_INDEX }])
       }
+    }
+  })
+
+  it('the `regex` syntax end to end: the full-path regex, never from the index', async () => {
+    const o = { ...base, path: 'bk', threshold: 0 }
+    const v = await buildView(env, { ...o, date: SEARCH, query: parseQuery('^bk/tmp/ttl=\\d+d$', regex)! })
+    expect([v.matches, v.matched, v.tree.b, v.tier.split('+')[0]]).toEqual([
+      ['bk/tmp/ttl=14d', 'bk/tmp/ttl=7d'],
+      [{ path: 'bk/tmp/ttl=14d', b: 5 * MiB, o: 2 }, { path: 'bk/tmp/ttl=7d', b: 2 * MiB, o: 1 }],
+      7 * MiB,
+      'path',
+    ])
+    expect(coverage(v)).toEqual({ approximate: APPROX_UNINDEXED })
+    // = the `simple` syntax's `/…/` fallback, and the sidecar-less generation.
+    for (const q of ['^bk/tmp/ttl=\\d+d$', 'model-\\d+', 'ckpt[^/]*final']) {
+      const [a, b, c] = await Promise.all([
+        buildView(env, { ...o, date: SEARCH, query: parseQuery(q, regex)! }),
+        buildView(env, { ...o, date: SEARCH, query: parseQuery(`/${q}/`)! }),
+        buildView(env, { ...o, date: PLAIN, query: parseQuery(q, regex)! }),
+      ])
+      expect([q, a.matches]).toEqual([q, await brute(`/${q}/`, 'bk')])
+      expect([{ ...a, tier: '' }, { ...a, tier: '' }]).toEqual([{ ...b, tier: '' }, { ...c, tier: '' }])
     }
   })
 
   it('a search cut before any root falls back to the pre-index read', async () => {
     const o = { ...base, path: '', threshold: 0, query: parseQuery('ttl')! }
     const [a, b] = await Promise.all([buildView(env, { ...o, date: SEARCH, searchLimits: { ...SEARCH_LIMITS, pathRgs: 0 } }), buildView(env, { ...o, date: PLAIN })])
-    expect(a).toEqual(b)
+    expect(bare(a)).toEqual(bare(b))
+    expect([coverage(a), coverage(b)]).toEqual([
+      { partial: 'the search stopped before finding a match (the row read hit its budget (0 path groups)); showing a thresholded read' },
+      { approximate: APPROX_NO_INDEX },
+    ])
     expect(a.tier).toBe('path+path')
   })
 
@@ -191,11 +234,22 @@ describe('the filter view', () => {
     ])
   })
 
+  it('a search cut after finding roots: the view is `partial`, with the reason', async () => {
+    const v = await buildView(env, { ...base, date: SEARCH, path: '', threshold: 0, query: parseQuery('0598')!, searchLimits: { ...SEARCH_LIMITS, pathRgs: 1 } })
+    expect([v.matches, v.truncated, v.partial, v.partialReason, v.approximate]).toEqual([
+      Array.from({ length: 10 }, (_, i) => `bk/fill/f0598${i}`), true, true, 'the row read hit its budget (1 path group)', undefined,
+    ])
+    const d = await buildDiff(env, { ...base, from: SEARCH, to: SEARCH_PQ, top: 100, path: '', threshold: 0, query: parseQuery('0598')!, searchLimits: { ...SEARCH_LIMITS, pathRgs: 1 } })
+    expect(coverage(d as unknown as View)).toEqual({ partial: 'the row read hit its budget (1 path group)' })
+  })
+
   it('a filtered diff uses it on both sides', async () => {
     // The same generation on both sides: one finds its roots by index, the
     // other by the pre-index read; nothing differs.
     const d = await buildDiff(env, { ...base, from: PLAIN, to: SEARCH, top: 100, path: '', threshold: 0, query: parseQuery('ttl')! })
     expect([d.rows, d.tier, d.total_a, d.total_b]).toEqual([[], 'search+path', 7352542, 7352542])
+    // The sidecar-less side was read without the index: the diff says so.
+    expect([d.partial, d.approximate, d.approximateReason]).toEqual([undefined, true, APPROX_NO_INDEX])
     expect(d.matched?.map(m => m.path)).toEqual(['bk/fill/zz-TTL-b', 'bk/fill/zz-ttl-a', 'bk/iris/TTL-misc', 'bk/tmp/ttl=14d', 'bk/tmp/ttl=7d', 'zz/Checkpoints/ttl'])
   })
 })
@@ -236,8 +290,10 @@ describe('NOT: excluded descendants leave their roots’ totals and the tree', (
       for (const path of ['', 'bk', 'bk/tmp']) {
         const o = { ...base, path, query: parseQuery(q)! }
         const [a, b] = await Promise.all([buildView(env, { ...o, date: SEARCH }), buildView(env, { ...o, date: PLAIN })])
-        got.push([q, path, { ...a, tier: '' }])
-        want.push([q, path, { ...b, tier: '' }])
+        got.push([q, path, { ...bare(a), tier: '' }, coverage(a), coverage(b)])
+        // Without the index: phase 1 is approximate, or (the root matches)
+        // only the exclusions are.
+        want.push([q, path, { ...bare(b), tier: '' }, {}, { approximate: o.query(path) ? APPROX_EXCL_NO_INDEX : APPROX_NO_INDEX }])
       }
     }
     expect(got).toEqual(want)
@@ -250,6 +306,7 @@ describe('NOT: excluded descendants leave their roots’ totals and the tree', (
     const [a, b] = await Promise.all([buildView(env, { ...o, date: SEARCH }), buildView(env, { ...o, date: PLAIN })])
     expect([a.excluded, a.tree.b]).toEqual([['bk/iris/notes.txt'], size('bk') - 50])
     expect([b.excluded, b.tree.b]).toEqual([undefined, size('bk')])
+    expect([coverage(a), coverage(b)]).toEqual([{}, { approximate: APPROX_NO_INDEX }])
   })
 
   it('a filtered diff subtracts on both sides', async () => {

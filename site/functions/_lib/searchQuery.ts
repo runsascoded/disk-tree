@@ -1,17 +1,17 @@
 /**
  * The search index's query planner (specs/path-store-search.md §1, §4.1): a
- * parsed path query (`pathQuery.ts`) → the candidate condition on a match
+ * query AST (`queryAst.ts`) → the candidate condition on a match
  * root's **last segment**, as an OR of branches, each a trigram formula (what
  * the postings can narrow) plus the exact name test (what a candidate must
  * pass). Pure; the reads are `search.ts`'s.
  *
  * The planner never changes what matches: the view still tests full paths
- * with `parseQuery`'s predicate. It only answers "which last segments can a
+ * with `compileQuery`'s predicate. It only answers "which last segments can a
  * match root (or an excluded path) have?" — and returns null where that set
- * isn't a function of one segment (a term ending in `/`, the `/…/` regex
- * fallback); the view then reads as before.
+ * isn't a function of one segment (a term ending in `/`, a `regex` matcher);
+ * the view then reads as before.
  */
-import type { PathQuery, Term } from './pathQuery.js'
+import type { Matcher, QueryAst } from './queryAst.js'
 
 /** A monotone boolean formula over trigram codes: `true` (no constraint), a
  * trigram (the name contains it), or an AND / OR of formulas. */
@@ -79,10 +79,17 @@ const stringFormula = (s: string): Formula => and(trigrams(s))
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
-/** One term's branch: what a match root's last segment must satisfy for the
- * term to have become true there (spec §1), or null when the term constrains
- * no segment (it ends in `/`). */
-export function termBranch(t: Term): Branch | null {
+/** A substring / glob matcher's literal pieces (a substring is one piece);
+ * null for a regex. */
+const piecesOf = (m: Matcher): string[] | null => (m.kind === 'sub' ? [m.text] : m.kind === 'glob' ? m.pieces : null)
+
+/** One matcher's branch: what a match root's last segment must satisfy for
+ * the term to have become true there (spec §1), or null when the term
+ * constrains no segment (it ends in `/`) or isn't indexable (a regex). */
+export function termBranch(m: Matcher): Branch | null {
+  const pieces = piecesOf(m)
+  if (!pieces) return null
+  const t = { pieces }
   // The part after the term's last `/` (wildcards never match `/`, so that
   // `/` is the separator before the root's last segment, which then starts
   // with the rest); a slash-free term lies inside the segment.
@@ -100,9 +107,9 @@ export function termBranch(t: Term): Branch | null {
   return { formula, test: n => re.test(n.toLowerCase()) }
 }
 
-/** The candidate names of an OR of terms — one branch each; null when some
- * term constrains no segment. */
-export function planTerms(terms: Term[]): SearchPlan | null {
+/** The candidate names of an OR of matchers — one branch each; null when
+ * some matcher constrains no segment. */
+export function planTerms(terms: Matcher[]): SearchPlan | null {
   const branches: Branch[] = []
   for (const t of terms) {
     const b = termBranch(t)
@@ -112,15 +119,15 @@ export function planTerms(terms: Term[]): SearchPlan | null {
   return branches.length ? { branches } : null
 }
 
-/** Where the positive part of `query` can become true: a match root's last
+/** Where the positive part of `ast` can become true: a match root's last
  * segment satisfies some term of the alternative that became true there —
  * so the union of every positive term's candidates (AND = union, then the
- * exact filter). Null for a regex (the hidden fallback) or an alternative
- * with no positive term (the positive part is everywhere true). */
-export function planPositive(query: PathQuery): SearchPlan | null {
-  if (query.regex || query.alts.some(a => !a.length)) return null
-  return planTerms(query.alts.flat())
+ * exact filter). Null for a regex matcher or an alternative with no positive
+ * term (the positive part is everywhere true). */
+export function planPositive(ast: QueryAst): SearchPlan | null {
+  if (ast.alts.some(a => !a.length)) return null
+  return planTerms(ast.alts.flat())
 }
 
 /** Where the negative part can become true: the excluded paths' last segments. */
-export const planNegative = (query: PathQuery): SearchPlan | null => (query.regex ? null : planTerms(query.neg))
+export const planNegative = (ast: QueryAst): SearchPlan | null => planTerms(ast.neg)

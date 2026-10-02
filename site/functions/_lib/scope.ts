@@ -5,7 +5,8 @@
  *
  * Both are pure functions over index rows / per-path aggregates so `buildView`
  * stays one pipeline: read a superset by total bytes, narrow per row, fold. */
-import type { NamePred } from './pathQuery.js'
+import { compileQuery, type NamePred } from './pathQuery.js'
+import { parseAst, resolveSyntax } from './querySyntax.js'
 
 /** `o=`: `owned` = rows some person owns (`usr` set), `unowned` = the
  * NULL-`usr` slices (ownership has one axis: a person or nobody). `{not}` =
@@ -57,9 +58,20 @@ export function classRow<R extends { size: number; n_files: number; mtime_w: num
   return { ...r, size, n_files: Math.round(r.n_files * f), mtime_w: r.mtime_w * f, cls2: cl.has('2') ? r.cls2 : 0, cls3: cl.has('3') ? r.cls3 : 0, cls4: cl.has('4') ? r.cls4 : 0 }
 }
 
-/** `q=`: the path filter's syntax and predicate live in `pathQuery.ts`
- * (shared with the client's `filterTree.ts`). */
-export { type NamePred, parseQuery } from './pathQuery.js'
+/** `q=`: the path filter's predicate lives in `pathQuery.ts`, its syntaxes in
+ * `querySyntax.ts` (both shared with the client's `filterTree.ts`). */
+export { type NamePred, compileQuery, parseQuery } from './pathQuery.js'
+export { QueryError } from './queryAst.js'
+
+/** `q=` in syntax `qs=` (else the deployment's `QUERY_SYNTAX`, else
+ * `simple`) → the predicate (undefined: no filter) and the syntax's id (the
+ * cache key carries it beside `q`). Throws `QueryError` (an unknown `qs=`, a
+ * parse error): the handler's 400. */
+export function queryParam(sp: URLSearchParams, deflt?: string): { query?: NamePred; syntax: string } {
+  const syntax = resolveSyntax(sp.get('qs'), deflt)
+  const ast = parseAst(sp.get('q'), syntax)
+  return { query: ast ? compileQuery(ast) : undefined, syntax: syntax.id }
+}
 
 /** Name-filter a set of per-path aggregates (every path under the view root
  * that was read, plus the root itself as `''`-keyed `root`): the outermost

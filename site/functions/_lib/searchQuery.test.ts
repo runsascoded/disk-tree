@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { parsePathQuery } from './pathQuery'
+import { makeSimple, parseAst as parseWith } from './querySyntax'
+
+// Planner cases include short terms (`gr`): `simple` without its minimum.
+const parseAst = (q: string) => parseWith(q, makeSimple({ minTerm: 1 }))
 import { and, type Formula, or, planNegative, planPositive, triCode, trigrams } from './searchQuery'
 
 /** A string's formula, spelled out: AND of its trigrams. */
 const all = (s: string): Formula => and(trigrams(s))
-const formulas = (q: string): Formula[] | null => planPositive(parsePathQuery(q)!)?.branches.map(b => b.formula) ?? null
+const formulas = (q: string): Formula[] | null => planPositive(parseAst(q)!)?.branches.map(b => b.formula) ?? null
 /** Which of `names` a plan's branches accept (the exact name test). */
 const accepts = (q: string, names: string[]): string[] => {
-  const p = planPositive(parsePathQuery(q)!)!
+  const p = planPositive(parseAst(q)!)!
   return names.filter(n => p.branches.some(b => b.test(n)))
 }
 
@@ -48,25 +51,25 @@ describe('positive terms (AND = the union of the terms’ candidates)', () => {
     expect(accepts('tmp/run*ckpt', ['run-a-ckpt', 'a-run-ckpt'])).toEqual(['run-a-ckpt'])
   })
   it('a term ending in `/` constrains no segment: not served', () => {
-    expect(planPositive(parsePathQuery('ckpt/')!)).toBeNull()
-    expect(planPositive(parsePathQuery('ttl|ckpt/')!)).toBeNull()
+    expect(planPositive(parseAst('ckpt/')!)).toBeNull()
+    expect(planPositive(parseAst('ttl|ckpt/')!)).toBeNull()
   })
   it('a term under 3 characters has no trigram: unconstrained (the names scan)', () => {
     expect(formulas('gr')).toEqual([true])
     expect(formulas('ttl|gr')).toEqual([triCode('ttl'), true])
   })
   it('no positive part to search: only negatives, or the regex fallback', () => {
-    expect([planPositive(parsePathQuery('-x')!), planPositive(parsePathQuery('a|-x')!), planPositive(parsePathQuery('/ttl/')!)]).toEqual([null, null, null])
+    expect([planPositive(parseAst('-x')!), planPositive(parseAst('a|-x')!), planPositive(parseAst('/ttl/')!)]).toEqual([null, null, null])
   })
 })
 
 describe('negative terms', () => {
   it('the excluded paths’ candidates: one branch per NOT term', () => {
     // `run*b`: `b` is under 3 characters, so `run` alone narrows it.
-    const p = planNegative(parsePathQuery('ckpt -tmp -run*b')!)!
+    const p = planNegative(parseAst('ckpt -tmp -run*b')!)!
     expect(p.branches.map(b => b.formula)).toEqual([all('tmp'), all('run')])
     expect(['tmp-1', 'run-ab', 'run', 'ckpt'].filter(n => p.branches.some(b => b.test(n)))).toEqual(['tmp-1', 'run-ab'])
-    expect(planNegative(parsePathQuery('ckpt')!)).toBeNull()
+    expect(planNegative(parseAst('ckpt')!)).toBeNull()
   })
 })
 

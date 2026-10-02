@@ -67,6 +67,9 @@ export interface Env {
    *  (`POST /api/plans/stage`, `stage_batches` in this D1); mirrors the
    *  client's `Store.staging`. Unset = admins curate plans directly. */
   STAGING?: string
+  /** The path filter's default syntax (`q=` without `qs=`; `querySyntax.ts`
+   *  ids). Mirrors the client's `Store.querySyntax`. Unset = `simple`. */
+  QUERY_SYNTAX?: string
   STORE_ACCESS_KEY_ID?: string
   STORE_SECRET_ACCESS_KEY?: string
   /** Global second cache tier behind the colo cache (`_lib/edgeCache.ts`). */
