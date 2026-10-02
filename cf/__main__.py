@@ -63,9 +63,30 @@ dev_domain = cloudflare.PagesDomain(
     opts=pulumi.ResourceOptions(depends_on=[dev_cname]),
 )
 
+# The capture trigger (specs/capture-ingest-trigger.md): a capture's
+# `_SUCCESS.json` (written last, so the capture is complete) landing under
+# `captures/` in the `disk-tree` bucket → this queue → the `capture-trigger`
+# Worker (`cf/capture-trigger/`, deployed by wrangler, which attaches it as the
+# consumer) → Batch `SubmitJob`. Laptops then need only R2 write.
+CAPTURES_QUEUE = "disk-tree-captures"
+captures_queue = cloudflare.Queue("captures-queue", account_id=account_id, queue_name=CAPTURES_QUEUE)
+cloudflare.R2BucketEventNotification(
+    "captures-notification",
+    account_id=account_id,
+    bucket_name="disk-tree",
+    queue_id=captures_queue.queue_id,
+    rules=[cloudflare.R2BucketEventNotificationRuleArgs(
+        actions=["PutObject", "CompleteMultipartUpload", "CopyObject"],
+        prefix="captures/",
+        suffix="_SUCCESS.json",
+        description="a finished capture → ingest",
+    )],
+)
+
 pulumi.export("pages_project", dash.pages.name)
 pulumi.export("dev_pages_project", dev_pages.name)
 pulumi.export("dev_domain", dev_domain.name)
 pulumi.export("custom_domain", dash.domain.name)
 pulumi.export("d1_database", dash.d1.name)
 pulumi.export("d1_database_id", dash.d1.id)   # → site/wrangler.toml `database_id`
+pulumi.export("captures_queue", captures_queue.queue_name)

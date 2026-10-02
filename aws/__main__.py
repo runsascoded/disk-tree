@@ -259,7 +259,33 @@ job_def = aws.batch.JobDefinition(
     ).apply(_container_props),
 )
 
+# --- The capture trigger's caller (specs/capture-ingest-trigger.md) ---
+# The Cloudflare Worker that submits an ingest when a capture's `_SUCCESS.json`
+# lands in R2. It may submit this one job definition to this one queue and
+# nothing else. Its access key is made outside Pulumi (`cf/capture-trigger/
+# put-secrets` pipes it straight into the Worker's secrets), so no key value
+# enters state.
+account_id = aws.get_caller_identity().account_id
+trigger_user = aws.iam.User("capture-trigger", name=f"{PREFIX}-capture-trigger")
+aws.iam.UserPolicy(
+    "capture-trigger-submit",
+    user=trigger_user.name,
+    policy=queue.arn.apply(lambda queue_arn: json.dumps({
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Effect": "Allow",
+            "Action": "batch:SubmitJob",
+            "Resource": [
+                queue_arn,
+                f"arn:aws:batch:{REGION}:{account_id}:job-definition/{PREFIX}-ingest",
+                f"arn:aws:batch:{REGION}:{account_id}:job-definition/{PREFIX}-ingest:*",
+            ],
+        }],
+    })),
+)
+
 pulumi.export("queue", queue.name)
 pulumi.export("job_definition", job_def.name)
 pulumi.export("image", image_ref)
 pulumi.export("log_group", log_group.name)
+pulumi.export("capture_trigger_user", trigger_user.name)
