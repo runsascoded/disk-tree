@@ -41,15 +41,13 @@ def test_scenarios():
             "/api/series?path=bk-a",
         ],
         "filter-hit": [
-            f"/api/subtree?{W}&date=2026-10-01&path=&depth=1&q=ckpt",
+            f"/api/subtree?{W}&date=2026-10-01&path=&q=ckpt",
             f"/api/subtree?{W}&date=2026-10-01&path=&q=ckpt&full=1",
-            f"/api/diff?{W}&{D}&path=&q=ckpt&depth=1",
             f"/api/diff?{W}&{D}&path=&q=ckpt",
         ],
         "filter-miss": [
-            f"/api/subtree?{W}&date=2026-10-01&path=bk-a&depth=1&q=zz-probe-no-match-zz",
+            f"/api/subtree?{W}&date=2026-10-01&path=bk-a&q=zz-probe-no-match-zz",
             f"/api/subtree?{W}&date=2026-10-01&path=bk-a&q=zz-probe-no-match-zz&full=1",
-            f"/api/diff?{W}&{D}&path=bk-a&q=zz-probe-no-match-zz&depth=1",
             f"/api/diff?{W}&{D}&path=bk-a&q=zz-probe-no-match-zz",
         ],
     }
@@ -63,7 +61,7 @@ def test_scenarios_cold_and_single_scan():
         "/api/series?path=bk%2Fx",
     ]
     assert s["filter-hit"] == [
-        "/api/subtree?cv=2&w=1408&h=896&minArea=12.000042&date=2026-10-01&path=&depth=1&q=a%20b",
+        "/api/subtree?cv=2&w=1408&h=896&minArea=12.000042&date=2026-10-01&path=&q=a%20b",
         "/api/subtree?cv=2&w=1408&h=896&minArea=12.000042&date=2026-10-01&path=&q=a%20b&full=1",
     ]
 

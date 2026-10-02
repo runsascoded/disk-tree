@@ -125,17 +125,26 @@ def scenarios(t: Targets, cold: str = "") -> dict[str, list[str]]:
     W = "cv=2&w=1408&h=896" + (f"&minArea={cold}" if cold else "")
     def page(path: str, scope: str = "") -> list[str]:
         p = _q(path)
+        if "q=" in scope:
+            # A filtered page: the coarsest-tier forest first, then the planned
+            # read (`full=1`); no `depth=1` diff (App.tsx skips it under a filter).
+            reqs = [
+                f"/api/subtree?{W}&date={t.date}&path={p}{scope}",
+                f"/api/subtree?{W}&date={t.date}&path={p}{scope}&full=1",
+            ]
+            if t.prev:
+                reqs.append(f"/api/diff?{W}&from={t.prev}&to={t.date}&path={p}{scope}")
+            return reqs
         reqs = [
-            f"/api/subtree?{W}&date={t.date}&path={p}&depth=1{scope}",
-            f"/api/subtree?{W}&date={t.date}&path={p}{scope}{'&full=1' if 'q=' in scope else ''}",
+            f"/api/subtree?{W}&date={t.date}&path={p}&depth=1",
+            f"/api/subtree?{W}&date={t.date}&path={p}",
         ]
         if t.prev:
             reqs += [
-                f"/api/diff?{W}&from={t.prev}&to={t.date}&path={p}{scope}&depth=1",
-                f"/api/diff?{W}&from={t.prev}&to={t.date}&path={p}{scope}",
+                f"/api/diff?{W}&from={t.prev}&to={t.date}&path={p}&depth=1",
+                f"/api/diff?{W}&from={t.prev}&to={t.date}&path={p}",
             ]
-        if not scope:
-            reqs.append(f"/api/series?path={p}")
+        reqs.append(f"/api/series?path={p}")
         return reqs
 
     return {
