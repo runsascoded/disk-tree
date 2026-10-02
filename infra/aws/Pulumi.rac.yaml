@@ -2,6 +2,18 @@ config:
   aws:region: us-east-1
   # RAC AWS (006196295121, `AWS_PROFILE=r` from the worktree's `.envrc`).
   # Sized from the Phase 0 run: path-index peaked at 1.5 GiB over 6.6M files.
+  disk-tree-m3:prefix: disk-tree-m3
+  # The image build's inputs, relative to the repo root (zipped, content-hashed).
+  disk-tree-m3:dockerfile: infra/aws/Dockerfile
+  disk-tree-m3:sources:
+    - pyproject.toml
+    - uv.lock
+    - README.md
+    - src
+    - cloud/pyproject.toml
+    - cloud/src
+    - infra/aws/Dockerfile
+    - infra/aws/ingest.sh
   disk-tree-m3:vcpu: "1"
   disk-tree-m3:memory_mib: "8192"
   disk-tree-m3:ephemeral_gib: "30"

@@ -1,7 +1,7 @@
 # The capture trigger (specs/capture-ingest-trigger.md): consumes the
 # `disk-tree-captures` queue (fed by the `disk-tree` bucket's `_SUCCESS.json`
 # event notification, `infra/cf/__main__.py`) and submits each finished capture to
-# the m3 Batch ingest. Deploy: `pnpm -C cf/capture-trigger deploy` under
+# the m3 Batch ingest. Deploy: `pnpm -C infra/cf/capture-trigger run deploy` under
 # direnv; secrets: `infra/cf/capture-trigger/put-secrets`.
 name = "disk-tree-capture-trigger"
 main = "src/index.ts"

@@ -3,8 +3,7 @@ description: m3's AWS Batch ingest (RAC account) — laptop capture → path ind
 runtime:
   name: python
   options:
-    toolchain: pip
-    virtualenv: .venv
+    toolchain: uv
 # Committed local state (as hccs/crashes/batch/infra), passphrase-encrypted:
 # `PULUMI_CONFIG_PASSPHRASE` in the worktree's `.envrc`.
 backend:

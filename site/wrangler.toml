@@ -1,7 +1,7 @@
 # CF Pages config for m3's deployment (disk.rbw.sh) — this laptop as the
 # `laptop` store (specs/m3-site.md). Private: the app gate, staff =
 # runsascoded.com. The index tiers + snapshots are written to R2 `disk-tree`
-# by the Batch ingest (`aws/`), footers → D1.
+# by the Batch ingest (`infra/aws/`), footers → D1.
 #
 # Not yet deployed: disk.rbw.sh still serves `ui/` (Pages project `disk-tree`)
 # until Phase 4. The D1 is `infra/cf/`'s (Pulumi): `disk-tree-m3-db`. Migrations:

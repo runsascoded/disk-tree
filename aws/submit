@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Submit one capture to the `disk-tree-m3` Batch queue (aws/__main__.py).
+"""Submit one capture to the `disk-tree-m3` Batch queue (infra/aws/__main__.py).
 
   aws/submit r2://disk-tree/captures/<host>/<root slug>/<stamp>
 

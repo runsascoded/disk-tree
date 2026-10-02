@@ -1,0 +1,20 @@
+# A deployment's Cloudflare surface (`CfnDashboard` + `CaptureTrigger`). Copy to
+# `Pulumi.<stack>.yaml`; the key prefix is `Pulumi.yaml`'s `name`. The provider
+# reads `CLOUDFLARE_API_TOKEN` from the environment: account Pages, D1, Queues,
+# Workers Scripts and Workers R2 Storage Write, plus DNS Write on the zone.
+config:
+  my-deployment-cf:accountId: <cf-account-id>
+  my-deployment-cf:zoneId: <zone-id>              # the zone holding `domain`
+  my-deployment-cf:pagesProject: my-deployment
+  # my-deployment-cf:productionBranch: main
+  my-deployment-cf:domain: disk.example.com
+  my-deployment-cf:d1Name: my-deployment-db
+  # A second Pages project on the same D1, for previews / staging.
+  my-deployment-cf:devProject: my-deployment-dev
+  my-deployment-cf:devDomain: dev.disk.example.com
+  # `<capturesBucket>/captures/**/_SUCCESS.json` → this queue → the
+  # `capture-trigger` Worker → the Batch ingest.
+  my-deployment-cf:capturesBucket: my-captures-bucket
+  my-deployment-cf:capturesQueue: my-deployment-captures
+  # To adopt live resources instead of creating them, see infra/README.md.
+  # my-deployment-cf:importIds: {}

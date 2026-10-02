@@ -8,7 +8,6 @@ description: Cloudflare resources for disk.rbw.sh — Pages project shell, custo
 runtime:
   name: python
   options:
-    toolchain: pip
-    virtualenv: .venv
+    toolchain: uv
 backend:
   url: file://./state

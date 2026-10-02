@@ -9,6 +9,7 @@ legacy Access app on `/auth/sso` (ui/'s SSO) is retired by hand at cut-over.
 
 import pulumi
 
+from capture_trigger import CaptureTrigger
 from cfn_dashboard import CfnDashboard, Store
 
 cfg = pulumi.Config()
@@ -16,16 +17,13 @@ account_id = cfg.require("accountId")
 zone_id = cfg.require("zoneId")
 import_ids = cfg.get_object("importIds") or None
 
-STACK = "rac"
+STACK = pulumi.get_stack()
 STORE = Store(
-    pages_project="disk-tree",
-    production_branch="main",
-    domain="disk.rbw.sh",
-    d1_name="disk-tree-m3-db",
+    pages_project=cfg.require("pagesProject"),
+    production_branch=cfg.get("productionBranch") or "main",
+    domain=cfg.require("domain"),
+    d1_name=cfg.require("d1Name"),
 )
-
-if pulumi.get_stack() != STACK:
-    raise pulumi.RunError(f"m3's cf/ wires the {STACK!r} stack only; selected {pulumi.get_stack()!r}")
 
 dash = CfnDashboard(STACK, account_id=account_id, zone_id=zone_id, store=STORE, import_ids=import_ids)
 
@@ -36,7 +34,7 @@ dash = CfnDashboard(STACK, account_id=account_id, zone_id=zone_id, store=STORE, 
 # D1 of its own); the same three resources the component makes for production.
 import pulumi_cloudflare as cloudflare
 
-DEV_PROJECT, DEV_DOMAIN = "disk-tree-dev", "dev.disk.rbw.sh"
+DEV_PROJECT, DEV_DOMAIN = cfg.require("devProject"), cfg.require("devDomain")
 dev_pages = cloudflare.PagesProject(
     "dev-pages",
     account_id=account_id,
@@ -68,19 +66,12 @@ dev_domain = cloudflare.PagesDomain(
 # `captures/` in the `disk-tree` bucket → this queue → the `capture-trigger`
 # Worker (`infra/cf/capture-trigger/`, deployed by wrangler, which attaches it as the
 # consumer) → Batch `SubmitJob`. Laptops then need only R2 write.
-CAPTURES_QUEUE = "disk-tree-captures"
-captures_queue = cloudflare.Queue("captures-queue", account_id=account_id, queue_name=CAPTURES_QUEUE)
-cloudflare.R2BucketEventNotification(
-    "captures-notification",
+trigger = CaptureTrigger(
+    "captures",
     account_id=account_id,
-    bucket_name="disk-tree",
-    queue_id=captures_queue.queue_id,
-    rules=[cloudflare.R2BucketEventNotificationRuleArgs(
-        actions=["PutObject", "CompleteMultipartUpload", "CopyObject"],
-        prefix="captures/",
-        suffix="_SUCCESS.json",
-        description="a finished capture → ingest",
-    )],
+    bucket=cfg.require("capturesBucket"),
+    queue_name=cfg.require("capturesQueue"),
+    moved_from_root=True,   # declared at the stack root before the component
 )
 
 pulumi.export("pages_project", dash.pages.name)
@@ -89,4 +80,4 @@ pulumi.export("dev_domain", dev_domain.name)
 pulumi.export("custom_domain", dash.domain.name)
 pulumi.export("d1_database", dash.d1.name)
 pulumi.export("d1_database_id", dash.d1.id)   # → site/wrangler.toml `database_id`
-pulumi.export("captures_queue", captures_queue.queue_name)
+pulumi.export("captures_queue", trigger.queue.queue_name)

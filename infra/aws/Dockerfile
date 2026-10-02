@@ -1,7 +1,7 @@
 # The m3 ingest image: a laptop capture (layer-1 listing shards in R2) →
 # path index + snapshot, back to R2 (see ingest.sh, specs/m3-site.md).
 #
-# Built by Pulumi (`aws/__main__.py`) from THIS worktree — `m3` isn't pushed
+# Built by Pulumi (`infra/aws/__main__.py`) from THIS worktree — `m3` isn't pushed
 # (it's a laptop deployment; `log.md` names local paths), so there's no
 # public ref to clone. Context is the repo root; `Dockerfile.dockerignore`
 # allowlists the Python sources. `cloud/` is a member of the root uv
@@ -23,6 +23,6 @@ COPY cloud/src ./cloud/src
 RUN mkdir -p ui/dist && uv sync --frozen --no-dev --package dt-cloud
 
 # chmod: the source zip (Pulumi `AssetArchive`) doesn't carry file modes.
-COPY aws/ingest.sh /ingest.sh
+COPY infra/aws/ingest.sh /ingest.sh
 RUN chmod 755 /ingest.sh
 ENTRYPOINT ["/ingest.sh"]
