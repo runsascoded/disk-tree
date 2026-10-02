@@ -11,7 +11,7 @@ import { STORES } from './stores'
 import { useTheme } from './theme'
 import { useUnits } from './units'
 import { useCanStage } from './auth'
-import { shareLabel, useSharePreview } from './sharePreview'
+import { useShare } from './sharePreview'
 
 export const REPO_URL = 'https://github.com/Open-Athena/marin-gcs-usage'
 const CW_URL = 'https://cw-s3.oa.dev/'
@@ -49,9 +49,16 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
     ['/users', 'Users — storage by owner'],
   ]
   const canShare = useCanStage()
-  const { share, status: shareStatus } = useSharePreview()
+  const { share, status: shareStatus } = useShare()
   useActions({
-    ...(canShare ? { 'share:preview': { label: shareLabel(shareStatus), group: 'Share', handler: () => void share() } } : {}),
+    ...(canShare ? {
+      'share:preview': {
+        label: shareStatus.state === 'copied' ? 'Copied: link with detailed preview' : shareStatus.state === 'error' ? `Couldn't copy: ${shareStatus.error}` : 'Copy link with detailed preview (link-preview card only; grants no access)',
+        description: 'Copies this page\'s link with a token that makes its unfurl card in Slack, iMessage etc. show labels, sizes and owners. Opening the link still needs sign-in.',
+        group: 'Share',
+        handler: () => void share('preview'),
+      },
+    } : {}),
     'help:toggle': {
       label: `Help line: ${help} (toggle)`,
       group: 'View',
