@@ -102,6 +102,24 @@ Inputs: ~777M rows/scan; distinct dir-segment names ~15.5M, distinct basenames ~
 
 ≈ 7–11 GB/scan beside ~27.5 GB of sorts (+25–40 %). **Decision for the user:** the basenames are ~85 % of it; a `dirs`-only vocabulary (~15.5M names → ~1 GB) is exact for directory roots but cannot find an object whose own name is the only match (`.safetensors` under non-matching dirs) — so a dirs-only reader would have to keep today's fallback for every query. Not built; `all` is the only mode.
 
+### 3.1 Measured: r2 (2026-10-02)
+
+The r2 demo's daily ingest builds the sidecars since `cloud` 968d3b5 (`path-index -S`). Over a 1.24M-row `path` sort (12.3 MiB, 152 groups), `write_search` took 0.7 s at 604 MB peak RSS (locally, on the 2026-10-01 sort). It wrote names 4.2 MiB (222K names, 109 groups), trigrams 16.5 MiB (6.0M postings, 368 groups) and the directory 0.02 MiB: 20.7 MiB, about 1.7× the `path` sort. The whole `path-index -S` step on GHA took ~8 s.
+
+Filter latency on r2.rbw.sh, comparing the 2026-10-01 generation (no sidecars) with 2026-10-02 (sidecars), same deploy. Each figure is the median `server-timing` total of 7 cold requests (random `minArea`); `m` is the number of matches.
+
+| `q` | view | no index | index |
+|---|---|---|---|
+| `gbfs` | root, `depth=1` | 137 ms, m=0 | 63 ms, m=1 |
+| `gbfs` | root, `full=1` | 469 ms, m=1 | 167 ms, m=1 |
+| `tripdata` | root, `depth=1` / `full=1` | 48 ms, m=0 | 65 ms, m=1 |
+| `2019` | root, `depth=1` | 53 ms, m=0 | 193 ms, m=185 |
+| `2019` | root, `full=1` | 73 ms, m=16 | 70 ms, m=185 |
+| `2019` | `ctbk`, `depth=1` | 52 ms, m=0 | 64 ms, m=179 |
+| no match | any | 42–49 ms | 31–37 ms |
+
+The non-index path misses matches: it found 0 for `tripdata` at the root and 0 or 16 of `2019`'s 185. The index finds them all, at the same latency or better, except `2019` at the root (193 ms). There the trigrams are unselective (369 candidates) and the 185 matches cost an extra group read.
+
 ## 4. How the Worker answers a query
 
 ### 4.1 Plan (pure; `searchQuery.ts`)
