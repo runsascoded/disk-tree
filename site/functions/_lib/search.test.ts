@@ -3,7 +3,7 @@ import type { Env } from './auth'
 import { matchRoots } from './filter'
 import { type IndexHandle, openIndex, readRects, type Row } from './index'
 import { type NamePred, parseQuery as parseWith } from './scope'
-import { type SearchLimits, SEARCH_LIMITS, searchKey, searchRoots } from './search'
+import { SEARCH_FILES, type SearchLimits, SEARCH_LIMITS, searchKey, searchRoots } from './search'
 import { makeSimple, regex } from './querySyntax'
 import { planPositive } from './searchQuery'
 import { sqliteD1 } from './testD1'
@@ -16,14 +16,19 @@ vi.mock('@rdub/file-tree/stores/s3', async () => ({ S3Store: (await import('./te
 // `fixtures/v2-search/` (`gen.py` `write_v2_search`): buckets `bk` (6000
 // filler objects `fill/f*` + `ttl` dirs nested in `ttl` dirs, case variants,
 // `.safetensors` objects, `ckpt…final` paths, a Kelvin-sign `Key`) and `zz`,
-// `path` + `bysize` sorts in 2048-row groups (3 each), the search sidecars at
-// 2048-row data groups and 2 rows per directory group. Served twice: with the
-// sidecars (SEARCH) and without them (PLAIN: the same generation, the
-// pre-index read).
+// `path` + `bysize` sorts in 2048-row groups (3 each), the search sidecars in
+// both layouts (v2: 512-row rows groups; v1: 2048-row names groups; the same
+// 2048-row postings) at 2 rows per directory group. Served with the v2
+// sidecars (SEARCH, and SEARCH_PQ with its groups retired to the blob), the
+// v1 ones (SEARCH_V1) and none (PLAIN: the same generation, the pre-index
+// read).
 
 const SEARCH = '2026-10-01T0001'
 const PLAIN = '2026-10-01T0002'
 const SEARCH_PQ = '2026-10-01T0003'
+const SEARCH_V1 = '2026-10-01T0004'
+const V2_FILES = ['rows', 'trigrams', 'rowsSearch'] as const
+const V1_FILES = ['names', 'trigrams', 'search'] as const
 const dirOf = (date: string) => `cw-l2/${date}/index/g`
 const files = { path: { parquet: 'v2-search/path-index.parquet', groups: 'v2-search/path-index.groups.json' }, bysize: { parquet: 'v2-search/path-index-bysize.parquet', groups: 'v2-search/path-index-bysize.groups.json' } }
 const MiB = 1 << 20
@@ -37,10 +42,14 @@ beforeAll(async () => {
   ;(globalThis as unknown as { caches: unknown }).caches = { default: { match: async () => undefined, put: async () => {} } }
   const { db, raw } = await sqliteD1('cw')
   const v = await readJson<Record<string, D1Variant>>('v2-search/d1.json')
-  for (const date of [SEARCH, PLAIN]) seedGeneration(raw, { date, gen: 'g', dir: dirOf(date), variants: v, files })
+  for (const date of [SEARCH, PLAIN, SEARCH_V1]) seedGeneration(raw, { date, gen: 'g', dir: dirOf(date), variants: v, files })
   // Retired from D1: the `path` groups' metadata comes from the blob.
   seedGeneration(raw, { date: SEARCH_PQ, gen: 'g', dir: dirOf(SEARCH_PQ), variants: v, files, retired: ['path', 'bysize'] })
-  for (const date of [SEARCH, SEARCH_PQ]) for (const role of ['names', 'trigrams', 'search'] as const) FILES.set(searchKey(dirOf(date), role), fixture(`v2-search/path-index.${role}.parquet`))
+  const sidecar = (date: string, roles: readonly (keyof typeof SEARCH_FILES)[]) => {
+    for (const role of roles) FILES.set(searchKey(dirOf(date), role), fixture(`v2-search/${SEARCH_FILES[role]}`))
+  }
+  for (const date of [SEARCH, SEARCH_PQ]) sidecar(date, V2_FILES)
+  sidecar(SEARCH_V1, V1_FILES)
   env = { DB: db, ROOT_LABEL: 'root', GCS_HMAC_KEY_ID: 'k', GCS_HMAC_SECRET: 's' } as Env
 })
 
@@ -69,19 +78,27 @@ describe('searchRoots: exactly the outermost matches', () => {
     // The roots' own rows, every one: phase 1's aggregates come from them.
     const all = await allRows(PLAIN)
     expect(byPath(got.rows)).toEqual(byPath(all.filter(r => got.roots.includes(r.path))))
-    // 1 trigram in 1 postings group → 7 candidates (`ttl`, `TTL-misc`,
-    // `inner-ttl`, `ttl=14d`, `ttl=7d`, `zz-ttl-a`, `zz-TTL-b`) in 2 names
-    // groups, all verified, living in 1 `path` group; 2 directory groups read.
-    expect(got.stats).toEqual({ mode: 'trigrams', trigrams: 1, postingsRgs: 1, candidates: 7, dirGroups: 2, namesRgs: 2, names: 7, pathRgs: 1, lifted: 0 })
+    // v2: 1 trigram in 1 postings group → the same 7 candidates, whose rows
+    // live in 3 rows groups (ids 7–24 in group 0, `TTL-misc` and `inner-ttl`
+    // in 2, `zz/Checkpoints/ttl` in 7: 3 directory groups, 1 more for the
+    // trigram) holding matching rows of 14 names (the roots' descendants
+    // too); no names file, no `path` group.
+    expect(got.stats).toEqual({ layout: 2, mode: 'trigrams', trigrams: 1, postingsRgs: 1, candidates: 7, dirGroups: 4, namesRgs: 0, names: 14, pathRgs: 0, rowsRgs: 3, lifted: 0 })
+    const v1 = (await find(await openIndex(env, SEARCH_V1), parseQuery('ttl')!, ''))!
+    expect([v1.roots, byPath(v1.rows)]).toEqual([got.roots, byPath(got.rows)])
+    // v1: the same 7 candidates (`ttl`, `TTL-misc`, `inner-ttl`, `ttl=14d`,
+    // `ttl=7d`, `zz-ttl-a`, `zz-TTL-b`) in 2 names groups, all verified,
+    // living in 1 `path` group; 2 directory groups read.
+    expect(v1.stats).toEqual({ layout: 1, mode: 'trigrams', trigrams: 1, postingsRgs: 1, candidates: 7, dirGroups: 2, namesRgs: 2, names: 7, pathRgs: 1, rowsRgs: 0, lifted: 0 })
   })
 
   const QUERIES = [
     'ttl', 'TTL', 'ttl=14d', 'ttl|safetensors', 'run-a/ckpt', 'tmp/ttl', 'swarm', '.safetensors', 'key', 'checkpoints', 'ckpt', 'gr', 'f0042', 'zz-',
     'ckpt final', 'grug swarm', 'ckpt*final', 'model-*-of-*.safetensors', 'tmp/*/ckpt', 'f00*1', '"ttl=7d"', 'TTL -14d', 'ttl -fill|safetensors', 'models -llama',
   ]
-  for (const root of ['', 'bk', 'bk/tmp', 'bk/iris', 'zz']) {
-    it(`= matchRoots over every row, under '${root}'`, async () => {
-      const h = await openIndex(env, SEARCH)
+  for (const [layout, date] of [['v2', SEARCH], ['v1', SEARCH_V1]]) for (const root of ['', 'bk', 'bk/tmp', 'bk/iris', 'zz']) {
+    it(`= matchRoots over every row, under '${root}' (${layout})`, async () => {
+      const h = await openIndex(env, date)
       const got: unknown[] = []
       const want: unknown[] = []
       for (const q of QUERIES) {
@@ -126,8 +143,45 @@ describe('searchRoots: exactly the outermost matches', () => {
 })
 
 describe('budgets: a cut search is flagged, heaviest names kept, roots still outermost', () => {
-  it('`path` groups: the heaviest names’ groups first', async () => {
+  const f0598 = (...ids: string[]) => ids.map(i => `bk/fill/f0${i}`)
+  it('v2 rows groups: the heaviest names’ groups first, a name whole or not at all', async () => {
     const h = await openIndex(env, SEARCH)
+    // `0598`'s 11 names sit in 9 rows groups, heaviest first: `f05987` (2 KiB,
+    // id 523) and `f00598` (1 KiB, 574) in group 1, `f05986` (1023) in 2, ….
+    const got = (await find(h, parseQuery('0598')!, '', { ...SEARCH_LIMITS, rowsRgs: 1 }))!
+    expect([got.roots, got.truncated, got.reason, got.stats.rowsRgs, got.stats.lifted]).toEqual([f0598('0598', '5987'), true, 'the row read hit its budget (1 row group)', 1, 0])
+    const two = (await find(h, parseQuery('0598')!, '', { ...SEARCH_LIMITS, rowsRgs: 2 }))!
+    expect([two.roots, two.stats.rowsRgs]).toEqual([f0598('0598', '5985', '5986', '5987'), 2])
+    expect((await find(h, parseQuery('0598')!, ''))!.roots).toEqual(await brute('0598', ''))
+  })
+  it('v2: a cut ancestor is lifted from the `path` sort', async () => {
+    const h = await openIndex(env, SEARCH)
+    // `zz` (2 characters: the names scan) in rows group 0 only: `zz-TTL-b`,
+    // `zz-ttl-a` and rows under the bucket `zz`, whose own row (id 3538,
+    // group 6) was not read — one point lookup fetches it.
+    const got = (await find(h, parseQuery('zz')!, '', { ...SEARCH_LIMITS, rowsRgs: 1 }))!
+    expect([got.roots, got.truncated, got.reason, got.stats.mode, got.stats.rowsRgs, got.stats.lifted]).toEqual([await brute('zz', ''), true, 'the row read hit its budget (1 row group)', 'scan', 1, 1])
+    expect(byPath(got.rows)).toEqual(byPath((await allRows(PLAIN)).filter(r => got.roots.includes(r.path))))
+    const dropped = (await find(h, parseQuery('zz')!, '', { ...SEARCH_LIMITS, rowsRgs: 1, liftGroups: 0 }))!
+    expect([dropped.roots, dropped.reason]).toEqual([['bk/fill/zz-TTL-b', 'bk/fill/zz-ttl-a'], 'the row read hit its budget (1 row group); 1 match root too wide to look up'])
+  })
+  it('the rows kept: past `keptRows` no further group is decoded', async () => {
+    // v2, in id order: group 1 keeps 2 rows (`f05987`, `f00598`), group 2
+    // two more (`f05986`, `f05985`); then the search stops.
+    const v2 = (await find(await openIndex(env, SEARCH), parseQuery('0598')!, '', { ...SEARCH_LIMITS, keptRows: 2 }))!
+    expect([v2.roots, v2.truncated, v2.reason, v2.stats.rowsRgs]).toEqual([f0598('0598', '5985', '5986', '5987'), true, 'more than 2 matching rows', 2])
+    // v1, in `path` order: group 0 keeps `f00598`; group 2 is not decoded.
+    const v1 = (await find(await openIndex(env, SEARCH_V1), parseQuery('0598')!, '', { ...SEARCH_LIMITS, keptRows: 0 }))!
+    expect([v1.roots, v1.truncated, v1.reason, v1.stats.pathRgs]).toEqual([f0598('0598'), true, 'more than 0 matching rows', 1])
+  })
+  it('the wall clock: past `wallMs` the search stops where it is', async () => {
+    for (const date of [SEARCH, SEARCH_V1]) {
+      const got = (await find(await openIndex(env, date), parseQuery('ttl')!, '', { ...SEARCH_LIMITS, wallMs: 0 }))!
+      expect([date, got.roots, got.truncated, got.reason]).toEqual([date, [], true, 'the search hit its time budget (0.0 s)'])
+    }
+  })
+  it('v1 `path` groups: the heaviest names’ groups first', async () => {
+    const h = await openIndex(env, SEARCH_V1)
     // `0598`: `f05980`..`f05989` (path group 2) and `f00598` (group 0). By
     // bytes: `f05987` (2 KiB), then `f00598` and `f05986` (1 KiB, by name) —
     // `f00598` needs a second group, so the search stops there. Every match
@@ -137,8 +191,8 @@ describe('budgets: a cut search is flagged, heaviest names kept, roots still out
     expect(got.reason).toBe('the row read hit its budget (1 path group)')
     expect((await find(h, parseQuery('0598')!, ''))!.roots).toEqual(await brute('0598', ''))
   })
-  it('a cut ancestor is lifted: its rows come from one point lookup', async () => {
-    const h = await openIndex(env, SEARCH)
+  it('v1: a cut ancestor is lifted: its rows come from one point lookup', async () => {
+    const h = await openIndex(env, SEARCH_V1)
     // `zz-TTL-b`, `zz-ttl-a` (path group 2) outweigh the bucket `zz` (group
     // 0): only group 2 is read, where `zz/…` rows match too — their outermost
     // match, the bucket, is fetched by itself.
@@ -151,16 +205,60 @@ describe('budgets: a cut search is flagged, heaviest names kept, roots still out
     expect([dropped.roots, dropped.reason]).toEqual([['bk/fill/zz-TTL-b', 'bk/fill/zz-ttl-a'], 'the row read hit its budget (1 path group); 1 match root too wide to look up'])
     expect(byPath(got.rows)).toEqual(byPath((await allRows(PLAIN)).filter(r => got.roots.includes(r.path))))
   })
-  it('names groups', async () => {
-    const h = await openIndex(env, SEARCH)
+  it('v1 names groups', async () => {
+    const h = await openIndex(env, SEARCH_V1)
     const got = (await find(h, parseQuery('gr')!, '', { ...SEARCH_LIMITS, namesRgs: 1 }))!
     // `grug` is a heavy name (first names group); the rest are not read.
     expect([got.roots, got.truncated, got.stats.namesRgs, got.reason]).toEqual([['bk/runs/grug'], true, 1, 'the name search hit its read budget (1 name group)'])
   })
   it('an unselective trigram is no constraint: same roots, more names verified', async () => {
+    for (const date of [SEARCH, SEARCH_V1]) {
+      const got = (await find(await openIndex(env, date), parseQuery('safetensors')!, '', { ...SEARCH_LIMITS, triRgs: 0 }))!
+      expect([date, got.roots, got.truncated, got.stats.mode]).toEqual([date, await brute('safetensors', ''), false, 'scan'])
+    }
+  })
+})
+
+describe('I/O', () => {
+  it('v2 reads a query’s rows groups as merged range reads', async () => {
+    // A generation of its own: nothing decoded yet in this isolate.
+    const { db, raw } = await sqliteD1('cw')
+    const date = '2026-10-01T0101'
+    seedGeneration(raw, { date, gen: 'g', dir: dirOf(date), variants: await readJson<Record<string, D1Variant>>('v2-search/d1.json'), files })
+    for (const role of V2_FILES) FILES.set(searchKey(dirOf(date), role), fixture(`v2-search/${SEARCH_FILES[role]}`))
+    const e = { ...env, DB: db } as Env
+    const h = await openIndex(e, date)
+    GETS.length = 0
+    const pred = parseQuery('0598')!
+    const got = (await searchRoots(e, h, pred, planPositive(pred.ast!)!, ''))!
+    expect(got.roots).toEqual(await brute('0598', ''))
+    // 9 rows groups (~5 KiB each, all within `RUN_GAP` of the next): one read.
+    const rows = searchKey(dirOf(date), 'rows')
+    expect([got.stats.rowsRgs, GETS.filter(g => g.key === rows).length]).toEqual([9, 1])
+    // No names file, no `path` group.
+    expect(GETS.filter(g => g.key.endsWith('/path-index.names.parquet') || g.key.endsWith('/path-index.parquet'))).toEqual([])
+  })
+  it('a repeated search is answered from the isolate', async () => {
     const h = await openIndex(env, SEARCH)
-    const got = (await find(h, parseQuery('safetensors')!, '', { ...SEARCH_LIMITS, triRgs: 0 }))!
-    expect([got.roots, got.truncated, got.stats.mode]).toEqual([await brute('safetensors', ''), false, 'scan'])
+    const pred = parseQuery('ttl')!
+    const plan = planPositive(pred.ast!)!
+    const key = `pos:${JSON.stringify(pred.ast)}`
+    const a = (await searchRoots(env, h, pred, plan, '', SEARCH_LIMITS, key))!
+    GETS.length = 0
+    const b = (await searchRoots(env, h, pred, plan, '', SEARCH_LIMITS, key))!
+    expect([b === a, GETS]).toEqual([true, []])
+    // Another root, other limits: searched afresh.
+    const c = (await searchRoots(env, h, pred, plan, 'bk', SEARCH_LIMITS, key))!
+    expect([c === a, c.roots]).toEqual([false, a.roots.filter(r => r.startsWith('bk/'))])
+  })
+  it('a search cut by the wall clock is not kept', async () => {
+    const h = await openIndex(env, SEARCH)
+    const pred = parseQuery('ckpt')!
+    const plan = planPositive(pred.ast!)!
+    const key = `pos:${JSON.stringify(pred.ast)}`
+    const late = (await searchRoots(env, h, pred, plan, '', { ...SEARCH_LIMITS, wallMs: 0 }, key))!
+    const again = (await searchRoots(env, h, pred, plan, '', { ...SEARCH_LIMITS, wallMs: 0 }, key))!
+    expect([late.truncated, again === late]).toEqual([true, false])
   })
 })
 
@@ -221,13 +319,16 @@ describe('the filter view', () => {
 
   it('a search cut before any root falls back to the pre-index read', async () => {
     const o = { ...base, path: '', threshold: 0, query: parseQuery('ttl')! }
-    const [a, b] = await Promise.all([buildView(env, { ...o, date: SEARCH, searchLimits: { ...SEARCH_LIMITS, pathRgs: 0 } }), buildView(env, { ...o, date: PLAIN })])
-    expect(bare(a)).toEqual(bare(b))
-    expect([coverage(a), coverage(b)]).toEqual([
-      { partial: 'the search stopped before finding a match (the row read hit its budget (0 path groups)); showing a thresholded read' },
-      { approximate: APPROX_NO_INDEX },
-    ])
-    expect(a.tier).toBe('path+path')
+    const b = await buildView(env, { ...o, date: PLAIN })
+    expect(coverage(b)).toEqual({ approximate: APPROX_NO_INDEX })
+    for (const [date, limits, why] of [
+      [SEARCH, { rowsRgs: 0 }, 'the row read hit its budget (0 row groups)'],
+      [SEARCH_V1, { pathRgs: 0 }, 'the row read hit its budget (0 path groups)'],
+      [SEARCH, { wallMs: 0 }, 'the search hit its time budget (0.0 s)'],
+    ] as const) {
+      const a = await buildView(env, { ...o, date, searchLimits: { ...SEARCH_LIMITS, ...limits } })
+      expect([date, why, bare(a), coverage(a), a.tier]).toEqual([date, why, bare(b), { partial: `the search stopped before finding a match (${why}); showing a thresholded read` }, 'path+path'])
+    }
   })
 
   it('finds a match below the pixel budget the pre-index read can’t see', async () => {
@@ -249,12 +350,14 @@ describe('the filter view', () => {
   })
 
   it('a search cut after finding roots: the view is `partial`, with the reason', async () => {
-    const v = await buildView(env, { ...base, date: SEARCH, path: '', threshold: 0, query: parseQuery('0598')!, searchLimits: { ...SEARCH_LIMITS, pathRgs: 1 } })
+    const v = await buildView(env, { ...base, date: SEARCH, path: '', threshold: 0, query: parseQuery('0598')!, searchLimits: { ...SEARCH_LIMITS, rowsRgs: 1 } })
     expect([v.matches, v.truncated, v.partial, v.partialReason, v.approximate]).toEqual([
-      Array.from({ length: 10 }, (_, i) => `bk/fill/f0598${i}`), true, true, 'the row read hit its budget (1 path group)', undefined,
+      ['bk/fill/f00598', 'bk/fill/f05987'], true, true, 'the row read hit its budget (1 row group)', undefined,
     ])
-    const d = await buildDiff(env, { ...base, from: SEARCH, to: SEARCH_PQ, top: 100, path: '', threshold: 0, query: parseQuery('0598')!, searchLimits: { ...SEARCH_LIMITS, pathRgs: 1 } })
-    expect(coverage(d as unknown as View)).toEqual({ partial: 'the row read hit its budget (1 path group)' })
+    const d = await buildDiff(env, { ...base, from: SEARCH, to: SEARCH_PQ, top: 100, path: '', threshold: 0, query: parseQuery('0598')!, searchLimits: { ...SEARCH_LIMITS, rowsRgs: 1 } })
+    expect(coverage(d as unknown as View)).toEqual({ partial: 'the row read hit its budget (1 row group)' })
+    const v1 = await buildView(env, { ...base, date: SEARCH_V1, path: '', threshold: 0, query: parseQuery('0598')!, searchLimits: { ...SEARCH_LIMITS, pathRgs: 1 } })
+    expect([v1.matches, v1.partialReason]).toEqual([Array.from({ length: 10 }, (_, i) => `bk/fill/f0598${i}`), 'the row read hit its budget (1 path group)'])
   })
 
   it('a filtered diff uses it on both sides', async () => {

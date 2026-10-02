@@ -30,14 +30,14 @@
  * tier's ~27k-group footer exceeds the Worker's memory.
  */
 import { S3Store } from '@rdub/file-tree/stores/s3'
-import { type FileMetaData, parquetMetadata, parquetMetadataAsync, parquetReadObjects, type RowGroup } from 'hyparquet'
+import { type FileMetaData, parquetMetadata, parquetMetadataAsync, parquetRead, parquetReadObjects, type RowGroup } from 'hyparquet'
 import type { Env } from './auth.js'
 import { shared } from './shared.js'
 import { d1Variant, isPrimary, PRIMARY_STORE, storeKey } from './stores.js'
 import { compressors } from './zstd.js'
 
 /** A leaf of the stored parquet schema (`index_schema.schema_json`). */
-interface SchemaElement { type: string; name: string; repetition_type: string; converted_type?: string }
+export interface SchemaElement { type: string; name: string; repetition_type: string; converted_type?: string }
 
 export const BUCKET = 'oa-gcs-usage-dvx'
 
@@ -652,26 +652,96 @@ export function reviveRowGroup(json: string, schema: SchemaElement[]): Record<st
   }
 }
 
+/** The byte span `[start, end)` of a row group's column chunks — the
+ * `columns` it projects, else every chunk. One range read of it replaces
+ * hyparquet's one-read-per-column plan for a projected read (14 GETs per
+ * store group), which the Worker's 6 simultaneous connections queue up. */
+export function chunkSpan(rg: { columns: { meta_data?: { path_in_schema: string[]; data_page_offset: bigint | number; dictionary_page_offset?: bigint | number; total_compressed_size: bigint | number } }[] }, columns?: string[]): [number, number] {
+  let start = Infinity
+  let end = 0
+  for (const c of rg.columns) {
+    const m = c.meta_data!
+    if (columns && !columns.includes(m.path_in_schema[0])) continue
+    const data = Number(m.data_page_offset)
+    const dict = m.dictionary_page_offset == null ? data : Number(m.dictionary_page_offset)
+    const s = dict > 0 ? Math.min(dict, data) : data
+    start = Math.min(start, s)
+    end = Math.max(end, s + Number(m.total_compressed_size))
+  }
+  if (!(end > start)) throw new Error('row group has no column chunks to read')
+  return [start, end]
+}
+
+/** Range reads merge spans closer than this (a gap is read and dropped):
+ * a read costs a round trip (~60 ms from a Worker, and at most 6 in
+ * flight) where 512 KiB more of it costs ~10 ms. */
+export const RUN_GAP = 512 << 10
+/** A merged range read's ceiling. */
+export const RUN_BYTES = 2 << 20
+
+/** Range reads in flight per merged read: a Worker holds at most 6
+ * simultaneous connections, so more only queues (and holds buffers). */
+export const RUN_READS = 6
+
+/** Byte spans merged into range reads: sorted by start, a run grows while
+ * the next span starts within `gap` bytes of its end and the run stays
+ * within `max` bytes (a span bigger than `max` is a run of its own). */
+export function planRuns<T extends { start: number; end: number }>(spans: T[], gap = RUN_GAP, max = RUN_BYTES): { start: number; end: number; items: T[] }[] {
+  const runs: { start: number; end: number; items: T[] }[] = []
+  for (const sp of [...spans].sort((a, b) => a.start - b.start)) {
+    const last = runs[runs.length - 1]
+    if (last && sp.start - last.end <= gap && Math.max(last.end, sp.end) - last.start <= max) {
+      last.end = Math.max(last.end, sp.end)
+      last.items.push(sp)
+    } else runs.push({ start: sp.start, end: sp.end, items: [sp] })
+  }
+  return runs
+}
+
+/** A `FileSlice` over a buffer holding the file's bytes from `start`
+ * (offsets stay absolute, as the revived row groups' are). */
+export const bufferSlice = (buf: ArrayBuffer, start: number): FileSlice => ({
+  byteLength: start + buf.byteLength,
+  slice: async (s, e) => {
+    const end = e ?? start + buf.byteLength
+    if (s < start || end > start + buf.byteLength) throw new Error(`read [${s}, ${end}) outside the fetched [${start}, ${start + buf.byteLength})`)
+    return buf.slice(s - start, end - start)
+  },
+})
+
+/** One range read of a handle's file (traced as `fetch`). */
+async function fetchRange(h: IndexHandle, start: number, end: number): Promise<ArrayBuffer> {
+  const t0 = now()
+  try {
+    return await h.file.slice(start, end)
+  } finally {
+    h.trace?.('fetch', now() - t0)
+  }
+}
+
 /** Read one row group (given its stored metadata JSON) via a subset
- * FileMetaData, as raw column records (pre-`toRow`). The age index (variant
- * `age`) carries its own columns (`day,b,o`), not the shared `Row` shape. */
-async function readGroupRaw(h: IndexHandle, rgJson: string, columns?: string[]): Promise<Record<string, unknown>[]> {
+ * FileMetaData, as raw column records (pre-`toRow`): one range read of the
+ * projected chunks (`chunkSpan`), or from `file` when the caller already
+ * holds the bytes. The age index (variant `age`) carries its own columns
+ * (`day,b,o`), not the shared `Row` shape. */
+async function readGroupRaw(h: IndexHandle, rgJson: string, columns?: string[], held?: FileSlice): Promise<Record<string, unknown>[]> {
   const rg = reviveRowGroup(rgJson, h.schema)
   const metadata = { version: h.version, schema: h.schema, num_rows: rg.num_rows, row_groups: [rg], metadata_length: 0 } as unknown as Awaited<ReturnType<typeof parquetMetadataAsync>>
-  const trace = h.trace
-  const file: FileSlice = trace
-    ? { byteLength: h.file.byteLength, slice: async (s, e) => { const t0 = now(); try { return await h.file.slice(s, e) } finally { trace('fetch', now() - t0) } } }
-    : h.file
+  let file = held
+  if (!file) {
+    const [s, e] = chunkSpan(rg as unknown as Parameters<typeof chunkSpan>[0], columns)
+    file = bufferSlice(await fetchRange(h, s, e), s)
+  }
   const t0 = now()
   const rows = (await parquetReadObjects({ file, metadata, columns, compressors })) as Record<string, unknown>[]
-  trace?.('group', now() - t0, h.variant)
+  h.trace?.('group', now() - t0, h.variant)
   return rows
 }
 
 /** Read one row group as shaped `Row`s (the handle's projection unless the
  * caller narrows it further). */
-async function readGroup(h: IndexHandle, rgJson: string, columns?: string[]): Promise<Row[]> {
-  return (await readGroupRaw(h, rgJson, columns ?? h.columns ?? undefined)).map(toRow(h))
+async function readGroup(h: IndexHandle, rgJson: string, columns?: string[], held?: FileSlice): Promise<Row[]> {
+  return (await readGroupRaw(h, rgJson, columns ?? h.columns ?? undefined, held)).map(toRow(h))
 }
 
 export interface Span extends GroupSpan { rg: number }
@@ -716,16 +786,35 @@ export function cachePut(k: string, v: unknown[], bytes: number): void {
   groupCacheBytes += bytes
 }
 
-async function readGroupCached(h: IndexHandle, rg: number, rgJson: string): Promise<Row[]> {
-  const k = `${storeKey(h.env)}|${h.date}|${h.variant}|${h.gen}|${rg}`
-  const hit = cacheGet<Row>(k)
-  if (hit) {
-    h.trace?.('gcache', 1)
-    return hit
-  }
-  const rows = await readGroup(h, rgJson)
-  cachePut(k, rows, rows.length * ROW_BYTES)
-  return rows
+const groupKey = (h: IndexHandle, rg: number) => `${storeKey(h.env)}|${h.date}|${h.variant}|${h.gen}|${rg}`
+
+/** Many row groups' shaped rows, each through the decoded-group cache; the
+ * misses' projected chunks are fetched as merged range reads (`planRuns`:
+ * neighbouring groups of a sort are adjacent in its file), `RUN_READS`
+ * runs in flight, and each group decoded from its run's bytes. `f` maps each
+ * group's rows (kept per group, in input order). */
+async function readGroupsCached<T>(h: IndexHandle, groups: { rg: number; json: string }[], f: (rows: Row[]) => T): Promise<T[]> {
+  const out: T[] = new Array(groups.length)
+  const miss: { i: number; rg: number; json: string; start: number; end: number }[] = []
+  groups.forEach((g, i) => {
+    const hit = cacheGet<Row>(groupKey(h, g.rg))
+    if (hit) {
+      h.trace?.('gcache', 1)
+      out[i] = f(hit)
+      return
+    }
+    const [start, end] = chunkSpan(reviveRowGroup(g.json, h.schema) as unknown as Parameters<typeof chunkSpan>[0], h.columns ?? undefined)
+    miss.push({ i, ...g, start, end })
+  })
+  await mapLimit(planRuns(miss), RUN_READS, async run => {
+    const file = bufferSlice(await fetchRange(h, run.start, run.end), run.start)
+    for (const g of run.items) {
+      const rows = await readGroup(h, g.json, undefined, file)
+      cachePut(groupKey(h, g.rg), rows, rows.length * ROW_BYTES)
+      out[g.i] = f(rows)
+    }
+  })
+  return out
 }
 
 /** Row groups in flight at once per read. Each group is its own range
@@ -907,22 +996,73 @@ async function decodeSpans(h: IndexHandle, kept: Span[], keep: (r: Row) => boole
   h.trace?.('rgjson', now() - t0)
   h.trace?.('ngroups', kept.length)
   t0 = now()
-  const perGroup = await mapLimit(kept, GROUP_READS, async s => {
-    const j = jsons.get(s.rg)
-    if (!j) return []
-    const out: Row[] = []
-    for (const r of await readGroupCached(h, s.rg, j)) if (keep(r)) out.push(r)
-    return out
-  })
+  const perGroup = await readGroupsCached(h, kept.flatMap(s => { const json = jsons.get(s.rg); return json ? [{ rg: s.rg, json }] : [] }), rows => rows.filter(keep))
   h.trace?.('groups', now() - t0, h.variant)
   return perGroup.flat()
 }
 
-/** Rows `keep` accepts from row groups named by ordinal — the search index's
- * read (`search.ts`: a name's `rgs` are `path`-sort groups), through the same
- * metadata fetch and per-isolate decoded-group cache as a span read. */
-export async function readGroupsAt(h: IndexHandle, rgs: number[], keep: (r: Row) => boolean): Promise<Row[]> {
-  if (!rgs.length) return []
+/** At most `n` of the calls it wraps running at once (the rest queue). */
+export function limiter(n: number): <T>(f: () => Promise<T>) => Promise<T> {
+  let active = 0
+  const queue: (() => void)[] = []
+  return async f => {
+    if (active >= n) await new Promise<void>(r => queue.push(r))
+    else active++
+    try {
+      return await f()
+    } finally {
+      const next = queue.shift()
+      if (next) next()
+      else active--
+    }
+  }
+}
+
+/** Merged range reads fetched `RUN_READS` at a time but handed to `each`
+ * in order — a budgeted read stops on a prefix, so what it skips is the
+ * tail (the lightest names, in impact order). `stop` is asked before each
+ * fetch and each run: once it says so, the rest are skipped. */
+export async function runsInOrder<R>(runs: R[], fetch: (r: R) => Promise<ArrayBuffer>, each: (r: R, buf: ArrayBuffer) => Promise<void>, stop: () => boolean): Promise<void> {
+  const limit = limiter(RUN_READS)
+  const bufs = runs.map(r => limit(() => (stop() ? Promise.resolve(null) : fetch(r))))
+  for (const b of bufs) b.catch(() => {}) // a skipped run's failure is moot; an awaited one still throws
+  for (let i = 0; i < runs.length; i++) {
+    if (stop()) return
+    const buf = await bufs[i]
+    if (!buf || stop()) return
+    await each(runs[i], buf)
+  }
+}
+
+/** One row group's columns as arrays (no row objects), from bytes held. */
+export async function decodeColumns(schema: SchemaElement[], rg: RowGroup, file: FileSlice, columns: string[]): Promise<Map<string, unknown[]>> {
+  const n = Number(rg.num_rows)
+  const out = new Map<string, unknown[]>(columns.map(c => [c, new Array(n)]))
+  const metadata = { version: 1, schema, num_rows: rg.num_rows, row_groups: [rg], metadata_length: 0 } as unknown as FileMetaData
+  await parquetRead({
+    file, metadata, columns, compressors,
+    onChunk: ({ columnName, columnData, rowStart }) => {
+      const arr = out.get(columnName)!
+      for (let i = 0; i < columnData.length; i++) arr[rowStart + i] = columnData[i]
+    },
+  })
+  return out
+}
+
+/** The rows of `path`-sort groups named by ordinal whose path `keep`
+ * accepts — the search index's read (`search.ts`: a name's `rgs` are
+ * `path`-sort groups). A group in the decoded-group cache is filtered there;
+ * the misses are fetched with their neighbours as merged range reads
+ * (`planRuns`, `runsInOrder`), each group's `path` column decoded first, and
+ * the other columns decoded — and rows built — only for a group with a kept
+ * path, only for those rows (few of a group's rows match; the `path` column
+ * is about half its decode and building 8k row objects most of the rest).
+ * `stop(kept)` is asked before each group with the rows kept so far: once it
+ * says so the remaining groups are skipped, and `read` names the groups
+ * whose rows are all in `rows`. */
+export async function readGroupsAt(h: IndexHandle, rgs: number[], keep: (path: string) => boolean, stop: (kept: number) => boolean = () => false): Promise<{ rows: Row[]; read: Set<number> }> {
+  const read = new Set<number>()
+  if (!rgs.length) return { rows: [], read }
   let t0 = now()
   const jsons = await fetchGroupJson(h, rgs)
   h.trace?.('rgjson', now() - t0)
@@ -930,9 +1070,46 @@ export async function readGroupsAt(h: IndexHandle, rgs: number[], keep: (r: Row)
   const missing = rgs.filter(rg => !jsons.has(rg))
   if (missing.length) throw new Error(`${h.variant} ${h.date}: no row group ${missing.join(', ')} in generation ${h.gen}`)
   t0 = now()
-  const perGroup = await mapLimit(rgs, GROUP_READS, async rg => (await readGroupCached(h, rg, jsons.get(rg)!)).filter(keep))
+  const out: Row[] = []
+  const miss: { rg: number; group: RowGroup; start: number; end: number }[] = []
+  for (const rg of rgs) {
+    const hit = cacheGet<Row>(groupKey(h, rg))
+    if (hit) {
+      h.trace?.('gcache', 1)
+      for (const r of hit) if (keep(r.path)) out.push(r)
+      read.add(rg)
+      continue
+    }
+    const group = reviveRowGroup(jsons.get(rg)!, h.schema) as unknown as RowGroup
+    const [start, end] = chunkSpan(group as unknown as Parameters<typeof chunkSpan>[0], h.columns ?? undefined)
+    miss.push({ rg, group, start, end })
+  }
+  const rest = (h.columns ?? h.schema.slice(1).map(l => l.name)).filter(c => c !== 'path')
+  const shape = toRow(h)
+  let halted = false
+  const halt = () => (halted ||= stop(out.length))
+  await runsInOrder(planRuns(miss), run => fetchRange(h, run.start, run.end), async (run, buf) => {
+    const file = bufferSlice(buf, run.start)
+    for (const g of run.items) {
+      if (halt()) return
+      const t1 = now()
+      const paths = (await decodeColumns(h.schema, g.group, file, ['path'])).get('path')!
+      const hits: number[] = []
+      for (let i = 0; i < paths.length; i++) if (keep(str(paths[i]))) hits.push(i)
+      if (hits.length) {
+        const cols = await decodeColumns(h.schema, g.group, file, rest)
+        for (const i of hits) {
+          const rec: Record<string, unknown> = { path: paths[i] }
+          for (const [c, arr] of cols) rec[c] = arr[i]
+          out.push(shape(rec))
+        }
+      }
+      h.trace?.('group', now() - t1, h.variant)
+      read.add(g.rg)
+    }
+  }, halt)
   h.trace?.('groups', now() - t0, h.variant)
-  return perGroup.flat()
+  return { rows: out, read }
 }
 
 // --- the size-bucket sort (specs/path-store.md §1.3, §2.1) -------------------
@@ -1091,12 +1268,13 @@ export async function readAsks(
   h.trace?.('rgjson', now() - t0)
   h.trace?.('ngroups', spans.length)
   t0 = now()
-  const perGroup = await mapLimit(spans, GROUP_READS, async s => {
-    const j = jsons.get(s.rg)
-    if (!j) return []
-    // a column subset (the totals manifest) bypasses the cache: cached rows are whole
-    return (columns ? await readGroup(h, j, columns) : await readGroupCached(h, s.rg, j)).filter(keep)
-  })
+  // a column subset (the totals manifest) bypasses the cache: cached rows are whole
+  const perGroup = columns
+    ? await mapLimit(spans, GROUP_READS, async s => {
+      const j = jsons.get(s.rg)
+      return j ? (await readGroup(h, j, columns)).filter(keep) : []
+    })
+    : await readGroupsCached(h, spans.flatMap(s => { const json = jsons.get(s.rg); return json ? [{ rg: s.rg, json }] : [] }), rows => rows.filter(keep))
   h.trace?.('groups', now() - t0)
   return { rows: perGroup.flat(), groups: spans.length }
 }

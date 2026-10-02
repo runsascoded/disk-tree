@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import type { Env } from './auth'
 import { serverTiming } from './edgeCache'
-import { blobKey, columnsFor, footerKey, groupMatchesSize, indexKey, type IndexHandle, lensSorted, openIndex, pathGens, planRects, planSizeRects, readAsks, readRects, readSizeRects, type Rect, type Row, rowColumns, sizeVariant, withTrace } from './index'
+import { blobKey, chunkSpan, columnsFor, footerKey, groupMatchesSize, indexKey, type IndexHandle, lensSorted, openIndex, pathGens, planRects, planSizeRects, readAsks, readRects, readSizeRects, type Rect, reviveRowGroup, type Row, rowColumns, sizeVariant, withTrace } from './index'
 import { storeEnv } from './stores'
 import { sqliteD1 } from './testD1'
 import { type D1Variant, fixture, fixtureSize, FILES, GETS, readJson, seedGeneration } from './testStore'
@@ -188,6 +188,26 @@ describe('reads', () => {
     expect(down.map(r => r.path)).toEqual(up.map(r => r.path))
     // capped one level down: `nest/a` alone
     expect((await readSizeRects(size, [{ ...rect, dHi: 3 }], () => MiB)).map(r => r.path)).toEqual(['bk/nest/a'])
+  })
+
+  it('a group is one range read of its projected columns, and neighbouring groups one merged read', async () => {
+    // A generation of its own: nothing decoded yet in this isolate.
+    const { db, raw } = await sqliteD1('cw')
+    const v2 = await readJson<Record<string, D1Variant>>('v2/d1.json')
+    const dir = 'cw-l2/io2/index/g'
+    seedGeneration(raw, { date: 'io2', gen: 'g', dir, variants: v2, files: v2Files })
+    const e = { DB: db, ROOT_LABEL: 'root', GCS_HMAC_KEY_ID: 'k', GCS_HMAC_SECRET: 's' } as Env
+    const h = await openIndex(e, 'io2')
+    const key = `${dir}/path-index.parquet`
+    // Each group's span over the columns a store read projects (`created`
+    // is not one, but sits between them: read and dropped).
+    const spans = v2.path.rows.map(r => chunkSpan(reviveRowGroup(r.rg_json, v2.path.schema.schema as never) as never, rowColumns(2, v2.path.schema.schema as never)!))
+    GETS.length = 0
+    const all = await readRects(h, [{ dLo: 1, dHi: 1e9, pLo: '', pHi: '￿' }])
+    expect(all.length).toBe(v2.path.rows.reduce((n, r) => n + r.row_end - r.row_start, 0))
+    // 4 groups, adjacent: one read from the first's start to the last's end
+    // (hyparquet alone: one per column per group, 4 × 11).
+    expect(GETS.filter(g => g.key === key).map(g => [g.offset, g.length])).toEqual([[spans[0][0], spans[3][1] - spans[0][0]]])
   })
 
   it('point lookups read path: an object row and a dir row, from the groups that may hold them', async () => {
@@ -473,6 +493,7 @@ it('fixtures are registered', () => {
     ...['path-index-bysize', 'path-index'].flatMap(s => ['groups.json', 'groups.parquet', 'parquet'].map(x => `cw-l2/${V2_PQ}/index/g6/${s}.${x}`)),
     ...['path-index-bysize-by-user', 'path-index-bysize', 'path-index'].flatMap(s => ['groups.json', 'groups.parquet', 'parquet'].map(x => `cw-l2/${V2_LENS_PQ}/index/g8/${s}.${x}`)),
     ...['path-index-bysize', 'path-index'].flatMap(s => ['groups.json', 'groups.parquet', 'parquet'].map(x => `cw-l2/io/index/g7/${s}.${x}`)),
+    ...['path-index-bysize', 'path-index'].flatMap(s => ['groups.json', 'parquet'].map(x => `cw-l2/io2/index/g/${s}.${x}`)),
     `listing/${V1}/index/g1/path-index.groups.json`, `listing/${V1}/index/g1/path-index.parquet`,
     `listing/${V2_STALE}/index/g0/path-index-coarse20.groups.json`, `listing/${V2_STALE}/index/g0/path-index-coarse20.parquet`,
     `listing/${V2_LENS}/index/g0/path-index-by-user.groups.json`, `listing/${V2_LENS}/index/g0/path-index-by-user.parquet`,

@@ -650,7 +650,7 @@ async function readView(env: Env, o: ViewOpts, cov: Coverage = {}): Promise<Read
     const pathIdx = !tiers.length && !lens ? (sort === 'path' && fine ? fine : withTrace(await openFine(env, date, 'path'), tr)) : null
     const store = !!pathIdx && isStore(pathIdx)
     const pq = query.ast
-    const traceSearch = (what: string, f: SearchFound) => tr?.('search', performance.now() - t0, `${what} ${f.stats.mode} c${f.stats.candidates} n${f.stats.namesRgs} g${f.stats.pathRgs}${f.truncated ? ' cut' : ''}`)
+    const traceSearch = (what: string, f: SearchFound) => tr?.('search', performance.now() - t0, `${what} ${f.stats.mode} c${f.stats.candidates} ${f.stats.layout === 2 ? `r${f.stats.rowsRgs}` : `n${f.stats.namesRgs} g${f.stats.pathRgs}`}${f.truncated ? ' cut' : ''}`)
     if (rootHit) {
       // The view root is the match: its aggregate is the root read's.
       roots = [path]
@@ -658,7 +658,7 @@ async function readView(env: Env, o: ViewOpts, cov: Coverage = {}): Promise<Read
       p1Tier = 'root'
     } else {
       const plan = store && pq ? planPositive(pq) : null
-      const searched = plan ? await searchRoots(env, pathIdx!, query, plan, path, o.searchLimits) : null
+      const searched = plan ? await searchRoots(env, pathIdx!, query, plan, path, o.searchLimits, `pos:${JSON.stringify(pq)}`) : null
       if (searched) traceSearch('pos', searched)
       // A search cut before it found anything (its heaviest name alone is
       // over budget) says nothing: the thresholded read below answers instead.
@@ -728,7 +728,7 @@ async function readView(env: Env, o: ViewOpts, cov: Coverage = {}): Promise<Read
     if (negP && pq) {
       t0 = performance.now()
       const nplan = store ? planNegative(pq) : null
-      const ns = nplan ? await searchRoots(env, pathIdx!, negP, nplan, path, o.searchLimits) : null
+      const ns = nplan ? await searchRoots(env, pathIdx!, negP, nplan, path, o.searchLimits, `neg:${JSON.stringify(pq)}`) : null
       if (ns) {
         traceSearch('neg', ns)
         if (ns.truncated) searchCut = true
