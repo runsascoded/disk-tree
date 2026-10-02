@@ -91,6 +91,13 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 2. **Full image `sig`s are base62:** a 2-char expiry plus a 10-digit tag (the mac's first 64 bits mod 62¹⁰, ~59.5 bits), so no `+` `/` `-` `_`. Vectors are re-checked in Python. Anonymous image URLs stay unsigned. These replace items 1–2 above.
 3. **The Share dialog is one choice (radio):** "Detailed preview · sign-in required" (`og=`, the default) or "Anyone with the link can view" (`key=`, implies the full preview; disabled for non-admins with "admins only for now"). There's no plain option, since copying the URL is the browser's job. The dialog stays on every page; the omnibar keeps its direct detailed-preview action. This replaces item 8.
 
+**Revocation reaches issued images (Ryan, 2026-10-02), built:**
+- **The image names its credential:** a full image URL carries the credential its page was stamped from, under the `sig`: `t=<og token>` or `g=<share-link grant id>`.
+- **Re-checked on every fetch** (`tier.ts` `credLive`), cache hit or not. The token needs its row for exactly this kind + view, unexpired and unrevoked. The grant needs to be still live by the gate's rule.
+- **A failed check serves the anonymous card.** Revoking a token on /admin, or revoking the share link, reverts every later fetch of its cards.
+- **Caching:** full PNGs are served `private, no-store` and stay only in the colo cache, behind the check. Anonymous PNGs stay `public` for a day.
+- **The staged Slack card is backed by an `og_tokens` row** (`serverToken`, minted by `slack:staged`, view `''`), reused while it has ≥ 7 days left and re-minted after. It's chosen over a reserved kind because it then shows on /admin's "Preview links" and revokes the same way, with no second mechanism to audit.
+
 **Open at hand-off (2026-10-02):**
 - Prod runs `0034`; this revision isn't on prod yet. Dev (`dev.gcs.oa.dev`) runs it with `OG_CARDS` on, against prod's D1.
 - Measured on dev: cold renders 0.5–2.9 s per card (the view read dominates; the rasterize is ~100–200 ms), cached about 60 ms.

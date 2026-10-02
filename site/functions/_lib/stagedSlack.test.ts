@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PLAN_SENDER, fmtBytes, nameSlug, personSender, renderParent, runEvent, stageEvent, stagedCardUrl, type RunRow } from './stagedSlack.js'
-import { ogKey, resolveImage } from './og/sign.js'
+import { sqliteD1 } from './testD1.js'
 
 const run = (o: Partial<RunRow>): RunRow => ({
   run_id: 'cw-sweep-dry-1', mode: 'dry', scan: '2026-09-28T1201', actor: 'ann@openathena.ai', started_ts: 100,
@@ -106,11 +106,11 @@ describe('the plan card', () => {
       ['section', 'section', 'actions'],
     ])
   })
-  it('a full-tier signed URL keyed by the plan digest; none without cards', async () => {
-    const env = { OG_CARDS: '1', SESSION_SECRET: 's3cret' }
-    const url = (await stagedCardUrl(env, 'https://site.example.org', 'abcdef0123456789'))!
-    const v = (await resolveImage(await ogKey('s3cret'), new URL(url), Math.floor(Date.now() / 1000)))!
-    expect([url.replace(/sig=.*/, 'sig=…'), [v.kind, v.params, v.tier], await stagedCardUrl({ SESSION_SECRET: 's3cret' }, 'https://site.example.org', 'x')])
-      .toEqual(['https://site.example.org/og/staged.png?v=abcdef01&sig=…', ['staged', { v: 'abcdef01' }, 'full'], null])
+  it('no card without cards on, nor without a token table to back it (the cw lineage); the gcs lineage case is in og/revocation.test.ts', async () => {
+    const { db } = await sqliteD1('cw')
+    expect([
+      await stagedCardUrl({ SESSION_SECRET: 's3cret' }, db, 'https://site.example.org', 'abcdef0123456789'),
+      await stagedCardUrl({ OG_CARDS: '1', SESSION_SECRET: 's3cret' }, db, 'https://site.example.org', 'abcdef0123456789'),
+    ]).toEqual([null, null])
   })
 })

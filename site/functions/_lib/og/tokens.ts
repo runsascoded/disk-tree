@@ -79,13 +79,49 @@ export async function revoke(db: D1Database, token: string, by: string, now: num
  * unexpired; the redeem cap only limits new sessions), carrying one of
  * `scopes`. Read-only: nothing is redeemed or touched. Such a page unfurls
  * with the full card, since the bearer gets access anyway. */
-export async function shareKeyLive(db: D1Database | undefined, key: string | null, scopes: readonly string[], now: number): Promise<boolean> {
-  if (!db || !key || key.length < 16 || key.length > 256) return false
+export async function shareKeyGrant(db: D1Database | undefined, key: string | null, scopes: readonly string[], now: number): Promise<string | null> {
+  if (!db || !key || key.length < 16 || key.length > 256) return null
   try {
     const g = await d1GrantStore(db as never).byTokenHash(await hashToken(key))
-    if (!g || !canRedeem(g, now)) return false
-    return g.scopes.some((sc: string) => sc === '*' || scopes.includes(sc))
+    return g && grantOk(g, scopes, now) ? g.id : null
+  } catch {
+    return null
+  }
+}
+
+export const shareKeyLive = async (db: D1Database | undefined, key: string | null, scopes: readonly string[], now: number): Promise<boolean> =>
+  (await shareKeyGrant(db, key, scopes, now)) != null
+
+type GrantLike = { revokedAt: number | null; disabledAt: number | null; expiresAt: number | null; scopes: string[] } & Parameters<typeof canRedeem>[0]
+const grantOk = (g: GrantLike, scopes: readonly string[], now: number): boolean =>
+  canRedeem(g, now) && g.scopes.some((sc: string) => sc === '*' || scopes.includes(sc))
+
+/** The share-link grant `id` is still live (same rule as `shareKeyGrant`):
+ * what a `key=` page's full card image re-checks on every fetch, so
+ * revoking the link also reverts its cards. */
+export async function grantLive(db: D1Database | undefined, id: string, scopes: readonly string[], now: number): Promise<boolean> {
+  if (!db || !id) return false
+  try {
+    const g = await d1GrantStore(db as never).byId(id)
+    return !!g && grantOk(g, scopes, now)
   } catch {
     return false
   }
+}
+
+/** A server-minted token for a view (`by` like `slack:staged`): reuses a live
+ * row of the same minter and view that has at least `minDays` left, else
+ * mints one (`days` long). Recorded and revocable like any other: the
+ * staged-plan Slack thread's card goes back to anonymous when its row is
+ * revoked on /admin. */
+export async function serverToken(db: D1Database, kind: string, params: Record<string, string>, page: string, by: string, now: number, minDays: number, days = TOKEN_DAYS_DEFAULT): Promise<{ token: string; day: number }> {
+  const view = canonical(params)
+  const row = await db.prepare('SELECT token, exp_day FROM og_tokens WHERE kind = ? AND view = ? AND minted_by = ? AND revoked_ts IS NULL AND exp_day >= ? ORDER BY exp_day DESC LIMIT 1')
+    .bind(kind, view, by, expDay(now, minDays)).first<{ token: string; exp_day: number }>()
+  if (row) return { token: row.token, day: row.exp_day }
+  const token = randomToken(TOKEN_CHARS)
+  const day = expDay(now, days)
+  await db.prepare('INSERT INTO og_tokens (token, kind, view, page, minted_by, minted_ts, exp_day) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .bind(token, kind, view, page, by, now, day).run()
+  return { token, day }
 }
