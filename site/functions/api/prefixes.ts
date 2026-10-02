@@ -1,15 +1,16 @@
 /**
- * POST /api/prefix-stats  { date, prefixes: [...] }
- *   → { date, stats: { <prefix>: { b, o, d?, a?, us? } }, groups }
+ * POST /api/prefixes  { date, prefixes: [...] }
+ *   → { date, stats: { <prefix>: { b, o, d?, a?, us?, cb? } }, groups }
  *
- * Sizes, created / last-read days and owner shares for up to
- * `MAX_PREFIXES` prefixes at one scan, in one batched index read
- * (`_lib/prefixStats.ts`) — what `/staged`'s table shows per item. A prefix
- * gone by that scan is absent from `stats`.
+ * Any list of up to `MAX_PREFIXES` prefixes at one scan, with what a table
+ * row shows (bytes, objects, created / last-read days, owner shares, class
+ * mix), in one batched index read (`_lib/prefixes.ts`) — `/staged`'s items,
+ * the action log's prefixes. A prefix gone by that scan is absent from
+ * `stats`.
  */
 import { type Ctx, json, requireViewer } from '../_lib/auth.js'
 import { storeReady } from '../_lib/index.js'
-import { MAX_PREFIXES, prefixStats } from '../_lib/prefixStats.js'
+import { MAX_PREFIXES, prefixesAt } from '../_lib/prefixes.js'
 
 export const onRequestPost = async (ctx: Ctx): Promise<Response> => {
   const { env, request } = ctx
@@ -22,7 +23,7 @@ export const onRequestPost = async (ctx: Ctx): Promise<Response> => {
   const prefixes = Array.isArray(body?.prefixes) ? body.prefixes.filter((p): p is string => typeof p === 'string' && /^[a-z0-9]+:\/\/[^/]+\//.test(p)) : []
   if (!prefixes.length || prefixes.length > MAX_PREFIXES) return json({ error: `expected 1–${MAX_PREFIXES} prefixes` }, 400)
   try {
-    const { stats, groups } = await prefixStats(env, date, prefixes)
+    const { stats, groups } = await prefixesAt(env, date, prefixes)
     return json({ date, stats, groups }, 200, { 'cache-control': 'private, no-store' })
   } catch (e) {
     return json({ error: (e as Error).message }, 503)

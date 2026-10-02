@@ -15,19 +15,19 @@ import { SiteKbd } from './SiteKbd'
 import { Tooltip } from './Tooltip'
 import { Treemap } from './Treemap'
 import { UserChip } from './UserChip'
-import { OwnerFactChip } from './OwnerFactChip'
-import { OwnerBar, ownerShares } from './OwnerBar'
+import { PrefixTable, TimeCell } from './PrefixTable'
 import { useUnits } from './units'
 import { fmtN, type Meta, type TreeNode } from './types'
 import { DEFAULT_STORE } from './stores'
-import { ago, buildUserIndex, dateColor, epochDaysToDate, epochDaysToMonthShort } from './colors'
+import { buildUserIndex } from './colors'
 import { useCanStage, useIdent } from './auth'
 import { applyLedger } from './ledgerOverlay'
 import { useOwnerIndex, useOwners } from './owners'
 import { useRowSelection, useRowSelectionKeys } from './rowSelection'
-import { useDispatch, useExecJobs, usePrefixStats, useRunAction, useStagedPlan, useUnstage, LIVE_STATES } from './plans'
+import { useDispatch, useExecJobs, useRunAction, useStagedPlan, useUnstage, LIVE_STATES } from './plans'
 import type { DeletionRun, ExecJob, StagedItem } from './plans'
-import { type PrefixStat, sortStaged, type StagedSortKey, stagedTree } from './stagedTree'
+import { type PrefixSortKey, type PrefixStat, relAgo, sortPrefixRows, usePrefixes } from './prefixes'
+import { stagedTree } from './stagedTree'
 
 const iso = (ts: number): string => new Date(ts * 1000).toISOString()
 const store = DEFAULT_STORE
@@ -52,7 +52,7 @@ function useIsAdmin(): boolean {
   return admin
 }
 
-type Row = StagedItem & { stat?: PrefixStat }
+type Row = StagedItem & { name: string; to: string; stat?: PrefixStat }
 type Group = { id: number | null; batch?: { created_by: string; created_ts: number; note: string | null }; rows: Row[] }
 
 export function StagedPage() {
@@ -86,7 +86,7 @@ export function StagedPage() {
     void fetch(`${store.base}/scans.json`, { credentials: 'include' }).then(r => r.json()).then((s: string[]) => { setScans(s); setDate(s[0] ?? '') }).catch(() => {})
   }, [])
   const prefixes = useMemo(() => items.map(it => it.prefix), [items])
-  const statsQ = usePrefixStats(date, prefixes)
+  const statsQ = usePrefixes(date, prefixes)
   const stats = statsQ.data
   const metaQ = useQuery<Meta>({
     queryKey: ['meta', store.key, date],
@@ -98,8 +98,9 @@ export function StagedPage() {
   const ownerIdx = useOwnerIndex(useOwners(!!store.owners).data)
   const error = unstage.error ?? dispatch.error ?? runAction.error ?? staged.error ?? statsQ.error
 
-  const rows: Row[] = useMemo(() => items.map(it => ({ ...it, stat: stats?.[it.prefix] })), [items, stats])
-  const [sort, setSort] = useState<{ k: StagedSortKey; asc: boolean }>({ k: 'b', asc: false })
+  const rows: Row[] = useMemo(() => items.map(it => ({ ...it, name: it.prefix, to: `/${prefixToPath(it.prefix)}`, stat: stats?.[it.prefix] })), [items, stats])
+  const [sort, setSort] = useState<{ k: PrefixSortKey; asc: boolean }>({ k: 'b', asc: false })
+  const onSort = (k: PrefixSortKey) => setSort(s => ({ k, asc: s.k === k ? !s.asc : k === 'name' }))
 
   // Items grouped by gesture (newest first); items staged before batches
   // existed fall into one "earlier" group. Each group sorts by the table's key.
@@ -111,7 +112,7 @@ export function StagedPage() {
     }
     const known = new Map(batches.map(b => [b.id, b]))
     return [...byBatch.entries()]
-      .map(([id, rs]) => ({ id, batch: id != null ? known.get(id) : undefined, rows: sortStaged(rs, sort.k, sort.asc) }))
+      .map(([id, rs]) => ({ id, batch: id != null ? known.get(id) : undefined, rows: sortPrefixRows(rs, sort.k, sort.asc, r => r.added_ts) }))
       .sort((a, b) => (b.batch?.created_ts ?? 0) - (a.batch?.created_ts ?? 0))
   }, [rows, batches, sort])
 
@@ -145,19 +146,6 @@ export function StagedPage() {
   const selKey = selected.join('\n')
   const selTree = useMemo(() => (stats && selected.length ? overlay(stagedTree(selected, stats, 'selected')) : null), [selKey, stats, ownerIdx]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Created-month ink over the listed rows' range, as the map's table does.
-  const [dMin, dMax] = useMemo(() => {
-    const ds = rows.map(r => r.stat?.d).filter((d): d is number => d != null)
-    return ds.length ? [Math.min(...ds), Math.max(...ds)] : [0, 0]
-  }, [rows])
-  const ageInk = (d: number) => dateColor(dMax > dMin ? (d - dMin) / (dMax - dMin) : 1)
-
-  const th = (k: StagedSortKey, label: string, num = true) => (
-    <th className={(num ? 'num ' : '') + 'sortable' + (sort.k === k ? ' on' : '')} title="sort"
-      onClick={() => setSort(s => ({ k, asc: s.k === k ? !s.asc : k === 'prefix' }))}>
-      {label}{sort.k === k ? (sort.asc ? ' ▲' : ' ▼') : ''}
-    </th>
-  )
   const sizesNote = !date ? null : statsQ.isLoading ? 'sizing…' : stats ? null : 'sizes unavailable'
 
   return (
@@ -184,7 +172,7 @@ export function StagedPage() {
             <h2>
               {items.length} {items.length === 1 ? 'prefix' : 'prefixes'}
               {stats && <> · {fmtBytes(all.b)} · {fmtN(all.o)} objects</>}
-              <span className="dim"> · plan #{plan.id}{plan.name !== 'Staged' && <> “{plan.name}”</>} · open since {ago(plan.created_ts)} ago</span>
+              <span className="dim"> · plan #{plan.id}{plan.name !== 'Staged' && <> “{plan.name}”</>} · open since {relAgo(plan.created_ts).replace(/ ago$/, '')}</span>
             </h2>
             <label className="scan-pick">sized at scan <select value={date} onChange={e => setDate(e.target.value)} aria-label="scan">{scans.map(s => <option key={s}>{s}</option>)}</select>
               {sizesNote && <span className="dim"> {sizesNote}</span>}
@@ -235,60 +223,32 @@ export function StagedPage() {
                   <button type="button" className="fold" aria-expanded={open} aria-label={open ? 'collapse batch' : 'expand batch'}
                     onClick={() => setCollapsed(c => { const n = new Set(c); if (open) n.add(k); else n.delete(k); return n })}>{open ? '▾' : '▸'}</button>
                   {g.batch
-                    ? <><UserChip who={g.batch.created_by} size={18} /> staged <Tooltip content={iso(g.batch.created_ts)}><span>{ago(g.batch.created_ts)} ago</span></Tooltip></>
+                    ? <><UserChip who={g.batch.created_by} size={18} /> staged <Tooltip content={iso(g.batch.created_ts)}><span>{relAgo(g.batch.created_ts)}</span></Tooltip></>
                     : <span className="dim">staged earlier</span>}
                   <span className="dim">· {g.rows.length} {g.rows.length === 1 ? 'prefix' : 'prefixes'}{stats && <> · {fmtBytes(t.b)}</>}</span>
                   {g.batch?.note && <i className="memo">{g.batch.note}</i>}
                 </div>
                 {open && (
                   <div className="staged-wrap">
-                    <table className="staged-table">
-                      <thead>
-                        <tr>
-                          <th className="col-sel" />
-                          {th('prefix', 'prefix', false)}
-                          {th('b', 'size')}
-                          {th('o', 'objects')}
-                          <th>owner(s)</th>
-                          {th('d', 'created')}
-                          {th('a', 'read')}
-                          {th('staged', 'staged')}
-                          <th />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {shown.map(r => {
-                          const i = visible.indexOf(r)
-                          const s = r.stat
-                          const cl = ownerIdx.count ? ownerIdx.claimOf(r.prefix) : null
-                          const node: TreeNode | null = s ? { n: r.prefix, b: s.b, o: s.o, ...(s.us ? { us: s.us } : {}) } : null
-                          const shares = node ? ownerShares(node) : []
-                          return (
-                            <tr key={r.prefix} ref={sel.rowRef(i)} {...sel.rowProps(i)}>
-                              <td className="col-sel"><input type="checkbox" checked={sel.selected.has(r.prefix)} onChange={() => { sel.toggle(i); sel.commit() }} aria-label={`select ${r.prefix}`} /></td>
-                              <td className="pfx"><Link to={`/${prefixToPath(r.prefix)}`} title="open in the map"><code>{r.prefix}</code></Link></td>
-                              <td className="num">{s ? fmtBytes(s.b) : stats ? <span className="dim">empty</span> : '…'}</td>
-                              <td className="num">{s ? fmtN(s.o) : ''}</td>
-                              <td className="owners">
-                                {cl ? <OwnerFactChip who={cl.who} assigned={{ by: cl.by, ts: cl.ts, memo: cl.memo }} />
-                                  : node && shares.length === 1 && shares[0][1] >= 0.98 * node.b ? <OwnerFactChip who={shares[0][0]} />
-                                  : node && shares.length ? <OwnerBar node={node} userIdx={userIdx} width={70} />
-                                  : <span className="dim">—</span>}
-                              </td>
-                              <td className="created">{s?.d != null ? <><i className="sw" style={{ background: ageInk(s.d) }} />{epochDaysToMonthShort(s.d)}</> : <span className="dim">—</span>}</td>
-                              <td className="read">{s?.a != null ? epochDaysToDate(s.a) : <span className="dim">—</span>}</td>
-                              <td className="nb staged-by">
-                                {r.added_by !== g.batch?.created_by && <UserChip who={r.added_by} size={16} />}
-                                <Tooltip content={iso(r.added_ts)}><span className="dim">{ago(r.added_ts)} ago</span></Tooltip>
-                              </td>
-                              <td className="actions">
-                                {canRemove(r) && <button type="button" className="rm" title="unstage" disabled={busy} onClick={() => unstage.mutate([r.prefix])}>×</button>}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
+                    <PrefixTable
+                      rows={shown}
+                      sort={sort}
+                      onSort={onSort}
+                      shareOf={all.b}
+                      userIdx={userIdx}
+                      ownerIdx={ownerIdx}
+                      loading={!stats}
+                      extra={[{
+                        key: 'staged', label: 'staged', className: 'nb staged-by', sort: r => r.added_ts,
+                        cell: r => <>{r.added_by !== g.batch?.created_by && <UserChip who={r.added_by} size={16} />}<TimeCell ts={r.added_ts} /></>,
+                      }]}
+                      lead={{
+                        header: null,
+                        cell: r => <input type="checkbox" checked={sel.selected.has(r.prefix)} onChange={() => { const i = visible.indexOf(r); sel.toggle(i); sel.commit() }} aria-label={`select ${r.prefix}`} />,
+                      }}
+                      rowProps={r => { const i = visible.indexOf(r); return { ref: sel.rowRef(i), ...sel.rowProps(i) } }}
+                      trail={r => canRemove(r) && <button type="button" className="rm" title="unstage" disabled={busy} onClick={() => unstage.mutate([r.prefix])}>×</button>}
+                    />
                     {np > 1 && (
                       <div className="pg">
                         <button type="button" disabled={pg === 0} onClick={() => setPg(0)} aria-label="first page">«</button>
@@ -368,7 +328,7 @@ function RunRow({ r, job, admin, planFirst, busy, fmtBytes, act }: {
         {fmtBytes(r.deleted_bytes)} <span className="dim">/ {fmtN(r.deleted_objects)}</span>
       </td>
       <td>{fmtN(r.skipped_gone)}</td>
-      <td><Tooltip content={iso(r.started_ts)}><span>{ago(r.started_ts)} ago</span></Tooltip></td>
+      <td><TimeCell ts={r.started_ts} /></td>
       <td className="actions">
         {planFirst && admin && live && <button type="button" disabled={busy} onClick={() => act('stop', r.run_id)}>stop</button>}
         {canUndo && <button type="button" disabled={busy} onClick={() => act('undo', r.run_id)}>undo</button>}

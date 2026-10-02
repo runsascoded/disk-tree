@@ -2344,33 +2344,6 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
   .staged-actions { display: flex; align-items: center; gap: 12px; margin: 6px 0 10px; font-size: 13px; .sel-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; } }
   .stage-batch { margin: 12px 0 18px; }
   .batch-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); .memo { color: var(--ink); } }
-  .staged-table {
-    width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 4px;
-    th { text-align: left; color: var(--ink-3); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; font-size: 12.5px; }
-    th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    th.sortable { cursor: pointer; user-select: none; &:hover, &.on { color: var(--ink); } }
-    td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-    td.created, td.read, td.owners { white-space: nowrap; }
-    td.created .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
-    td.staged-by { display: table-cell; font-size: 12.5px; .user-chip { margin-right: 4px; } }
-    code { font-size: 12.5px; }
-    .nb, .user-chip { white-space: nowrap; display: inline-block; }
-    // Selection: the checkbox column is the mouse/touch handle; the path
-    // column comes second and may break anywhere, but never below a readable
-    // width — past that the table scrolls in its box instead of crushing it.
-    td.col-sel { width: 1.6em; padding-right: 0; input { margin: 0; vertical-align: middle; cursor: pointer; } }
-    td:nth-child(2) { overflow-wrap: anywhere; min-width: 16em; }
-    td.pfx code { word-break: break-all; }
-    tbody tr { cursor: default; }
-    tr.sel td { background: color-mix(in srgb, var(--accent, #58a6ff) 14%, transparent); }
-    // The cursor is the keyboard row (j/k target) and the anchor a shift-click
-    // or shift+j/k extends *from* — a distinct concept from what's selected.
-    tr.cur td { box-shadow: inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
-    tr.cur td:first-child { box-shadow: inset 2px 0 0 var(--accent, #58a6ff), inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
-    tr.cur td:last-child { box-shadow: inset -2px 0 0 var(--accent, #58a6ff), inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
-    td.actions { width: 2em; text-align: right; }
-    .rm { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--ink-3); cursor: pointer; padding: 0 6px; &:hover { color: var(--ink); border-color: var(--ink-3); } }
-  }
   .staged-empty { color: var(--ink-3); margin: 18px 0; }
   // A wide table scrolls inside its own box; the page never scrolls sideways.
   .runs-wrap { overflow-x: auto; max-width: 100%; }
@@ -2405,6 +2378,35 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
     &.danger { border-color: var(--danger); color: var(--danger); font-weight: 650; }
     &.danger.armed { background: var(--danger); color: #fff; }
   }
+}
+
+// A table of arbitrary prefixes and their numbers at a scan (`PrefixTable`):
+// /staged's items; the action log and the map's table are to converge on it.
+.prefix-table {
+  width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 4px;
+  th { text-align: left; color: var(--ink-3); font-weight: 600; padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; font-size: 12.5px; }
+  th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  th.sortable { cursor: pointer; user-select: none; &:hover, &.on { color: var(--ink); } }
+  td { padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  td.created, td.read, td.owners, td.nb { white-space: nowrap; }
+  .when .sw { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  td.staged-by { display: table-cell; font-size: 12.5px; .user-chip { margin-right: 4px; } }
+  code { font-size: 12.5px; }
+  .nb, .user-chip { white-space: nowrap; display: inline-block; }
+  // Selection: the leading checkbox column is the mouse/touch handle; the
+  // prefix may break anywhere, but never below a readable width — past that
+  // the table scrolls in its box instead of crushing it.
+  th.col-lead, td.col-lead { width: 1.6em; padding-right: 0; input { margin: 0; vertical-align: middle; cursor: pointer; } }
+  td.pfx { overflow-wrap: anywhere; min-width: 16em; code { word-break: break-all; } }
+  tbody tr { cursor: default; }
+  tr.sel td { background: color-mix(in srgb, var(--accent, #58a6ff) 14%, transparent); }
+  // The cursor is the keyboard row (j/k target) and the anchor a shift-click
+  // or shift+j/k extends *from* — a distinct concept from what's selected.
+  tr.cur td { box-shadow: inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
+  tr.cur td:first-child { box-shadow: inset 2px 0 0 var(--accent, #58a6ff), inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
+  tr.cur td:last-child { box-shadow: inset -2px 0 0 var(--accent, #58a6ff), inset 0 2px 0 var(--accent, #58a6ff), inset 0 -2px 0 var(--accent, #58a6ff); }
+  td.actions { width: 2em; text-align: right; }
+  .rm { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--ink-3); cursor: pointer; padding: 0 6px; &:hover { color: var(--ink); border-color: var(--ink-3); } }
 }
 
 // `?perf=1` time-to-render panel (dev/PerfOverlay.tsx). Sits where the help

@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DEFAULT_STORE } from './stores'
-import type { PrefixStat } from './stagedTree'
 
 // Client for the deletion-plan API (specs/staged-delete.md; the OA build plan
 // `sweep-plan-union.md`). The opt-in trash model: a trash gesture *stages*
@@ -95,25 +94,6 @@ export function useStagedPlan(live = false) {
     queryKey: ['plans', 'staged'],
     queryFn: () => call<StagedPlan>('/api/plans/staged'),
     refetchInterval: live ? 20_000 : false,
-  })
-}
-
-/** Sizes, dates and owners of `prefixes` at scan `date` — one batched index
- *  read (`POST /api/prefix-stats`), chunked under its per-request cap. */
-export function usePrefixStats(date: string, prefixes: string[]) {
-  const key = [...prefixes].sort()
-  return useQuery<Record<string, PrefixStat>, Error>({
-    queryKey: ['prefix-stats', date, key],
-    enabled: !!date && key.length > 0,
-    staleTime: 5 * 60_000,
-    queryFn: async () => {
-      const out: Record<string, PrefixStat> = {}
-      for (let i = 0; i < key.length; i += 1000) {
-        const r = await call<{ stats: Record<string, PrefixStat> }>('/api/prefix-stats', 'POST', { date, prefixes: key.slice(i, i + 1000) })
-        Object.assign(out, r.stats)
-      }
-      return out
-    },
   })
 }
 
