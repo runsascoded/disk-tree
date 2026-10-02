@@ -52,7 +52,8 @@ class JobAccount(ComponentResource):
     `actors` are account emails granted `serviceAccountUser` on it. A job account
     is its own actor (`acts_as_self`): Cloud Scheduler calls Batch with its token,
     and the Batch job that call submits runs as this same account. A dispatcher
-    (e.g. the site's sweep console) is another.
+    (e.g. the site's sweep console) is another; when this stack creates it, pass
+    it in `actor_deps` so the binding waits for the account to exist.
     """
 
     def __init__(
@@ -64,6 +65,7 @@ class JobAccount(ComponentResource):
         display_name: str,
         roles: list[str],
         actors: list[str] = (),
+        actor_deps: list[pulumi.Resource] = (),
         description: str | None = None,
         acts_as_self: bool = True,
         adopt: Adopt,
@@ -99,7 +101,7 @@ class JobAccount(ComponentResource):
                 service_account_id=self.account.name,
                 role=act,
                 member=f"serviceAccount:{actor}",
-                opts=adopt.opts(existing, f"{sa_path} {act} serviceAccount:{actor}", parent=self),
+                opts=adopt.opts(existing, f"{sa_path} {act} serviceAccount:{actor}", parent=self, depends_on=list(actor_deps)),
             )
         self.register_outputs({"email": self.email})
 
