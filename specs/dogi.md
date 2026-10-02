@@ -53,6 +53,16 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 - Route → meta: exact `{title, desc, image path}` per page shape, from URL fixtures.
 - Card SVG: structural snapshot on a fixture tree (rect count, labels present), plus a PNG render smoke test.
 
+## Implementation
+
+**Phase 1a (map cards, anonymous tier): built.**
+- `functions/_lib/og/sign.ts`: one key, HMAC(`SESSION_SECRET`, `og-card:v1`). Tags are HMAC-SHA256 truncated to 64 bits, base64url (11 chars); expiries are whole days since 2026-01-01, packed into 2 base64url chars. An image URL is `/og/<kind>.png?<view>&sig=<t><ee><tag>` (14 chars; `t` = `a`/`f` tier). A view token is `og=<ee><tag>` (13 chars). Test vectors are checked against Python's `hmac`.
+- `routes.ts` maps a page URL to its kind, its canonical view params and title. `card.ts` draws the SVG (anon: no tile labels, no legend). `data.ts` reads the page's own view (`buildView` at the card's 1120×410 box, `maxDepth: 2`), applies the live ledger as the map does, and colours by the scan's owner rank. `render.ts` is resvg-wasm (vendored `vendor/resvg.wasm`, imported as a module) with Inter 400/600 from `public/_fonts/`.
+- `functions/_middleware.ts` stamps every HTML response's meta (`stampPage`) when `OG_CARDS` is set. `functions/og/[[path]].ts` verifies and renders, cached in the colo cache under the signed URL plus the ledger head. `public/_routes.json` keeps `/assets/*` and fonts off the Functions.
+- `src/ownerIndex.ts`: the ledger's resolver, moved out of `owners.ts` (React-free) so the cards fold it exactly as the map does.
+
+**Next:** 1b view tokens (mint endpoint, D1 `og_tokens`, the share button); 2 the other pages' cards; 3 the Slack image block.
+
 ## Rollout
 
 `site/deploy --dev` first; check unfurls with Slack's link fetcher UA and a real paste in a test DM. Prod after Ryan's go.
