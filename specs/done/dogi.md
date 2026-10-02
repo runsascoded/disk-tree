@@ -1,6 +1,6 @@
 # Dynamic OG images for every page
 
-Status: proposed 2026-10-02 (gcs session); revised the same day to two tiers (anonymous shape-only cards, full-info by minted per-view token). Code is `[cloud]`; each deployment opts in.
+Status: built 2026-10-02 (gcs session), on dev; prod and the gcs D1 migration `0034` await Ryan's go. Two tiers: anonymous shape-only cards, full-info by minted per-view token. Code is `[cloud]`; each deployment opts in.
 
 ## Why
 
@@ -74,7 +74,12 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 - `/assignments`: the matrix as a heatmap (`Grid`; names only on a full card).
 - These pages' Functions already stamp a title with counts, so the middleware swaps only their image.
 
-**Next:** 3 the Slack image block.
+**Phase 3 (Slack): built.** The staged-plan parent message ends with an `image` block: the plan's full-tier `/staged` card (`stagedCardUrl`, signed for 7 days). The view carries the plan digest (`v=`), so a new batch is a new URL; Slack fetches an image once per URL. Existing threads pick it up on their next event, or on `POST /api/plans/:id/slack`.
+
+**Open at hand-off (2026-10-02):**
+- gcs D1 `0034_og_tokens` isn't applied anywhere remote. Until it is, minting answers 501 and every card is anonymous. Dev shares prod's D1, so the full tier hasn't been seen live; it's covered by tests and a local render.
+- Prod isn't deployed. Dev (`dev.gcs.oa.dev`) runs all three phases with `OG_CARDS` on.
+- Measured on dev: cold renders 0.5–2.9 s per card (the view read dominates; the rasterize is ~100–200 ms), cached about 60 ms.
 
 ## Rollout
 

@@ -14,6 +14,7 @@ import type { Env } from './auth.js'
 import { pathScans, storeReady } from './index.js'
 import { prefixesAt } from './prefixes.js'
 import { pathTree } from './pathTree.js'
+import { expDay, IMAGE_TTL_DAYS, imagePath, ogKey } from './og/sign.js'
 import { loadRegistry } from './identity.js'
 
 export type { RunRow }
@@ -44,6 +45,8 @@ export interface ParentView {
   mentions?: Record<string, string>
   /** The staged set's size at the latest scan. */
   size?: Sized
+  /** The plan's share card (a signed, full-tier `/og/staged.png` URL). */
+  image?: string
 }
 
 /** A staged set at one scan: totals and its largest owners (labels are
@@ -115,6 +118,7 @@ export function renderParent(v: ParentView): { text: string; blocks: unknown[] }
     { type: 'section', text: { type: 'mrkdwn', text: `${title}\n${by}` } },
     { type: 'section', text: { type: 'mrkdwn', text: `${dryLine}${realLine}${hint}` } },
     { type: 'actions', elements: buttons },
+    ...(v.image && v.items ? [{ type: 'image', image_url: v.image, alt_text: `Plan #${v.planId}: the staged prefixes as a treemap, coloured by owner` }] : []),
   ]
   return { text: `Staged for deletion: plan #${v.planId}, ${v.items} prefixes`, blocks }
 }
@@ -156,6 +160,15 @@ export function runEvent(r: RunRow, phase: 'dispatched' | 'finished' | 'failed',
 export type NotifyEnv = SlackEnv & { GCP_SA_KEY?: string }
 
 interface Event { text: string; blocks?: unknown[]; sender?: Sender }
+/** The plan's full-tier card for the parent message, or null when the
+ * deployment draws no cards. Slack fetches it once per URL, so the view
+ * carries the plan's digest (`v`): a new batch is a new image. */
+export async function stagedCardUrl(env: NotifyEnv & { OG_CARDS?: string; SESSION_SECRET?: string }, siteUrl: string, digest: string): Promise<string | null> {
+  if (!env.OG_CARDS || !env.SESSION_SECRET || !siteUrl) return null
+  const key = await ogKey(env.SESSION_SECRET)
+  return siteUrl + await imagePath(key, 'staged', { v: digest.slice(0, 8) }, 'full', expDay(Math.floor(Date.now() / 1000), IMAGE_TTL_DAYS))
+}
+
 /** A stage batch's reply, rendered here so it can carry mentions and sizes. */
 export interface StageArgs { stage: Omit<Parameters<typeof stageEvent>[0], 'mentions' | 'size'> }
 
@@ -307,7 +320,7 @@ export async function notifyPlan(env: NotifyEnv, db: D1Database, planId: number,
       sizeStaged(full, db, items).catch(() => null),
       stage ? sizeStaged(full, db, stage.prefixes).catch(() => null) : Promise.resolve(null),
     ])
-    const parent = renderParent({ ...v, mentions, size: size ?? undefined })
+    const parent = renderParent({ ...v, mentions, size: size ?? undefined, image: await stagedCardUrl(env, siteUrl, v.digest) ?? undefined })
     const people = stage ? await slackPeople(env, [stage.by]) : {}
     const event: Event | undefined = stage
       ? { ...stageEvent({ ...stage, mentions, size: stageSize ?? undefined }), sender: personSender(stage.by, people[stage.by.toLowerCase()], 'staged') }

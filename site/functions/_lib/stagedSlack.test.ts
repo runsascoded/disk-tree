@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { PLAN_SENDER, fmtBytes, nameSlug, personSender, renderParent, runEvent, stageEvent, type RunRow } from './stagedSlack.js'
+import { PLAN_SENDER, fmtBytes, nameSlug, personSender, renderParent, runEvent, stageEvent, stagedCardUrl, type RunRow } from './stagedSlack.js'
+import { ogKey, verifyImage } from './og/sign.js'
 
 const run = (o: Partial<RunRow>): RunRow => ({
   run_id: 'cw-sweep-dry-1', mode: 'dry', scan: '2026-09-28T1201', actor: 'ann@openathena.ai', started_ts: 100,
@@ -90,5 +91,26 @@ describe('senders', () => {
       { username: 'c.d · staged', icon_emoji: ':bust_in_silhouette:' },
       { username: 'Staged deletions', icon_emoji: ':wastebasket:' },
     ])
+  })
+})
+
+describe('the plan card', () => {
+  const base = { planId: 7, siteUrl: 'https://site.example.org', items: 3, batches: 2, stagers: [] as string[], digest: 'D1', actions: true, closed: false, runs: [] as RunRow[] }
+  const types = (blocks: unknown[]) => blocks.map(b => (b as { type: string }).type)
+  it('an image block last, only with an image and items', () => {
+    const v = { ...base, image: 'https://site.example.org/og/staged.png?v=abc&sig=x' }
+    expect([types(renderParent(v).blocks), renderParent(v).blocks[3], types(renderParent({ ...v, items: 0 }).blocks), types(renderParent(base).blocks)]).toEqual([
+      ['section', 'section', 'actions', 'image'],
+      { type: 'image', image_url: 'https://site.example.org/og/staged.png?v=abc&sig=x', alt_text: 'Plan #7: the staged prefixes as a treemap, coloured by owner' },
+      ['section', 'section', 'actions'],
+      ['section', 'section', 'actions'],
+    ])
+  })
+  it('a full-tier signed URL keyed by the plan digest; none without cards', async () => {
+    const env = { OG_CARDS: '1', SESSION_SECRET: 's3cret' }
+    const url = (await stagedCardUrl(env, 'https://site.example.org', 'abcdef0123456789'))!
+    const v = await verifyImage(await ogKey('s3cret'), new URL(url), Math.floor(Date.now() / 1000))
+    expect([url.replace(/sig=.*/, 'sig=…'), 'error' in v ? v : [v.kind, v.params, v.tier], await stagedCardUrl({ SESSION_SECRET: 's3cret' }, 'https://site.example.org', 'x')])
+      .toEqual(['https://site.example.org/og/staged.png?v=abcdef01&sig=…', ['staged', { v: 'abcdef01' }, 'full'], null])
   })
 })
