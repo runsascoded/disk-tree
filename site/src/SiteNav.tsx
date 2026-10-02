@@ -25,6 +25,7 @@ import { AUTH_MODE, signInUrl, useCanAssign, useIdent, useSignOut } from './auth
 import { useRegistry } from './identities'
 import { REPO_URL } from './SiteKbd'
 import { useMyUser, useUserEmails } from './owners'
+import ProfileModal from './ProfileModal'
 import TokenModal from './TokenModal'
 import { UserCard, ghHandle, shortName } from './UserChip'
 import { useUnits } from './units'
@@ -221,6 +222,7 @@ function UserMenu() {
   const myUser = useMyUser(ident?.email, ownersOn)
   const emails = useUserEmails(ownersOn)
   const [tokenOpen, setTokenOpen] = useState(false)
+  const [profileOpen, setProfileOpen] = useState(false)
   const { units, suffixB, toggleUnits, toggleSuffixB } = useUnits()
   const m = useMenu('bottom-end')
   // Public deploys have no auth — no sign-in affordance.
@@ -234,6 +236,7 @@ function UserMenu() {
   return (
     <>
       {tokenOpen && <TokenModal onClose={() => setTokenOpen(false)} />}
+      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
       <button type="button" className="tb-avatar" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label={`Signed in as ${dispName}`} title={dispName}>
         {guest || ident.avatar
           ? <Avatar src={ident.avatar} name={dispName} size={26} />
@@ -257,6 +260,11 @@ function UserMenu() {
                   Trailing B: <b>{suffixB ? 'On' : 'Off'}</b> <span className="dim">({units === 'iec' ? 'Ti' : 'T'}{suffixB ? 'B' : ''})</span>
                 </button>
               </Explain>
+              {!guest && (
+                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setProfileOpen(true) }}>
+                  Profile…
+                </button>
+              )}
               {canAssign && (
                 <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setTokenOpen(true) }}>
                   Agent / CLI Token…
@@ -303,9 +311,9 @@ function SessionLines({ email, user, emails }: { email: string; user: string | n
           {aliases.length > 0 && <div>aliases: {aliases.map(a => <code key={a}>{a}</code>)}</div>}
           {others.length > 0 && <div>also signs in as: {others.map(e => <code key={e}>{e}</code>)}</div>}
         </>
-      ) : (
+      ) : DEFAULT_STORE.owners ? (
         <div className="uc-warn">Not mapped to a user in the identity registry — the “me” owner filter won't resolve; ping Ryan.</div>
-      )}
+      ) : null}
     </div>
   )
 }
