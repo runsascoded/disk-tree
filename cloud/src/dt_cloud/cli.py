@@ -537,6 +537,58 @@ def healthcheck(date: str | None, max_age_days: int, as_json: bool, subdir: str 
         raise SystemExit(1)
 
 
+@main.command()
+@option("-b", "--budget", default=None, type=float, help="Fail a scenario whose slowest request exceeds this many seconds")
+@option("-c", "--cold", is_flag=True, help="Key subtree and diff reads past the edge cache (a random `minArea` ≈ the default), to measure uncached cost")
+@option("-j", "--json", "as_json", is_flag=True, help="Emit the run record (every request) as JSON to stdout")
+@option("-o", "--out", default=None, help="Write the run record to this path or prefix (`…/` or `gs://…/` → `<prefix><ts>.json`)")
+@option("-q", "--hit", default=None, help="Filter term the filter-hit scenario searches for (default: the largest bucket's largest child)")
+@option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ (default: $SNAPSHOTS_SUBDIR)")
+@option("-S", "--serial", is_flag=True, help="Send each scenario's requests one at a time (default: concurrently, as a page load does)")
+@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
+@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+def probe(budget: float | None, cold: bool, as_json: bool, out: str | None, hit: str | None, subdir: str | None, serial: bool, token: str | None, url: str | None) -> None:
+    """Replay the site's page loads (root, largest bucket, a matching and a
+    non-matching path filter) against a live deployment.
+
+    Each scenario's API requests go out concurrently, like the browser's, and
+    each response's status, wall time, edge-cache tier and server time is
+    recorded. Exits nonzero on any 5xx or transport failure (and on a scenario
+    over `--budget`). `-o` keeps the record, so a prefix of runs is a latency
+    time series.
+    """
+    import fsspec
+
+    import random
+
+    from .probe import cold_min_area, http_fetch, record, resolve_targets, run, scenarios, summarize
+    from .site import creds
+
+    base, tok = creds(token, url)
+    if not tok:
+        raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN")
+    sub = subdir if subdir is not None else os.environ.get("SNAPSHOTS_SUBDIR", "")
+    fetch = http_fetch(base, tok)
+    t = resolve_targets(fetch, sub, hit)
+    min_area = cold_min_area(random.Random()) if cold else ""
+    err(f"probe {base} @ {t.date} (vs {t.prev}; bucket {t.bucket}; filter hit {t.hit!r}{'; cold' if cold else ''})")
+    results = run(fetch, scenarios(t, min_area), parallel=not serial)
+    ok, lines = summarize(results, round(budget * 1000) if budget is not None else None)
+    for line in lines:
+        err(line)
+    err("PASS" if ok else "FAIL")
+    rec = {**record(base, t, results), "cold": cold}
+    if out:
+        path = f"{out}{rec['ts']}.json" if out.endswith("/") else out
+        with fsspec.open(path, "w") as fh:
+            json.dump(rec, fh)
+        err(f"wrote {path}")
+    if as_json:
+        print(json.dumps(rec, indent=2))
+    if not ok:
+        raise SystemExit(1)
+
+
 def bucket_sources(specs: tuple[str, ...], default_bucket: str) -> list[tuple[str, str]]:
     """`<bucket>=<layer-2 parquet>` pairs → [(bucket, path)]; a bare path is
     ``default_bucket``'s (the single-bucket form)."""
