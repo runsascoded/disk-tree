@@ -1,16 +1,21 @@
 # Dynamic OG images for every page
 
-Status: proposed 2026-10-02 (gcs session). Code is `[cloud]`; each deployment opts in.
+Status: proposed 2026-10-02 (gcs session); revised the same day to two tiers (anonymous shape-only cards, full-info by minted per-view token). Code is `[cloud]`; each deployment opts in.
 
 ## Why
 
 Links to the site are pasted into Slack all day (the staged-deletion thread, #marin-alerts, DMs). Today every page unfurls with one static `og.jpg`, plus a title and counts (`functions/_lib/unfurl.ts`). Ryan wants each link's card to show *that view*: the map at that path, scan, filter and lens; the staged plan; a user's estate. The staged-plan Slack thread should carry the same image.
 
-## Decision: what an unsigned fetch may see
+## Decision: two tiers of card
 
-Unfurlers (Slackbot, iMessage, Discord) fetch without signing in. Ryan chose (2026-10-02) that cards show the full view: treemap, byte totals, owner colours and names, as a signed-in viewer sees that page. Anyone holding a page link can therefore see that page's card. Two limits:
+The first draft gave any unsigned fetch the full view. Ryan caught the hole (2026-10-02): a page fetch hands out a signed image for *that* page, child names included, so a scraper could walk the whole fleet tree, sizes and all, one card at a time. Signing image URLs stops forgery, not enumeration.
 
-- **Signed, expiring image URLs.** `og:image` is `/og/<kind>.png?<view params>&exp=<unix>&sig=<hmac>`. The signature covers the canonical view params and `exp`, keyed by a secret the deployment already holds (derive a sub-key, e.g. HKDF or HMAC(`og-image`, <existing secret>), so no new secret is needed). Default lifetime 7 days. Unsigned, tampered or expired → 403. So images can't be guessed or enumerated, only obtained by fetching a page.
+- **Anonymous card (the default for every page fetch):** the view's treemap as shapes with **no labels**, its total size, the scan date and the page title. Owner colours without a named legend. Nothing on it names a child, so it can't be walked. (A guessed path still reveals whether it exists and its size; accepted. Optionally, unknown or empty paths get the generic card.)
+- **Full-info card, only for an explicitly shared link:** labels, sizes and owner names, as a signed-in viewer sees the view.
+  - A signed-in viewer mints it from a "share with preview" button (and a use-kbd action). The server returns the page URL plus `og=<token>`. The token is an HMAC (deployment key, derived from an existing secret) over the **canonical view**: path, scan, filter, lens, colour and expiry. A token is valid for that exact view only: not a child, parent or sibling, and not other params.
+  - Each mint is recorded in D1 (who, view, when, expiry) for audit and per-token revocation, like minted share links. `/admin` lists them.
+  - Server-side posts (the staged-plan Slack thread) mint their own full-info link.
+- **Image URLs stay signed and expiring in both tiers** (`/og/<kind>.png?<view>&tier=anon|full&exp&sig`). The signature covers the tier, so an anonymous image URL can't be upgraded.
 - **The page shell stays as today:** an anonymous fetch gets the SPA shell with meta stamped, never data beyond the card.
 
 ## Pages and their cards
@@ -19,7 +24,7 @@ Unfurlers (Slackbot, iMessage, Discord) fetch without signing in. Ryan chose (20
 
 | Page | Card |
 |---|---|
-| `/` and `/<bucket>/<path…>` (+ `date`, `f` filter, `o` owner lens, `c` colour, `from` diff) | the treemap of that view, coloured as the page colours it (owner by default); totals; the filter text if any |
+| `/` and `/<bucket>/<path…>` (+ `date`, `f` filter, `o` owner lens, `c` colour, `from` diff) | the treemap of that view, coloured as the page colours it (owner by default); totals; the filter text if any. Anonymous tier: unlabelled shapes + total |
 | `/staged` (+ `q`, `s`) | treemap of the staged set (filtered), coloured by owner; "N prefixes · X TiB · M objects"; top owners |
 | `/users` | per-user bars (top ~12 by bytes) |
 | `/user/<id>` | that user's estate treemap + total |
@@ -43,6 +48,7 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 
 ## Tests
 
+- Tiers: the anonymous card's SVG contains no path names (assert the exact text nodes); a view token verifies only for its exact canonical view (child, parent, sibling, changed param, expired, revoked → anonymous card).
 - Signing: exact canonicalisation (param order, defaults dropped), verify accepts the signed URL, rejects tampered params, a wrong sig and an expired `exp`.
 - Route → meta: exact `{title, desc, image path}` per page shape, from URL fixtures.
 - Card SVG: structural snapshot on a fixture tree (rect count, labels present), plus a PNG render smoke test.
