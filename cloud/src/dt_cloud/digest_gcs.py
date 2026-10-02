@@ -180,6 +180,10 @@ class Gcs:
     def units(self, rows: list[Scan], variant: str, platform: str = "slack") -> list[Unit]:
         return [Unit(r.date, r.date, reply(r, self.cfg, platform)) for r in rows]
 
+    def provisional(self, rows: list[Scan], variant: str) -> None:
+        """A reply per scan is never provisional."""
+        return None
+
     def render_plot(self, rows: list[Scan], month: dt.date, out: Path, root: str | None = None) -> None:
         """The storage-class mosaic (needs the `[plot]` extra — matplotlib)."""
         from .digest_plot import render_tiers

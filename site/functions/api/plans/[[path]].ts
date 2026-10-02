@@ -18,7 +18,7 @@
 import type { D1Database } from "@cloudflare/workers-types"
 import { type Ctx, type Env as AuthEnv, json, requireAdmin, requireStager, requireViewer } from "../../_lib/auth.js"
 import { audit, canonicalPrefix, openPlanId, planDetail, type PlanRow, type PrefixShape, prefixShape, stageItems } from "../../_lib/plans.js"
-import { notifyPlan, stageEvent, type NotifyEnv } from "../../_lib/stagedSlack.js"
+import { notifyPlan, refreshThread, type NotifyEnv } from "../../_lib/stagedSlack.js"
 
 type Env = AuthEnv & NotifyEnv & { DB?: D1Database }
 type Bg = (p: Promise<unknown>) => void
@@ -158,7 +158,7 @@ export const onRequest = async (ctx: Ctx & { env: Env; waitUntil?: Bg }): Promis
     if (res.staged.length) {
       const siteUrl = new URL(ctx.request.url).origin
       background(ctx, notifyPlan(ctx.env, db, res.plan_id, siteUrl,
-        stageEvent({ planId: res.plan_id, batchId: res.batch_id, by, prefixes: res.staged, covered: res.covered.length, note, siteUrl })))
+        { stage: { planId: res.plan_id, batchId: res.batch_id, by, prefixes: res.staged, covered: res.covered.length, note, siteUrl } }))
     }
     return json(res, 201)
   }
@@ -177,6 +177,18 @@ export const onRequest = async (ctx: Ctx & { env: Env; waitUntil?: Bg }): Promis
       return gated instanceof Response ? gated : closePlan(db, (gated.email ?? gated.name ?? 'guest'), id, await readBody(ctx.request))
     }
     return json({ error: "method not allowed" }, 405)
+  }
+
+  // /api/plans/:id/slack — admin: re-render the plan's Slack thread (parent,
+  // and the stage-batch replies named by `{ replies: { <batch_id>: <ts> } }`),
+  // e.g. after the message format changes. Edits don't notify anyone.
+  if (segs.length === 2 && segs[1] === "slack" && method === "POST") {
+    const gated = await requireAdmin(ctx)
+    if (gated instanceof Response) return gated
+    const body = await readBody(ctx.request)
+    const replies = (body.replies && typeof body.replies === "object" ? body.replies : {}) as Record<string, unknown>
+    const ok = Object.entries(replies).filter((e): e is [string, string] => /^\d+$/.test(e[0]) && typeof e[1] === "string" && /^\d+\.\d+$/.test(e[1]))
+    return json(await refreshThread(ctx.env as NotifyEnv, db, id, new URL(ctx.request.url).origin, Object.fromEntries(ok.map(([b, t]) => [Number(b), t]))))
   }
 
   // /api/plans/:id/items — admins curate; on a staging deployment a stager

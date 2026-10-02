@@ -1,6 +1,8 @@
 /**
  * Actions ledger (specs/actions-ledger.md): attribution as an append-only WAL.
  *
+ *   GET  /api/actions?log=1    → { total, rows: [...] } — every owner action,
+ *                                newest first, with its status (actionLog.ts).
  *   GET  /api/actions          → { owners: [...] } — the live expanded owner
  *                                rows joined to their raw action's
  *                                provenance; the client folds them
@@ -18,6 +20,7 @@
 import { type Ctx, json, requireAdmin, requireViewer } from '../_lib/auth.js'
 import { primaryOnly } from '../_lib/stores.js'
 import { canonId, loadRegistry } from '../_lib/identity.js'
+import { actionLog } from '../_lib/actionLog.js'
 
 /** gs://marin-<suffix>/<path>/ — the six marin buckets only, dir prefixes only. */
 const PREFIX_RE = /^gs:\/\/marin-[a-z0-9-]+\/(?:[^\s]*\/)?$/
@@ -63,6 +66,12 @@ export const onRequest = async (ctx: Ctx): Promise<Response> => {
   if (request.method === 'GET') {
     const gated = await requireViewer(ctx)
     if (gated instanceof Response) return gated
+    // `?log=1[&limit=&offset=]`: every owner action newest first, with its
+    // status (live / superseded / overridden / retracted) — the audit view.
+    const u = new URL(request.url)
+    if (u.searchParams.get('log')) {
+      return json(await actionLog(env, Number(u.searchParams.get('limit') ?? 50), Number(u.searchParams.get('offset') ?? 0)))
+    }
     const owners = await env.DB.prepare(
       'SELECT o.prefix, o.owner, o.ts, a.actor AS who, a.memo, a.id AS action_id ' +
       'FROM owner_prefixes o JOIN actions a ON a.id = o.action_id ' +
