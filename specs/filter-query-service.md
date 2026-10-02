@@ -39,6 +39,8 @@ The Worker stays the front door. The service is a backend it calls only when its
 
 The client may show the Worker's partial first paint while the exact answer loads (the existing `firstPaint` mechanism), flagged as such.
 
+**Engine override.** `qe=auto|service|worker` on the page URL, passed through to the API (default `auto`, the flow above). `qe=service` always forwards to `dt-query`, for verifying its answers. `qe=worker` never forwards; its answer is flagged as before. Every filtered response names the engine that answered and its time (`engine: worker|service`, plus `server-timing`).
+
 ## 4. The service
 
 - **Runtime:** Cloud Run (gen2), Python + DuckDB, one container image built from `cloud/` (a `dt-cloud serve-query` command), so the AST evaluator is shared with the job's code and tested alongside it.
@@ -47,6 +49,7 @@ The client may show the Worker's partial first paint while the exact answer load
 - **Evaluation:** names first, `path` as the fallback.
   - **Hot generations (with sidecars):** the names vocabulary (127M names, 1.45 GiB compressed on gcs 10-01) is pinned decoded in instance memory per hot generation (a few GB). The AST's segment terms are evaluated against it with vectorised `contains`/`ILIKE`, or `regexp_matches` for the regex syntax (~1–2 s warm). Matching name ids then map to rows by range reads: v2 `rows` is name-major, and v1 lists each name's `path` row groups.
   - **Unindexed generations:** a scan of the `path` column with the AST compiled to SQL, using predicate pushdown on `depth`/`path` ranges for a drilled view root. That's a cold scan of several GB (estimate 10–30 s), so it is the fallback, flagged slow in the UI while it runs.
+  - **Roots first:** the search's job is the outermost match roots only; anything under a matching directory is that root's contents, never a separate match. Candidates are checked shallowest-first, and a candidate under an already-found root is skipped before its rows are read. Drawing then reads only what is inside the roots above the view's threshold, level by level, never whole subtrees.
   - **Match volume:** matched rows are grouped by parent directory first (the `(depth, path)` sort clusters siblings). Where a whole directory matches, its existing dir aggregate is used instead of expanding its files. Match roots are an anti-join of matched paths against matched ancestors. The drawn tree is a `GROUP BY` over ancestors, cut at the view's threshold as `view.ts` does. The match-roots list in the response is capped with a total count (e.g. `roots: 1,071+`), like the series chart's cap.
   - So sidecars aren't needed for correctness, but they make the service fast. That feeds the retention decision: hot scans get sidecars, older ones take the `path` fallback.
 - **Input:** only the AST as JSON, validated against a strict schema. No raw SQL, and no regex passed through except as an AST matcher compiled by the service. On large stores the `regex` syntax is service-only, since `regexp_matches` over the vocabulary is cheap there but unbounded in a Worker.
@@ -57,6 +60,8 @@ The client may show the Worker's partial first paint while the exact answer load
 
 - **Cold starts:** `min-instances=0` keeps the idle cost near zero, but the first heavy query after idle waits for container start plus loading the vocabulary (estimate 10–20 s). A warm-up ping from the daily job after each scan publishes (beside `warm-cache`) pre-loads the new generation, so the day's first real query isn't the cold one. `min-instances=1` at 4 vCPU / 16 GiB is roughly $150–250/month always-on. Start at 0 with the ping, and measure.
 - **Egress:** none. Same region as the data bucket (`us-east1`), so the service should run in `us-east1`, not the job's `us-central1`.
+- **Idle behaviour (Cloud Run):** the idle period before scale-in isn't configurable. An idle instance is kept for up to about 15 minutes after its last request, then removed. The knobs are `min-instances` (warm capacity, billed always) and CPU allocation (request-only vs always). A schedule could raise `min-instances` to 1 during working hours only.
+- **Admin status:** an admin panel shows the service's state, read through the Worker from Cloud Run's monitoring metrics: instance count (warm or cold), last request, and recent query latencies by engine. It also has a "warm up" button that loads the latest generation.
 - **Interaction with the search sidecars:** the service is exact without them (the `path` fallback), but they make it fast: its names-first path reads them, and they keep selective queries in the Worker. Retention is then "how many recent scans get the fast path", not a correctness question.
 - **What it doesn't fix:** plain (unfiltered) views and diffs still run in the Worker. Their remaining cost is decode CPU (pure-JS zstd), tracked separately.
 
@@ -69,6 +74,9 @@ The client may show the Worker's partial first paint while the exact answer load
 4. **Measure on gcs**, then decide `min-instances`, and the sidecar retention window (the root session's proposal: last ~7 scans plus pinned dates).
 
 ## 7. Open questions
+
+- **Skewing the Worker's index:** if the index covers only names that can be drawn (largest occurrence over a size floor) or that sit at shallow depth, it shrinks a lot. Everything else is exact via the service. Phase 0 measures the sizes; `filter-query-service-p0.md` will have the numbers.
+- **Factoring hash-like names:** templating digit and hex runs (`shard-#-of-#`) could collapse much of the 127M-name vocabulary. A query with digits then verifies exactly against the real names. Phase 0 measures how many templates result.
 
 - **Diff on two scans:** one DuckDB query over both generations (simpler, and keeps the join exact), at the cost of pinning both vocabularies.
 - **User-lens queries with claims:** the service needs the ledger's claims (D1). Simplest: the Worker passes the relevant claim regions in the request, as it already computes them.
