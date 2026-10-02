@@ -10,6 +10,8 @@ import { useStore } from './store'
 import { STORES } from './stores'
 import { useTheme } from './theme'
 import { useUnits } from './units'
+import { useCanStage } from './auth'
+import { shareLabel, useSharePreview } from './sharePreview'
 
 export const REPO_URL = 'https://github.com/Open-Athena/marin-gcs-usage'
 const CW_URL = 'https://cw-s3.oa.dev/'
@@ -46,7 +48,10 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
     [store.path, 'Map (home)'],
     ['/users', 'Users — storage by owner'],
   ]
+  const canShare = useCanStage()
+  const { share, status: shareStatus } = useSharePreview()
   useActions({
+    ...(canShare ? { 'share:preview': { label: shareLabel(shareStatus), group: 'Share', handler: () => void share() } } : {}),
     'help:toggle': {
       label: `Help line: ${help} (toggle)`,
       group: 'View',

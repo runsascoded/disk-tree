@@ -61,7 +61,13 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 - `functions/_middleware.ts` stamps every HTML response's meta (`stampPage`) when `OG_CARDS` is set. `functions/og/[[path]].ts` verifies and renders, cached in the colo cache under the signed URL plus the ledger head. `public/_routes.json` keeps `/assets/*` and fonts off the Functions.
 - `src/ownerIndex.ts`: the ledger's resolver, moved out of `owners.ts` (React-free) so the cards fold it exactly as the map does.
 
-**Next:** 1b view tokens (mint endpoint, D1 `og_tokens`, the share button); 2 the other pages' cards; 3 the Slack image block.
+**Phase 1b (full tier by view token): built; needs gcs migration `0034_og_tokens` applied to prod D1 (Ryan's go).**
+- `migrations/gcs/0034_og_tokens.sql`: one row per mint (token, kind, canonical view, page, minter, minted, expiry day, revoked by/at). A new table with no references. Tested on the full gcs lineage with foreign keys on (`tokens.test.ts` via `testD1`; `storeMigration.test.ts` lists it).
+- `POST /api/og/mint {url, days?}` (full viewers, not read-only guest links: a token outlives the session; default 30 days, max 90) → the page URL with `og=<token>`. `GET /api/og/tokens` and `DELETE /api/og/tokens/<token>` are admin-only.
+- The middleware upgrades to `full` only when `og=` was minted for exactly this view, is unexpired, and has a live D1 row. The full image URL never outlives the token. Without the table (cw), no token is honoured.
+- UI: "Copy link with preview" in the site menu and the omnibar (`share:preview`); `/admin` lists mints with revoke ("Preview links").
+
+**Next:** 2 the other pages' cards; 3 the Slack image block.
 
 ## Rollout
 

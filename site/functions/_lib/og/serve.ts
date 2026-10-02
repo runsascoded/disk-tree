@@ -9,6 +9,7 @@ import { mapCard, type Site } from './data.js'
 import { ensureWasm, FONT_FILES, svgToPng } from './render.js'
 import { pageView, type OgKind } from './routes.js'
 import { expDay, IMAGE_TTL_DAYS, imagePath, ogKey, verifyImage, type OgTier } from './sign.js'
+import { fullTier } from './tokens.js'
 
 export type OgEnv = Env & {
   ASSETS: { fetch: (req: Request) => Promise<Response> }
@@ -32,16 +33,21 @@ export function deploymentKey(env: OgEnv): Promise<CryptoKey> | null {
 
 const now = () => Math.floor(Date.now() / 1000)
 
-/** Stamp a page's HTML with its card when it has one. The anonymous tier for
- * every fetch; `full` is the view-token path (phase 1b). */
+/** Stamp a page's HTML with its card when it has one: the anonymous tier for
+ * any fetch, the full tier for a URL carrying this view's live token. */
 export async function stampPage(env: OgEnv, url: URL, html: Response): Promise<Response> {
   if (!env.OG_CARDS) return html
   const pv = pageView(url, siteOf(env).name)
   if (!pv || !DRAWN.has(pv.kind)) return html
-  const key = deploymentKey(env)
-  if (!key) return html
-  const tier: OgTier = 'anon'
-  const image = url.origin + await imagePath(await key, pv.kind, pv.params, tier, expDay(now(), IMAGE_TTL_DAYS))
+  const keyP = deploymentKey(env)
+  if (!keyP) return html
+  const key = await keyP
+  // Full only with an `og=` token minted for exactly this view (and live in
+  // D1); its image URL never outlives the token.
+  const full = await fullTier(env.DB, key, pv.kind, pv.params, url.searchParams.get('og'), now())
+  const tier: OgTier = full ? 'full' : 'anon'
+  const day = Math.min(expDay(now(), IMAGE_TTL_DAYS), full?.day ?? Infinity)
+  const image = url.origin + await imagePath(key, pv.kind, pv.params, tier, day)
   return stampMeta(html, {
     title: pv.title,
     desc: `${siteOf(env).name}: an interactive storage map of this view: who owns what, by size.`,

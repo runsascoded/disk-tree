@@ -21,7 +21,8 @@ import { MdMenu } from 'react-icons/md'
 import { Link, useLocation } from 'react-router-dom'
 import { AboutModal } from './About'
 import { Avatar } from './Avatar'
-import { AUTH_MODE, signInUrl, useCanAssign, useIdent, useSignOut } from './auth'
+import { AUTH_MODE, signInUrl, useCanAssign, useCanStage, useIdent, useSignOut } from './auth'
+import { shareLabel, useSharePreview } from './sharePreview'
 import { useRegistry } from './identities'
 import { REPO_URL } from './SiteKbd'
 import { useMyUser, useUserEmails } from './owners'
@@ -157,6 +158,10 @@ function useMenu(placement: 'bottom-start' | 'bottom-end') {
 function NavMenu({ extra }: { extra?: MenuEntry[] }) {
   const { pathname } = useLocation()
   const canAssign = useCanAssign()
+  // Full viewers mint full-card share links (guest links can't: a token
+  // outlives the session that minted it).
+  const canShare = useCanStage()
+  const { share, status: shareStatus } = useSharePreview()
   const [aboutOpen, setAboutOpen] = useState(false)
   const m = useMenu('bottom-start')
   // The subtree's store: its own map (`/meta`), and only the affordances it
@@ -198,6 +203,11 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
                 </>
               )}
               <hr />
+              {canShare && (
+                <Tooltip content="Copies this page's link with a token that makes its preview card (in Slack, iMessage…) show the full view: labels, sizes, owners. Good for this exact view only; admins can revoke it. Plain links preview as unlabelled shapes.">
+                  <button type="button" role="menuitem" className="mi" disabled={shareStatus.state === 'busy'} onClick={() => void share()}>{shareLabel(shareStatus)}</button>
+                </Tooltip>
+              )}
               <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setAboutOpen(true) }}>About — the data, axes &amp; colors</button>
               {extra?.map(e => (
                 <button key={e.key} type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); e.onClick() }}>{e.label}</button>
