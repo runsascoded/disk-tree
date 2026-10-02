@@ -32,6 +32,7 @@ import { QueryHelpTip } from './QueryHelp'
 import { FilterFlags, FilterNote } from './FilterNote'
 import { BulkBar } from './BulkBar'
 import { setCurrentScan, useMyUser, useOwnerIndex, useOwners } from './owners'
+import { applyLedger } from './ledgerOverlay'
 import { MultiSelect } from './MultiSelect'
 import { SiteNav, topbarH } from './SiteNav'
 import type { MenuEntry } from './SiteNav'
@@ -483,7 +484,15 @@ function AppContent() {
   // empty the decorations under a map that is still showing.
   const lastTree = useRef<TreeNode | null>(null)
   if (tree) lastTree.current = tree
-  const mapTree = tree ?? lastTree.current
+  // The live ownership ledger over the scan's attribution (`applyLedger`):
+  // assignments recolor the map and its legend as soon as `/api/actions`
+  // refetches, with no subtree re-read. A user lens is already folded
+  // server-side (`ownerLens`), so it is left as served.
+  const heldTree = tree ?? lastTree.current
+  const mapTree = useMemo(
+    () => (heldTree && ownersMode && ownerMode !== 'user' ? applyLedger(heldTree, ownerIdx, store.scheme, canonId) : heldTree),
+    [heldTree, ownersMode, ownerMode, ownerIdx, store.scheme],
+  )
   // What the map shows vs. what the page asked for: a held previous tree
   // (`mapStale` — dimmed, with a centered marker), or the asked-for tree with
   // a fetch still in flight (`mapBusy` — the full tree filling in behind the

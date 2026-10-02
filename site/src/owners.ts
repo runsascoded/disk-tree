@@ -106,38 +106,40 @@ function foldLatest<R extends { prefix: string; ts: number; action_id: number }>
   return m
 }
 
+export function useOwnerIndex(data: { owners: OwnerRow[] } | undefined): OwnerIndex {
+  return useMemo(() => ownerIndex(data), [data])
+}
+
 /**
  * Lookups are O(depth): a prefix's owner is decided by the newest live row on
  * one of its ancestors-or-self, so `claimOf` walks the ~6 ancestor prefixes
  * and probes a Map — not a scan over every assignment.
  */
-export function useOwnerIndex(data: { owners: OwnerRow[] } | undefined): OwnerIndex {
-  return useMemo(() => {
-    const norm = (uri: string) => (uri.endsWith('/') ? uri : uri + '/')
-    const owners = foldLatest((data?.owners ?? []).map(r => (r.prefix.endsWith('/') ? r : { ...r, prefix: r.prefix + '/' })))
-    // 'gs://b/x/y/' → ['gs://b/', 'gs://b/x/', 'gs://b/x/y/'] (self last).
-    const ancestors = (p: string): string[] => {
-      const out: string[] = []
-      let i = p.indexOf('/', 'gs://'.length)
-      while (i !== -1) {
-        out.push(p.slice(0, i + 1))
-        i = p.indexOf('/', i + 1)
-      }
-      return out
+export function ownerIndex(data: { owners: OwnerRow[] } | undefined): OwnerIndex {
+  const norm = (uri: string) => (uri.endsWith('/') ? uri : uri + '/')
+  const owners = foldLatest((data?.owners ?? []).map(r => (r.prefix.endsWith('/') ? r : { ...r, prefix: r.prefix + '/' })))
+  // 'gs://b/x/y/' → ['gs://b/', 'gs://b/x/', 'gs://b/x/y/'] (self last).
+  const ancestors = (p: string): string[] => {
+    const out: string[] = []
+    let i = p.indexOf('/', 'gs://'.length)
+    while (i !== -1) {
+      out.push(p.slice(0, i + 1))
+      i = p.indexOf('/', i + 1)
     }
-    const claimOf = (uri: string): Owner | null => {
-      const p = norm(uri)
-      let win: OwnerRow | null = null
-      for (const a of ancestors(p)) {
-        const r = owners.get(a)
-        if (r && (!win || newer(r, win))) win = r
-      }
-      return win?.owner != null ? { prefix: win.prefix, who: win.owner, ts: win.ts, by: win.who, memo: win.memo } : null
+    return out
+  }
+  const claimOf = (uri: string): Owner | null => {
+    const p = norm(uri)
+    let win: OwnerRow | null = null
+    for (const a of ancestors(p)) {
+      const r = owners.get(a)
+      if (r && (!win || newer(r, win))) win = r
     }
-    let count = 0
-    for (const r of owners.values()) if (r.owner != null) count++
-    return { claimOf, owners, count }
-  }, [data])
+    return win?.owner != null ? { prefix: win.prefix, who: win.owner, ts: win.ts, by: win.who, memo: win.memo } : null
+  }
+  let count = 0
+  for (const r of owners.values()) if (r.owner != null) count++
+  return { claimOf, owners, count }
 }
 
 /** D1 `user_emails` as an email → canonical-user map (signed-in readers only). */
