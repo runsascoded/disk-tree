@@ -1,6 +1,7 @@
 // The "Share…" dialog (specs/dogi.md): copy this page's link, optionally with
 // a detailed link-preview card (`og=`), or, for admins, as a link that grants
 // read-only access (`key=`, whose preview is detailed too).
+import { FloatingPortal } from '@floating-ui/react'
 import { useEffect, useState } from 'react'
 import { useCanAssign } from './auth'
 import { SHARE_DAYS, useShare, type ShareMode } from './sharePreview'
@@ -17,7 +18,10 @@ export function ShareDialog({ onClose }: { onClose: () => void }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+  // Portaled to <body>: rendered inside the nav, the backdrop would stack under
+  // the page's own panels.
   return (
+    <FloatingPortal>
     <div className="token-backdrop" onClick={onClose}>
       <div className="token-modal share-modal" onClick={e => e.stopPropagation()} role="dialog" aria-label="Share">
         <div className="token-head">
@@ -49,5 +53,6 @@ export function ShareDialog({ onClose }: { onClose: () => void }) {
         {status.state === 'copied' && <code className="share-url">{status.url}</code>}
       </div>
     </div>
+    </FloatingPortal>
   )
 }
