@@ -84,6 +84,8 @@ export interface Env {
   SNAPSHOTS_SUBDIR?: string
   /** Dedicated SA key (Batch submit + actAs the job SA) for the sweep dispatch bridge. */
   GCP_SA_KEY?: string
+  /** The service account dispatched Batch jobs run as (a `[vars]` entry). */
+  JOB_SA?: string
   /** Secondary stores served beside the primary (`_lib/stores.ts`,
    *  specs/multi-store.md): `{<key>: {scope?, vars?, secrets?}}` as JSON. */
   STORES_JSON?: string
