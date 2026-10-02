@@ -187,6 +187,38 @@ def test_day_rows_variants():
         D.day_rows(MONTH, "x", 12)
 
 
+def test_day_rows_provisional():
+    half = D.Month(lead=MONTH.lead, rows=MONTH.rows[:3])  # 9/2 has only its 00:00 scan
+    # the still-open day gets a provisional row over its latest scan, Δ vs the prior day's reply scan
+    assert D.day_rows(half, "sender", 12, provisional=True) == [
+        D.DayRow("2026-09-01", "2026-09-01T1200", 713.0, 8.0, 24.0, E.scan_ts("2026-08-31T1200")),
+        D.DayRow("2026-09-02", "2026-09-02T0000", 712.0, -1.0, 12.0, E.scan_ts("2026-09-01T1200"), provisional=True),
+    ]
+    # a day with its reply scan has none; nor does `body` (its reply is edited intra-day already)
+    assert D.day_rows(MONTH, "sender", 12, provisional=True) == D.day_rows(MONTH, "sender", 12)
+    assert D.day_rows(half, "body", 12, provisional=True) == D.day_rows(half, "body", 12)
+    # a `closed` month (a later month's scan exists): its last day's last scan stands in, no provisional
+    assert D.day_rows(D.Month(lead=half.lead, rows=half.rows, closed=True), "sender", 12, provisional=True)[1] == (
+        D.DayRow("2026-09-02", "2026-09-02T0000", 712.0, -1.0, 12.0, E.scan_ts("2026-09-01T1200"))
+    )
+
+
+def test_provisional_reply():
+    from dataclasses import replace
+
+    half = D.Month(lead=MONTH.lead, rows=MONTH.rows[:3])
+    # a fixed neutral sender + icon (both outlive edits); the numbers so far + their scan's time in the body
+    assert D.Cw(CFG).provisional(half, "sender") == E.Unit("2026-09-02", "2026-09-02T0000", E.Reply(
+        "9/2 · so far",
+        f":arrow_deg-30: **712 TiB (−1.0, 0.1%)** · [as of 00:00Z]({SITE}/?d=260902-0000-12h#over-time) · "
+        f"[02a]({SITE}/marin-us-east-02a?d=260902-0000-12h#over-time): 78.2% of 1P (198.0 Ti free)",
+        icon_emoji=":hourglass_flowing_sand:",
+    ))
+    assert (D.Cw(CFG).provisional(MONTH, "sender"), D.Cw(CFG).provisional(half, "body")) == (None, None)
+    # `reply_hour=0`: every day's first scan is its reply scan, so never a provisional
+    assert D.Cw(replace(CFG, reply_hour=0)).provisional(half, "sender") is None
+
+
 def test_parse_bytes():
     assert [E.parse_bytes(v) for v in (10**15, "910 TiB", "100Ti", "1 PB", "1.5T", "512")] == [10**15, 910 * 1024**4, 100 * 1024**4, 10**15, 15 * 10**11, 512]
     with pytest.raises(ValueError, match="not a size"):
@@ -226,6 +258,7 @@ buckets:
     ({"reply_hour": True}, "digest config reply_hour: expected int, got True"),
     ({"reply_hour": 24}, "digest config reply_hour: 24 is not a UTC hour (0–23)"),
     ({"primary": 7}, "digest config primary: expected str or null, got 7"),
+    ({"provisional": "yes"}, "digest config provisional: expected bool, got 'yes'"),
     ({"template": "s3"}, "digest config template: 's3' is not one of ('gcs', 'cw')"),
 ])
 def test_config_invalid(d: dict, msg: str):

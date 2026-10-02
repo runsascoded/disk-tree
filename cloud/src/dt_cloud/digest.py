@@ -14,17 +14,19 @@ neither intrinsic to one store:
 - ``gcs`` (`digest_gcs`): a reply per scan, the headline as the sender name,
   $/mo by storage class in the body, a storage-class mosaic plot.
 - ``cw`` (`digest_cw`): a reply per UTC day in two variants (``sender``: the
-  headline as the sender name, posted once from the morning scan; ``body``:
-  bold in the body, edited as the day's scans land), multi-bucket `% of quota
+  headline as the sender name, posted once from the morning scan — optionally
+  preceded by a ``provisional`` reply the earlier scans edit; ``body``: bold
+  in the body, edited as the day's scans land), multi-bucket `% of quota
   (free)` clauses when quotas are configured, a quota sparkline + diff
   treemap plot.
 
-A template is a small object (`load`, `op_body`, `units`, `render_plot`);
-this module holds everything else: arrow math, formatters, scan ids and
-`?d=` link tokens, Discord emoji, snapshot listing, state IO, plot hosting
-(`wrangler pages deploy`), and the converge shells (`converge_slack`,
-`converge_discord`, `redo_replies`). Design: specs/digest-unification.md;
-history: specs/done/slack-digest-shape-c.md, specs/cw-slack-digest.md."""
+A template is a small object (`load`, `op_body`, `units`, `provisional`,
+`render_plot`); this module holds everything else: arrow math, formatters,
+scan ids and `?d=` link tokens, Discord emoji, snapshot listing, state IO,
+plot hosting (`wrangler pages deploy`), and the converge shells
+(`converge_slack`, `converge_slack_now`, `converge_discord`,
+`redo_replies`). Design: specs/digest-unification.md; history:
+specs/done/slack-digest-shape-c.md, specs/cw-slack-digest.md."""
 from __future__ import annotations
 
 import datetime as dt
@@ -87,7 +89,10 @@ class DigestConfig:
     repo checkout's); it lands on ``plot_project``'s ``plot_branch``, served at
     ``plot_base`` unless wrangler names its deployment URL. ``primary`` +
     ``buckets`` (cw template) pick the headline bucket and label/quota each;
-    ``prices`` (gcs template) are $/GiB-month by storage-class id."""
+    ``prices`` (gcs template) are $/GiB-month by storage-class id.
+    ``provisional`` (cw ``sender``): post a day's early scans as one
+    provisional reply, edited in place, replaced by the final reply when the
+    day's reply scan lands (see `digest_cw`)."""
 
     template: str
     title: str
@@ -103,6 +108,7 @@ class DigestConfig:
     plot_base: str = ICONS_BASE
     variant: str = "sender"
     reply_hour: int = 12
+    provisional: bool = False
     primary: str | None = None
     buckets: dict[str, Bucket] = field(default_factory=dict)
     prices: dict[str, float] = field(default_factory=dict)
@@ -183,7 +189,7 @@ _SCALAR_TYPES: dict[str, tuple[type, ...]] = {
     "template": (str,), "title": (str,), "site_url": (str,), "root": (str,), "state": (str,),
     "discord_state": (str,), "discord_webhook_env": (str, type(None)), "icons_base": (str,),
     "icons_dir": (str,), "plot_project": (str,), "plot_branch": (str,), "plot_base": (str,),
-    "variant": (str,), "reply_hour": (int,), "primary": (str, type(None)),
+    "variant": (str,), "reply_hour": (int,), "provisional": (bool,), "primary": (str, type(None)),
 }
 
 
@@ -223,7 +229,7 @@ def config_from_dict(d: dict, base: DigestConfig | None = None) -> DigestConfig:
     d = dict(_keys("", d, {f.name for f in fields(DigestConfig)}))
     for k, types in _SCALAR_TYPES.items():
         # bool is an int subclass; `reply_hour: true` is a typo, not hour 1
-        if k in d and (not isinstance(d[k], types) or isinstance(d[k], bool)):
+        if k in d and (not isinstance(d[k], types) or (isinstance(d[k], bool) and bool not in types)):
             want = " or ".join("null" if t is type(None) else t.__name__ for t in types)
             raise ValueError(f"digest config {k}: expected {want}, got {d[k]!r}")
     if d.get("template", "gcs") not in TEMPLATES:
@@ -366,7 +372,8 @@ class Template(Protocol):
     ``variants`` are its reply styles (the first is the default);
     ``edited_variants`` re-edit a day's reply when a later scan of it lands;
     ``track_scan`` stores each posted reply as ``{ts, scan}`` (else the bare
-    ts — the gcs template's existing state format)."""
+    ts — the gcs template's existing state format). ``provisional`` is the
+    still-open unit's stand-in reply (``cfg.provisional``), or None."""
 
     cfg: DigestConfig
     variants: tuple[str, ...]
@@ -377,6 +384,7 @@ class Template(Protocol):
     def n_scans(self, data: Any) -> int: ...
     def op_body(self, data: Any, month: dt.date, plot_url: str | None) -> str: ...
     def units(self, data: Any, variant: str, platform: str = "slack") -> list[Unit]: ...
+    def provisional(self, data: Any, variant: str) -> Unit | None: ...
     def render_plot(self, data: Any, month: dt.date, out: Path, root: str | None = None) -> None: ...
 
 
@@ -412,14 +420,14 @@ def list_scans(root: str) -> list[str]:
     )
 
 
-def load_window(root: str, month: dt.date) -> tuple[list[tuple[str, dict]], list[tuple[str, dict]]] | None:
+def load_window(root: str, month: dt.date, scans: list[str] | None = None) -> tuple[list[tuple[str, dict]], list[tuple[str, dict]]] | None:
     """``(lead, in_month)`` ``(scan id, meta.json)`` pairs for ``month``: the
     month's scans, and ``lead`` = every scan of the last calendar day before it
     (the first delta's baseline; empty for the first month ever). None if the
-    month has no scans."""
+    month has no scans. ``scans``: ``list_scans(root)``, if already listed."""
     import fsspec
 
-    scans = list_scans(root)
+    scans = list_scans(root) if scans is None else scans
     pfx = f"{month:%Y-%m}-"
     in_month = [s for s in scans if s.startswith(pfx)]
     if not in_month:
@@ -509,7 +517,13 @@ def _ts(rec: str | dict) -> str:
 def converge_slack(tpl: Template, root: str, month: dt.date, client, channel: str, variant: str | None = None, *, icons_dir=None, deploy_plot=None, reply_delay: float = 0.0) -> dict:
     """Converge the month's Slack thread: render+host the plot, post/edit the
     OP, then per reply unit post it if none exists — or, on an edited variant,
-    edit it when a later scan has landed. Persist and return state.
+    edit it when a later scan has landed. Then the provisional reply
+    (``cfg.provisional``): delete every one whose unit is no longer open
+    (its final reply just posted, or a delete that failed last run), and
+    post the open unit's — or edit it when a later scan has landed. Persist
+    and return state; the provisional's ``{ts, scan}`` lives under
+    ``state["provisional"][<key>]`` (absent when there is none), so a re-run
+    edits rather than duplicates.
 
     ``icons_dir`` is where to write the PNG; ``deploy_plot(local, basename)``
     publishes it and returns the host serving it (None → ``cfg.plot_base``).
@@ -577,8 +591,50 @@ def converge_slack(tpl: Template, root: str, month: dt.date, client, channel: st
             save_state(path, state)
             _err(f"digest: edited reply {u.key} -> {u.scan}")
 
+    open_ = tpl.provisional(data, variant) if cfg.provisional else None
+    provs = state.setdefault("provisional", {})
+    for key in [k for k in provs if open_ is None or k != open_.key]:
+        try:
+            client.delete(provs[key]["ts"], orphans_ok=True)
+        except Exception as e:  # noqa: BLE001 — the next run retries; a lingering provisional reads `so far`
+            _err(f"digest: WARN could not delete provisional reply {key}: {e}")
+            continue
+        del provs[key]
+        save_state(path, state)
+        _err(f"digest: deleted provisional reply {key}")
+    if open_ is not None:
+        have = provs.get(open_.key)
+        r = open_.reply
+        if have is None:
+            rm = client.post(r.body, thread_id=op_ts, username=r.username, icon_url=r.icon_url, icon_emoji=r.icon_emoji)
+            provs[open_.key] = {"ts": rm.id, "scan": open_.scan}
+            save_state(path, state)
+            _err(f"digest: provisional reply {open_.key} ({open_.scan}) -> {rm.id}")
+        elif have["scan"] != open_.scan:
+            client.edit(have["ts"], r.body)
+            have["scan"] = open_.scan
+            save_state(path, state)
+            _err(f"digest: edited provisional reply {open_.key} -> {open_.scan}")
+    if not provs:
+        state.pop("provisional")
+
     save_state(path, state)
     return state
+
+
+def converge_slack_now(tpl: Template, root: str, month: dt.date, client, channel: str, variant: str | None = None, **kw) -> dict:
+    """The scheduled run's converge: ``month``'s thread (the current one),
+    after first re-converging the PREVIOUS month's if its state still holds a
+    provisional reply. That happens when a month's last day never got its
+    reply scan: only a scan after the month (this month's first) lets the
+    stand-in rule give that day a final reply, and only then can the
+    provisional go. Idempotent like `converge_slack`; ``kw`` passes through."""
+    variant = variant or tpl.variants[0]
+    prev = (month - dt.timedelta(days=1)).replace(day=1)
+    if load_state(state_path(root, prev, tpl.cfg.state.format(channel=channel, variant=variant))).get("provisional"):
+        _err(f"digest: {prev:%Y-%m} still has a provisional reply — closing it first")
+        converge_slack(tpl, root, prev, client, channel, variant, **kw)
+    return converge_slack(tpl, root, month, client, channel, variant, **kw)
 
 
 def redo_replies(tpl: Template, root: str, month: dt.date, client, channel: str, variant: str | None = None, *, icons_dir=None, deploy_plot=None, reply_delay: float = 0.0, for_real: bool = False) -> dict:
@@ -708,7 +764,8 @@ def post_digest_discord(tpl: Template, root: str, month: dt.date, webhook: str, 
 
 def dry_run(tpl: Template, root: str, month: dt.date, variant: str | None = None, plot_dir=None) -> str:
     """Render the plot (into ``plot_dir``, default the temp dir) and return the
-    OP + every reply as text; posts and hosts nothing."""
+    OP + every reply (+ the open day's provisional reply, last) as text;
+    posts and hosts nothing."""
     import tempfile
 
     variant = variant or tpl.variants[0]
@@ -719,7 +776,8 @@ def dry_run(tpl: Template, root: str, month: dt.date, variant: str | None = None
     tpl.render_plot(data, month, out, root)
     _err(f"rendered plot → {out}")
     lines = [tpl.op_body(data, month, "<plot-url>"), "", f"--- replies ({variant}: username | body | icon) ---"]
-    for u in tpl.units(data, variant):
+    open_ = tpl.provisional(data, variant) if tpl.cfg.provisional else None
+    for u in tpl.units(data, variant) + ([open_] if open_ else []):
         r = u.reply
         lines.append(f"{r.username} | {r.body} | {(r.icon_url or r.icon_emoji or '').split('/')[-1]}")
     return "\n".join(lines)
