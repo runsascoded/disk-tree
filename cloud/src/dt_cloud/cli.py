@@ -2211,6 +2211,7 @@ def discord_webhook(bot_token: str | None, channel: str, guild: str | None, name
 
 
 @main.command("publish-r2")
+@option("-a", "--all-gens", is_flag=True, help="Copy every `index/<gen>/` under the scan, pointed or not (no D1 read); default: only the generations a D1 `index_schema` row names")
 @option("-b", "--bucket", "src_bucket", default=None, help="Source GCS scan store (default $DATA_BUCKET)")
 @option("-l", "--layer2", default=None, help="Layer-2 dir template, `{scan}` = the scan id (default $LAYER2_PREFIX, else listing/{scan}/index/; cw: cw-l2/{scan}/)")
 @option("-L", "--no-listings", is_flag=True, help="Leave the canonical per-bucket listings (`<layer-2 dir>/<bucket>.parquet`) in GCS only; copy the tiers + snapshot JSONs")
@@ -2219,7 +2220,17 @@ def discord_webhook(bot_token: str | None, channel: str, guild: str | None, name
 @option("-s", "--subdir", default=None, help="Snapshots subdir of this store (default $SNAPSHOTS_SUBDIR, else none)")
 @option("-w", "--workers", default=8, type=int, help="Concurrent HEADs/uploads (default 8)")
 @argument("scan")
-def publish_r2(src_bucket: str | None, layer2: str | None, no_listings: bool, dry_run: bool, prefixes: tuple[str, ...], subdir: str | None, workers: int, scan: str) -> None:
+def publish_r2(
+    all_gens: bool,
+    src_bucket: str | None,
+    layer2: str | None,
+    no_listings: bool,
+    dry_run: bool,
+    prefixes: tuple[str, ...],
+    subdir: str | None,
+    workers: int,
+    scan: str,
+) -> None:
     """Copy one scan's served artifacts GCS → R2.
 
     The final "publish to the serving cloud" stage of an ingest that builds
@@ -2228,9 +2239,19 @@ def publish_r2(src_bucket: str | None, layer2: str | None, no_listings: bool, dr
     Idempotent — same size + md5 already in R2 is skipped — so it doubles as
     the backfill over old scans. R2 via the env: R2_ENDPOINT, R2_BUCKET,
     R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (`s3` extra).
+
+    Only the generations D1 points at are copied (the site reads no other),
+    so a reindex's superseded `index/<gen>/` never reaches R2; that reads D1
+    (`D1_DB_ID` + `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID`). `-a`
+    copies every generation without it.
     """
     from . import publish as pub
 
+    pointed = None
+    if not all_gens:
+        from .index_footer import pointers
+
+        pointed = {d for _, _, d in pointers()}
     pub.publish(
         scan,
         src_bucket=src_bucket or pub.DATA_BUCKET,
@@ -2240,4 +2261,5 @@ def publish_r2(src_bucket: str | None, layer2: str | None, no_listings: bool, dr
         dry_run=dry_run,
         workers=workers,
         listings=not no_listings,
+        pointed=pointed,
     )
