@@ -16,12 +16,12 @@ time (`chat.update` can't change them):
 - ``sender``: the headline IS the sender name, the arrow the avatar. Posted
   once, from the day's MORNING scan — the first at/after ``cfg.reply_hour``
   UTC (12:01Z = 8:01 am ET, the same calendar date in both zones) — with a
-  ~24 h delta to the prior day's reply scan; the 00:01Z scan only
-  re-converges the OP + plot.
+  ~24 h delta to the prior day's reply scan; the day's other scans only
+  re-converge the OP + plot.
 - ``body``: the headline is bold body text under a static sender/avatar, so
   the day's reply is EDITED whenever a later scan of the day lands — text and
-  sparkline agree intra-day (at the cost of the first edit's Δ spanning 12 h
-  until the day's last scan makes it 24 h).
+  sparkline agree intra-day (at the cost of the first edits' Δ spanning less than
+  a day until the day's last scan makes it ~24 h).
 
 Content + deltas: specs/cw-slack-digest.md; the engine: `digest`."""
 from __future__ import annotations
