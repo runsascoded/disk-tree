@@ -1,0 +1,4 @@
+# `pulumi up` snapshots: git history already records each change to `stacks/`
+.pulumi/backups/
+.pulumi/history/
+*.bak.attrs
