@@ -2,6 +2,12 @@
 
 **From:** m3 (`wt/m3`), 2026-10-02. **For:** the root session (`cloud` / `local` components), then m3 as the first consumer.
 
+**Status (2026-10-02):** phase 1 done (root).
+- `local` be830d5: `BatchIngest` (`infra/aws/batch_ingest.py`, + `build-image`) and `CaptureTrigger` (`infra/cf/capture_trigger.py`). Both take `moved_from_root=True`, which aliases each child to its old root-level logical name. `infra/tests/` checks both under Pulumi's mocks.
+- `cloud` bf8ff8e: `site/wrangler.example.toml` + `functions/_lib/wranglerExample.test.ts`.
+- On `aws/` → `infra/aws/`: yes, the component already lives there. m3's program and `Pulumi.yaml` move beside it.
+- Next: m3's rewire (phase 2), then the README walkthrough (phase 3).
+
 ## Goal
 
 Someone who isn't us should be able to stand up a disk-tree deployment from the public repo by writing config, not code: copy `Pulumi.example.yaml` → `Pulumi.<stack>.yaml`, fill in names and ids, `pulumi up`. The same goes for each Worker's and the site's `wrangler.toml`.
