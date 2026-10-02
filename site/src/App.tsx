@@ -866,9 +866,12 @@ function AppContent() {
 
   // Catch-all route: a first path segment that isn't one of the store's
   // buckets is a typo'd URL (/sweeps), not a drillable prefix — 404 it
-  // instead of silently rendering the root view at a bogus address.
+  // instead of silently rendering the root view at a bogus address. Only an
+  // unscoped root lists every bucket: under a filter or owner scope a real
+  // bucket with nothing in scope is absent from it, and is "no matches", not
+  // a 404.
   const seg0 = drillPath.split('/')[0]
-  if (baseTree?.c && seg0 && !baseTree.c.some(k => k.n === seg0)) {
+  if (!scopeQs && baseTree?.c && seg0 && !baseTree.c.some(k => k.n === seg0)) {
     return (
       <main>
         <SiteNav />
