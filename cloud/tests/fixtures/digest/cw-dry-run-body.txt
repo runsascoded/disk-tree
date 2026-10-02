@@ -1,4 +1,5 @@
 :arrow_deg50: **+84.6 TiB** [month-to-date](https://cw-s3.oa.dev/?d=260908-0001-7d12h#over-time) · 790 TiB · 86.8% of 1 PB · hero-checkpoints 100 TiB (+11.5) · marin-us-west-04a 2 TiB · [dashboard](https://cw-s3.oa.dev/)
+_as of 9/8 00:01Z_
 
 *Weekly summaries*
 :arrow_deg-10: [wk of 8/31](https://cw-s3.oa.dev/?d=260904-1201-4d#over-time): **−4.4 TiB** → 701 TiB · 77.0% of 1 PB

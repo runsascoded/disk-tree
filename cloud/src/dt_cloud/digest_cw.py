@@ -223,9 +223,10 @@ def day_rows(month: Month, variant: str, reply_hour: int) -> list[DayRow]:
 
 
 def op_body(month: Month, m: dt.date, plot_url: str | None, cfg: DigestConfig) -> str:
-    """OP markdown: month-to-date headline, per-ISO-week bullets, trailing
-    sparkline. The month/year title is NOT in the body -- it's folded into the
-    OP's sender name by the poster. ``plot_url=None`` omits the image line."""
+    """OP markdown: month-to-date headline, the latest scan's "as of" line,
+    per-ISO-week bullets, trailing sparkline. The month/year title is NOT in
+    the body -- it's folded into the OP's sender name by the poster.
+    ``plot_url=None`` omits the image line."""
     site_url, q = cfg.site_url, cfg.primary_quota
     rows, base = month.rows, month.base
     last = rows[-1]
@@ -237,6 +238,8 @@ def op_body(month: Month, m: dt.date, plot_url: str | None, cfg: DigestConfig) -
     mtd_url = _diff_url(last.scan, scan_ts(base.scan) if base is not last else None, site_url)
     lines = [
         f":arrow_deg{deg(mweekly)}: **{_tb(mdtb)} TiB** [month-to-date]({mtd_url}) · {last.tb:,.0f} TiB{_quota(last.tb, q)}{_extras(last.extra, _dextra(last, base if base is not last else None))} · [dashboard]({site_url}/)",
+        # the OP is re-edited every scan, so it is the thread's live view; say which scan it reflects
+        f"_as of {_md(last.date)} {scan_ts(last.scan):%H:%M}Z_",
         "",
         "*Weekly summaries*",
     ]

@@ -219,6 +219,7 @@ def test_no_quota():
     cfg = replace(CFG, buckets={})
     assert D.op_body(MONTH, SEP, None, cfg).split("\n") == [
         f":arrow_deg40: **+10.0 TiB** [month-to-date]({SITE}/?d=260902-1200-2d#over-time) · 715 TiB · [dashboard]({SITE}/)",
+        "_as of 9/2 12:00Z_",
         "",
         "*Weekly summaries*",
         f":arrow_deg20: [wk of 8/31]({SITE}/?d=260902-1200-2d#over-time) _(partial)_: **+10.0 TiB** → 715 TiB",
@@ -231,6 +232,7 @@ def test_op_body():
     # the (partial) week +10.0 → 1.4% → deg20, linked over 8/31 12:00 → 9/2 12:00 = 2d
     assert D.op_body(MONTH, SEP, "https://x/p.png", CFG).split("\n") == [
         f":arrow_deg40: **+10.0 TiB** [month-to-date]({SITE}/?d=260902-1200-2d#over-time) · 715 TiB · 78.6% of 1 PB · [dashboard]({SITE}/)",
+        "_as of 9/2 12:00Z_",
         "",
         "*Weekly summaries*",
         f":arrow_deg20: [wk of 8/31]({SITE}/?d=260902-1200-2d#over-time) _(partial)_: **+10.0 TiB** → 715 TiB · 78.6% of 1 PB",
@@ -245,7 +247,7 @@ def test_op_body_two_weeks():
     metas = LEAD + [(f"2026-09-{d:02d}T{h}", _meta(700 + i)) for i, (d, h) in enumerate(((d, h) for d in range(1, 8) for h in ("0000", "1200")), start=1)]
     rows = D.rows_from_meta(metas, P)
     month = D.Month(lead=rows[:2], rows=rows[2:])
-    bullets = D.op_body(month, SEP, None, CFG).split("\n")[3:]
+    bullets = D.op_body(month, SEP, None, CFG).split("\n")[4:]
     assert bullets == [
         f":arrow_deg20: [wk of 8/31]({SITE}/?d=260906-1200-6d#over-time): **+7.0 TiB** → 712 TiB · 78.2% of 1 PB",
         f":arrow_deg0: [wk of 9/7]({SITE}/?d=260907-1200-1d#over-time) _(partial)_: **+2.0 TiB** → 714 TiB · 78.5% of 1 PB",
