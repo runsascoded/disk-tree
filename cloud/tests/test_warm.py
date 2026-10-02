@@ -66,3 +66,15 @@ def test_subdaily_plan_one_width():
         "/api/diff?from=2026-09-08T1201&to=2026-09-15T1201&path=&w=1280&h=768&summary=1",
         "/api/diff?from=2026-09-08T1201&to=2026-09-15T1201&path=&w=1280&h=768",
     ]
+
+
+def test_widths_match_the_sites_canvas_snap():
+    # The site snaps its canvas to these widths (`site/src/canvas.ts`), so a
+    # width warmed here and not there (or vice versa) is a cache miss for everyone.
+    import re
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[2] / "site" / "src" / "canvas.ts").read_text()
+    m = re.search(r"WARMED_WIDTHS = \[([\d, ]+)\]", src)
+    assert m is not None
+    assert tuple(int(w) for w in m.group(1).split(",")) == W.WIDTHS

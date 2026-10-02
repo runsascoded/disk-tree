@@ -10,8 +10,10 @@ scan is a new cache key, so its first viewer otherwise pays the over-time
 reads), then one subtree + the diff span chips (1d/3d/7d/14d/30d, plus the
 plain previous-scan pair) each with its `summary=1` twin — at the canvas
 widths common laptops and phones produce. The cache keys include the pixel
-budget: the client sends `w = ceil(innerWidth / 128) * 128`, `h = round(0.6 w)`,
-so warming a width only helps viewers whose window quantizes to it.
+budget: the client snaps its window up to the nearest of these WIDTHS
+(`site/src/canvas.ts` `canvasWidth`; past the widest, the 128-px step) and
+sends `h = round(0.6 w)`, so every window up to 1920 px lands on a warmed key.
+Keep the two lists equal.
 
 Pure planning (`nearest_prior`, `plan`) is unit-tested; `scan_dates` lists the
 published scans, `warm` does the HTTP."""
