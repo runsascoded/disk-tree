@@ -51,6 +51,39 @@ interface Grant {
 
 const fmtTs = (ts: number | null): string => (ts ? new Date(ts * 1000).toLocaleString() : '—')
 
+/** A grant's memo (`note`, the admin-side label), editable in place: click to
+ *  edit, Enter or blur saves (`PATCH /api/auth/grants/:id`), Escape cancels. */
+function MemoCell({ grant, onSave, saving }: { grant: Grant; onSave: (note: string | null) => void; saving: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  if (grant.revokedAt) return <>{grant.note || <em>—</em>}</>
+  if (draft == null) {
+    return (
+      <button type="button" className="memo-edit" aria-label="Edit memo" onClick={() => setDraft(grant.note ?? '')} disabled={saving}>
+        {grant.note || <em>—</em>}
+      </button>
+    )
+  }
+  const save = () => {
+    const note = draft.trim() || null
+    setDraft(null)
+    if (note !== (grant.note || null)) onSave(note)
+  }
+  return (
+    <input
+      className="memo-input"
+      autoFocus
+      value={draft}
+      placeholder="memo"
+      onChange={e => setDraft(e.target.value)}
+      onBlur={save}
+      onKeyDown={e => {
+        if (e.key === 'Enter') save()
+        else if (e.key === 'Escape') setDraft(null)
+      }}
+    />
+  )
+}
+
 const linkFor = (token: string): string => `${window.location.origin}/?key=${token}`
 
 /** `POST /api/auth/grants`' allowlist outcome for a link minted with `allowlist: true`. */
@@ -191,6 +224,19 @@ export function AdminPage() {
       }
       void qc.invalidateQueries({ queryKey: ['auth', 'grants'] })
     },
+  })
+
+  const editNote = useMutation({
+    mutationFn: async ({ id, note }: { id: string; note: string | null }) => {
+      const r = await fetch(`/api/auth/grants/${id}`, {
+        method: 'PATCH',
+        credentials: 'include',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ note }),
+      })
+      if (!r.ok) throw new Error(`memo update failed: ${r.status}`)
+    },
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['auth', 'grants'] }),
   })
 
   const revoke = useMutation({
@@ -338,7 +384,7 @@ export function AdminPage() {
         <tbody>
           {shown.map(g => (
             <tr key={g.id} className={g.revokedAt ? 'revoked' : ''}>
-              <td>{g.note ?? <em>—</em>}</td>
+              <td className="memo"><MemoCell grant={g} onSave={note => editNote.mutate({ id: g.id, note })} saving={editNote.isPending} /></td>
               <td>
                 <span className="holder">
                   {g.subject?.avatar && <img className="grant-avi" src={g.subject.avatar} alt="" />}

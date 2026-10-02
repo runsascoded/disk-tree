@@ -1413,6 +1413,13 @@ input::placeholder, textarea::placeholder { color: var(--ink-3); opacity: 1; }
     th, td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--ink-3, #4443); }
     // Holder cell: the link's subject — small round avatar + their name.
     .holder { display: inline-flex; align-items: center; gap: 6px; }
+    // The memo edits in place: the text is the button, a dashed underline says so.
+    .memo-edit {
+      background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: left; cursor: text;
+      border-bottom: 1px dashed var(--ink-3);
+      &:hover { border-bottom-color: var(--ink); }
+    }
+    .memo-input { font: inherit; width: 100%; min-width: 16em; padding: 2px 4px; }
     .grant-avi {
       flex: none;
       width: 20px;
