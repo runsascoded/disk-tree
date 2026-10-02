@@ -243,7 +243,12 @@ function UserMenu() {
       () => {
         if (handoff) {
           setHandedOff(true)
-          window.close()  // honored only where a script opened the tab; harmless elsewhere
+          // Close only once the app has taken focus, and a beat after: closing
+          // in the same tick as the `disky://` navigation cancels Chrome's
+          // launch of the app. No focus change → the tab stays, with the banner.
+          const close = () => setTimeout(() => window.close(), 1000)
+          if (!document.hasFocus()) close()
+          else window.addEventListener('blur', close, { once: true })
           return
         }
         setTimeout(() => {
