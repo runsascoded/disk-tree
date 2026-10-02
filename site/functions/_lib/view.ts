@@ -33,6 +33,7 @@ import { type IndexHandle, isStore, type Lens, openIndex, planRects, planSizeRec
 import { ownerLens, type OwnerLens } from './owners.js'
 import { type ClassScope, classRow, nameFilter, type NamePred, ownerOk, type OwnerScope } from './scope.js'
 import { filterThreshold, looseThreshold, matchRoots, pickTier, rebasedThreshold, rootRects } from './filter.js'
+import { type SearchLimits, searchRoots } from './search.js'
 import { ownerClaims } from './ownerTotals.js'
 import { shared } from './shared.js'
 import { storeKey } from './stores.js'
@@ -110,6 +111,8 @@ export interface ViewOpts {
   /** With `query` on a v1 scan: the largest subtree (objects) the no-match
    * fallback reads (default `V1_FILTER_SCAN_OBJECTS`). */
   v1ScanObjects?: number
+  /** The search index's read budgets (default `SEARCH_LIMITS`). */
+  searchLimits?: SearchLimits
 }
 
 export interface View {
@@ -575,19 +578,39 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
       return { all, mine, depth }
     }
     const tierOf = (name: string) => tiers.find(t => t.name === name)
-    // Phase 1.
+    // Phase 1. A store generation with the search sidecars answers from
+    // them (specs/path-store-search.md): the match roots anywhere under P,
+    // exact unless a budget cut the search; anything else reads as before.
     t0 = performance.now()
     let roots: string[] = []
     let p1: ReturnType<typeof aggregate> | null = null
     let p1Tier = ''
-    for (const t of tiers) {
+    let searchCut = false
+    // The search reads the `path` sort (its names' row groups are that
+    // sort's); a lens without claims keeps the old read.
+    const pathIdx = !tiers.length && !lens ? (sort === 'path' && fine ? fine : withTrace(await openFine(env, date, 'path'), tr)) : null
+    const searched = pathIdx && isStore(pathIdx) ? await searchRoots(env, pathIdx, query, path, o.searchLimits) : null
+    if (searched) {
+      const st = searched.stats
+      tr?.('search', performance.now() - t0, `${st.mode} c${st.candidates} n${st.namesRgs} g${st.pathRgs}${searched.truncated ? ' cut' : ''}`)
+    }
+    // A search cut before it found anything (its heaviest name alone is over
+    // budget) says nothing: the thresholded read below answers instead.
+    const found = searched && (searched.roots.length || !searched.truncated) ? searched : null
+    if (found) {
+      p1 = aggregate(found.rows)
+      roots = found.roots
+      p1Tier = 'search'
+      searchCut = found.truncated
+    }
+    for (const t of found ? [] : tiers) {
       const rs = await readRows(t.idx, dP + 1, 1e9, pLo, pHi, t === tiers[0] ? undefined : thrAt)
       p1 = aggregate(rs)
       roots = matchRoots(p1.depth.keys(), query, path)
       p1Tier = t.name
       if (roots.length) break
     }
-    const fineIdx = roots.length ? null : fine ?? withTrace(await openFine(env, date, 'path'), tr)
+    const fineIdx = roots.length || found ? null : pathIdx ?? fine ?? withTrace(await openFine(env, date, 'path'), tr)
     if (fineIdx && (isStore(fineIdx) || rootAll.o <= (o.v1ScanObjects ?? V1_FILTER_SCAN_OBJECTS))) {
       const got = await readSubtree(env, date, fineIdx, [{ dLo: dP + 1, dHi: maxDepth != null ? dP + maxDepth : 1e9, pLo, pHi }], thrAt, undefined, nDesc, smallRows, tr)
       p1 = aggregate(got.rows)
@@ -651,8 +674,10 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
     }
     return {
       rootAll, rootAgg: matchedAgg, kept: aggsF, aggDepth: depthF, foldedOf: foldedF, threshold: T, thrAt: loose,
-      tier: `${p1Tier}+${tierName}`, idx: regionIdx, truncated: roots.length > HARD_CAP,
-      matches: [...roots].sort(), matched: roots.map(r => ({ path: r, b: Math.round(rootAggOf.get(r)!.b), o: Math.round(rootAggOf.get(r)!.o) })),
+      tier: `${p1Tier}+${tierName}`, idx: regionIdx, truncated: searchCut || roots.length > HARD_CAP,
+      matches: [...roots].sort(),
+      // Heaviest first (ties by path): the list a bulk action and the series read.
+      matched: roots.map(r => ({ path: r, b: Math.round(rootAggOf.get(r)!.b), o: Math.round(rootAggOf.get(r)!.o) })).sort((x, y) => y.b - x.b || (x.path < y.path ? -1 : x.path > y.path ? 1 : 0)),
       ...(o.partial ? { partial: true } : {}), ownerLens: ol, scoped,
     }
   }

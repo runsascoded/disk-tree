@@ -84,7 +84,7 @@ interface GroupSpan {
   bMax: number
 }
 
-type FileSlice = { byteLength: number; slice: (s: number, e?: number) => Promise<ArrayBuffer> }
+export type FileSlice = { byteLength: number; slice: (s: number, e?: number) => Promise<ArrayBuffer> }
 
 /** Per-request timing sink: `(phase, ms)` accumulates into a `Server-Timing`
  * header (`/api/subtree`, `/api/diff`), so DevTools shows where a cold view
@@ -105,6 +105,9 @@ interface D1Handle {
   /** The generation the schema row pointed at when this handle opened; every
    * row-group query is scoped to it, so a flip mid-handle is invisible. */
   gen: string
+  /** The generation's bucket dir (`index_schema.dir`): where its sidecars
+   * live (the search index, `search.ts`). */
+  dir: string
   schema: SchemaElement[]
   /** `index_schema.version`: 1 = the dir-only index (wire names), 2 = a
    * path-store sort (layer-2 names, objects as rows, a `bysize` sibling). */
@@ -356,7 +359,7 @@ export async function openIndex(env: Env, date: string, variant = 'path'): Promi
     // generation from before it was written) the group-manifest blob.
     const any = await env.DB.prepare('SELECT 1 AS x FROM index_row_groups WHERE date = ? AND variant = ? AND gen = ? LIMIT 1').bind(date, d1Variant(env, variant), s.gen).first<{ x: number }>()
     const schema = JSON.parse(s.schema_json) as SchemaElement[]
-    const base = { file: fileFor(env, s.dir, variant), env, date, variant, gen: s.gen, schema, version: s.version, columns: rowColumns(s.version, schema), floor: s.floor_bytes == null ? null : num(s.floor_bytes) }
+    const base = { file: fileFor(env, s.dir, variant), env, date, variant, gen: s.gen, dir: s.dir, schema, version: s.version, columns: rowColumns(s.version, schema), floor: s.floor_bytes == null ? null : num(s.floor_bytes) }
     if (any) return { mode: 'd1', ...base }
     let footer: FooterIndex
     try {
@@ -434,7 +437,7 @@ async function openBlob(env: Env, date: string, variant: string, gen: string, di
   const blob = JSON.parse(text) as GroupsBlob
   if (blob.v !== 1) throw new Error(`${key}: unknown blob version ${blob.v}`)
   const groups: BlobGroup[] = blob.groups.map(([rg, dMin, dMax, pMin, pMax, bMax, uMin, uMax, rowStart, rowEnd, rgJson]) => ({ rg, dMin, dMax, pMin, pMax, bMax, uMin, uMax, rowStart, rowEnd, rgJson }))
-  return { mode: 'blob', file: fileFor(env, dir, variant), env, date, variant, gen, schema: blob.schema, version: blob.version, columns: rowColumns(blob.version, blob.schema), floor: blob.floor_bytes == null ? null : num(blob.floor_bytes), groups }
+  return { mode: 'blob', file: fileFor(env, dir, variant), env, date, variant, gen, dir, schema: blob.schema, version: blob.version, columns: rowColumns(blob.version, blob.schema), floor: blob.floor_bytes == null ? null : num(blob.floor_bytes), groups }
 }
 
 // --- the cold footer tier: `<tier>.groups.parquet` (`pq` mode) ---------------
@@ -462,7 +465,7 @@ const toBuffer = (b: Uint8Array): ArrayBuffer => b.buffer.slice(b.byteOffset, b.
 
 /** Bytes `[start, end)` of a store object through the colo cache (a
  * generation dir is immutable, so a range is too). */
-async function cachedRange(env: Env, key: string, start: number, end: number): Promise<ArrayBuffer> {
+export async function cachedRange(env: Env, key: string, start: number, end: number): Promise<ArrayBuffer> {
   const ck = coloKey(env, key, `r=${start}-${end}`)
   const hit = await colo().match(ck)
   if (hit) return hit.arrayBuffer()
@@ -471,11 +474,10 @@ async function cachedRange(env: Env, key: string, start: number, end: number): P
   return buf
 }
 
-/** A `.groups.parquet`'s footer — its metadata bytes + the 8-byte trailer,
- * colo-cached — parsed into one `FooterGroup` per row group. Throws the
- * store's `NotFoundError` when the file is absent (the caller falls back to
- * the `.groups.json` blob). */
-async function openFooter(env: Env, key: string): Promise<FooterIndex> {
+/** A small parquet's footer bytes (metadata + the 8-byte trailer), colo-
+ * cached: one tail read of `FOOTER_TAIL` bytes, one more when the footer is
+ * longer. Throws the store's `NotFoundError` when the file is absent. */
+export async function readFooterBytes(env: Env, key: string): Promise<ArrayBuffer> {
   const ck = coloKey(env, key, 'footer')
   let buf: ArrayBuffer
   const hit = await colo().match(ck)
@@ -498,7 +500,14 @@ async function openFooter(env: Env, key: string): Promise<FooterIndex> {
     buf = toBuffer(tail.subarray(tail.byteLength - need))
     await colo().put(ck, new Response(buf, { headers: { 'cache-control': `max-age=${BLOB_CACHE_TTL}` } }))
   }
-  const metadata = parquetMetadata(buf)
+  return buf
+}
+
+/** A `.groups.parquet`'s footer (`readFooterBytes`) parsed into one
+ * `FooterGroup` per row group. Throws the store's `NotFoundError` when the
+ * file is absent (the caller falls back to the `.groups.json` blob). */
+async function openFooter(env: Env, key: string): Promise<FooterIndex> {
+  const metadata = parquetMetadata(await readFooterBytes(env, key))
   const kv = new Map((metadata.key_value_metadata ?? []).map(e => [e.key, e.value]))
   if (kv.get('groups_v') !== '1') throw new Error(`${key}: not a v1 groups parquet (groups_v=${kv.get('groups_v')})`)
   let rg = 0
@@ -683,7 +692,7 @@ const ROW_BYTES = 160 // a shaped Row with a ~60-char path, roughly
 const groupCache = new Map<string, { v: unknown[]; bytes: number }>()
 let groupCacheBytes = 0
 
-function cacheGet<T>(k: string): T[] | undefined {
+export function cacheGet<T>(k: string): T[] | undefined {
   const hit = groupCache.get(k)
   if (!hit) return undefined
   groupCache.delete(k)
@@ -691,7 +700,7 @@ function cacheGet<T>(k: string): T[] | undefined {
   return hit.v as T[]
 }
 
-function cachePut(k: string, v: unknown[], bytes: number): void {
+export function cachePut(k: string, v: unknown[], bytes: number): void {
   if (bytes > GROUP_CACHE_CAP) return
   const old = groupCache.get(k)
   if (old) {
@@ -725,11 +734,11 @@ async function readGroupCached(h: IndexHandle, rg: number, rgJson: string): Prom
  * took three rounds at 8-wide (`Server-Timing` 2026-09-15: fetch 5.0 s
  * summed, 1.0 s wall) and a 7-day diff's 107 groups fourteen. 32 in flight
  * is ~9 MB of buffers at most — well inside the isolate's memory. */
-const GROUP_READS = 32
+export const GROUP_READS = 32
 
 /** `Promise.all(items.map(f))` with at most `limit` in flight; results in
  * input order. */
-async function mapLimit<T, R>(items: T[], limit: number, f: (t: T) => Promise<R>): Promise<R[]> {
+export async function mapLimit<T, R>(items: T[], limit: number, f: (t: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length)
   let next = 0
   const worker = async () => {
@@ -905,6 +914,23 @@ async function decodeSpans(h: IndexHandle, kept: Span[], keep: (r: Row) => boole
     for (const r of await readGroupCached(h, s.rg, j)) if (keep(r)) out.push(r)
     return out
   })
+  h.trace?.('groups', now() - t0, h.variant)
+  return perGroup.flat()
+}
+
+/** Rows `keep` accepts from row groups named by ordinal — the search index's
+ * read (`search.ts`: a name's `rgs` are `path`-sort groups), through the same
+ * metadata fetch and per-isolate decoded-group cache as a span read. */
+export async function readGroupsAt(h: IndexHandle, rgs: number[], keep: (r: Row) => boolean): Promise<Row[]> {
+  if (!rgs.length) return []
+  let t0 = now()
+  const jsons = await fetchGroupJson(h, rgs)
+  h.trace?.('rgjson', now() - t0)
+  h.trace?.('ngroups', rgs.length)
+  const missing = rgs.filter(rg => !jsons.has(rg))
+  if (missing.length) throw new Error(`${h.variant} ${h.date}: no row group ${missing.join(', ')} in generation ${h.gen}`)
+  t0 = now()
+  const perGroup = await mapLimit(rgs, GROUP_READS, async rg => (await readGroupCached(h, rg, jsons.get(rg)!)).filter(keep))
   h.trace?.('groups', now() - t0, h.variant)
   return perGroup.flat()
 }

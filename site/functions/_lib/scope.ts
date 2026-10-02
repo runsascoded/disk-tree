@@ -59,8 +59,10 @@ export function classRow<R extends { size: number; n_files: number; mtime_w: num
 /** `q=`: `/…/` = regex (case-insensitive); anything else = substring (ci),
  * with `|` splitting alternatives. Predicates receive the index path
  * (`bucket/dir/sub`), so `grug/swarm` matches across segments. Mirrors the
- * client's `parseQuery` (`site/src/filterTree.ts`) exactly. */
-export type NamePred = (path: string) => boolean
+ * client's `parseQuery` (`site/src/filterTree.ts`) exactly. A parsed
+ * predicate carries its query string (`q`), which the search index plans
+ * from (`searchQuery.ts`). */
+export type NamePred = ((path: string) => boolean) & { q?: string }
 
 export function parseQuery(q: string | null): NamePred | null {
   const s = (q ?? '').trim()
@@ -68,17 +70,17 @@ export function parseQuery(q: string | null): NamePred | null {
   if (s.length > 2 && s.startsWith('/') && s.endsWith('/')) {
     try {
       const re = new RegExp(s.slice(1, -1), 'i')
-      return path => re.test(path)
+      return Object.assign((path: string) => re.test(path), { q: s })
     } catch {
       return null
     }
   }
   const needles = s.toLowerCase().split('|').map(t => t.trim()).filter(Boolean)
   if (!needles.length) return null
-  return path => {
+  return Object.assign((path: string) => {
     const p = path.toLowerCase()
     return needles.some(t => p.includes(t))
-  }
+  }, { q: s })
 }
 
 /** Name-filter a set of per-path aggregates (every path under the view root
