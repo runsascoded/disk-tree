@@ -8,7 +8,7 @@ importers:
 
   .: {}
 
-  cf/capture-trigger:
+  infra/cf/capture-trigger:
     dependencies:
       aws4fetch:
         specifier: ^1.0.20

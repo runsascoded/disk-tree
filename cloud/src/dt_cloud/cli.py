@@ -22,7 +22,6 @@ import duckdb
 import pandas as pd
 from click import Choice, UsageError, argument, group, option
 
-from .cw_digest import REPLY_HOUR_UTC
 from .identity import IDENTITIES_ENV, load_identities
 from .site import DEFAULT_URL as SITE_DEFAULT_URL
 from .secrets import env_secret, secret
@@ -408,6 +407,7 @@ def wandb_mine(
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
 @option("-o", "--out", "out_dir", type=Path, default=None, help="Output dir for JSON files [default: site/public/data/<asof>]")
 @option("-r", "--row-group-rows", default=None, type=int, help="Parquet row-group size for the store's sorts (default 8192 — the reader decodes ~one group per depth of a drilled subtree, so 32768 pushed small drills past its decode cap; specs/path-store.md §1.6)")
+@option("-S", "--search", is_flag=True, help="Also write the search sidecars beside the `path` sort (`path-index.{rows,trigrams,rows-search}.parquet`: the filter view's segment-name index, specs/path-store-search.md); upload them with the generation dir")
 @option("-u", "--user-sort-tiers", default=None, help="Only these sorts get a `-by-user` copy, comma-separated (`bysize`: the copy a lens view reads; default every sort)")
 @option("-U", "--no-user-sorts", "user_sorts", is_flag=True, flag_value=False, default=True, help="Skip every `-by-user` sort copy (a lens then reads the mixed-user sorts, filtered per row — fine below the root, too wide at a user's root view; see -u)")
 @option("-P", "--path-index", "path_index", type=Path, default=None, help="Write the path store here (`<dir>/path-index.parquet`, the `path` sort; `path-index-bysize.parquet` and the by-user copies land beside it — specs/path-store.md §4.3)")
@@ -422,6 +422,7 @@ def build_path_index(
     out_dir: Path | None,
     path_index: Path | None,
     row_group_rows: int | None,
+    search: bool,
     user_sort_tiers: str | None,
     user_sorts: bool,
     access: tuple[str, ...],
@@ -440,7 +441,7 @@ def build_path_index(
         out_dir = Path("site/public/data") / asof
     meta = write_path_index(
         listings, out_dir, asof, attributions, identities_path, access=access, dir_cache=dir_cache, path_index=path_index,
-        user_sorts=user_sorts, row_group_rows=row_group_rows, age_strata=age_strata,
+        user_sorts=user_sorts, row_group_rows=row_group_rows, age_strata=age_strata, search=search,
         user_sort_tiers=tuple(t for t in user_sort_tiers.split(",") if t) if user_sort_tiers else None,
     )
     err(f"wrote {out_dir}/: age.json meta.json ({meta['total_bytes']/1e12:.0f} TB, {meta['total_objects']:,} objects)")
@@ -524,8 +525,6 @@ def healthcheck(date: str | None, max_age_days: int, as_json: bool, subdir: str 
     from .site import creds
 
     base, tok = creds(token, url)
-    if not tok:
-        raise SystemExit("error: no token — pass --token or set $GCS_USAGE_TOKEN")
     sub = subdir if subdir is not None else os.environ.get("SNAPSHOTS_SUBDIR", "")
     resolved, checks = run_checks(base, tok, date, max_age_days=max_age_days, subdir=sub)
     err(f"healthcheck {base} @ {resolved or '?'}")
@@ -536,6 +535,56 @@ def healthcheck(date: str | None, max_age_days: int, as_json: bool, subdir: str 
     err(f"{'PASS' if ok else 'FAIL'} ({n_ok}/{len(checks)})")
     if as_json:
         print(json.dumps(as_dict(resolved, checks), indent=2))
+    if not ok:
+        raise SystemExit(1)
+
+
+@main.command()
+@option("-b", "--budget", default=None, type=float, help="Fail a scenario whose slowest request exceeds this many seconds")
+@option("-c", "--cold", is_flag=True, help="Key subtree and diff reads past the edge cache (a random `minArea` ≈ the default), to measure uncached cost")
+@option("-j", "--json", "as_json", is_flag=True, help="Emit the run record (every request) as JSON to stdout")
+@option("-o", "--out", default=None, help="Write the run record to this path or prefix (`…/` or `gs://…/` → `<prefix><ts>.json`)")
+@option("-q", "--hit", default=None, help="Filter term the filter-hit scenario searches for (default: the largest bucket's largest child)")
+@option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ (default: $SNAPSHOTS_SUBDIR)")
+@option("-S", "--serial", is_flag=True, help="Send each scenario's requests one at a time (default: concurrently, as a page load does)")
+@option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN; none for a public deployment like r2.rbw.sh)")
+@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+def probe(budget: float | None, cold: bool, as_json: bool, out: str | None, hit: str | None, subdir: str | None, serial: bool, token: str | None, url: str | None) -> None:
+    """Replay the site's page loads (root, largest bucket, a matching and a
+    non-matching path filter) against a live deployment.
+
+    Each scenario's API requests go out concurrently, like the browser's, and
+    each response's status, wall time, edge-cache tier and server time is
+    recorded. Exits nonzero on any 5xx or transport failure (and on a scenario
+    over `--budget`). `-o` keeps the record, so a prefix of runs is a latency
+    time series.
+    """
+    import fsspec
+
+    import random
+
+    from .probe import cold_min_area, http_fetch, record, resolve_targets, run, scenarios, summarize
+    from .site import creds
+
+    base, tok = creds(token, url)
+    sub = subdir if subdir is not None else os.environ.get("SNAPSHOTS_SUBDIR", "")
+    fetch = http_fetch(base, tok)
+    t = resolve_targets(fetch, sub, hit)
+    min_area = cold_min_area(random.Random()) if cold else ""
+    err(f"probe {base} @ {t.date} (vs {t.prev}; bucket {t.bucket}; filter hit {t.hit!r}{'; cold' if cold else ''})")
+    results = run(fetch, scenarios(t, min_area), parallel=not serial)
+    ok, lines = summarize(results, round(budget * 1000) if budget is not None else None)
+    for line in lines:
+        err(line)
+    err("PASS" if ok else "FAIL")
+    rec = {**record(base, t, results), "cold": cold}
+    if out:
+        path = f"{out}{rec['ts']}.json" if out.endswith("/") else out
+        with fsspec.open(path, "w") as fh:
+            json.dump(rec, fh)
+        err(f"wrote {path}")
+    if as_json:
+        print(json.dumps(rec, indent=2))
     if not ok:
         raise SystemExit(1)
 
@@ -556,10 +605,11 @@ def bucket_sources(specs: tuple[str, ...], default_bucket: str) -> list[tuple[st
 @option("-m", "--mem", default="8GB", help="DuckDB memory limit")
 @option("-o", "--out", "out_dir", type=Path, required=True, help="Output dir: path-index.parquet + path-index-bysize.parquet (+ .groups.json sidecars) + age-pyramid-*.parquet")
 @option("-r", "--row-group-rows", default=8192, type=int, help="Parquet row-group size for the sorts — the range-read unit and the D1 footer's row count per sort (default 8192; a gcs-sized fleet uses 32768, specs/path-store.md §1.6)")
+@option("-S", "--search", is_flag=True, help="Also write the search sidecars beside the `path` sort (`path-index.{rows,trigrams,rows-search}.parquet`, specs/path-store-search.md)")
 @option("-t", "--threads", default=8, type=int, help="DuckDB threads")
 @option("-T", "--tmp", "tmp_dir", type=Path, default=None, help="DuckDB spill dir (default: <out>/.duckdb-tmp)")
 @argument("sources", nargs=-1, required=True)
-def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, row_group_rows: int, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
+def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, row_group_rows: int, search: bool, threads: int, tmp_dir: Path | None, sources: tuple[str, ...]) -> None:
     """Write the scan's path store from its layer-2 parquet(s) — SOURCES are
     `<bucket>=<l2.parquet>` pairs, one per bucket of the scan (a bare path is
     `-b`'s bucket): every row (objects and dirs), bucket-prefixed, in the
@@ -573,7 +623,7 @@ def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, row
 
     s = write_index(
         bucket_sources(sources, bucket or CW_BUCKET), out_dir,
-        mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only, row_group_rows=row_group_rows,
+        mem=mem, threads=threads, tmp_dir=tmp_dir, age_only=age_only, row_group_rows=row_group_rows, search=search,
     )
     if age_only:
         err(f"index-write: age pyramid only — floor {s['pyramid']['floor']}, {len(s['pyramid']['bins'])} tiers over {s['buckets']}")
@@ -1859,89 +1909,114 @@ def cascade_a2a(bucket: str, index_path: str, as_json: bool, top: int, dirs_tier
         raise SystemExit(1)
 
 
-def _cw_icons_dir() -> Path:
-    """`job/icons-cw` in both layouts: pip-installed in the job image (cwd=/app →
-    /app/job/icons-cw) or the repo checkout (…/parents[3]/job/icons-cw)."""
-    cands = (Path.cwd() / "job" / "icons-cw", Path(__file__).resolve().parents[3] / "job" / "icons-cw")
+def _icons_dir(rel: str = "job/icons") -> Path:
+    """``rel`` (e.g. `job/icons`) in both layouts: pip-installed in the job image
+    (cwd=/app → /app/job/icons) or the repo checkout (…/parents[3]/job/icons)."""
+    cands = (Path.cwd() / rel, Path(__file__).resolve().parents[3] / rel)
     return next((c for c in cands if c.exists()), cands[-1])
 
 
-@main.command("cw-digest")
-@option("-c", "--channel", help="Slack channel id (default $SLACK_CHANNEL)")
-@option("-D", "--reply-delay", "reply_delay", default=0.0, type=float, help="Seconds to sleep between replies (e.g. 305 for a spaced backfill so per-reply sender chrome survives)")
-@option("-F", "--for-real", is_flag=True, help="With --redo-replies: actually post the new replies and delete the old ones (default: print the plan)")
-@option("-H", "--reply-hour", type=int, default=REPLY_HOUR_UTC, help="UTC hour the sender variant's daily reply is taken from: the day's first scan at/after it (default 12 → the 12:01Z morning scan, 8:01 am ET; 00:01Z scans still feed the OP + plot)")
-@option("-i", "--icons-dir", type=Path, default=None, help="Where the plot PNG is written + deployed from (default job/icons-cw)")
-@option("-m", "--month", help="Month YYYY-MM (default: current UTC month)")
-@option("-n", "--dry-run", is_flag=True, help="Render the plot + print OP/replies; post & host nothing")
-@option("-r", "--root", help="Snapshots root (default gs://$DATA_BUCKET/snapshots/cw)")
-@option("-t", "--token", help="Slack bot token (default $SLACK_BOT_TOKEN)")
-@option("-u", "--url", "site_url", default=None, help="Site base for links (default cw-s3.oa.dev)")
-@option("-R", "--redo-replies", is_flag=True, help="Re-post the month's replies under the current day rule, then delete the old ones (dry-run unless --for-real)")
-@option("-V", "--variant", type=Choice(["sender", "body"]), default="sender", help="Reply style: headline as the sender name, posted once from the day's morning scan (sender) or bold in the body, edited as the day's scans land (body)")
-def cw_digest(channel: str | None, reply_delay: float, for_real: bool, reply_hour: int, icons_dir: Path | None, month: str | None, dry_run: bool, redo_replies: bool, root: str | None, token: str | None, site_url: str | None, variant: str) -> None:
-    """Converge the monthly digest thread in #cw-s3-usage: an OP edited in place
-    (month-to-date + weekly bullets + quota sparkline) + one reply per UTC day,
-    via thrds. State in gs://<bucket>/digest/cw/<channel>/<variant>/<YYYY-MM>.json.
-    See specs/cw-slack-digest.md."""
-    from . import cw_digest as dg
+def _digest_options(template_default: str):
+    """`digest`'s options; `cw-digest` is the same command defaulting to `-T cw`."""
+    opts = [
+        option("-b", "--bot-token", help="Discord bot token: opens the month's thread + resolves app emoji (default $DISCORD_BOT_TOKEN; with -P discord)"),
+        option("-c", "--channel", help="Slack channel id (default $SLACK_CHANNEL)"),
+        option("-C", "--config", "config_path", type=Path, help="YAML/JSON DigestConfig overlaid on the template's preset (title, site, root, state, plot host, buckets/quotas, prices…; see specs/digest-unification.md)"),
+        option("-D", "--reply-delay", "reply_delay", default=0.0, type=float, help="Seconds to sleep between replies (e.g. 305 for a spaced Slack backfill so per-reply sender chrome survives; Discord needs none)"),
+        option("-E", "--edit-replies", is_flag=True, help="Re-edit every already-posted reply to its current body (backfill after a format change; -P discord only)"),
+        option("-F", "--for-real", is_flag=True, help="With --redo-replies: actually post the new replies and delete the old ones (default: print the plan)"),
+        option("-H", "--reply-hour", type=int, default=None, help="cw template: UTC hour the sender variant's daily reply is taken from — the day's first scan at/after it (default 12 → the 12:01Z morning scan, 8:01 am ET; 00:01Z scans still feed the OP + plot)"),
+        option("-i", "--icons-dir", type=Path, default=None, help="Where the plot PNG is written + deployed from (default the config's `icons_dir`: job/icons, job/icons-cw)"),
+        option("-m", "--month", help="Month YYYY-MM (default: current UTC month)"),
+        option("-n", "--dry-run", is_flag=True, help="Render the plot + print OP/replies; post & host nothing"),
+        option("-P", "--platform", type=Choice(["slack", "discord"]), default="slack", help="Which thread to converge (default slack)"),
+        option("-r", "--root", help="Snapshots root (default the config's: gs://$DATA_BUCKET/snapshots[/cw])"),
+        option("-R", "--redo-replies", is_flag=True, help="Re-post the month's replies under the current day rule, then delete the old ones (Slack; dry-run unless --for-real)"),
+        option("-t", "--token", help="Slack bot token (default $SLACK_BOT_TOKEN)"),
+        option("-T", "--template", type=Choice(["gcs", "cw"]), default=template_default, help=f"Post style + preset config (default {template_default}): gcs = a reply per scan, $/mo by storage class, class mosaic; cw = a reply per day, % of quota per bucket, quota sparkline + diff treemap"),
+        option("-u", "--url", "site_url", default=None, help="Site base for links (default the config's: gcs.oa.dev, cw-s3.oa.dev)"),
+        option("-V", "--variant", type=Choice(["sender", "body"]), default=None, help="Reply style (cw template): headline as the sender name, posted once from the day's morning scan (sender, default) or bold in the body, edited as the day's scans land (body)"),
+        option("-w", "--webhook", help="Discord webhook URL in the digest channel (default $<config discord_webhook_env>: gcs $DISCORD_GCS_USAGE_WEBHOOK, cw none; with -P discord)"),
+    ]
 
-    site_url = site_url or dg.DEFAULT_URL
+    def deco(f):
+        for o in reversed(opts):
+            f = o(f)
+        return f
+    return deco
+
+
+def _digest(
+    bot_token: str | None,
+    channel: str | None,
+    config_path: Path | None,
+    reply_delay: float,
+    edit_replies: bool,
+    for_real: bool,
+    reply_hour: int | None,
+    icons_dir: Path | None,
+    month: str | None,
+    dry_run: bool,
+    platform: str,
+    root: str | None,
+    redo_replies: bool,
+    token: str | None,
+    template: str,
+    site_url: str | None,
+    variant: str | None,
+    webhook: str | None,
+) -> None:
+    from dataclasses import replace
+
+    from . import digest as dg
+
+    cfg = dg.load_config(template, config_path)
+    cfg = replace(cfg, site_url=site_url or cfg.site_url, reply_hour=cfg.reply_hour if reply_hour is None else reply_hour)
+    tpl = dg.template(cfg)
+    variant = variant or cfg.variant
+    if variant not in tpl.variants:
+        raise SystemExit(f"digest: the {cfg.template} template has no {variant!r} variant ({' | '.join(tpl.variants)})")
     m = (
         dt.datetime.strptime(month, "%Y-%m").date()
         if month
         else dt.datetime.now(dt.timezone.utc).date().replace(day=1)
     )
-    root = root or f"gs://{os.environ.get('DATA_BUCKET', 'oa-gcs-usage-dvx')}/snapshots/cw"
+    root = root or cfg.resolve_root()
 
     if dry_run:
-        month = dg.load_month(root, m)
-        if month is None:
-            raise SystemExit(f"digest: no scans for {m:%Y-%m}")
-        import tempfile
-
-        out = Path(tempfile.gettempdir()) / f"cw-digest-{m:%Y%m}.png"
-        dg.render_plot(month, m, out, root)
-        err(f"rendered plot → {out}")
-        print(dg.op_body(month, m, "<plot-url>", site_url))
-        print(f"\n--- replies ({variant}: username | body | icon) ---")
-        for day in dg.day_rows(month, variant, reply_hour):
-            r = dg.reply(day, variant, site_url)
-            print(f"{r.username} | {r.body} | {(r.icon_url or r.icon_emoji or '').split('/')[-1]}")
+        print(dg.dry_run(tpl, root, m, variant))
         return
 
+    if platform == "discord":
+        if redo_replies:
+            raise SystemExit("digest: -R/--redo-replies is Slack-only")
+        webhook = secret(webhook, cfg.discord_webhook_env) if cfg.discord_webhook_env else webhook
+        bot_token = secret(bot_token, "DISCORD_BOT_TOKEN")
+        if not (webhook and bot_token):
+            raise SystemExit(f"digest: -P discord needs {cfg.discord_webhook_env or 'a webhook (-w)'} + DISCORD_BOT_TOKEN (or -w/-b)")
+        dg.post_digest_discord(tpl, root, m, webhook, bot_token, edit_replies=edit_replies)
+        err(f"digest: converged {m:%Y-%m} (discord)")
+        return
+    if edit_replies:
+        raise SystemExit("digest: -E/--edit-replies is Discord-only (Slack replies are re-posted with -R/--redo-replies)")
     channel = channel or os.environ.get("SLACK_CHANNEL")
     token = secret(token, "SLACK_BOT_TOKEN")
     if not (channel and token):
         raise SystemExit("digest: need SLACK_BOT_TOKEN + SLACK_CHANNEL (or -t/-c)")
-    icons = icons_dir or _cw_icons_dir()
+    from thrds.slack import SlackClient
+
+    client = SlackClient(token, channel)
+    icons = icons_dir or _icons_dir(cfg.icons_dir)
 
     def deploy(local: Path, name: str) -> str | None:
-        # publish the cw icons dir (the CORS _headers + the fresh plot) to the
-        # icons Pages project's `cw` preview branch — never its production
-        # branch, whose root alias serves the arrow avatars both digests use.
-        # Return the deployment-specific URL (served instantly), which the OP
-        # image uses to avoid racing alias propagation (→ Slack invalid_blocks).
-        import re
-        import shutil
-        import subprocess
-
-        # The job image installs wrangler globally (`npm install -g`) but has
-        # no `npx` shim, so prefer the binary; `npx` only serves a laptop run.
-        wrangler = [shutil.which("wrangler")] if shutil.which("wrangler") else ["npx", "wrangler"] if shutil.which("npx") else None
-        if wrangler is None:
-            raise SystemExit("digest: neither `wrangler` nor `npx` on PATH — can't publish the plot")
-        r = subprocess.run(
-            [*wrangler, "pages", "deploy", str(icons), "--project-name", dg.ICONS_PROJECT, "--branch", dg.ICONS_BRANCH, "--commit-dirty=true"],
-            check=True, capture_output=True, text=True,
-        )
-        err(r.stdout)
-        found = re.search(r"https://[a-z0-9]+\.gcs-usage-icons\.pages\.dev", r.stdout + r.stderr)
-        return found.group(0) if found else None
+        # publish the icons dir (incl. the freshly-rendered plot) to the
+        # config's Pages project + branch — cw's is a preview branch, never the
+        # production branch whose root alias serves the arrow avatars
+        return dg.pages_deploy(icons, cfg.plot_project, cfg.plot_branch)
 
     if redo_replies:
         # rule change: re-post every reply under the current day rule, then retire the old ones
-        plan = dg.redo_replies(root, m, token, channel, variant, site_url=site_url, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay, reply_hour=reply_hour, for_real=for_real)
+        plan = dg.redo_replies(tpl, root, m, client, channel, variant, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay, for_real=for_real)
         if for_real:
             err(f"digest: re-threaded {m:%Y-%m} ({variant}): {len(plan.get('posted', {}))} replies" + (f", {len(plan['stale'])} old left undeleted" if plan.get("stale") else ""))
             return
@@ -1949,112 +2024,38 @@ def cw_digest(channel: str | None, reply_delay: float, for_real: bool, reply_hou
         print(f"digest --redo-replies {m:%Y-%m} in {channel} ({variant}; dry-run — -F/--for-real applies):")
         print(f"  old replies to delete: {len(plan['old'])}")
         for day, e in plan["old"]:
-            print(f"    {day}  {e['scan']}  ts={e['ts']}")
+            print(f"    {day}  {e['scan'] if isinstance(e, dict) else day}  ts={e['ts'] if isinstance(e, dict) else e}")
         print(f"  new replies to post: {len(plan['new'])}")
         for day, scan, head in plan["new"]:
-            same = "  (same scan as the old reply)" if day in old and old[day]["scan"] == scan else ""
+            same = "  (same scan as the old reply)" if isinstance(old.get(day), dict) and old[day]["scan"] == scan else ""
             print(f"    {day}  {scan}  {head!r}{same}")
         return
-    dg.post_digest(root, m, token, channel, variant, site_url=site_url, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay, reply_hour=reply_hour)
-    err(f"digest: converged {m:%Y-%m} ({variant})")
+    dg.converge_slack(tpl, root, m, client, channel, variant, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay)
+    err(f"digest: converged {m:%Y-%m} ({cfg.template}, {variant})")
+
+
+@main.command()
+@_digest_options("gcs")
+def digest(**kw) -> None:
+    """Converge the monthly digest thread: an OP (month-to-date headline,
+    per-week bullets, plot) edited in place + one reply per scan (gcs template)
+    or per UTC day (cw), in Slack (default) or its Discord twin (`-P discord`:
+    webhook OP with the plot attached, bot-opened thread, webhook replies).
+    State beside the snapshots, per the config's `state`/`discord_state`
+    (gcs: digest/<YYYY-MM>.json; cw: digest/cw/<channel>/<variant>/<YYYY-MM>.json).
+    See specs/digest-unification.md."""
+    _digest(**kw)
+
+
+@main.command("cw-digest")
+@_digest_options("cw")
+def cw_digest(**kw) -> None:
+    """`digest -T cw` (kept so the cw job's invocation is unchanged)."""
+    _digest(**kw)
 
 
 if __name__ == "__main__":
     main()
-
-
-def _icons_dir() -> Path:
-    """`job/icons` in both layouts: pip-installed in the job image (cwd=/app →
-    /app/job/icons) or the repo checkout (…/parents[3]/job/icons)."""
-    cands = (Path.cwd() / "job" / "icons", Path(__file__).resolve().parents[3] / "job" / "icons")
-    return next((c for c in cands if c.exists()), cands[-1])
-
-
-@main.command()
-@option("-b", "--bot-token", help="Discord bot token: opens the month's thread + resolves app emoji (default $DISCORD_BOT_TOKEN; with -P discord)")
-@option("-c", "--channel", help="Slack channel id (default $SLACK_CHANNEL)")
-@option("-D", "--reply-delay", "reply_delay", default=0.0, type=float, help="Seconds to sleep between replies (e.g. 305 for a spaced Slack backfill so per-reply sender chrome survives; Discord needs none)")
-@option("-E", "--edit-replies", is_flag=True, help="Re-edit every already-posted reply to its current body (backfill after a format change; -P discord only)")
-@option("-m", "--month", help="Month YYYY-MM (default: current UTC month)")
-@option("-n", "--dry-run", is_flag=True, help="Render the plot + print OP/replies; post & host nothing")
-@option("-P", "--platform", type=Choice(["slack", "discord"]), default="slack", help="Which twin to converge (default slack)")
-@option("-r", "--root", help="Snapshots root (default gs://$DATA_BUCKET/snapshots)")
-@option("-t", "--token", help="Slack bot token (default $SLACK_BOT_TOKEN)")
-@option("-u", "--url", "site_url", default=None, help="Site base for links (default gcs.oa.dev)")
-@option("-w", "--webhook", help="Discord webhook URL in the digest channel (default $DISCORD_GCS_USAGE_WEBHOOK; with -P discord)")
-def digest(bot_token: str | None, channel: str | None, reply_delay: float, edit_replies: bool, month: str | None, dry_run: bool, platform: str, root: str | None, token: str | None, site_url: str | None, webhook: str | None) -> None:
-    """Converge the Shape-C monthly digest thread: an OP (month-to-date headline,
-    per-week bullets, mosaic plot) edited in place + one reply per scan (headline
-    sender, $/mo body, colour-coded arrow avatar). Slack (default; state in
-    gs://<bucket>/digest/<YYYY-MM>.json) or its Discord twin (`-P discord`: webhook
-    OP with the plot attached, bot-opened thread, per-scan webhook replies; state
-    in digest/discord/<channel>/<YYYY-MM>.json). See specs/done/slack-digest-shape-c.md."""
-    from . import digest as dg
-
-    site_url = site_url or dg.DEFAULT_URL
-    m = (
-        dt.datetime.strptime(month, "%Y-%m").date()
-        if month
-        else dt.datetime.now(dt.timezone.utc).date().replace(day=1)
-    )
-    root = root or f"gs://{os.environ.get('DATA_BUCKET', 'oa-gcs-usage-dvx')}/snapshots"
-
-    if dry_run:
-        rows = dg.load_month(root, m)
-        if not rows:
-            raise SystemExit(f"digest: no scans for {m:%Y-%m}")
-        import tempfile
-
-        out = Path(tempfile.gettempdir()) / f"digest-{m:%Y%m}.png"
-        dg.render_plot(rows, m, out)
-        err(f"rendered plot → {out}")
-        print(dg.op_body(rows, m, "<plot-url>", site_url))
-        print("\n--- replies (sender | body | avatar) ---")
-        for r in rows:
-            s, b, a = dg.reply(r, site_url)
-            print(f"{s} | {b} | {a.split('/')[-1]}")
-        return
-
-    if platform == "discord":
-        webhook = secret(webhook, "DISCORD_GCS_USAGE_WEBHOOK")
-        bot_token = secret(bot_token, "DISCORD_BOT_TOKEN")
-        if not (webhook and bot_token):
-            raise SystemExit("digest: -P discord needs DISCORD_GCS_USAGE_WEBHOOK + DISCORD_BOT_TOKEN (or -w/-b)")
-        dg.post_digest_discord(root, m, webhook, bot_token, site_url=site_url, edit_replies=edit_replies)
-        err(f"digest: converged {m:%Y-%m} (discord)")
-        return
-    if edit_replies:
-        raise SystemExit("digest: -E/--edit-replies is Discord-only (Slack replies are never edited)")
-    channel = channel or os.environ.get("SLACK_CHANNEL")
-    token = secret(token, "SLACK_BOT_TOKEN")
-    if not (channel and token):
-        raise SystemExit("digest: need SLACK_BOT_TOKEN + SLACK_CHANNEL (or -t/-c)")
-    icons = _icons_dir()
-
-    def deploy(local: Path, name: str) -> str | None:
-        # publish the icons dir (incl. the freshly-rendered plot) to the Pages
-        # project; needs CLOUDFLARE_* + node/wrangler. Return the deployment-
-        # specific URL (served instantly), which the OP image uses to avoid
-        # racing root-alias CDN propagation (→ Slack `invalid_blocks`).
-        import re
-        import shutil
-        import subprocess
-
-        # The job image installs wrangler globally (`npm install -g`) but has
-        # no `npx` shim, so prefer the binary; `npx` only serves a laptop run.
-        wrangler = [shutil.which("wrangler")] if shutil.which("wrangler") else ["npx", "wrangler"] if shutil.which("npx") else None
-        if wrangler is None:
-            raise SystemExit("digest: neither `wrangler` nor `npx` on PATH — can't publish the plot")
-        r = subprocess.run(
-            [*wrangler, "pages", "deploy", str(icons), "--project-name", "gcs-usage-icons", "--branch", "main", "--commit-dirty=true"],
-            check=True, capture_output=True, text=True,
-        )
-        err(r.stdout)
-        m = re.search(r"https://[a-z0-9]+\.gcs-usage-icons\.pages\.dev", r.stdout + r.stderr)
-        return m.group(0) if m else None
-
-    dg.post_digest(root, m, token, channel, site_url=site_url, icons_dir=icons, deploy_plot=deploy, reply_delay=reply_delay)
-    err(f"digest: converged {m:%Y-%m}")
 
 
 @main.command("discord-emoji")

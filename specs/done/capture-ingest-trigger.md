@@ -48,7 +48,7 @@ Built in `3e8e6c3`, applied 2026-10-02:
 - `aws/__main__.py`: IAM user `disk-tree-m3-capture-trigger`, allowed only `batch:SubmitJob` on the queue and the job definition. No access key in Pulumi: `cf/capture-trigger/put-secrets` mints one straight into the Worker secrets (and rotates out older keys on a re-run).
 - `cf/capture-trigger/`: the Worker. It is a serial consumer (`max_concurrency = 1`). The `_INGEST.json` marker is written `submitting` before the call and `submitted` with the job id after. A failed submit deletes the marker and retries the message.
 
-Apply order, for reference: `pulumi up` (aws, then cf) → `pnpm -C cf/capture-trigger run deploy` (`pnpm deploy` is pnpm's own command) → `cf/capture-trigger/put-secrets` (`AWS_PROFILE=r`, under direnv). Then drop `then` from disky.json's scan job at the same time: `aws/submit` writes no marker, so while both run, a capture is ingested twice.
+Apply order, for reference: `pulumi up` (aws, then cf) → `pnpm -C infra/cf/capture-trigger run deploy` (`pnpm deploy` is pnpm's own command) → `infra/cf/capture-trigger/put-secrets` (`AWS_PROFILE=r`, under direnv). Then drop `then` from disky.json's scan job at the same time: `aws/submit` writes no marker, so while both run, a capture is ingested twice.
 
 Cutover done 2026-10-02: `then` dropped from `disky.json`; a Scan now captured `captures/m3/root/2026-10-02T14-59-17Z` (`_SUCCESS.json` 15:05:24Z), the Worker submitted Batch job `7e6297c8…` at 15:05:30Z, and it succeeded at 11:08 EDT with index gen `listing/laptop/2026-10-02/index/202610021506` (R2 + D1 `index_schema`; `du -p` reads it).
 

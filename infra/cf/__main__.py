@@ -66,7 +66,7 @@ dev_domain = cloudflare.PagesDomain(
 # The capture trigger (specs/capture-ingest-trigger.md): a capture's
 # `_SUCCESS.json` (written last, so the capture is complete) landing under
 # `captures/` in the `disk-tree` bucket → this queue → the `capture-trigger`
-# Worker (`cf/capture-trigger/`, deployed by wrangler, which attaches it as the
+# Worker (`infra/cf/capture-trigger/`, deployed by wrangler, which attaches it as the
 # consumer) → Batch `SubmitJob`. Laptops then need only R2 write.
 CAPTURES_QUEUE = "disk-tree-captures"
 captures_queue = cloudflare.Queue("captures-queue", account_id=account_id, queue_name=CAPTURES_QUEUE)

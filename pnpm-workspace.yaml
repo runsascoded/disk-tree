@@ -1,4 +1,4 @@
 packages:
   - "site"
   - "packages/*"
-  - "cf/capture-trigger"
+  - "infra/cf/capture-trigger"

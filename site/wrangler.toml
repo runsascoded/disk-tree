@@ -4,7 +4,7 @@
 # by the Batch ingest (`aws/`), footers → D1.
 #
 # Not yet deployed: disk.rbw.sh still serves `ui/` (Pages project `disk-tree`)
-# until Phase 4. The D1 is `cf/`'s (Pulumi): `disk-tree-m3-db`. Migrations:
+# until Phase 4. The D1 is `infra/cf/`'s (Pulumi): `disk-tree-m3-db`. Migrations:
 #   wrangler d1 migrations apply disk-tree-m3-db --remote
 name = "disk-tree"
 pages_build_output_dir = "dist"
