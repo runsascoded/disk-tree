@@ -8,6 +8,7 @@
 // inaction: no deadline, no auto-sweep.
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { SiteNav } from './SiteNav'
 import { Tooltip } from './Tooltip'
 import { UserChip } from './UserChip'
 import { useUnits } from './units'
@@ -96,8 +97,8 @@ export function StagedPage() {
 
   return (
     <div className="staged-page">
+      <SiteNav />
       <div className="staged-head">
-        <Link to="/" className="back">← treemap</Link>
         <h1>Staged for deletion</h1>
         <span className="who">
           {ident ? <>{admin ? 'admin' : canStage ? 'stager' : 'viewer'} · <UserChip who={ident.email} size={20} /></> : 'not signed in'}
