@@ -5,6 +5,7 @@ import { blobKey, columnsFor, footerKey, groupMatchesSize, indexKey, type IndexH
 import { storeEnv } from './stores'
 import { sqliteD1 } from './testD1'
 import { type D1Variant, fixture, fixtureSize, FILES, GETS, readJson, seedGeneration } from './testStore'
+import { parseQuery } from './scope'
 import { buildDiff, buildView, type DiffRow, lensSort, SMALL_SUBTREE_ROWS, type ViewNode } from './view'
 
 vi.mock('@rdub/file-tree/stores/s3', async () => ({ S3Store: (await import('./testStore')).S3Store }))
@@ -367,6 +368,18 @@ describe('buildView on a store generation', () => {
   })
 })
 
+describe('filter no-match fallback on a v1 scan', () => {
+  const base = { w: 1280, h: 800, minArea: 12, atten: 1, query: parseQuery('bk/b')! }
+  it('reads the floor-free tier for a subtree within the cap', async () => {
+    const v = await buildView(env, { ...base, date: V1, path: 'bk' })
+    expect([v.matches, v.matched]).toEqual([['bk/b'], [{ path: 'bk/b', b: 400, o: 1 }]])
+  })
+  it('skips that unprunable read past the cap: no matches instead of a Worker over its limits', async () => {
+    const v = await buildView(env, { ...base, date: V1, path: 'bk', v1ScanObjects: 2 })
+    expect([v.tier, v.nodes, v.matches, v.matched]).toEqual(['none', 0, [], []])
+  })
+})
+
 describe('buildDiff', () => {
   const base = { w: 1280, h: 800, minArea: 12, atten: 1, top: 500 }
   const row = (p: string, d: number, k: DiffRow['k'], s: DiffRow['s'], a: number, b: number, oa: number, ob: number, x?: true): DiffRow => ({ p, d, k, s, a, b, oa, ob, ...(x ? { x } : {}) })
@@ -413,6 +426,14 @@ describe('buildDiff', () => {
       ],
       total_a: 700, total_b: 37229948, objects_a: 3, objects_b: 8009, threshold: 1, tier: 'path',
       expansions: 4, truncated: false, lookups: 7, lookups_capped: false,
+    })
+  })
+
+  it('a filter matching nothing on either side is an empty diff, not a 500', async () => {
+    const d = await buildDiff(env, { ...base, from: V1, to: V2, path: 'bk', query: parseQuery('no-such-name')! })
+    expect(d).toEqual({
+      rows: [], total_a: 0, total_b: 0, objects_a: 0, objects_b: 0, threshold: 0, tier: 'none', matched: [],
+      expansions: 0, truncated: false, lookups: 0, lookups_capped: false,
     })
   })
 })

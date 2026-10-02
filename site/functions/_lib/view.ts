@@ -54,6 +54,15 @@ const COARSE_EXPS = [16, 20, 24]
  * is cheaper (gcs's 32K-row groups: a 2K-row dir 20 levels deep decoded
  * ~1.3M rows from `path`). The two span queries cost ~20 ms. */
 export const SMALL_SUBTREE_ROWS = 0
+/** A v1 floor-free tier is sorted `(depth, path)`, so a size threshold can't
+ * prune it: the filter's no-match fallback reads every row under the path.
+ * For a whole bucket that read exceeds the Worker's limits (a bucket-level
+ * filter on 2026-10-01 died with 1102 and took its isolate's other requests
+ * with it), so past this many objects under the path (v1 rows carry no row
+ * count; a subtree's dirs are far fewer than its objects) the fallback is
+ * skipped and the matches are the coarse tiers'. A 390k-object subtree
+ * read in 5–8 s. */
+export const V1_FILTER_SCAN_OBJECTS = 500_000
 
 /** A node of the served tree. `k`: what the path is — an object (`file`) or
  * a directory; a v1 generation only has directories, and a fold (`(other)`)
@@ -98,6 +107,9 @@ export interface ViewOpts {
   partial?: boolean
   /** The store's small-subtree cutoff, rows (default `SMALL_SUBTREE_ROWS`). */
   smallRows?: number
+  /** With `query` on a v1 scan: the largest subtree (objects) the no-match
+   * fallback reads (default `V1_FILTER_SCAN_OBJECTS`). */
+  v1ScanObjects?: number
 }
 
 export interface View {
@@ -575,8 +587,8 @@ async function readView(env: Env, o: ViewOpts): Promise<Read | null> {
       p1Tier = t.name
       if (roots.length) break
     }
-    if (!roots.length) {
-      const fineIdx = fine ?? withTrace(await openFine(env, date, 'path'), tr)
+    const fineIdx = roots.length ? null : fine ?? withTrace(await openFine(env, date, 'path'), tr)
+    if (fineIdx && (isStore(fineIdx) || rootAll.o <= (o.v1ScanObjects ?? V1_FILTER_SCAN_OBJECTS))) {
       const got = await readSubtree(env, date, fineIdx, [{ dLo: dP + 1, dHi: maxDepth != null ? dP + maxDepth : 1e9, pLo, pHi }], thrAt, undefined, nDesc, smallRows, tr)
       p1 = aggregate(got.rows)
       roots = matchRoots(p1.depth.keys(), query, path)
@@ -959,6 +971,11 @@ export async function buildDiff(env: Env, o: DiffOpts): Promise<Diff> {
     else vb = await readView(env, { ...o, date: to, threshold: shared, ...cap })
   }
   tr?.('views', performance.now() - t0)
+  // Nothing in scope on either side (a filter with no matches, an empty owner
+  // pool): an empty diff, not a crash on the missing views.
+  if (!va && !vb) {
+    return { rows: [], total_a: 0, total_b: 0, objects_a: 0, objects_b: 0, threshold: 0, tier: 'none', ...(query ? { matched: [] } : {}), expansions: 0, truncated: false, lookups: 0, lookups_capped: false }
+  }
   // One side a v1 generation (dirs only), the other a store (objects too):
   // the objects have no counterpart to be compared with, so they fold into
   // `(other)` on the store side rather than reading as added / removed.
