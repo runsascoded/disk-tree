@@ -282,9 +282,12 @@ export function SizeOverTime({ scans, prefix, user, pool, onPickDate, onBrush, w
       // their own callouts), so the total's labels always go above.
       .map(c => ({ x: c.x, y: c.y, label: fmtY(c.y), below: stacked ? false : c.below }))
     if (stacked) {
+      // The stack's top edge per x, from the bands themselves (their own sums).
+      const top = new Map<number, number>()
+      for (const s of series) if (s.key !== 'total') for (const b of s.points as Band[]) top.set(b.x, Math.max(top.get(b.x) ?? -Infinity, b.y))
       for (const s of series) {
         if (s.key === 'total') continue
-        for (const c of bandCallouts(s.points as Band[], radius, floor)) out.push({ x: c.x, y: c.y, y0: c.y0, label: fmtBytes(c.h) })
+        for (const c of bandCallouts(s.points as Band[], radius, floor, top)) out.push({ x: c.x, y: c.y, y0: c.y0, label: fmtBytes(c.h) })
       }
     }
     return out
