@@ -13,6 +13,7 @@ import { slackApi, slackReady, type SlackEnv } from './slack.js'
 import type { Env } from './auth.js'
 import { pathScans, storeReady } from './index.js'
 import { prefixesAt } from './prefixes.js'
+import { pathTree } from './pathTree.js'
 import { loadRegistry } from './identity.js'
 
 export type { RunRow }
@@ -120,8 +121,9 @@ export function renderParent(v: ParentView): { text: string; blocks: unknown[] }
 
 /** A stage batch's reply, with its reject button. */
 export function stageEvent(e: { planId: number; batchId: number; by: string; prefixes: string[]; covered: number; note: string | null; siteUrl: string; mentions?: Record<string, string>; size?: Sized }): { text: string; blocks: unknown[] } {
-  const shown = e.prefixes.slice(0, 8).map(p => `• \`${p}\``).join('\n')
-  const more = e.prefixes.length > 8 ? `\n…and ${e.prefixes.length - 8} more` : ''
+  // The prefixes as a `tree`: shared parents once, sibling leaves packed.
+  const shown = '```' + pathTree(e.prefixes, { maxLines: 16 }).join('\n') + '```'
+  const more = ''
   const cov = e.covered ? ` (${e.covered} already covered)` : ''
   const memo = e.note ? `\n> ${e.note.replace(/\n/g, '\n> ')}` : ''
   const text = `${who(e.by, e.mentions)} staged ${e.prefixes.length} ${e.prefixes.length === 1 ? 'prefix' : 'prefixes'}${cov}`
@@ -153,33 +155,53 @@ export function runEvent(r: RunRow, phase: 'dispatched' | 'finished' | 'failed',
  * parent message offers the dispatch buttons. */
 export type NotifyEnv = SlackEnv & { GCP_SA_KEY?: string }
 
-interface Event { text: string; blocks?: unknown[] }
+interface Event { text: string; blocks?: unknown[]; sender?: Sender }
 /** A stage batch's reply, rendered here so it can carry mentions and sizes. */
 export interface StageArgs { stage: Omit<Parameters<typeof stageEvent>[0], 'mentions' | 'size'> }
 
-// email → `<@U…>` (or null: not in the workspace), per isolate.
-const mentionMemo = new Map<string, Promise<string | null>>()
+/** A workspace member, as `users.lookupByEmail` returns them. */
+export interface SlackPerson { mention: string; name: string | null; image: string | null }
 
-/** Slack mentions for `emails` (`users.lookupByEmail`; the bot has
- *  `users:read.email`). Unknown emails are left out: callers fall back to the
- *  local part. */
-export async function slackMentions(env: SlackEnv, emails: readonly string[]): Promise<Record<string, string>> {
-  const out: Record<string, string> = {}
+// email → member (or null: not in the workspace), per isolate.
+const personMemo = new Map<string, Promise<SlackPerson | null>>()
+
+/** Workspace members for `emails` (`users.lookupByEmail`; the bot has
+ *  `users:read.email`). Unknown emails are left out. */
+export async function slackPeople(env: SlackEnv, emails: readonly string[]): Promise<Record<string, SlackPerson>> {
+  const out: Record<string, SlackPerson> = {}
   await Promise.all([...new Set(emails.map(e => e.toLowerCase()))].map(async e => {
-    let m = mentionMemo.get(e)
+    let m = personMemo.get(e)
     if (!m) {
       m = (async () => {
         if (!env.SLACK_BOT_TOKEN) return null
         const r = await fetch(`https://slack.com/api/users.lookupByEmail?email=${encodeURIComponent(e)}`, { headers: { authorization: `Bearer ${env.SLACK_BOT_TOKEN}` } })
-        const j = (await r.json().catch(() => null)) as { ok?: boolean; user?: { id?: string; deleted?: boolean } } | null
-        return j?.ok && j.user?.id && !j.user.deleted ? `<@${j.user.id}>` : null
+        const j = (await r.json().catch(() => null)) as { ok?: boolean; user?: { id?: string; deleted?: boolean; real_name?: string; profile?: { real_name?: string; image_192?: string } } } | null
+        const u = j?.ok ? j.user : undefined
+        return u?.id && !u.deleted ? { mention: `<@${u.id}>`, name: u.profile?.real_name || u.real_name || null, image: u.profile?.image_192 ?? null } : null
       })().catch(() => null)
-      mentionMemo.set(e, m)
+      personMemo.set(e, m)
     }
     const v = await m
     if (v) out[e] = v
   }))
   return out
+}
+
+/** Slack mentions for `emails`; unknown emails are left out (callers fall back
+ *  to the local part). */
+export async function slackMentions(env: SlackEnv, emails: readonly string[]): Promise<Record<string, string>> {
+  const people = await slackPeople(env, emails)
+  return Object.fromEntries(Object.entries(people).map(([e, p]) => [e, p.mention]))
+}
+
+/** Who a message posts as (`username` / `icon_*`; honoured only with the
+ *  `chat:write.customize` scope, ignored otherwise). The thread's parent is
+ *  the plan itself; an event posts as the person who did it. */
+export interface Sender { username: string; icon_url?: string; icon_emoji?: string }
+export const PLAN_SENDER: Sender = { username: 'Staged deletions', icon_emoji: ':wastebasket:' }
+export function personSender(email: string, person: SlackPerson | undefined, verb: string): Sender {
+  const name = person?.name ?? email.replace(/@.*$/, '')
+  return { username: `${name} · ${verb}`, ...(person?.image ? { icon_url: person.image } : { icon_emoji: ':bust_in_silhouette:' }) }
 }
 
 /** A name as the site's canonical user id: `Chi-Heem Wong` → `chi-heem-wong`. */
@@ -286,11 +308,14 @@ export async function notifyPlan(env: NotifyEnv, db: D1Database, planId: number,
       stage ? sizeStaged(full, db, stage.prefixes).catch(() => null) : Promise.resolve(null),
     ])
     const parent = renderParent({ ...v, mentions, size: size ?? undefined })
-    const event: Event | undefined = stage ? stageEvent({ ...stage, mentions, size: stageSize ?? undefined }) : (ev as Event | undefined)
+    const people = stage ? await slackPeople(env, [stage.by]) : {}
+    const event: Event | undefined = stage
+      ? { ...stageEvent({ ...stage, mentions, size: stageSize ?? undefined }), sender: personSender(stage.by, people[stage.by.toLowerCase()], 'staged') }
+      : (ev as Event | undefined)
     let channel = v.slack_channel ?? env.SLACK_ADMIN_CHANNEL!
     let ts = v.slack_ts
     if (!ts) {
-      const p = await slackApi(env, 'chat.postMessage', { channel, ...parent, unfurl_links: false })
+      const p = await slackApi(env, 'chat.postMessage', { channel, ...parent, ...PLAN_SENDER, unfurl_links: false })
       if (!p.ok || !p.ts) return
       // Two concurrent first events would each post a parent: the claim is
       // the tiebreak, and the loser deletes its own.
@@ -306,7 +331,7 @@ export async function notifyPlan(env: NotifyEnv, db: D1Database, planId: number,
     } else {
       await slackApi(env, 'chat.update', { channel, ts, ...parent })
     }
-    if (event) await slackApi(env, 'chat.postMessage', { channel, thread_ts: ts, text: event.text, ...(event.blocks ? { blocks: event.blocks } : {}), unfurl_links: false })
+    if (event) await slackApi(env, 'chat.postMessage', { channel, thread_ts: ts, text: event.text, ...(event.blocks ? { blocks: event.blocks } : {}), ...(event.sender ?? PLAN_SENDER), unfurl_links: false })
   } catch (e) {
     console.log(`staged slack notify failed for plan ${planId}: ${(e as Error).message}`)
   }

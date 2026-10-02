@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtBytes, nameSlug, renderParent, runEvent, stageEvent, type RunRow } from './stagedSlack.js'
+import { PLAN_SENDER, fmtBytes, nameSlug, personSender, renderParent, runEvent, stageEvent, type RunRow } from './stagedSlack.js'
 
 const run = (o: Partial<RunRow>): RunRow => ({
   run_id: 'cw-sweep-dry-1', mode: 'dry', scan: '2026-09-28T1201', actor: 'ann@openathena.ai', started_ts: 100,
@@ -67,7 +67,7 @@ describe('mentions and sizes', () => {
       ':wastebasket: *<@UA> staged 1 prefix*',
       '*51.0 TiB* · 179,327,698 objects at scan 2026-10-02',
       '> old runs',
-      '• `gs://b/x/`',
+      '```b/x/```',
     ]])
   })
 })
@@ -76,5 +76,19 @@ describe('nameSlug: a Slack name as the canonical owner id', () => {
   it('lowercase, accents folded, other runs to one dash', () => {
     expect(['Chi-Heem Wong', 'Percy Liang', 'José  Núñez', ' Will Held (he/him) '].map(nameSlug))
       .toEqual(['chi-heem-wong', 'percy-liang', 'jose-nunez', 'will-held-he-him'])
+  })
+})
+
+describe('senders', () => {
+  it('an event posts as the person (their Slack avatar), else their local part with a generic icon', () => {
+    expect([
+      personSender('a.b@x.org', { mention: '<@UA>', name: 'Ann Bee', image: 'https://img/a.png' }, 'staged'),
+      personSender('c.d@x.org', undefined, 'staged'),
+      PLAN_SENDER,
+    ]).toEqual([
+      { username: 'Ann Bee · staged', icon_url: 'https://img/a.png' },
+      { username: 'c.d · staged', icon_emoji: ':bust_in_silhouette:' },
+      { username: 'Staged deletions', icon_emoji: ':wastebasket:' },
+    ])
   })
 })
