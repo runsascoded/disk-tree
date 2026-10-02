@@ -35,6 +35,16 @@ export interface CardData {
   legend?: LegendItem[]
   /** Shown instead of a treemap when there's nothing to draw. */
   empty?: string
+  /** A heatmap instead of a treemap (`/assignments`): rows × cols, cell
+   *  shade by bytes. Labels (people) only on a `full` card. */
+  grid?: Grid
+}
+
+export interface Grid {
+  rows: string[]
+  cols: string[]
+  /** `[row, col, bytes]`, indices into `rows` / `cols`. */
+  cells: [number, number, number][]
 }
 
 const BG = '#16181d'
@@ -77,6 +87,30 @@ function text(x: number, y: number, s: string, size: number, opts: { fill?: stri
   return `<text x="${r1(x)}" y="${r1(y)}" font-family="${FONT}" font-size="${size}" font-weight="${opts.weight ?? 400}" fill="${opts.fill ?? INK}"${opts.anchor ? ` text-anchor="${opts.anchor}"` : ''}>${esc(s)}</text>`
 }
 
+/** A heatmap in the box: shade = log bytes over the accent; a `full` card
+ * names rows and columns (people), an `anon` one draws the grid alone. */
+function gridSvg(g: Grid, full: boolean, x: number, y: number, w: number, h: number): string {
+  const head = full ? 150 : 0
+  const top = full ? 34 : 0
+  const cw = Math.min(90, (w - head) / Math.max(1, g.cols.length))
+  const ch = Math.min(44, (h - top) / Math.max(1, g.rows.length))
+  const max = Math.max(1, ...g.cells.map(c => c[2]))
+  const out: string[] = []
+  if (full) {
+    g.cols.forEach((c, i) => out.push(text(x + head + i * cw + cw / 2, y + 20, clip(c, cw - 4, 14), 14, { fill: MUTED, anchor: 'middle' })))
+    g.rows.forEach((r, i) => out.push(text(x, y + top + i * ch + ch / 2 + 5, clip(r, head - 8, 14), 14, { fill: MUTED })))
+  }
+  for (let i = 0; i < g.rows.length; i++) for (let j = 0; j < g.cols.length; j++) {
+    out.push(`<rect class="cell" x="${r1(x + head + j * cw)}" y="${r1(y + top + i * ch)}" width="${r1(cw - 2)}" height="${r1(ch - 2)}" fill="#20232a"/>`)
+  }
+  for (const [i, j, b] of g.cells) {
+    const t = Math.log10(b + 1) / Math.log10(max + 1)
+    out.push(`<rect class="hot" x="${r1(x + head + j * cw)}" y="${r1(y + top + i * ch)}" width="${r1(cw - 2)}" height="${r1(ch - 2)}" fill="#4269d0" fill-opacity="${(0.15 + 0.85 * t).toFixed(2)}"/>`)
+    if (full && cw > 56) out.push(text(x + head + j * cw + cw / 2 - 1, y + top + i * ch + ch / 2 + 5, fmtB(b), 13, { anchor: 'middle' }))
+  }
+  return out.join('')
+}
+
 /** The card. Tiles are laid out by bytes; children inside each tile get a
  * 4px inset. Labels only on a `full` card, and only where they fit. */
 export function cardSvg(d: CardData): string {
@@ -89,7 +123,9 @@ export function cardSvg(d: CardData): string {
   out.push(text(40, 124, clip(d.subtitle, 1120, 20), 20, { fill: MUTED }))
   const [mx, my, mw, mh] = [40, 144, 1120, 410]
   const tiles = d.tiles.filter(t => t.b > 0)
-  if (!tiles.length) {
+  if (d.grid?.cells.length) {
+    out.push(gridSvg(d.grid, full, mx, my, mw, mh))
+  } else if (!tiles.length) {
     out.push(`<rect x="${mx}" y="${my}" width="${mw}" height="${mh}" rx="6" fill="#20232a"/>`)
     out.push(text(mx + mw / 2, my + mh / 2, d.empty ?? 'nothing to show', 26, { fill: MUTED, anchor: 'middle' }))
   } else {

@@ -67,7 +67,14 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 - The middleware upgrades to `full` only when `og=` was minted for exactly this view, is unexpired, and has a live D1 row. The full image URL never outlives the token. Without the table (cw), no token is honoured.
 - UI: "Copy link with preview" in the site menu and the omnibar (`share:preview`); `/admin` lists mints with revoke ("Preview links").
 
-**Next:** 2 the other pages' cards; 3 the Slack image block.
+**Phase 2 (the other pages): built.** `og/pages.ts`:
+- `/staged` (+ `q`, the page's own filter): the open plan's items at the latest scan (`prefixesAt`), a tile per bucket, coloured by owner (the ledger's assignee, else the scan's top owner).
+- `/users`: a tile per person by owned bytes, plus the unowned pool.
+- `/user/<id>`: the map card under that user's lens.
+- `/assignments`: the matrix as a heatmap (`Grid`; names only on a full card).
+- These pages' Functions already stamp a title with counts, so the middleware swaps only their image.
+
+**Next:** 3 the Slack image block.
 
 ## Rollout
 

@@ -34,6 +34,17 @@ describe('cardSvg', () => {
       3, 2,
     ])
   })
+  it('heatmap: anon draws the grid with no names; full names rows, columns and cells', () => {
+    const grid = { rows: ['Michael', 'Ahmed'], cols: ['Michael', 'Ahmed', 'Will'], cells: [[0, 0, 178 * T], [1, 1, 50 * T], [1, 2, 0.02 * T]] as [number, number, number][] }
+    const d = (tier: 'anon' | 'full') => ({ ...data(tier), title: 'assigner × assignee', tiles: [], legend: undefined, grid })
+    const anon = cardSvg(d('anon'))
+    const full = cardSvg(d('full'))
+    expect([texts(anon), count(anon, 'cell'), count(anon, 'hot'), texts(full)]).toEqual([
+      ['marin GCS', 'assigner × assignee', 'scan 2026-10-02', '51.1 TiB · 179,327,698 objects'],
+      6, 3,
+      ['marin GCS', 'assigner × assignee', 'scan 2026-10-02', 'Michael', 'Ahmed', 'Will', 'Michael', 'Ahmed', '178 TiB', '50.0 TiB', '20.5 GiB', '51.1 TiB · 179,327,698 objects'],
+    ])
+  })
   it('nothing to draw: the empty note', () => {
     expect(texts(cardSvg({ ...data('anon'), tiles: [], empty: 'no matches' }))).toEqual(['marin GCS', 'marin-us-central2/checkpoints', 'scan 2026-10-02', 'no matches', '51.1 TiB · 179,327,698 objects'])
   })

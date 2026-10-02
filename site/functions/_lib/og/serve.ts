@@ -6,6 +6,7 @@ import { ledgerHead } from '../ledger.js'
 import { stampMeta } from '../unfurl.js'
 import { cardSvg, type CardData } from './card.js'
 import { mapCard, type Site } from './data.js'
+import { assignmentsCard, stagedCard, userCard, usersCard } from './pages.js'
 import { ensureWasm, FONT_FILES, svgToPng } from './render.js'
 import { pageView, type OgKind } from './routes.js'
 import { expDay, IMAGE_TTL_DAYS, imagePath, ogKey, verifyImage, type OgTier } from './sign.js'
@@ -18,7 +19,12 @@ export type OgEnv = Env & {
 }
 
 /** The kinds this build draws; the rest keep their static card. */
-export const DRAWN: ReadonlySet<OgKind> = new Set(['map'])
+export const DRAWN: ReadonlySet<OgKind> = new Set(['map', 'staged', 'users', 'user', 'assignments'])
+
+/** Kinds whose page Function already stamps its own title and description
+ * (`functions/staged.ts`, `users.ts`, `user/[id].ts`, `assignments.ts`): the
+ * middleware only swaps their image. */
+const OWN_TITLES: ReadonlySet<OgKind> = new Set(['staged', 'users', 'user', 'assignments'])
 
 export const siteOf = (env: OgEnv): Site => ({ name: env.ROOT_LABEL ?? 'storage', scheme: env.STORE_SCHEME ?? 'gs://' })
 
@@ -48,6 +54,7 @@ export async function stampPage(env: OgEnv, url: URL, html: Response): Promise<R
   const tier: OgTier = full ? 'full' : 'anon'
   const day = Math.min(expDay(now(), IMAGE_TTL_DAYS), full?.day ?? Infinity)
   const image = url.origin + await imagePath(key, pv.kind, pv.params, tier, day)
+  if (OWN_TITLES.has(pv.kind)) return stampMeta(html, { image, imageType: 'image/png', page: url.href })
   return stampMeta(html, {
     title: pv.title,
     desc: `${siteOf(env).name}: an interactive storage map of this view: who owns what, by size.`,
@@ -68,11 +75,20 @@ function fonts(env: OgEnv, origin: string): Promise<Uint8Array[]> {
 }
 
 async function cardData(env: OgEnv, kind: string, params: Record<string, string>, tier: OgTier, url: URL): Promise<CardData | null> {
-  if (kind === 'map') {
-    const pv = pageView(new URL(`/${params.path ?? ''}`, url.origin), siteOf(env).name)
-    return mapCard(env, siteOf(env), pv?.title ?? siteOf(env).name, params, tier)
+  const site = siteOf(env)
+  // The page's own title, recomputed from the signed view.
+  const page = kind === 'map' ? `/${params.path ?? ''}` : kind === 'user' ? `/user/${params.id ?? ''}` : `/${kind}`
+  const pu = new URL(page, url.origin)
+  for (const [k, v] of Object.entries(params)) if (k !== 'path' && k !== 'id') pu.searchParams.set(k, v)
+  const title = pageView(pu, site.name)?.title ?? site.name
+  switch (kind) {
+    case 'map': return mapCard(env, site, title, params, tier)
+    case 'staged': return stagedCard(env, site, title, params, tier)
+    case 'users': return usersCard(env, site, title, params, tier)
+    case 'user': return userCard(env, site, title, params, tier)
+    case 'assignments': return assignmentsCard(env, site, title, params, tier)
+    default: return null
   }
-  return null
 }
 
 /** `GET /og/<kind>.png?<view>&sig=…`: verify, then render (or serve the

@@ -30,8 +30,9 @@ export async function unfurlShell(
 }
 
 /** Rewrite an HTML response's title and `og:*` / `twitter:*` / description
- * meta to `meta` (crawlers never run the React router). */
-export function stampMeta(html: Response, meta: Unfurl): Response {
+ * meta to `meta` (crawlers never run the React router). Fields left out keep
+ * the response's own. */
+export function stampMeta(html: Response, meta: Partial<Unfurl>): Response {
   return new HTMLRewriter()
     .on('meta', {
       element(el) {
@@ -49,7 +50,7 @@ export function stampMeta(html: Response, meta: Unfurl): Response {
     })
     .on('title', {
       element(el) {
-        el.setInnerContent(meta.title)
+        if (meta.title) el.setInnerContent(meta.title)
       },
     })
     .transform(html)
