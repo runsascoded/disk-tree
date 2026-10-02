@@ -5,6 +5,7 @@
  *
  * Both are pure functions over index rows / per-path aggregates so `buildView`
  * stays one pipeline: read a superset by total bytes, narrow per row, fold. */
+import type { NamePred } from './pathQuery.js'
 
 /** `o=`: `owned` = rows some person owns (`usr` set), `unowned` = the
  * NULL-`usr` slices (ownership has one axis: a person or nobody). `{not}` =
@@ -56,32 +57,9 @@ export function classRow<R extends { size: number; n_files: number; mtime_w: num
   return { ...r, size, n_files: Math.round(r.n_files * f), mtime_w: r.mtime_w * f, cls2: cl.has('2') ? r.cls2 : 0, cls3: cl.has('3') ? r.cls3 : 0, cls4: cl.has('4') ? r.cls4 : 0 }
 }
 
-/** `q=`: `/…/` = regex (case-insensitive); anything else = substring (ci),
- * with `|` splitting alternatives. Predicates receive the index path
- * (`bucket/dir/sub`), so `grug/swarm` matches across segments. Mirrors the
- * client's `parseQuery` (`site/src/filterTree.ts`) exactly. A parsed
- * predicate carries its query string (`q`), which the search index plans
- * from (`searchQuery.ts`). */
-export type NamePred = ((path: string) => boolean) & { q?: string }
-
-export function parseQuery(q: string | null): NamePred | null {
-  const s = (q ?? '').trim()
-  if (!s) return null
-  if (s.length > 2 && s.startsWith('/') && s.endsWith('/')) {
-    try {
-      const re = new RegExp(s.slice(1, -1), 'i')
-      return Object.assign((path: string) => re.test(path), { q: s })
-    } catch {
-      return null
-    }
-  }
-  const needles = s.toLowerCase().split('|').map(t => t.trim()).filter(Boolean)
-  if (!needles.length) return null
-  return Object.assign((path: string) => {
-    const p = path.toLowerCase()
-    return needles.some(t => p.includes(t))
-  }, { q: s })
-}
+/** `q=`: the path filter's syntax and predicate live in `pathQuery.ts`
+ * (shared with the client's `filterTree.ts`). */
+export { type NamePred, parseQuery } from './pathQuery.js'
 
 /** Name-filter a set of per-path aggregates (every path under the view root
  * that was read, plus the root itself as `''`-keyed `root`): the outermost

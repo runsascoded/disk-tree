@@ -95,7 +95,7 @@ export const onRequestGet = async (ctx0: { request: Request; env: Env; waitUntil
       nodes: view.nodes,
       truncated: view.truncated,
       ...(owner ? { owner } : {}),
-      ...(query ? { q: qRaw, matches: view.matches, matched: view.matched ?? [], ...(view.partial ? { partial: true } : {}) } : {}),
+      ...(query ? { q: qRaw, matches: view.matches, matched: view.matched ?? [], ...(view.excluded ? { excluded: view.excluded } : {}), ...(view.partial ? { partial: true } : {}) } : {}),
       tree: view.tree,
     })
     return await cacheStore(ctx.env, cacheKey, body, { 'server-timing': st.header() }, ctx.waitUntil?.bind(ctx))

@@ -10,28 +10,10 @@ import type { TreeNode } from './types'
 export type NamePred = (name: string) => boolean
 export type NodePred = (n: TreeNode) => boolean
 
-/** `/…/` = regex (case-insensitive); anything else = substring (ci), with
- * `|` splitting alternatives (`grug|swarm` = either). Predicates receive the
- * node's full path below the root (`bucket/dir/sub`), so `grug/swarm` matches
- * across segments and regexes can span `/`. */
-export function parseQuery(q: string): NamePred | null {
-  const s = q.trim()
-  if (!s) return null
-  if (s.length > 2 && s.startsWith('/') && s.endsWith('/')) {
-    try {
-      const re = new RegExp(s.slice(1, -1), 'i')
-      return path => re.test(path)
-    } catch {
-      return null
-    }
-  }
-  const needles = s.toLowerCase().split('|').map(t => t.trim()).filter(Boolean)
-  if (!needles.length) return null
-  return path => {
-    const p = path.toLowerCase()
-    return needles.some(t => p.includes(t))
-  }
-}
+/** The path filter's syntax (`text · a|b · a b · -x · *`), the server's own
+ * parser (`functions/_lib/pathQuery.ts`): predicates receive the node's full
+ * path below the root (`bucket/dir/sub`). */
+export { parseQuery } from '../functions/_lib/pathQuery'
 
 /** Re-aggregate a node's stats (b/o/tm/sh/us/d) from a filtered kid set. */
 export function reaggregate(n: TreeNode, kids: TreeNode[]): TreeNode {

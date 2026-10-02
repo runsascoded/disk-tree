@@ -19,7 +19,7 @@ import { type FileMetaData, parquetMetadata, parquetReadObjects, type RowGroup }
 import type { Env } from './auth.js'
 import { cacheGet, cachePut, cachedRange, type FileSlice, GROUP_READS, type IndexHandle, mapLimit, num, readAsks, readFooterBytes, readGroupsAt, reviveRowGroup, type Row, str } from './index.js'
 import type { NamePred } from './scope.js'
-import { type Formula, or, planSearch } from './searchQuery.js'
+import { type Formula, or, type SearchPlan } from './searchQuery.js'
 import { storeKey } from './stores.js'
 import { compressors } from './zstd.js'
 
@@ -269,13 +269,15 @@ export interface SearchFound {
   }
 }
 
-/** The match roots of `query` strictly under `root` on a store generation's
- * `path` sort `h`; null when the index can't answer (no sidecar for the
- * generation, or a query the planner doesn't serve) — the caller reads as
- * before. */
-export async function searchRoots(env: Env, h: IndexHandle, query: NamePred, root: string, limits: SearchLimits = SEARCH_LIMITS): Promise<SearchFound | null> {
-  const plan = planSearch(query.q)
-  if (!plan) return null
+/** The outermost paths strictly under `root` that pass `query`, on a store
+ * generation's `path` sort `h`, given `plan` — the planner's candidate names
+ * for the last segment of every such path (`planPositive` for match roots,
+ * `planNegative` for excluded paths). Null when the index can't answer (no
+ * sidecar for the generation): the caller reads as before. `query` must be
+ * an interval on every root-to-leaf chain (false, then true, then false —
+ * `pos ∧ ¬neg`), so a matching path's outermost match is its shallowest
+ * matching prefix. */
+export async function searchRoots(env: Env, h: IndexHandle, query: NamePred, plan: SearchPlan, root: string, limits: SearchLimits = SEARCH_LIMITS): Promise<SearchFound | null> {
   const idx = await openSearch(env, h.dir)
   if (!idx) return null
   let dirGroups = 0

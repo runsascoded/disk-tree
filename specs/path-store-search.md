@@ -1,6 +1,6 @@
 # Path-store search: a segment-name index for the filter view
 
-**Status:** implemented at fixture scale, 2026-10-01 (branch `seg-idx`, off `cloud`); writer behind `-S`, reader on whenever a generation has the sidecars. Production build and request costs unmeasured (§7). Base work (`cloud`). Builds the "vocabulary + block index + trigrams" tiers of [diff-and-search] §"The (prefix × query) product space" for the **served** path store ([path-store]); the August sidecar (`src/disk_tree/sidecar.py`, removed from `cloud` in `360be7d`) served only the local engine.
+**Status:** implemented at fixture scale, 2026-10-01; the filter syntax (§1: AND, NOT, `*`, quoting; regex a hidden fallback) replaced regex 2026-10-02 (branch `seg-idx`, off `cloud`); writer behind `-S`, reader on whenever a generation has the sidecars. Production build and request costs unmeasured (§7). Base work (`cloud`). Builds the "vocabulary + block index + trigrams" tiers of [diff-and-search] §"The (prefix × query) product space" for the **served** path store ([path-store]); the August sidecar (`src/disk_tree/sidecar.py`, removed from `cloud` in `360be7d`) served only the local engine.
 
 ## 0. Problem
 
@@ -12,22 +12,35 @@ The filter view (`q=` on `/api/subtree` and `/api/diff`, `view.ts` `readView` "t
 
 A Worker has ~128 MB and limited CPU; a request should read a few MB. The fix is an index from the query to the rows that can be match roots, so phase 1 reads only those.
 
-## 1. Query semantics (unchanged; what the index must reproduce)
+## 1. Query semantics (what the index must reproduce)
 
-`scope.ts` `parseQuery` (mirrored by the client's `filterTree.ts`):
+One parser, `site/functions/_lib/pathQuery.ts` (`parsePathQuery`, `parseQuery`), used by the server (`scope.ts` re-exports it) and the client (`src/filterTree.ts` re-exports it). Case-insensitive throughout; every term is tested against a node's **full index path** (`bucket/dir/sub`). Adopted 2026-10-02 in place of regex as the filter's syntax; the box reads "text · a|b · a b (both) · -x (not) · * (any chars in a name)".
 
-- `/…/` (length > 2): a JS `RegExp` with flag `i`, tested against the **full index path** (`bucket/dir/sub`);
-- otherwise: `|`-separated needles, each trimmed and lowercased; a path matches when its lowercased full path contains any needle.
+| syntax | meaning |
+|---|---|
+| `tomat` | substring anywhere in the path |
+| `a\|b` | OR; binds looser than AND: `a b\|c` = (a AND b) OR c |
+| `a b` | AND: the path contains every term, in any segments (`ckpt final` matches `x/ckpt/run/final` and `x/ckpt-final`) |
+| `-x` | NOT: nothing whose path contains `x` counts (below) |
+| `*` | any characters within one segment (`[^/]*`), also in a term with `/` (`ckpt*final` matches the name `ckpt-run-b-final`) |
+| `"a b"` | a quoted term is literal: spaces, a leading `-`, `\|`, `*` |
+| `…/…` | a term with `/` is a substring of the full path, like any other |
+| `/…/` | a JS regex (flag `i`) over the full path — an **undocumented fallback**, never served by the index (§5) |
 
-A match root under view root `P` is a path strictly under `P` that matches while none of its strict ancestors below `P` does (if `P` itself matches, the whole view is matched and no search runs).
+A blank alternative (`a|`) adds nothing; an empty quoted term is dropped; a lone `-` is a literal term.
 
-**Lemma (what the last segment of a match root must satisfy).** Let `p` be a match root, `s` its last segment, `parent(p)` its parent (a prefix of `p`'s string). Any match inside `parent(p)`'s characters with the same surrounding context would make `parent(p)` match, so every match in `p` touches `s`. Hence:
+**The predicate.** A query is `pos ∧ ¬neg` on the lowercased path: `pos` = OR over alternatives of AND over their positive terms; `neg` = OR of the NOT terms. **Negatives apply to the whole query**, whatever alternative they were written in (`a -x|b` excludes `x` from `b`'s matches too); an alternative with no positive term — a query of only negatives — makes `pos` everywhere true ("everything except"). Both halves are monotone along a root-to-leaf chain (a substring of a prefix is a substring of every extension), so the predicate is an interval on every chain: false, then true from the first path where `pos` holds, then false again from the first path where `neg` does.
 
-- a slash-free needle `t`: `s.toLowerCase()` contains `t` (a slash-free substring can't straddle a separator);
-- a needle with a slash, `t = …/u`: the occurrence's last `/` is the separator before `s`, so `s.toLowerCase()` **starts with** `u` (the needle's last piece). A needle ending in `/` (`u = ''`) constrains `s` not at all (every child of a dir named `…t` is a root); the index does not serve it (§5 fallback);
-- a regex that **cannot match `/`** (no `.`, no `\D \W \S`, no class admitting `/`, no negated class without `/`, no lookaround or backreference): the match lies inside one segment, which must be `s`, and `re.test(s)` holds on `s` alone — `^` can only match at the bucket (the first segment, at the path's start), `$` only at `s`'s end, and `\b` at a segment edge sees `/` or the string edge, both non-word. A regex that can match `/` (`/ckpt.*final/`) can match across segments and constrains no single segment; the index does not serve it (§5).
+**Match roots** under view root `P` are the paths strictly under `P` where the predicate holds while it holds on no strict ancestor below `P` — on each chain, the first `pos` path, unless `neg` already holds there. If `P` itself matches, `P` is the single match root.
 
-So every match root's last segment is in a **candidate name set** computable from the query alone. The index maps a query to that set, the set to rows, and the rows' full paths are tested with the very predicate `parseQuery` returns — results are exact by construction, never "close".
+**NOT subtracts.** Under each match root `r`, the **excluded paths** are the outermost descendants where `neg` holds. `r`'s total is its own total minus theirs (scoped by the page's owner/class axes like any aggregate), every node between `r` and an excluded path is likewise net of the excluded paths under it, and the excluded paths and their subtrees are not drawn — so the treemap's `(other)` fold (P − Σ kept) is computed on the net values with no new arithmetic; an excluded direct child also leaves its parent's child count. `/api/subtree` returns them as `excluded`; `matched` is net. A filtered diff subtracts each side's own excluded paths, including from the point lookups it makes on the other side.
+
+**Lemma (what the last segment of a path that becomes true must satisfy).** Let `p` be a path where a monotone term set becomes true (a match root: some alternative's AND holds at `p` but not at `parent(p)`; an excluded path: some NOT term), `s` its last segment. Some term of that set holds at `p` but not at `parent(p)` (a prefix of `p`'s string), so its occurrence touches `s`:
+
+- a slash-free term (with or without `*`, which never matches `/`): the occurrence lies inside `s` — `s` contains the term (for `*`: matches it as an unanchored `[^/]*` pattern);
+- a term with `/`: the occurrence's last `/` is the separator before `s` (no `*` can supply it), so `s` **starts with** the part after the term's last `/` (pieces joined by `[^/]*`, anchored). A term ending in `/` constrains `s` not at all (every child of a dir named `…t` qualifies); the index does not serve it (§5).
+
+So every match root's — and every excluded path's — last segment is in a **candidate name set** computable from the query alone: for match roots the union of the positive terms' candidates (AND is a union here, the exact filter does the rest), for excluded paths the NOT terms'. The index maps a query to that set, the set to rows, and the rows' full paths are tested with the very predicate `parseQuery` returns — results are exact by construction, never "close".
 
 ## 2. Artifacts (per index generation, beside the `path` sort; zero D1 rows)
 
@@ -50,7 +63,7 @@ Sorted **`b desc, name`** (one DuckDB `COPY`: last segment by `regexp_extract`, 
 
 ### 2.2 `path-index.trigrams.parquet` — trigram → name-id postings
 
-One row per (trigram, name) with the trigram in the name: `tri` int32 (`c0<<16 | c1<<8 | c2`), `id` int32, sorted `(tri, id)`. Trigrams are taken from DuckDB `lower(name)` and **only all-ASCII trigrams are kept**; the reader likewise extracts only all-ASCII trigrams from the (lowercased) query. That keeps the index sound across case-mapping differences between DuckDB, Python and JS (`'İ'` lowercases to `i` in DuckDB, `i̇` in JS; `'K'` (Kelvin) to `k` in both): an ASCII run in a name stays the same ASCII run under any of them, extra non-ASCII trigrams are never looked up, and a JS `/x/i` regex (non-unicode mode) matches an ASCII literal only by its two ASCII cases.
+One row per (trigram, name) with the trigram in the name: `tri` int32 (`c0<<16 | c1<<8 | c2`), `id` int32, sorted `(tri, id)`. Trigrams are taken from DuckDB `lower(name)` and **only all-ASCII trigrams are kept**; the reader likewise extracts only all-ASCII trigrams from the (lowercased) query. That keeps the index sound across case-mapping differences between DuckDB, Python and JS (`'İ'` lowercases to `i` in DuckDB, `i̇` in JS; `'K'` (Kelvin) to `k` in both): an ASCII run in a name stays the same ASCII run under any of them, and extra non-ASCII trigrams are never looked up.
 
 ### 2.3 `path-index.search.parquet` — the directory
 
@@ -93,13 +106,15 @@ Inputs: ~777M rows/scan; distinct dir-segment names ~15.5M, distinct basenames ~
 
 ### 4.1 Plan (pure; `searchQuery.ts`)
 
-`planSearch(q)` returns `null` (the index can't serve it → today's path) or an OR of **branches**, each a trigram formula plus an exact name test:
+`planPositive(query)` and `planNegative(query)` return `null` (the index can't serve it → today's path) or an OR of **branches**, one per term (`termBranch`), each a trigram formula plus an exact name test:
 
-- needle `t` without `/`: formula `AND(tri(t))`, test `name.toLowerCase().includes(t)`;
-- needle with `/`, last piece `u ≠ ''`: `AND(tri(u))`, test `startsWith(u)`; `u = ''` → `null`;
-- regex: parsed by a small recursive-descent parser over the JS syntax subset (alternation, groups `(…)`/`(?:…)`/`(?<n>…)`, quantifiers `* + ? {n,m}` and lazy forms, classes with ranges/escapes, `\d \w \s \D \W \S \b \B`, anchors, literal escapes). Anything else (lookaround, backreference, `\p{…}`, a parse failure) → `null`; a regex that can match `/` → `null`. Otherwise the formula is a simplified [Cox] compilation: each node yields an exact string set (when small: ≤ 16 strings, from literals, small classes, `?`, small products/unions) or a match formula; `* {0,…}` and wide classes are `TRUE`, `+ {n≥1,…}` keep their operand's formula; an exact set becomes `OR_s AND(tri(s))` (any string shorter than 3 makes it `TRUE`). Test: `re.test(name)`.
+- a term's literal pieces (split at `*`) give `AND(tri(piece))` over all pieces — the `*` itself constrains nothing;
+- slash-free: test `name.toLowerCase()` contains the term (a `[^/]*`-joined pattern when it has `*`);
+- with `/`: the same over the part after the last `/`, anchored at the name's start; an empty part (the term ends in `/`) → `null`.
 
-A formula of `TRUE` (a short needle, `/a.b/`-shaped regex fragments) is still served — by the names scan of §4.3, not trigrams.
+`planPositive` is `null` for the regex fallback and when an alternative has no positive term (then `pos` holds at `P` itself, and `P` is the match root — no search needed); `planNegative` is `null` without NOT terms. Formulas simplify by absorption (`ckpt | ckpts` = `ckpt`).
+
+A formula of `TRUE` (a term under 3 characters, or only wildcards and short pieces) is still served — by the names scan of §4.3, not trigrams.
 
 ### 4.2 Candidates
 
@@ -111,7 +126,8 @@ A formula of `TRUE` (a short needle, `/a.b/`-shaped regex fragments) is still se
 
 4. **Rows**: the verified names' `rgs`, unioned in id order until `pathRgs` (32) `path` groups; a NULL `rgs` (over `rg_cap`) or the budget running out stops the union and marks the result **truncated**. Those groups are read through the existing `path`-sort machinery (D1 / `.groups.parquet` / blob `rg_json`, the per-isolate decoded-group LRU) and filtered to rows strictly under `P` whose full path passes the query predicate.
 5. **Roots**: each kept row's root is its **shallowest matching prefix** below `P` (computed from the path string). Not truncated ⇒ every root's own rows were read (by the lemma, its name is a candidate and all its rows' groups are in its `rgs`), so the roots and their aggregates come straight from the rows — the same set `matchRoots` returns over all rows. Truncated ⇒ the roots are those of every matching row in the groups read (lighter names' included, when they share a group with a heavier one), and a lifted root may be unread: its rows are fetched with one `readAsks` point lookup (≤ `liftGroups` = 60 groups; wider → those roots are dropped, still flagged truncated). The lookup also covers the one non-truncated way a root could go unread — DuckDB's and JS's lowercase tables disagreeing on a name — instead of failing the request. A search **cut before it found any root** (its heaviest name alone over budget) says nothing about the query, so the view falls back to the thresholded read of §5 rather than report "no matches".
-6. **Phase 2** is unchanged: the roots' subtrees at one forest threshold, attenuated per root, from `bysize`/`path` (`readSubtree`).
+6. **Excluded paths (NOT)**: the same search with the negative part's predicate and `planNegative`, under `P`, keeping the outermost hits that lie under a match root; their rows give the aggregates to subtract (§1). A cut NOT search marks the view truncated. Without the index they come from the rows phase 1 read, and in both cases any further outermost `neg` path among phase 2's rows is subtracted too (only reachable without the index).
+7. **Phase 2** is unchanged: the roots' subtrees at one forest threshold (from the net matched total), attenuated per root, from `bysize`/`path` (`readSubtree`), rows at or under an excluded path skipped and every kept node net of the excluded paths under it.
 
 So a request reads, cold: the directory footer (~150 KB, cached per colo and isolate), a few directory groups (~25 KB each), the selective trigrams' postings groups (~40 KB each, ≤ 8 per trigram), ≤ 32 names groups (~25 KB), ≤ 32 `path` groups (~150 KB at 8K rows) — a few MB in the worst case, ~1 MB for a selective query — and never an unbounded read. **No match is cheap**: an empty candidate set, not truncated, returns "no matches" without touching the store's sorts.
 
@@ -119,9 +135,9 @@ So a request reads, cold: the directory footer (~150 KB, cached per colo and iso
 
 `/api/subtree`'s `matched` (the per-root list behind bulk actions and the series) is ordered **bytes desc, then path**, whichever way the roots were found; `matches` stays path-sorted, and `/api/diff`'s `matched` stays the path-sorted union of both sides. `truncated` is true when the search was budget-cut (or as before, the node cap). `tier` reads `search+<sort>` when the index found the roots, and `Server-Timing` gains `search;desc="<mode> c<candidates> n<names groups> g<path groups>[ cut]"`.
 
-## 5. Fallback (unchanged behaviour)
+## 5. Fallback
 
-The filter view uses today's phase 1 when: the generation has no `search.parquet` (every generation written before this, all v1 scans), the query is a needle ending in `/`, or a regex the index can't serve (can match `/`, unsupported syntax). Deliberately not a semantics change: `/ckpt.*final/` keeps matching across segments.
+The filter view uses the thresholded phase 1 (and finds excluded paths among the rows it read) when: the generation has no `search.parquet` (every generation written before this, all v1 scans), a term ends in `/`, or the query is a `/…/` regex. The regex keeps its full-path meaning (`/ckpt.*final/` matches across segments) and stays undocumented; the index never plans it. A user lens without claims also keeps the old read, and a lens view with claims filters after the read (`nameFilter`), which matches by the predicate but does not subtract excluded paths (open).
 
 ## 6. Cross-scan reuse (later)
 
@@ -130,8 +146,9 @@ Vocabulary churn is ~0.1–0.2 %/scan (gcs, [path-store] §4.7), so the names' t
 ## 7. As implemented, and what is open
 
 - **Writer** — `src/disk_tree/find/search.py` `write_search(path_sort, *, con, names_rg_rows, postings_rg_rows, rg_cap, dir_rg_rows)` (local files; sets `preserve_insertion_order` for its `COPY`s, which `viz` turns off). `dt_cloud.index.write_sorts(search=True)` runs it on the cut `path` sort and reports `{names, postings, files}` as the `path` entry's `search` (and `write_index`'s summary `search`); `dt-cloud path-index -S` / `index-write -S` (off by default). The generation dir's upload carries the files (r2's `daily-ingest.yml` copies the dir recursively; it does not pass `-S` yet).
-- **Reader** — `site/functions/_lib/searchQuery.ts` (`planSearch`, `trigrams`, formula `and`/`or` with absorption: `ckpt | ckpts` = `ckpt`), `search.ts` (`openSearch`, `searchRoots`, `SEARCH_LIMITS`), `index.ts` exports for it (`readGroupsAt` by ordinal, `readFooterBytes`, `cachedRange`, the group LRU, the handle's `dir`). `scope.ts` `parseQuery` attaches the query string to its predicate (`NamePred.q`). `view.ts` `readView`'s filter phase 1 calls `searchRoots` on a store generation without a lens (`ViewOpts.searchLimits` overrides the budgets) and keeps its old reads otherwise; `buildDiff` gets it through `readView` on each side.
-- **Tests** — `tests/test_search.py` (exact names table incl. `rgs` per row group, the full postings list, directory rows and key-value metadata, statistics only on the pruning columns, `rg_cap`, the Kelvin sign and a non-ASCII trigram, rejects); `cloud/tests/test_index.py::test_write_index_search`; `site/functions/_lib/searchQuery.test.ts` (formulas per query, name tests, declined queries); `search.test.ts` over `fixtures/v2-search/` (`gen.py` `write_v2_search`: 2 buckets, 6,047 rows, 3 `path` groups, 6,044 names, 24,199 postings, 2 directory rows per group): roots = `matchRoots` over every row for 20 queries × 5 roots, the roots' rows exact, the blob-served copy equal, stage counts for `ttl`, the names scan, no `path` read on no match, each budget's cut (incl. a lifted ancestor), whole-view equality with the pre-index read at threshold 0, a sub-budget match only the index finds, `matched` order, the fallback on a cut-before-any-root, and a filtered diff.
+- **Syntax** — `site/functions/_lib/pathQuery.ts` (`parsePathQuery` → `{alts, neg, regex}`, `parseQuery` → the predicate carrying `q`, `query`, `pos`, `neg`), re-exported by `scope.ts` and the client's `src/filterTree.ts`; `App.tsx`'s filter box shows the syntax as its placeholder and explainer. No filter parser exists on the `dt-cloud`/engine side (the local engine's `filter` CLI left `cloud` in `360be7d`); `@rdub/treemap`'s `parseQuery` is the widget library's own display filter and is unchanged.
+- **Reader** — `site/functions/_lib/searchQuery.ts` (`termBranch`, `planTerms`, `planPositive`, `planNegative`, `trigrams`, formula `and`/`or` with absorption), `search.ts` (`openSearch`, `searchRoots(env, h, pred, plan, root, limits)`, `SEARCH_LIMITS`), `index.ts` exports for it (`readGroupsAt` by ordinal, `readFooterBytes`, `cachedRange`, the group LRU, the handle's `dir`). `view.ts` `readView`'s filter branch runs whenever the root doesn't match or the query has NOT terms: phase 1 by `searchRoots` on a store generation without a lens (`ViewOpts.searchLimits` overrides the budgets), the old reads otherwise; then the excluded paths and the net totals (§1, §4.3); `buildDiff` gets both through `readView` on each side and nets its point lookups by `Read.excl`.
+- **Tests** — `tests/test_search.py` (exact names table incl. `rgs` per row group, the full postings list, directory rows and key-value metadata, statistics only on the pruning columns, `rg_cap`, the Kelvin sign and a non-ASCII trigram, rejects); `cloud/tests/test_index.py::test_write_index_search`; `site/functions/_lib/pathQuery.test.ts` (parse tables for every syntax row, predicate tables over a path list, the regex fallback); `searchQuery.test.ts` (formulas and name tests per term shape, declined plans, NOT branches, absorption); `search.test.ts` over `fixtures/v2-search/` (`gen.py` `write_v2_search`: 2 buckets, 6,047 rows, 3 `path` groups, 6,044 names, 24,199 postings, 2 directory rows per group): roots = `matchRoots` over every row for 24 queries (substrings, AND, `*`, quoted, `/` terms, AND with NOT) × 5 roots, the roots' rows exact, the blob-served copy equal, stage counts for `ttl`, the names scan, no `path` read on no match, each budget's cut (incl. a lifted ancestor), whole-view equality with the pre-index read at threshold 0, a sub-budget match only the index finds, `matched` order, the fallback on a cut-before-any-root, and a filtered diff; NOT: `tmp -ckpt`'s net totals, `excluded` and drawn tree exactly, only-negatives, index vs pre-index views equal for 8 NOT queries × 3 roots at threshold 0, an excluded path below the pixel budget only the index subtracts, and a filtered diff with NOT.
 
 Open, needing a production build/measurement:
 
@@ -142,10 +159,9 @@ Open, needing a production build/measurement:
 
 Decisions for the user:
 
-- **Regex semantics.** A regex that can match `/` (most uses of `.`, e.g. `/ckpt.*final/`) keeps today's full-path, cross-segment meaning and so falls back to the thresholded read. Adopting the local engine's rule ([diff-and-search]: a slash-free regex matches *one segment*; `/` in it means a full-path match) would let every slash-free regex use the index, at the cost of a semantics change on the page.
+- **Per-alternative NOT.** Negatives are the whole query's (`a -x|b` = (a OR b) AND NOT x). Scoping them to their alternative would make the predicate non-monotone along a path (`b` could hold again below an `x` that ended `a`), which the root/exclusion model doesn't express.
 - **Vocabulary scope** (§3): all names (exact for every query, ~7–11 GB/scan est.) vs dirs only (~1 GB, but object-name queries fall back).
 - **`-S` default**: off until measured; on for r2 first?
 
 [diff-and-search]: diff-and-search.md
 [path-store]: path-store.md
-[Cox]: https://swtch.com/~rsc/regexp/regexp4.html

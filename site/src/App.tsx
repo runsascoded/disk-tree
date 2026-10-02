@@ -47,6 +47,8 @@ import { useUnits } from './units'
 // the first time an object opens.
 const ObjectPanel = lazy(() => import('./ObjectPanel'))
 // The color axes on offer.
+/** The path filter's syntax, as the box shows it (`functions/_lib/pathQuery.ts`). */
+const FILTER_SYNTAX = 'text · a|b · a b (both) · -x (not) · * (any chars in a name)'
 const MODES: ColorMode[] = ['read', 'user', 'date', 'tree']
 
 /**
@@ -1030,13 +1032,15 @@ function AppContent() {
         )}
         {bar.pathFilter && (
           <span className="filterbox">
-            <input
-              value={fqDraft ?? fq ?? ''}
-              onChange={e => setFqDraft(e.target.value)}
-              placeholder="filter paths — text, a|b, or /regex/"
-              aria-label="Filter tree by segment name"
-              size={32}
-            />
+            <Explain text={`Filter paths: ${FILTER_SYNTAX}`}>
+              <input
+                value={fqDraft ?? fq ?? ''}
+                onChange={e => setFqDraft(e.target.value)}
+                placeholder={FILTER_SYNTAX}
+                aria-label="Filter tree by path"
+                size={44}
+              />
+            </Explain>
             {fq && tree && (
               <span className="fnote">
                 {tree.b > 0 ? <>{fmtBytes(tree.b)} matched</> : 'no matches'}
