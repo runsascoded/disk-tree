@@ -1,85 +1,111 @@
-# Filter query service: exact path filters at any scale
+# Serving box: a stateful query backend behind the Worker
 
-Status: proposed (2026-10-02), reviewed by the root session (names-first evaluation, early hand-off, match-volume grouping, phase 0). Owner: the gcs session. Lands on `cloud` (shared); deployments opt in.
+Status: proposed (2026-10-02). Supersedes this spec's earlier scale-to-zero Cloud Run design (after [phase 0]). Reviewed by the root session. Owner: the gcs session. Code lands on `cloud` (shared); a deployment opts in with its own VM.
 
 ## 1. Why
 
-The path filter (`q=`) is served by the Pages Function that serves everything else: a Worker with ~128 MB of memory, limited CPU, and 6 concurrent subrequests. [`path-store-search.md`] made it exact on small stores (r2: 1.24M rows, every query exact, ≤ ~2 s). At gcs scale it can't be, and it says so (`partial`) instead of missing matches silently. Measured on gcs's 2026-10-01 generation with search sidecars (v1 layout, 778M rows, 127M distinct names, 5.2B trigram postings):
+The site's reads run in a Cloudflare Worker: ~128 MB of memory, limited CPU, 6 concurrent subrequests, and no state between requests. Every request re-reads and re-decompresses parquet from GCS. That is why gcs's filters cut out `partial`, and why plain diffs and the series take seconds. The fight is with the serverless setup, not the problem size. On gcs's 2026-10-01 scan ([phase 0]):
 
-| query | trigram candidates | result |
-|---|---:|---|
-| `tomat` | 52,586 | 4 matches, `partial` (128 name groups + 1.5 s) |
-| `grug` | 8,308 | 13 matches, `partial` (same) |
-| `safetensors` | 1,327 | 0 matches, `partial` (96 path groups) |
-| `ckpt -eval` | 166 | 0 matches, `partial` (1.5 s) |
-
-Two limits, neither fixed by a layout change:
-
-- **Candidate volume.** With 127M names, even a specific term shares its trigrams with thousands of names; verifying them is many reads. Layout v2 (name-major rows) cuts reads per candidate but not the number of candidates.
-- **Match volume.** A file-name term (`safetensors`, `.json`) matches a file in nearly every run directory: millions of rows. The answer is a rollup of millions of rows. That is a scan-and-aggregate job, not a request-sized read.
+- **The data fits on one machine:** 778M rows (objects + dirs), 127M distinct names (about 3 GB as text), and a 7.7 GiB `path` sort.
+- **The search is fast when the data is held:** names-first matching takes 0.6–2.4 s end to end in plain DuckDB with the vocabulary in memory, and root sets are identical to a full scan.
+- **The full path scan is not an option:** the `path` column is 95 GiB decoded, so a scan takes 34 s warm and 219–288 s cold. Full paths are never scanned; the box keeps the tree as ids.
+- **Memory decides the platform:** the vocabulary takes 10–19 GB per generation in DuckDB, and a diff needs two generations, which exceeds Cloud Run's 32 GiB maximum.
 
 ## 2. What
 
-A small query service, **`dt-query`**: a container running DuckDB over the same path-store files in GCS. It answers the filter view's two questions exactly:
+An always-on VM, the **serving box**, that acts as a cascading cache in front of the data:
 
-1. **Match roots:** the outermost paths satisfying the query AST (OR of AND-groups, plus whole-query NOT; [`path-store-search.md`] §1.1), with each root's net aggregates (`b`, `o`, class mix, owners), after NOT subtraction.
-2. **The drawn tree:** for a view root `P`, canvas `w×h` and `minArea`, every node under the match roots at or above the size threshold (the same threshold and attenuation as `view.ts`), and `(other)` remainders. This is the same `TreeNode` shape `/api/subtree` returns, so the client doesn't change.
+- **Memory:** the hot generations (the latest two, for diffs) in RAM: vocabulary, name → rows map, and per-dir aggregates.
+- **Local NVMe:** recently used generations' files, kept under LRU, at block granularity where the cache layer allows (§4.3).
+- **GCS:** the parquet files of record, unchanged.
 
-Plus the diff (`/api/diff?q=`): the same two reads on both scans, joined, with `buildDiff`'s row semantics.
+The daily job warms it after each publish. Otherwise, each layer evicts least-recently-used data.
 
-The Worker stays the front door. The service is a backend it calls only when its own read can't answer exactly within budget.
+The Worker stays the front door: sign-in (the app's own Google OIDC and email-code sessions in D1, not Cloudflare Access), the edge cache, and every read it already serves well. It forwards to the box only what the box serves better. Phase 1 forwards path filters (`/api/subtree?q=` and `/api/diff?q=`); plain views, diffs and the series move later, only if the bake-off and probes show a gain (§6). The box is a soft dependency: if it's down, the Worker answers as today, with filters flagged `partial` or `approximate`. Never an outage, and never silently short.
 
-## 3. Request flow
+## 3. Request flow (filters)
 
 1. The client calls `/api/subtree?q=…` as today.
-2. The Worker parses `q` (the shared parser, so syntax errors stay 400s). Before spending its own budget it estimates the query's cost from the trigram directory: over a threshold (e.g. >2K candidate names), NOT-only, file-extension-shaped terms (`.json`, `safetensors`), or the `regex` syntax on a large store go straight to step 4. Otherwise it tries its own path: the index with budgets.
-3. If the Worker's answer is exact (no `partial`, no `approximate`), it returns it. Selective queries on indexed scans stay sub-second and never touch the service.
-4. Otherwise the Worker forwards the parsed AST (not the raw string) plus the view parameters to `dt-query`, and returns its answer, cached like any other view response (immutable per generation and parameters).
-5. If `dt-query` is down or over its own deadline, the Worker returns its own flagged `partial` answer. Never silently short.
+2. The Worker parses `q` (the shared parser; syntax errors stay 400s). It forwards to the box when the box is configured and the query is heavy: more than ~2K trigram candidates, NOT-only, file-extension-shaped terms, the `regex` syntax on a large store, or a generation without search sidecars. Otherwise it answers itself, and forwards anyway if its answer comes out `partial` or `approximate`.
+3. The box returns the same `TreeNode` / `DiffRow` shapes, exact. The Worker caches the answer like any view, keyed by the canonicalised AST (operands sorted, case folded) plus generation, view root, canvas and `minArea`.
+4. If the box is down or over its deadline, the Worker returns its own flagged answer.
 
-The client may show the Worker's partial first paint while the exact answer loads (the existing `firstPaint` mechanism), flagged as such.
+**Engine override:** `qe=auto|box|worker` on the page URL, passed through to the API (default `auto`). `qe=box` always forwards, for verification; `qe=worker` never does. Every filtered response names the engine that answered and its time.
 
-**Engine override.** `qe=auto|service|worker` on the page URL, passed through to the API (default `auto`, the flow above). `qe=service` always forwards to `dt-query`, for verifying its answers. `qe=worker` never forwards; its answer is flagged as before. Every filtered response names the engine that answered and its time (`engine: worker|service`, plus `server-timing`).
+## 4. The box
 
-## 4. The service
+### 4.1 Evaluation
 
-- **Runtime:** Cloud Run (gen2), Python + DuckDB, one container image built from `cloud/` (a `dt-cloud serve-query` command), so the AST evaluator is shared with the job's code and tested alongside it.
-- **Auth:** private (no unauthenticated invoke). The Worker calls it with a Google ID token for a dedicated service account (key in a Pages secret, like `GCP_SA_KEY` for sweep dispatch). The Worker has already authorized the viewer.
-- **Data:** reads the generation the Worker names (`listing/<date>/index/<gen>/`), via DuckDB `httpfs`/GCS. The pointer and scan list stay in D1. The Worker passes the generation, and the service never reads D1.
-- **Evaluation:** names first, `path` as the fallback.
-  - **Hot generations (with sidecars):** the names vocabulary (127M names, 1.45 GiB compressed on gcs 10-01) is pinned decoded in instance memory per hot generation (a few GB). The AST's segment terms are evaluated against it with vectorised `contains`/`ILIKE`, or `regexp_matches` for the regex syntax (~1–2 s warm). Matching name ids then map to rows by range reads: v2 `rows` is name-major, and v1 lists each name's `path` row groups.
-  - **Unindexed generations:** a scan of the `path` column with the AST compiled to SQL, using predicate pushdown on `depth`/`path` ranges for a drilled view root. That's a cold scan of several GB (estimate 10–30 s), so it is the fallback, flagged slow in the UI while it runs.
-  - **Roots first:** the search's job is the outermost match roots only; anything under a matching directory is that root's contents, never a separate match. Candidates are checked shallowest-first, and a candidate under an already-found root is skipped before its rows are read. Drawing then reads only what is inside the roots above the view's threshold, level by level, never whole subtrees.
-  - **Match volume:** matched rows are grouped by parent directory first (the `(depth, path)` sort clusters siblings). Where a whole directory matches, its existing dir aggregate is used instead of expanding its files. Match roots are an anti-join of matched paths against matched ancestors. The drawn tree is a `GROUP BY` over ancestors, cut at the view's threshold as `view.ts` does. The match-roots list in the response is capped with a total count (e.g. `roots: 1,071+`), like the series chart's cap.
-  - So sidecars aren't needed for correctness, but they make the service fast. That feeds the retention decision: hot scans get sidecars, older ones take the `path` fallback.
-- **Input:** only the AST as JSON, validated against a strict schema. No raw SQL, and no regex passed through except as an AST matcher compiled by the service. On large stores the `regex` syntax is service-only, since `regexp_matches` over the vocabulary is cheap there but unbounded in a Worker.
-- **Caching:** results are keyed by the canonicalised AST (AND/OR operands sorted, case folded, so `a b` and `b a` share an entry) plus generation, view root, canvas and `minArea` bucket. The key is used both in the service's in-instance LRU and in the Worker's edge cache, which sits in front, so a repeated view never reaches the service.
-- **Sizing:** start at 4 vCPU / 16 GiB and measure. A diff pins two generations' vocabularies; 16 GiB should hold two gcs generations, but measure. Targets on a warm instance with a hot generation: selective terms under ~1 s, `safetensors` at the gcs root under ~3 s. Phase 0 sets the cold numbers.
+- **Roots first:** the search finds only the outermost matching paths; anything under a matching dir is that root's contents. Candidates are checked shallowest-first, and one under an already-found root is skipped before its rows are read.
+- **Names-first:**
+  - The vocabulary (with a precomputed lowercase column; never `ILIKE`, 6.3 s vs 0.3 s in [phase 0]) is pinned per hot generation.
+  - Segment terms are matched against it: substring, `*` within a segment, `^`/`$` anchors, `regex`.
+  - Matched name ids map to rows via a pinned name → row-groups map (v1 `rgs`).
+  - Roots are an anti-join against matched ancestors, and totals come from the dir aggregates.
+- **Drawing:** only what's inside the roots above the view's threshold, level by level (children ordered by size), never whole subtrees.
+- **Diff:** both generations in one query.
+- **User lens with claims:** the Worker passes the claim regions it already computes.
 
-## 5. Costs and trade-offs
+### 4.2 Engines to bake off
 
-- **Cold starts:** `min-instances=0` keeps the idle cost near zero, but the first heavy query after idle waits for container start plus loading the vocabulary (estimate 10–20 s). A warm-up ping from the daily job after each scan publishes (beside `warm-cache`) pre-loads the new generation, so the day's first real query isn't the cold one. `min-instances=1` at 4 vCPU / 16 GiB is roughly $150–250/month always-on. Start at 0 with the ping, and measure.
-- **Egress:** none. Same region as the data bucket (`us-east1`), so the service should run in `us-east1`, not the job's `us-central1`.
-- **Idle behaviour (Cloud Run):** the idle period before scale-in isn't configurable. An idle instance is kept for up to about 15 minutes after its last request, then removed. The knobs are `min-instances` (warm capacity, billed always) and CPU allocation (request-only vs always). A schedule could raise `min-instances` to 1 during working hours only.
-- **Admin status:** an admin panel shows the service's state, read through the Worker from Cloud Run's monitoring metrics: instance count (warm or cold), last request, and recent query latencies by engine. It also has a "warm up" button that loads the latest generation.
-- **Interaction with the search sidecars:** the service is exact without them (the `path` fallback), but they make it fast: its names-first path reads them, and they keep selective queries in the Worker. Retention is then "how many recent scans get the fast path", not a correctness question.
-- **What it doesn't fix:** plain (unfiltered) views and diffs still run in the Worker. Their remaining cost is decode CPU (pure-JS zstd), tracked separately.
+1. **DuckDB names-first** over the generation's files on local NVMe: the [phase 0] approach, served.
+2. **Custom in-memory index:** the tree as id arrays (parent, name id, size, counts; ~25–30 GB for 778M rows), the vocabulary as one concatenated byte blob scanned with SIMD `memmem` across cores (~0.1–0.3 s for 3 GB), and children sorted by size.
+
+The bake-off (§6) picks between them, or a hybrid.
+
+### 4.3 Cache layers to bake off
+
+- **gcsfuse's file cache:** whole-file, LRU by size.
+- **`rclone mount --vfs-cache-mode full`:** byte ranges, sparse, LRU by size. This is the block-granular option.
+- **DuckDB `cache_httpfs`:** a block cache under DuckDB itself.
+
+The deciding questions: time to a hot generation, and how much NVMe a month of generations needs at the access pattern we actually see.
+
+### 4.4 Operations
+
+- **Machine:** a 64 GB VM (n2-highmem-8 or e2-highmem-8; price both, since the work is decode- and string-bound and tolerates e2) with a local SSD, in us-east1 beside the data bucket.
+  - On demand for the first month to measure use, then a 1-year commitment.
+  - It runs 24/7. A schedule doesn't pay: a commitment bills while stopped, and on demand 16 h a day costs about what a commitment does 24/7.
+- **Reachability:** `cloudflared` on the VM, a Cloudflare Tunnel to a hostname gated by a Cloudflare Access service token the Worker presents. No public IP, no load balancer. That token authenticates the Worker to the box only; it has nothing to do with user sign-in.
+- **Shape:**
+  - A managed instance group of size 1, with autohealing on `/healthz`.
+  - A container built from `cloud/` (`dt-cloud serve-query`).
+  - A startup script that copies the latest two generations' files to local SSD and loads them. Phase 0 measured copy-then-load at about 8–10 s for the vocabulary.
+  - The daily job calls `/reload?gen=…` after publish.
+- **IaC:** an `infra/gcp` component, `QueryBox`: its SA with `objectViewer` on the data bucket, the MIG, and the tunnel token secret. gcs's existing stack instantiates it, so no separate stack.
+- **Admin status:** an admin panel, read through the Worker from the box's `/status` and the VM's monitoring metrics: up/down, loaded generations, memory, recent query latencies by engine. It has a "reload latest" button.
+
+## 5. Costs
+
+At list prices, approximate:
+
+| Option | Cost per month |
+|---|---|
+| n2-highmem-8, on demand | ~$380 |
+| n2-highmem-8, 1-year commitment | ~$240 |
+| e2-highmem-8, on demand | ~$260 |
+| Local SSD 375 GB | ~$30 |
+
+There's no egress cost, since the box is in the same region as the bucket. For scale, that's about 1% of the GCS storage bill.
+
+The Worker's search sidecars become an optional fast path: selective queries stay in the Worker, everything else goes to the box. Templating hash-like names (74× fewer trigram postings, [phase 0]) and skewing the index toward drawable or shallow names are ways to keep that fast path cheap enough to build daily.
 
 ## 6. Phases
 
-0. **Measure before building.** On a Batch VM in us-east1, run plain DuckDB over 10-01's files: `tomat`, `grug`, `safetensors` and `ckpt -eval`. Compare a cold `path` scan with names-vocabulary-first evaluation (load time, decoded memory, per-query time), and the match-volume grouping on `safetensors`. This settles §4's strategy and the sizing before any infra.
-1. **Service + AST → SQL**, with tests: exact parity with `matchRoots` + NOT subtraction on the existing fixtures, run against the same parquet files the vitest fixtures use.
-2. **Worker hand-off** behind a deployment var (`QUERY_SERVICE_URL`; absent = today's behaviour), with the flags rules in §3. `dt-cloud probe` gains broad-query scenarios (`safetensors`, a 3-character common term).
-3. **Infra:** `infra/gcp` component for the Cloud Run service, its SA and the invoker binding (the gcs stack adds an instance), plus a `deploy/query-service/` build like `sheet-mirror`.
-4. **Measure on gcs**, then decide `min-instances`, and the sidecar retention window (the root session's proposal: last ~7 scans plus pinned dates).
+1. **Ground truth and the bake-off harness.**
+   - A query set of ~30 queries across shapes: selective and broad terms, `^`/`$` anchors, `-x`, file extensions, digit-heavy names, AND/OR, and drilled view roots.
+   - Exact answers computed once from a full scan on Batch (root sets and totals), stored under `gs://oa-gcs-usage-dvx/scratch/bench/`.
+   - A `dt-cloud probe` query-set mode that scores any engine on latency and exactness against them.
+2. **Prototype the engines** (§4.2) on a Batch or dev VM against the harness: the Worker index (v1, v2, templated), DuckDB names-first, and the custom in-memory index; cache layers per §4.3. Pick.
+3. **`dt-cloud serve-query`**, with parity tests (the shared AST case table, run against the vitest fixtures).
+4. **Worker hand-off** behind `QUERY_BOX_URL` (absent = today's behaviour), the `qe=` override, and probe scenarios.
+5. **Infra:** the `QueryBox` component plus the tunnel, on demand. Then measure for a month, then commit.
+6. **Then, if the probes say so:** plain views, diffs and the series through the box.
 
 ## 7. Open questions
 
-- **Skewing the Worker's index:** if the index covers only names that can be drawn (largest occurrence over a size floor) or that sit at shallow depth, it shrinks a lot. Everything else is exact via the service. Phase 0 measures the sizes; `filter-query-service-p0.md` will have the numbers.
-- **Factoring hash-like names:** templating digit and hex runs (`shard-#-of-#`) could collapse much of the 127M-name vocabulary. A query with digits then verifies exactly against the real names. Phase 0 measures how many templates result.
+- **AST compiler:** where it lives. TS (Worker) and Python or a compiled language (box) both need it. Keep one AST JSON schema with a shared case table.
+- **Retention of the Worker's sidecars**, if any are built daily: last ~7 scans plus pinned dates.
+- **Anchors in the simple syntax:** `^tomat` / `tomat$` as sugar. `/tomat` and `tomat/` already work as segment-start and segment-end matches.
 
-- **Diff on two scans:** one DuckDB query over both generations (simpler, and keeps the join exact), at the cost of pinning both vocabularies.
-- **User-lens queries with claims:** the service needs the ledger's claims (D1). Simplest: the Worker passes the relevant claim regions in the request, as it already computes them.
-- **Where the AST compiler lives:** TypeScript (Worker) and Python (service) both need it. Keep the AST JSON schema in one place (the TS types plus a JSON-schema test fixture), with an evaluator per language and parity tests over one shared case table.
-
-[`path-store-search.md`]: path-store-search.md
+[phase 0]: filter-query-service-p0.md
