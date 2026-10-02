@@ -33,6 +33,7 @@ STORE_REGION = "auto"
 # Staged deletes: plan prefixes are `file:///Users/…/` (the treemap's paths
 # start at `Users`), executed by the laptop's drainer (`_lib/laptopDispatch.ts`).
 EXECUTOR = "laptop"
+STAGING = "1"                     # the opt-in trash: viewers stage (`/api/plans/stage`), the laptop executes
 STORE_SCHEME = "file:///"
 STORE_BUCKETS = "*"               # every top-level dir is a root (a `capture /`: Applications, Users, …)
 HOME = "Users/ryan"               # paths under it read as `~/…` (site/src/pathCrumbs.ts)

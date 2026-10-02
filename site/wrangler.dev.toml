@@ -30,6 +30,7 @@ INDEX_VARIANTS = "path"
 STORE_BUCKET = "disk-tree"
 STORE_REGION = "auto"
 EXECUTOR = "laptop"
+STAGING = "1"                     # the opt-in trash: viewers stage (`/api/plans/stage`), the laptop executes
 STORE_SCHEME = "file:///"
 STORE_BUCKETS = "*"               # every top-level dir is a root (a `capture /`: Applications, Users, …)
 HOME = "Users/ryan"               # paths under it read as `~/…` (site/src/pathCrumbs.ts)
