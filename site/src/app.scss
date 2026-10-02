@@ -2341,6 +2341,13 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
   .sub { color: var(--ink-2); max-width: 80ch; }
   .err { color: var(--s3); }
   .dim { color: var(--ink-3); }
+  .staged-filter {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 4px; font-size: 13px;
+    input[type=search] { flex: 1 1 320px; min-width: 0; max-width: 560px; padding: 5px 8px; font: inherit; background: var(--bg-2, #1e1e1e); color: inherit; border: 1px solid var(--border, #444); border-radius: 4px; }
+    input.bad { border-color: var(--danger, #e05050); }
+    .err { color: var(--danger, #e05050); font-size: 12px; }
+    .group-by { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+  }
   .staged-actions { display: flex; align-items: center; gap: 12px; margin: 6px 0 10px; font-size: 13px; .sel-all { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; } }
   .stage-batch { margin: 12px 0 18px; }
   .batch-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); .memo { color: var(--ink); } }

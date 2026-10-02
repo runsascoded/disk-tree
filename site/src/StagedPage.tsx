@@ -10,11 +10,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { boolParam, stringParam, useUrlState } from 'use-prms'
 import { SiteNav } from './SiteNav'
 import { SiteKbd } from './SiteKbd'
 import { Tooltip } from './Tooltip'
 import { Treemap } from './Treemap'
-import { UserChip } from './UserChip'
+import { UserChip, canonId, shortName } from './UserChip'
+import { ownerShares } from './OwnerBar'
+import { encodeSort, filterStaged, parseSort } from './stagedFilter'
 import { PrefixTable, TimeCell } from './PrefixTable'
 import { useUnits } from './units'
 import { fmtN, type Meta, type TreeNode } from './types'
@@ -38,8 +41,12 @@ const prefixToPath = (prefix: string): string => {
   return m ? m[1] : prefix
 }
 
-/** Rows per batch page. */
+/** Rows per batch page; the flat (filtered or ungrouped) table pages longer. */
 const PAGE = 20
+const FLAT_PAGE = 50
+
+/** A user id or email as its search text: the canonical id and the display name. */
+const searchName = (who: string) => `${canonId(who)} ${shortName(who)}`
 
 /** Whoami's admin flag: the plan-first console keys on it server-side too. */
 function useIsAdmin(): boolean {
@@ -99,14 +106,31 @@ export function StagedPage() {
   const error = unstage.error ?? dispatch.error ?? runAction.error ?? staged.error ?? statsQ.error
 
   const rows: Row[] = useMemo(() => items.map(it => ({ ...it, name: it.prefix, to: `/${prefixToPath(it.prefix)}`, stat: stats?.[it.prefix] })), [items, stats])
-  const [sort, setSort] = useState<{ k: PrefixSortKey; asc: boolean }>({ k: 'b', asc: false })
-  const onSort = (k: PrefixSortKey) => setSort(s => ({ k, asc: s.k === k ? !s.asc : k === 'name' }))
+  // The view lives in the URL, so a link carries it: `?q=percy|chi-heem&s=-b`
+  // (filter, sort; `-` = descending, `-b` default) and `flat=1` (one table,
+  // not one per batch — implied by a filter).
+  const [qP, setQ] = useUrlState('q', stringParam())
+  const [sP, setS] = useUrlState('s', stringParam())
+  const [flatP, setFlat] = useUrlState('flat', boolParam)
+  const q = qP ?? ''
+  const sort = parseSort(sP) as { k: PrefixSortKey; asc: boolean }
+  const onSort = (k: PrefixSortKey) => setS(encodeSort({ k, asc: sort.k === k ? !sort.asc : k === 'name' }))
+  // What a row is found by: its prefix, its owners (the ledger's assignee, else
+  // the scan's attribution — what the owner(s) column shows) and its stager.
+  const filtered = useMemo(() => filterStaged(rows, q, r => {
+    const cl = ownerIdx.count ? ownerIdx.claimOf(r.prefix) : null
+    const owners = cl ? [cl.who] : r.stat ? ownerShares({ n: r.name, b: r.stat.b, o: r.stat.o, ...(r.stat.us ? { us: r.stat.us } : {}) }).map(([u]) => u) : []
+    return { prefix: r.prefix, owners, stagedBy: r.added_by }
+  }, searchName), [rows, q, ownerIdx])
+  const shownRows = filtered.rows
+  const flat = !!flatP || !!q.trim()
 
   // Items grouped by gesture (newest first); items staged before batches
   // existed fall into one "earlier" group. Each group sorts by the table's key.
   const groups: Group[] = useMemo(() => {
+    if (flat) return [{ id: -1, rows: sortPrefixRows(shownRows, sort.k, sort.asc, r => r.added_ts) }]
     const byBatch = new Map<number | null, Row[]>()
-    for (const r of rows) {
+    for (const r of shownRows) {
       if (!byBatch.has(r.batch_id)) byBatch.set(r.batch_id, [])
       byBatch.get(r.batch_id)!.push(r)
     }
@@ -114,17 +138,18 @@ export function StagedPage() {
     return [...byBatch.entries()]
       .map(([id, rs]) => ({ id, batch: id != null ? known.get(id) : undefined, rows: sortPrefixRows(rs, sort.k, sort.asc, r => r.added_ts) }))
       .sort((a, b) => (b.batch?.created_ts ?? 0) - (a.batch?.created_ts ?? 0))
-  }, [rows, batches, sort])
+  }, [shownRows, batches, sP, flat]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Collapsed batches and each batch's page.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [pages, setPages] = useState<Record<string, number>>({})
   const gkey = (g: Group) => String(g.id ?? 'none')
-  const pageOf = (g: Group) => Math.min(pages[gkey(g)] ?? 0, Math.max(0, Math.ceil(g.rows.length / PAGE) - 1))
+  const pageSize = flat ? FLAT_PAGE : PAGE
+  const pageOf = (g: Group) => Math.min(pages[gkey(g)] ?? 0, Math.max(0, Math.ceil(g.rows.length / pageSize) - 1))
   // What's on screen, in order: the rows selection and j/k walk.
   const visible = useMemo(
-    () => groups.flatMap(g => collapsed.has(gkey(g)) ? [] : g.rows.slice(pageOf(g) * PAGE, (pageOf(g) + 1) * PAGE)),
-    [groups, collapsed, pages], // eslint-disable-line react-hooks/exhaustive-deps
+    () => groups.flatMap(g => collapsed.has(gkey(g)) ? [] : g.rows.slice(pageOf(g) * pageSize, (pageOf(g) + 1) * pageSize)),
+    [groups, collapsed, pages, pageSize], // eslint-disable-line react-hooks/exhaustive-deps
   )
   const sel = useRowSelection(visible, r => r.prefix)
   useRowSelectionKeys(sel, 'staged', 'Staged')
@@ -137,12 +162,14 @@ export function StagedPage() {
   useEffect(() => setArmed(false), [plan?.id, items.length])
 
   const total = (rs: Row[]) => rs.reduce((t, r) => ({ b: t.b + (r.stat?.b ?? 0), o: t.o + (r.stat?.o ?? 0), gone: t.gone + (stats && !r.stat ? 1 : 0) }), { b: 0, o: 0, gone: 0 })
-  const all = total(rows)
+  const all = total(shownRows)
+  const everything = total(rows)
   const selRows = rows.filter(r => sel.selected.has(r.prefix))
   const selTotal = total(selRows)
 
   const overlay = (t: TreeNode) => (ownerIdx.count ? applyLedger(t, ownerIdx, store.scheme) : t)
-  const tree = useMemo(() => (stats ? overlay(stagedTree(prefixes, stats, 'staged')) : null), [prefixes, stats, ownerIdx]) // eslint-disable-line react-hooks/exhaustive-deps
+  const shownPrefixes = useMemo(() => shownRows.map(r => r.prefix), [shownRows])
+  const tree = useMemo(() => (stats && shownPrefixes.length ? overlay(stagedTree(shownPrefixes, stats, 'staged')) : null), [shownPrefixes, stats, ownerIdx]) // eslint-disable-line react-hooks/exhaustive-deps
   const selKey = selected.join('\n')
   const selTree = useMemo(() => (stats && selected.length ? overlay(stagedTree(selected, stats, 'selected')) : null), [selKey, stats, ownerIdx]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -170,8 +197,8 @@ export function StagedPage() {
         <>
           <div className="pp-head">
             <h2>
-              {items.length} {items.length === 1 ? 'prefix' : 'prefixes'}
-              {stats && <> · {fmtBytes(all.b)} · {fmtN(all.o)} objects</>}
+              {shownRows.length !== items.length && <>{shownRows.length} of </>}{items.length} {items.length === 1 ? 'prefix' : 'prefixes'}
+              {stats && <> · {fmtBytes(all.b)}{shownRows.length !== items.length && <span className="dim"> of {fmtBytes(everything.b)}</span>} · {fmtN(all.o)} objects</>}
               <span className="dim"> · plan #{plan.id}{plan.name !== 'Staged' && <> “{plan.name}”</>} · open since {relAgo(plan.created_ts).replace(/ ago$/, '')}</span>
             </h2>
             <label className="scan-pick">sized at scan <select value={date} onChange={e => setDate(e.target.value)} aria-label="scan">{scans.map(s => <option key={s}>{s}</option>)}</select>
@@ -182,7 +209,7 @@ export function StagedPage() {
 
           <div className={`staged-maps${selTree ? ' two' : ''}`}>
             <section className="staged-map">
-              <h3>everything staged</h3>
+              <h3>{q.trim() ? <>staged, matching “{q.trim()}”</> : 'everything staged'}</h3>
               <div className="map-box">
                 {tree ? <Treemap key={`all:${date}`} root={tree} mode="user" userIdx={userIdx} dateRange={null} scheme={store.scheme} /> : <p className="dim">{sizesNote ?? 'nothing to draw'}</p>}
               </div>
@@ -197,16 +224,25 @@ export function StagedPage() {
             )}
           </div>
 
+          <div className="staged-filter">
+            <input type="search" value={q} onChange={e => setQ(e.target.value || undefined)} placeholder="filter: percy|chi-heem, isoflop -nemotron, owner:will, staged-by:david"
+              aria-label="filter staged prefixes" className={filtered.error ? 'bad' : undefined} />
+            {filtered.error && <span className="err">{filtered.error}</span>}
+            <Tooltip content={q.trim() ? 'A filter shows one table across batches.' : 'One table per staging gesture (who, when, note), or one table of everything.'}>
+              <label className="group-by"><input type="checkbox" checked={!flat} disabled={!!q.trim()} onChange={e => setFlat(!e.target.checked)} /> group by batch</label>
+            </Tooltip>
+          </div>
+
           <div className="staged-actions">
             <label className="sel-all"><input type="checkbox" checked={sel.pageAll} onChange={sel.togglePage} aria-label="select all shown" /> {sel.selected.size ? `${sel.selected.size} selected · ${fmtBytes(selTotal.b)}` : 'select'}</label>
             {sel.selected.size > 0 && <button type="button" onClick={sel.clear}>deselect</button>}
             {removable.length > 0 && (
               <button type="button" disabled={busy} onClick={() => unstage.mutate(removable, { onSuccess: () => sel.clear() })}>unstage {removable.length}</button>
             )}
-            <span className="fold-all">
+            {!flat && <span className="fold-all">
               <button type="button" disabled={collapsed.size === 0} onClick={() => setCollapsed(new Set())} aria-label="expand all batches">▾ all</button>
               <button type="button" disabled={collapsed.size === groups.length} onClick={() => setCollapsed(new Set(groups.map(gkey)))} aria-label="collapse all batches">▸ all</button>
-            </span>
+            </span>}
           </div>
 
           {groups.map(g => {
@@ -214,12 +250,12 @@ export function StagedPage() {
             const open = !collapsed.has(k)
             const t = total(g.rows)
             const pg = pageOf(g)
-            const np = Math.max(1, Math.ceil(g.rows.length / PAGE))
+            const np = Math.max(1, Math.ceil(g.rows.length / pageSize))
             const setPg = (p: number) => setPages(ps => ({ ...ps, [k]: p }))
-            const shown = g.rows.slice(pg * PAGE, (pg + 1) * PAGE)
+            const shown = g.rows.slice(pg * pageSize, (pg + 1) * pageSize)
             return (
               <section key={k} className={`stage-batch${open ? '' : ' folded'}`}>
-                <div className="batch-head">
+                {g.id !== -1 && <div className="batch-head">
                   <button type="button" className="fold" aria-expanded={open} aria-label={open ? 'collapse batch' : 'expand batch'}
                     onClick={() => setCollapsed(c => { const n = new Set(c); if (open) n.add(k); else n.delete(k); return n })}>{open ? '▾' : '▸'}</button>
                   {g.batch
@@ -227,8 +263,8 @@ export function StagedPage() {
                     : <span className="dim">staged earlier</span>}
                   <span className="dim">· {g.rows.length} {g.rows.length === 1 ? 'prefix' : 'prefixes'}{stats && <> · {fmtBytes(t.b)}</>}</span>
                   {g.batch?.note && <i className="memo">{g.batch.note}</i>}
-                </div>
-                {open && (
+                </div>}
+                {(open || g.id === -1) && (
                   <div className="staged-wrap">
                     <PrefixTable
                       rows={shown}
@@ -253,7 +289,7 @@ export function StagedPage() {
                       <div className="pg">
                         <button type="button" disabled={pg === 0} onClick={() => setPg(0)} aria-label="first page">«</button>
                         <button type="button" disabled={pg === 0} onClick={() => setPg(pg - 1)} aria-label="previous page">‹</button>
-                        <span>{pg * PAGE + 1}–{Math.min(g.rows.length, (pg + 1) * PAGE)} of {g.rows.length.toLocaleString('en-US')}</span>
+                        <span>{pg * pageSize + 1}–{Math.min(g.rows.length, (pg + 1) * pageSize)} of {g.rows.length.toLocaleString('en-US')}</span>
                         <button type="button" disabled={pg >= np - 1} onClick={() => setPg(pg + 1)} aria-label="next page">›</button>
                         <button type="button" disabled={pg >= np - 1} onClick={() => setPg(np - 1)} aria-label="last page">»</button>
                       </div>
