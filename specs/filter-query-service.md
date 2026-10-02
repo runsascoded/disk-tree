@@ -2,6 +2,8 @@
 
 Status: proposed (2026-10-02). Supersedes this spec's earlier scale-to-zero Cloud Run design (after [phase 0]). Reviewed by the root session. Owner: the gcs session. Code lands on `cloud` (shared); a deployment opts in with its own VM.
 
+**Scope:** the box is one serving tier among several, not the default. Its cost floor (~$260+/month) pays only at fleet scale (gcs: 778M rows). `cloud` keeps a range of tuned configs, and each deployment picks one (§8). Every engine is scored by the same harness, so the tiers stay comparable.
+
 ## 1. Why
 
 The site's reads run in a Cloudflare Worker: ~128 MB of memory, limited CPU, 6 concurrent subrequests, and no state between requests. Every request re-reads and re-decompresses parquet from GCS. That is why gcs's filters cut out `partial`, and why plain diffs and the series take seconds. The fight is with the serverless setup, not the problem size. On gcs's 2026-10-01 scan ([phase 0]):
@@ -72,7 +74,7 @@ The deciding questions: time to a hot generation, and how much NVMe a month of g
   - A container built from `cloud/` (`dt-cloud serve-query`).
   - A startup script that copies the latest two generations' files to local SSD and loads them. Phase 0 measured copy-then-load at about 8–10 s for the vocabulary.
   - The daily job calls `/reload?gen=…` after publish.
-- **IaC:** an `infra/gcp` component, `QueryBox`: its SA with `objectViewer` on the data bucket, the MIG, and the tunnel token secret. gcs's existing stack instantiates it, so no separate stack.
+- **IaC:** a `QueryBox` component in `cloud`'s `infra/gcp/` beside `gcp_jobs.py` (generic: its SA with `objectViewer` on the data bucket, the MIG, the tunnel token secret, the reload hook). gcs's `infra/gcp/__main__.py` only instantiates it with its bucket, region and size, so no separate stack.
 - **Admin status:** an admin panel, read through the Worker from the box's `/status` and the VM's monitoring metrics: up/down, loaded generations, memory, recent query latencies by engine. It has a "reload latest" button.
 
 ## 5. Costs
@@ -102,7 +104,23 @@ The Worker's search sidecars become an optional fast path: selective queries sta
 5. **Infra:** the `QueryBox` component plus the tunnel, on demand. Then measure for a month, then commit.
 6. **Then, if the probes say so:** plain views, diffs and the series through the box.
 
-## 7. Open questions
+## 7. Code layout
+
+Per the branch rule, everything generic is `[cloud]`: `dt-cloud serve-query`, the `QueryBox` component, the Worker hand-off, the probe query-set mode and the ground-truth job. Deployment-specific pieces are data or config on the deployment branch: gcs's query set, its `QueryBox(...)` instantiation, and `QUERY_BOX_URL`.
+
+## 8. Serving tiers
+
+The box is the top of a ladder. Each rung should be thoroughly tuned on its own, not left as a degraded fallback:
+
+| Tier | Fits | Search |
+|---|---|---|
+| Local (`disk-tree` on one machine, the app) | a disk or a small bucket | in process, the whole index in memory |
+| Worker only | up to ~tens of millions of rows | the Worker's sidecars (v2 rows-search, templated); exact at this size |
+| Worker + box | gcs scale | §2–4 |
+
+The bake-off scores all rungs on the same query set, so each deployment's choice is a measurement. The Worker-only tier stays the default in `cloud`; a deployment adds the box only when its probes say the Worker can't serve it exactly within budget.
+
+## 9. Open questions
 
 - **AST compiler:** where it lives. TS (Worker) and Python or a compiled language (box) both need it. Keep one AST JSON schema with a shared case table.
 - **Retention of the Worker's sidecars**, if any are built daily: last ~7 scans plus pinned dates.
