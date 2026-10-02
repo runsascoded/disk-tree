@@ -212,9 +212,9 @@ def write_sorts(
     two sorts × 120 scans under D1's 10 GB (specs/path-store.md §1.6).
 
     ``search``: also write the search sidecars beside the `path` sort
-    (`path-index.{names,trigrams,search}.parquet`, specs/path-store-search.md;
+    (`path-index.{rows,trigrams,rows-search}.parquet`, specs/path-store-search.md;
     ``search_opts`` passes `write_search`'s sizes) — reported as the `path`
-    entry's ``search`` (names, postings, files)."""
+    entry's ``search`` (names, rows, postings, files)."""
     import pyarrow.parquet as pq
     from disk_tree.find.groups import groups_parquet_path, groups_path
     from disk_tree.find.tiers import TIERS, tier_path, write_tiers
@@ -241,8 +241,8 @@ def write_sorts(
         from disk_tree.find.search import write_search
 
         st = write_search(result["path"]["file"], con=con, **(search_opts or {}))
-        result["path"]["search"] = {"names": st.names, "postings": st.postings, "files": st.files}
-        err(f"search: {st.names:,} names, {st.postings:,} trigram postings → {st.files['search']}")
+        result["path"]["search"] = {"names": st.names, "rows": st.rows, "postings": st.postings, "files": st.files}
+        err(f"search: {st.names:,} names, {st.rows:,} rows, {st.postings:,} trigram postings → {st.files['search']}")
     return result
 
 

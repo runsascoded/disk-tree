@@ -23,8 +23,11 @@
   `ckpt…final` path that only a cross-segment regex matches, a Kelvin-sign
   `Key`, 6000 filler objects so the `path` sort spans several 2048-row groups)
   in two buckets, written with the search sidecars
-  (`path-index.{names,trigrams,search}.parquet`, specs/path-store-search.md)
-  at 2048-row data groups and `SEARCH_DIR_ROWS` rows per directory group.
+  (`path-index.{rows,trigrams,rows-search}.parquet`, layout v2,
+  specs/path-store-search.md) at `SEARCH_ROWS_RG`-row rows groups, 2048-row
+  postings groups and `SEARCH_DIR_ROWS` rows per directory group — beside
+  layout v1's `path-index.{names,search}.parquet`, kept as committed (the
+  writer no longer emits them; their postings are v2's).
 - `v2/plans.json`: `disk-tree tiers plan -j -C` over each v2 sidecar for a
   set of reads — the engine planner's group selection, which the reader's
   span queries must reproduce exactly (`pathStore.test.ts`).
@@ -54,10 +57,18 @@ MiB = 1 << 20
 #: sorts' 4 row groups are 4 footer groups the reader must prune between.
 FOOTER_ROWS = 1
 SORTS = {'path': 'path-index', 'bysize': 'path-index-bysize'}
-#: Rows per directory group of the search fixture's `.search.parquet`: two, so
-#: a query's directory reads prune between groups.
+#: Rows per directory group of the search fixture's directory: two, so a
+#: query's directory reads prune between groups.
 SEARCH_DIR_ROWS = 2
-SEARCH_SIDECARS = ('names', 'trigrams', 'search')
+#: Rows per rows-file group of the search fixture: 12 groups, so candidates
+#: scatter across them and the row budget can cut between them.
+SEARCH_ROWS_RG = 512
+#: The search sidecars the writer emits (layout v2).
+SEARCH_SIDECARS = ('rows', 'trigrams', 'rows-search')
+#: Layout v1's own sidecars, kept as committed: the writer no longer emits
+#: them, and the reader still serves them (`search.test.ts` runs both). Its
+#: postings are v2's (same ids, same `postings_rg_rows`).
+SEARCH_V1_FILES = ('names', 'search')
 #: The reads cross-checked against the reader (path, thr, atten, max_depth).
 PLANS = [
     ('', 32768, 1, None),
@@ -194,6 +205,10 @@ def search_rows() -> dict[str, list[tuple[str, int]]]:
 
 def write_v2_search(here: str) -> None:
     out_dir = join(here, 'v2-search')
+    v1 = {}
+    for side in SEARCH_V1_FILES:
+        with open(join(out_dir, f'path-index.{side}.parquet'), 'rb') as f:
+            v1[side] = f.read()
     shutil.rmtree(out_dir, ignore_errors=True)
     with tempfile.TemporaryDirectory() as tmp:
         con = duckdb.connect()
@@ -212,7 +227,7 @@ def write_v2_search(here: str) -> None:
             sources.append((bucket, l2))
         summary = ix.write_index(
             sources, join(tmp, 'out'), mem='1GB', threads=1, row_group_rows=2048,
-            search=True, search_opts={'names_rg_rows': 2048, 'postings_rg_rows': 2048, 'dir_rg_rows': SEARCH_DIR_ROWS},
+            search=True, search_opts={'rows_rg_rows': SEARCH_ROWS_RG, 'postings_rg_rows': 2048, 'dir_rg_rows': SEARCH_DIR_ROWS},
         )
         print(json.dumps({'rows': summary['rows'], 'sorts': summary['sorts'], 'search': {k: v for k, v in summary['search'].items() if k != 'files'}}, indent=2), file=sys.stderr)
         shutil.os.makedirs(out_dir)
@@ -223,6 +238,9 @@ def write_v2_search(here: str) -> None:
             files[variant] = dst
         for side in SEARCH_SIDECARS:
             shutil.copy(join(tmp, 'out', f'path-index.{side}.parquet'), join(out_dir, f'path-index.{side}.parquet'))
+    for side, data in v1.items():
+        with open(join(out_dir, f'path-index.{side}.parquet'), 'wb') as f:
+            f.write(data)
     d1 = d1_json(files)
     for variant, stem in SORTS.items():
         write_text(join(out_dir, f'{stem}.groups.json'), groups_blob(d1[variant]['schema'], d1[variant]['rows']))

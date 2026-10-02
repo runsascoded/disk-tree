@@ -294,21 +294,22 @@ def test_write_index_search(tmp_path: Path):
     _write_l2(l2, L2)
     out = tmp_path / "index"
     s = X.write_index([(BUCKET, str(l2))], out, mem="1GB", threads=2, search=True)
-    files = {k: str(out / f"path-index.{k}.parquet") for k in ("names", "trigrams", "search")}
+    files = {role: str(out / f"path-index.{f}.parquet") for role, f in (("rows", "rows"), ("trigrams", "trigrams"), ("search", "rows-search"))}
     # 10 names; their distinct trigrams: 15 (the bucket) + 3 (`marin`) + 3 × 3
     # (`?.bin`) + 1 (`tmp`) + 3 (`empty`) + 3 (`t.bin`'s `t.b`, `.bi`, `bin`).
-    assert s["search"] == {"names": 10, "postings": 34, "files": files}
+    assert s["search"] == {"names": 10, "rows": 10, "postings": 34, "files": files}
     assert s["sorts"] == {"path": {"rows": 10, "groups": 1}, "bysize": {"rows": 10, "groups": 1}}
-    # One name per distinct last segment (the bucket row's is the bucket), heaviest first.
-    assert _read(out / "path-index.names.parquet", "name, n, b, rgs") == [
-        (BUCKET, 1, 40 * GIB, "0"),
-        ("marin", 1, 30 * GIB, "0"),
-        ("a", 1, 20 * GIB, "0"),
-        ("x.bin", 1, 20 * GIB, "0"),
-        ("b", 1, 10 * GIB, "0"),
-        ("t.bin", 1, 10 * GIB, "0"),
-        ("tmp", 1, 10 * GIB, "0"),
-        ("y.bin", 1, 6 * GIB, "0"),
-        ("z.bin", 1, 4 * GIB, "0"),
-        ("empty", 1, 0, "0"),
+    # The rows name-major: one id per distinct last segment (the bucket
+    # row's is the bucket), heaviest first.
+    assert _read(out / "path-index.rows.parquet", "id, path, size") == [
+        (0, BUCKET, 40 * GIB),
+        (1, f"{BUCKET}/marin", 30 * GIB),
+        (2, f"{BUCKET}/marin/a", 20 * GIB),
+        (3, f"{BUCKET}/marin/a/x.bin", 20 * GIB),
+        (4, f"{BUCKET}/marin/b", 10 * GIB),
+        (5, f"{BUCKET}/tmp/t.bin", 10 * GIB),
+        (6, f"{BUCKET}/tmp", 10 * GIB),
+        (7, f"{BUCKET}/marin/b/y.bin", 6 * GIB),
+        (8, f"{BUCKET}/marin/b/z.bin", 4 * GIB),
+        (9, f"{BUCKET}/empty", 0),
     ]

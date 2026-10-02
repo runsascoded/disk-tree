@@ -1,6 +1,6 @@
 """The path store's search sidecars (`disk_tree.find.search`, spec
-`path-store-search.md` §2): exact names, postings and directory rows for a
-hand-built `path` sort spanning three 2048-row groups."""
+`path-store-search.md` §2, layout v2): exact name-major rows, postings and
+directory rows for a hand-built `path` sort spanning three 2048-row groups."""
 
 import json
 from pathlib import Path
@@ -38,26 +38,22 @@ def _rows(path: str, cols: str = '*') -> list[tuple]:
     return duckdb.connect().execute(f"SELECT {cols} FROM read_parquet('{path}')").fetchall()
 
 
-def _expected_names(rg_cap: int = 512) -> list[tuple]:
-    """(id, name, n, b, n_rgs, rgs), `b desc, name`: rows by their index → rg = index // 2048."""
-    def rgs(*rg: int) -> str | None:
-        return ','.join(map(str, rg)) if len(rg) <= rg_cap else None
-    head = [
-        ('bk', 1, 10000, 1, rgs(0)),
-        ('f', 1, 4500, 1, rgs(0)),
-        ('x.bin', 2, 3300, 2, rgs(0, 2)),  # rows 7 and 4508
-        ('a', 1, 3000, 1, rgs(0)),
-        ('TTL', 1, 2000, 1, rgs(0)),
-        ('ttl', 2, 1800, 1, rgs(0)),  # zz/ttl (row 5), bk/TTL/ttl (row 6)
-        ('zz', 1, 300, 1, rgs(0)),
-    ]
-    fill = [(f'n{i:04d}', 1, 1, 1, rgs((8 + i) // RG)) for i in range(N_FILL)]
-    return [(i, *r) for i, r in enumerate(head + fill)]
+def _expected_names() -> list[tuple[int, str]]:
+    """(id, name), `Σ size desc, name`."""
+    head = ['bk', 'f', 'x.bin', 'a', 'TTL', 'ttl', 'zz']  # x.bin: 3000 + 300; ttl: 300 + 1500
+    return list(enumerate(head + [f'n{i:04d}' for i in range(N_FILL)]))
 
 
-def _expected_postings(names: list[tuple]) -> list[tuple[int, int]]:
+def _expected_rows() -> list[tuple[int, str, int, int]]:
+    """(id, path, depth, size): each name's rows in `path`-sort order."""
+    ids = {name: id for id, name in _expected_names()}
+    rows = [(ids[p.rsplit('/', 1)[-1]], i, p, s) for i, (p, s) in enumerate(ROWS)]
+    return [(id, p, p.count('/') + 1, s) for id, _, p, s in sorted(rows)]
+
+
+def _expected_postings(names: list[tuple[int, str]]) -> list[tuple[int, int]]:
     out = set()
-    for id, name, *_ in names:
+    for id, name in names:
         low = name.lower()
         for k in range(len(low) - 2):
             t = low[k:k + 3]
@@ -68,20 +64,33 @@ def _expected_postings(names: list[tuple]) -> list[tuple[int, int]]:
 
 def test_write_search(tmp_path: Path):
     src = _path_sort(tmp_path / 'path-index.parquet')
-    st = write_search(src, names_rg_rows=2048, postings_rg_rows=2048, dir_rg_rows=4)
+    st = write_search(src, rows_rg_rows=1000, postings_rg_rows=2048, dir_rg_rows=4)
     paths = search_paths(src)
     assert paths == {
-        'names': str(tmp_path / 'path-index.names.parquet'),
+        'rows': str(tmp_path / 'path-index.rows.parquet'),
         'trigrams': str(tmp_path / 'path-index.trigrams.parquet'),
-        'search': str(tmp_path / 'path-index.search.parquet'),
+        'search': str(tmp_path / 'path-index.rows-search.parquet'),
     }
     names = _expected_names()
+    rows = _expected_rows()
     postings = _expected_postings(names)
-    assert (st.names, st.postings, st.path_groups, st.files) == (len(names), len(postings), 3, paths)
+    assert (st.names, st.rows, st.postings, st.path_groups, st.files) == (len(names), len(ROWS), len(postings), 3, paths)
 
-    # The vocabulary: one row per last segment, in impact order.
-    assert _rows(paths['names']) == names
-    assert [pq.read_metadata(paths['names']).row_group(g).num_rows for g in range(3)] == [2048, 2048, 411]
+    # The rows, name-major: a name's rows together (`x.bin`'s two, `ttl`'s
+    # `zz/ttl` then `bk/TTL/ttl` as the `path` sort has them), every column
+    # of the sort after `id`, in exact `rows_rg_rows` groups.
+    assert _rows(paths['rows']) == rows
+    assert rows[:9] == [
+        (0, 'bk', 1, 10000), (1, 'bk/f', 2, 4500), (2, 'bk/a/x.bin', 3, 3000), (2, 'zz/ttl/x.bin', 3, 300),
+        (3, 'bk/a', 2, 3000), (4, 'bk/TTL', 2, 2000), (5, 'zz/ttl', 2, 300), (5, 'bk/TTL/ttl', 3, 1500), (6, 'zz', 1, 300),
+    ]
+    rmd = pq.read_metadata(paths['rows'])
+    assert [rmd.row_group(g).num_rows for g in range(rmd.num_row_groups)] == [1000, 1000, 1000, 1000, 509]
+    # Statistics only on `id` (what the directory's key range comes from).
+    rg0 = rmd.row_group(0)
+    assert {rg0.column(c).path_in_schema: rg0.column(c).statistics is not None for c in range(rg0.num_columns)} == {
+        'id': True, 'path': False, 'depth': False, 'size': False,
+    }
     # Postings: every ASCII trigram of the lowercased name, `(tri, id)` order.
     assert _rows(paths['trigrams']) == postings
     ttl = tri_code('ttl')
@@ -93,18 +102,17 @@ def test_write_search(tmp_path: Path):
         assert json.loads(r.pop('rg_json'))[0] == r['row_end'] - r['row_start']
     n_post = len(postings)
     post_groups = [(i * RG, min((i + 1) * RG, n_post)) for i in range((n_post + RG - 1) // RG)]
+    row_groups = [(i * 1000, min((i + 1) * 1000, len(rows))) for i in range(5)]
     assert d == [
-        {'file': 0, 'rg': 0, 'row_start': 0, 'row_end': 2048, 'k_min': 0, 'k_max': 2047},
-        {'file': 0, 'rg': 1, 'row_start': 2048, 'row_end': 4096, 'k_min': 2048, 'k_max': 4095},
-        {'file': 0, 'rg': 2, 'row_start': 4096, 'row_end': 4507, 'k_min': 4096, 'k_max': 4506},
+        *({'file': 0, 'rg': g, 'row_start': a, 'row_end': b, 'k_min': rows[a][0], 'k_max': rows[b - 1][0]} for g, (a, b) in enumerate(row_groups)),
         *({'file': 1, 'rg': g, 'row_start': a, 'row_end': b, 'k_min': postings[a][0], 'k_max': postings[b - 1][0]} for g, (a, b) in enumerate(post_groups)),
     ]
     md = pq.read_metadata(paths['search'])
     assert md.num_row_groups == (len(d) + 3) // 4
     kv = {k.decode(): v.decode() for k, v in md.metadata.items()}
-    schemas = {k: [e['name'] for e in json.loads(kv.pop(k))] for k in ('names_schema', 'trigrams_schema')}
-    assert schemas == {'names_schema': ['schema', 'id', 'name', 'n', 'b', 'n_rgs', 'rgs'], 'trigrams_schema': ['schema', 'tri', 'id']}
-    assert kv == {'search_v': '1', 'names': str(len(names)), 'postings': str(n_post), 'rg_cap': '512', 'path_groups': '3', 'path_rows': str(len(ROWS))}
+    schemas = {k: [e['name'] for e in json.loads(kv.pop(k))] for k in ('rows_schema', 'trigrams_schema')}
+    assert schemas == {'rows_schema': ['schema', 'id', 'path', 'depth', 'size'], 'trigrams_schema': ['schema', 'tri', 'id']}
+    assert kv == {'search_v': '2', 'names': str(len(names)), 'rows': str(len(ROWS)), 'postings': str(n_post), 'path_groups': '3', 'path_rows': str(len(ROWS))}
     # Statistics only on what a reader prunes by.
     rg0 = md.row_group(0)
     assert {rg0.column(c).path_in_schema: rg0.column(c).statistics is not None for c in range(rg0.num_columns)} == {
@@ -112,11 +120,21 @@ def test_write_search(tmp_path: Path):
     }
 
 
-def test_rg_cap(tmp_path: Path):
-    """A name in more `path` groups than `rg_cap` keeps its count, not its list."""
-    src = _path_sort(tmp_path / 'path-index.parquet')
-    write_search(src, rg_cap=1)
-    assert _rows(search_paths(src)['names']) == _expected_names(rg_cap=1)
+def test_owner_slices(tmp_path: Path):
+    """A path's owner slices (one row per `usr`) stay together and in the
+    `path` sort's order; `usr` is dictionary-encoded, `path` plain."""
+    p = tmp_path / 'path-index.parquet'
+    pq.write_table(pa.table({
+        'path': ['bk', 'bk', 'bk/run', 'bk/run', 'bk/x/run'],
+        'usr': ['al', 'bo', 'bo', 'al', None],
+        'size': pa.array([5, 4, 3, 2, 1], pa.int64()),
+    }), p)
+    write_search(str(p))
+    rows = search_paths(str(p))['rows']
+    # `bk` (Σ 9) is id 0, `run` (Σ 6) 1; `x` has no row of its own.
+    assert _rows(rows) == [(0, 'bk', 'al', 5), (0, 'bk', 'bo', 4), (1, 'bk/run', 'bo', 3), (1, 'bk/run', 'al', 2), (1, 'bk/x/run', None, 1)]
+    enc = {c: pq.read_metadata(rows).row_group(0).column(c).encodings for c in (1, 2)}
+    assert ['RLE_DICTIONARY' in enc[1], 'RLE_DICTIONARY' in enc[2]] == [False, True]
 
 
 def test_unicode_names(tmp_path: Path):
@@ -135,4 +153,8 @@ def test_rejects(tmp_path: Path):
     with pytest.raises(ValueError, match='no `size` column'):
         write_search(str(p))
     with pytest.raises(ValueError, match='multiple of 2048'):
-        write_search(str(p), names_rg_rows=1000)
+        write_search(str(p), postings_rg_rows=1000)
+    q = tmp_path / 'y.parquet'
+    pq.write_table(pa.table({'path': ['a'], 'size': [1], 'id': [0]}), q)
+    with pytest.raises(ValueError, match='has an `id` column'):
+        write_search(str(q))
