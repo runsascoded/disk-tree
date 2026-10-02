@@ -205,6 +205,20 @@ describe('the filter view', () => {
     }
   })
 
+  it('`maxDepth` caps what is drawn, never where matches are found (all matches at depth ≥ 2)', async () => {
+    const want = await brute('ttl=', '')
+    expect(want).toEqual(['bk/tmp/ttl=14d', 'bk/tmp/ttl=7d'])
+    for (const date of [SEARCH, PLAIN]) {
+      const v = await buildView(env, { ...base, date, path: '', threshold: 0, maxDepth: 1, query: parseQuery('ttl=')! })
+      expect([date, v.matches, v.matched?.map(m => m.b), v.tree.b, coverage(v)]).toEqual([date, want, [5 * MiB, 2 * MiB], 7 * MiB, date === PLAIN ? { approximate: APPROX_NO_INDEX } : {}])
+    }
+    // The diff's first paint (`depth=1`), with and without sidecars on either side.
+    for (const [from, to] of [[PLAIN, SEARCH], [PLAIN, PLAIN]]) {
+      const d = await buildDiff(env, { ...base, from, to, top: 100, path: '', threshold: 0, depth: 1, query: parseQuery('ttl=')! })
+      expect([from, to, d.matched?.map(m => m.path), d.total_a, d.total_b, d.approximateReason]).toEqual([from, to, want, 7 * MiB, 7 * MiB, APPROX_NO_INDEX])
+    }
+  })
+
   it('a search cut before any root falls back to the pre-index read', async () => {
     const o = { ...base, path: '', threshold: 0, query: parseQuery('ttl')! }
     const [a, b] = await Promise.all([buildView(env, { ...o, date: SEARCH, searchLimits: { ...SEARCH_LIMITS, pathRgs: 0 } }), buildView(env, { ...o, date: PLAIN })])

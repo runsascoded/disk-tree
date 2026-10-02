@@ -685,7 +685,9 @@ async function readView(env: Env, o: ViewOpts, cov: Coverage = {}): Promise<Read
       const fineIdx = roots.length || found ? null : pathIdx ?? fine ?? withTrace(await openFine(env, date, 'path'), tr)
       if (fineIdx && !isStore(fineIdx) && rootAll.o > (o.v1ScanObjects ?? V1_FILTER_SCAN_OBJECTS)) noteCoverage(cov, 'approximate', APPROX_V1_TOO_BIG)
       if (fineIdx && (isStore(fineIdx) || rootAll.o <= (o.v1ScanObjects ?? V1_FILTER_SCAN_OBJECTS))) {
-        const got = await readSubtree(env, date, fineIdx, [{ dLo: dP + 1, dHi: maxDepth != null ? dP + maxDepth : 1e9, pLo, pHi }], thrAt, undefined, nDesc, smallRows, tr)
+        // Every depth: `maxDepth` caps what phase 2 draws, never where
+        // matches are found (a `depth=1` first paint must still find deep ones).
+        const got = await readSubtree(env, date, fineIdx, [{ dLo: dP + 1, dHi: 1e9, pLo, pHi }], thrAt, undefined, nDesc, smallRows, tr)
         p1 = aggregate(got.rows)
         roots = matchRoots(p1.depth.keys(), query, path)
         p1Tier = isStore(fineIdx) ? got.variant : 'fine'
@@ -816,9 +818,11 @@ async function readView(env: Env, o: ViewOpts, cov: Coverage = {}): Promise<Read
   // attenuated threshold bounds both row count and depth by construction.
   // `maxDepth` caps the band read at dP + N: the rows at the cap come back
   // childless (the client treats a `c`-less branch as drillable), and the
-  // deeper bands — the bulk of the work — are never touched.
+  // deeper bands — the bulk of the work — are never touched. Not with a
+  // query (a lens's claims fold filters these rows): matches are found at
+  // every depth.
   t0 = performance.now()
-  const sub = await readSubtree(env, date, idx, [{ dLo: dP + 1, dHi: maxDepth != null ? dP + maxDepth : 1e9, pLo, pHi }], thrAt, lens, nDesc, smallRows, tr)
+  const sub = await readSubtree(env, date, idx, [{ dLo: dP + 1, dHi: maxDepth != null && !query ? dP + maxDepth : 1e9, pLo, pHi }], thrAt, lens, nDesc, smallRows, tr)
   const rows = sub.rows
   tr?.('rows', performance.now() - t0, sub.variant)
   // A store generation names the sort that answered; a v1 one its tier.

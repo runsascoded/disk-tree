@@ -185,6 +185,8 @@ Both are absent when the index answered completely (or the view root itself matc
 
 ## 5. Fallback
 
+`depth=N` (`maxDepth`, the first paint and the diff's `depth=1`) caps only what phase 2 returns, never where matches are found: phase 1's fallback read and a lens's read under a query search every depth (until 2026-10-02 the fallback read stopped at `dP + N`, so a `depth=1` request with every match at depth ≥ 2 reported none).
+
 The filter view uses the thresholded phase 1 (and finds excluded paths among the rows it read), and flags the response `approximate` (§4.4), when: the generation has no `search.parquet` (every generation written before this, all v1 scans), a term ends in `/`, or the query is a `/…/` regex. The regex keeps its full-path meaning (`/ckpt.*final/` matches across segments) and stays undocumented; the index never plans it. A user lens without claims also keeps the old read, and a lens view with claims filters after the read (`nameFilter`), which matches by the predicate but does not subtract excluded paths (open).
 
 ## 6. Cross-scan reuse (later)
