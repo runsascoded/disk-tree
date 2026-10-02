@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtBytes, renderParent, runEvent, stageEvent, type RunRow } from './stagedSlack.js'
+import { fmtBytes, nameSlug, renderParent, runEvent, stageEvent, type RunRow } from './stagedSlack.js'
 
 const run = (o: Partial<RunRow>): RunRow => ({
   run_id: 'cw-sweep-dry-1', mode: 'dry', scan: '2026-09-28T1201', actor: 'ann@openathena.ai', started_ts: 100,
@@ -69,5 +69,12 @@ describe('mentions and sizes', () => {
       '> old runs',
       '• `gs://b/x/`',
     ]])
+  })
+})
+
+describe('nameSlug: a Slack name as the canonical owner id', () => {
+  it('lowercase, accents folded, other runs to one dash', () => {
+    expect(['Chi-Heem Wong', 'Percy Liang', 'José  Núñez', ' Will Held (he/him) '].map(nameSlug))
+      .toEqual(['chi-heem-wong', 'percy-liang', 'jose-nunez', 'will-held-he-him'])
   })
 })

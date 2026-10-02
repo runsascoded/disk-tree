@@ -181,6 +181,45 @@ export async function slackMentions(env: SlackEnv, emails: readonly string[]): P
   return out
 }
 
+/** A name as the site's canonical user id: `Chi-Heem Wong` → `chi-heem-wong`. */
+export const nameSlug = (name: string): string =>
+  name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
+
+// The workspace's members as slug → `<@U…>`, per isolate (10 min).
+let membersMemo: { at: number; p: Promise<Map<string, string>> } | null = null
+
+/** Workspace members keyed by their real and display names' slugs (`users.list`,
+ *  `users:read`) — how an owner id with no known email still gets a mention.
+ *  A slug two members share is dropped (no guessing). */
+export function slackMembers(env: SlackEnv): Promise<Map<string, string>> {
+  if (membersMemo && Date.now() - membersMemo.at < 10 * 60_000) return membersMemo.p
+  const p = (async () => {
+    const out = new Map<string, string>()
+    const dup = new Set<string>()
+    let cursor = ''
+    for (let page = 0; page < 20; page++) {
+      const r = await fetch(`https://slack.com/api/users.list?limit=500${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, { headers: { authorization: `Bearer ${env.SLACK_BOT_TOKEN}` } })
+      const j = (await r.json().catch(() => null)) as { ok?: boolean; members?: { id: string; deleted?: boolean; is_bot?: boolean; real_name?: string; profile?: { real_name?: string; display_name?: string } }[]; response_metadata?: { next_cursor?: string } } | null
+      if (!j?.ok) break
+      for (const m of j.members ?? []) {
+        if (m.deleted || m.is_bot) continue
+        const slugs = new Set([m.real_name, m.profile?.real_name, m.profile?.display_name].filter((x): x is string => !!x).map(nameSlug))
+        for (const sl of slugs) {
+          if (!sl) continue
+          if (out.has(sl) && out.get(sl) !== `<@${m.id}>`) dup.add(sl)
+          else out.set(sl, `<@${m.id}>`)
+        }
+      }
+      cursor = j.response_metadata?.next_cursor ?? ''
+      if (!cursor) break
+    }
+    for (const d of dup) out.delete(d)
+    return out
+  })().catch(() => new Map<string, string>())
+  membersMemo = { at: Date.now(), p }
+  return p
+}
+
 /** `prefixes` at the latest scan: totals and the top owners (by attributed
  *  bytes), owners named by Slack mention where their email is known. Null
  *  when the index isn't readable here. */
@@ -203,8 +242,8 @@ export async function sizeStaged(env: Env & SlackEnv, db: D1Database, prefixes: 
     ? (await db.prepare(`SELECT email, user FROM user_emails WHERE user IN (${top.map(() => '?').join(',')})`).bind(...top.map(t => t[0])).all<{ email: string; user: string }>()).results
     : []
   const emailOf = new Map(rows.map(r => [r.user, r.email]))
-  const mentions = await slackMentions(env, [...emailOf.values()])
-  const owners = top.map(([u, ub]) => ({ label: mentions[emailOf.get(u)?.toLowerCase() ?? ''] ?? u, b: ub }))
+  const [mentions, members] = await Promise.all([slackMentions(env, [...emailOf.values()]), slackMembers(env)])
+  const owners = top.map(([u, ub]) => ({ label: mentions[emailOf.get(u)?.toLowerCase() ?? ''] ?? members.get(u) ?? u, b: ub }))
   return { scan, b, o, empty, owners }
 }
 
