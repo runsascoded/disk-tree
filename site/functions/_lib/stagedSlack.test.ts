@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fmtBytes, renderParent, runEvent, type RunRow } from './stagedSlack.js'
+import { fmtBytes, renderParent, runEvent, stageEvent, type RunRow } from './stagedSlack.js'
 
 const run = (o: Partial<RunRow>): RunRow => ({
   run_id: 'cw-sweep-dry-1', mode: 'dry', scan: '2026-09-28T1201', actor: 'ann@openathena.ai', started_ts: 100,
@@ -47,5 +47,27 @@ describe('run events', () => {
     expect(runEvent(run({ mode: 'real', run_id: 'cw-sweep-real-1', undo_deadline: 1_790_604_800 }), 'finished')).toBe(':white_check_mark: Real deletion finished: deleted *2.0 TiB* / 1,234 objects; undoable until 2026-09-28 14:13Z (www).')
     expect(runEvent(run({ plan_digest: '' }), 'failed')).toBe(':x: Dry-run `cw-sweep-dry-1` ended without a result (its Batch job stopped before the run summary); check its logs in www.')
     expect([fmtBytes(0), fmtBytes(1536), fmtBytes(3 * 1024 ** 3)]).toEqual(['0 B', '1.5 KiB', '3.0 GiB'])
+  })
+})
+
+describe('mentions and sizes', () => {
+  const base = { planId: 7, siteUrl: 'https://cw-s3.oa.dev', items: 3, batches: 2, stagers: [] as string[], digest: 'D1', actions: true, closed: false, runs: [] as RunRow[] }
+  const size = { scan: '2026-10-02', b: 51 * 2 ** 40, o: 179327698, empty: 5, owners: [{ label: '<@U1>', b: 16 * 2 ** 40 }, { label: 'percy-liang', b: 6 * 2 ** 40 }] }
+  it('the parent names stagers by mention (else the local part) and carries the size line', () => {
+    const v = { ...base, stagers: ['a.b@x.org', 'c.d@x.org'], mentions: { 'a.b@x.org': '<@UA>' }, size }
+    expect((renderParent(v).blocks[0] as { text: { text: string } }).text.text.split('\n')).toEqual([
+      `*Staged for deletion* · plan #${base.planId} · ${base.items} prefixes in ${base.batches} batches`,
+      'staged by <@UA>, c.d',
+      '*51.0 TiB* · 179,327,698 objects at scan 2026-10-02 · 5 empty · owners: <@U1> 16.0 TiB, percy-liang 6.0 TiB',
+    ])
+  })
+  it('a stage reply: mention, size line, then the note and prefixes', () => {
+    const e = stageEvent({ planId: 1, batchId: 2, by: 'a.b@x.org', prefixes: ['gs://b/x/'], covered: 0, note: 'old runs', siteUrl: 'https://s', mentions: { 'a.b@x.org': '<@UA>' }, size: { ...size, empty: 0, owners: [] } })
+    expect([e.text, (e.blocks[0] as { text: { text: string } }).text.text.split('\n')]).toEqual(['<@UA> staged 1 prefix', [
+      ':wastebasket: *<@UA> staged 1 prefix*',
+      '*51.0 TiB* · 179,327,698 objects at scan 2026-10-02',
+      '> old runs',
+      '• `gs://b/x/`',
+    ]])
   })
 })
