@@ -35,7 +35,7 @@ const PAGE_SIZES = [20, 50, 100, 200]
  *  tooltip); ~60 chars fills the column's 480px at 12px mono. */
 const NAME_MAX = 60
 
-export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUser, onOpen, onOpenObject }: {
+export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUser, onOpen, onOpenObject, actionable }: {
   /** The treemap's currently-viewed node. */
   node: TreeNode
   /** Path segments from the tree root to `node` (no scheme, no root). */
@@ -50,6 +50,9 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
   onOpen: (segs: string[]) => void
   /** An object row was opened: show it in the leaf viewer. */
   onOpenObject: (segs: string[]) => void
+  /** Under a filter: which rows (path below the root) may be assigned or
+   *  trashed — those inside a match root (`inMatchRoots`). Absent: all. */
+  actionable?: (path: string) => boolean
 }) {
   usePerfCommit('table')
   const { fmtBytes } = useUnits()
@@ -119,7 +122,8 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
   const uriOfKid = (k: TreeNode) => scheme + [...segs, k.n].join('/')
   // Rows select (click / shift / ⌘, checkboxes, j/k) into one set keyed by
   // uri; the bar above the table stages or assigns the whole selection at once.
-  const selectable = useMemo(() => shown.filter(k => !k.n.startsWith('(')), [shown])
+  const acts = (k: TreeNode) => !k.n.startsWith('(') && (!actionable || actionable([...segs, k.n].join('/')))
+  const selectable = useMemo(() => shown.filter(acts), [shown, actionable, segs]) // eslint-disable-line react-hooks/exhaustive-deps
   const sel = useRowSelection(selectable, uriOfKid)
   useRowSelectionKeys(sel, 'tbl', 'Children table')
   // Selection survives paging and sort by key, but not a drill: the rows
@@ -282,7 +286,12 @@ export function ChildrenTable({ node, segs, scheme, ownerIdx, userIdx, onPickUse
                 )}
                 {showSel && (
                   <td className="actions">
-                    {!synthetic && (
+                    {!synthetic && !acts(k) && (
+                      <Tooltip content="Under a filter this row shows only its matching bytes, but an action would take the whole prefix. Drill in to the matches (or use the filter's bulk bar) to act on them.">
+                        <span className="none">—</span>
+                      </Tooltip>
+                    )}
+                    {!synthetic && acts(k) && (
                       <>
                         {staging && (
                           <Tooltip content="Stage this prefix for deletion — an admin approves and dispatches from /staged">

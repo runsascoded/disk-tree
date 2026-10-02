@@ -2421,3 +2421,12 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
     .srv { color: var(--ink-2); }
   }
 }
+
+.assign-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--warn, #e0a030);
+  button.danger { color: var(--danger, #e05050); border-color: currentColor; }
+}

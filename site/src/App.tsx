@@ -27,7 +27,7 @@ import { LifecycleFold } from './LifecycleFold'
 import { ClassMixTip, Tooltip } from './Tooltip'
 import { Treemap } from './Treemap'
 import type { DateRange, Highlight, ShadeMode } from './Treemap'
-import { collectFlagged, DEFAULT_SYNTAX, SYNTAXES, syntaxById } from './filterTree'
+import { collectFlagged, DEFAULT_SYNTAX, inMatchRoots, SYNTAXES, syntaxById } from './filterTree'
 import { QueryHelpTip } from './QueryHelp'
 import { FilterFlags, FilterNote } from './FilterNote'
 import { BulkBar } from './BulkBar'
@@ -769,6 +769,7 @@ function AppContent() {
   }, [mapTree, drillPath])
   // The table's path segments, stable while `mapPath` is (a fresh array per
   // render defeated every memo keyed on it).
+  const tblActionable = useMemo(() => inMatchRoots(matchedRoots, !!fq), [matchedRoots, fq])
   const tblSegs = useMemo(() => mapPath?.slice(1).map(n => n.n) ?? [], [mapPath])
   const onMapPath = (p: TreeNode[]) => drillTo(p.slice(1).map(n => n.n))
   // Worklist rows / children table → drill the map to a prefix and show it.
@@ -1204,6 +1205,7 @@ function AppContent() {
               onPickUser={u => pickUser(u, false)}
               onOpen={openPath}
               onOpenObject={openObject}
+              actionable={tblActionable}
             /></div>
           )}
         </>
