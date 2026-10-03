@@ -102,6 +102,9 @@ async function prepare(env: ExecEnv, db: D1Database, req: DispatchReq): Promise<
               // `sweep execute` records the run's `actor` from $USER
               USER: req.actor,
               CLOUDFLARE_ACCOUNT_ID: cfg.cfAccountId,
+              // `sweep manifest`'s listing root (`gs://$DATA_BUCKET`): dt-cloud
+              // has no default bucket (specs/oa-decoupling.md steps 9–10)
+              DATA_BUCKET: cfg.dataBucket,
               // the run's item digest, for `sweepReflect` (the executor ignores it)
               PLAN_DIGEST: digest,
               SITE_URL: req.siteUrl,
