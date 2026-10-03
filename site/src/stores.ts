@@ -12,6 +12,7 @@
 // Baking the JSONs into `public/` was the other option; it was rejected because
 // publishing a scan would then require a site redeploy, which is exactly the
 // staleness the data Function was introduced to fix.
+import type { ReactNode } from 'react'
 import type { RuleShape } from './lifecycle'
 
 /** The lifecycle fold's per-store shape (`LifecycleFold.tsx`). */
@@ -83,9 +84,21 @@ export interface Store {
    *  deployment's `/v1/files` proxy when that reads it, else shows size and
    *  dates only (`objects.ts` `objectSource`). */
   objectBases?: Record<string, string>
+  /** Where viewers take ownership questions (`AttributionRules`): an email
+   *  address and/or a chat link. Unset = no contact line. */
+  contact?: { email?: string; chat?: { label: string; href: string } }
+  /** The About panel's "The data" section, when the store says more than its
+   *  `desc` (a deployment's pipeline, its data's history). Unset = `desc`. */
+  about?: ReactNode
 }
 
-const REGISTRY: Store[] = [
+/** The registry: one module per store under `stores/` (each `export default`s a
+ * `Store`), plus the inline entries below; a module wins over an inline entry
+ * with its key. A deployment branch adds its store as a module, so the shared
+ * base carries no deployment's entry (specs/oa-decoupling.md step 6). */
+const MODULES = Object.values(import.meta.glob<{ default: Store }>('./stores/*.{ts,tsx}', { eager: true })).map(m => m.default)
+
+const INLINE: Store[] = [
   {
     key: 'cw',
     label: 'CoreWeave',
@@ -135,31 +148,6 @@ const REGISTRY: Store[] = [
     },
   },
   {
-    key: 'r2',
-    label: 'R2',
-    title: 'disk-tree — public R2 buckets',
-    desc: 'Storage usage of public Cloudflare R2 buckets (ctbk, crashes, jc-taxes) — treemap, sizes over time, and diffs. A public disk-tree demo.',
-    path: '/',
-    scheme: 'r2://',
-    base: '/data/r2',
-    ogImage: '/og.jpg',
-    prices: false,
-    staging: false,
-    owners: false,
-    executor: 'plan-sweep',
-    buckets: ['ctbk', 'crashes', 'jc-taxes'],
-    // Each bucket's public custom domain (CORS `*`). `jc-taxes` has one too,
-    // `data.jct.rbw.sh`, but its CORS admits only jct.rbw.sh (jc-taxes
-    // `infra/__main__.py`), so a browser here can't read it: its objects show
-    // size and dates until that rule lists this site.
-    objectBases: { ctbk: 'https://data.ctbk.dev', crashes: 'https://crashes-data.hccs.dev' },
-    rootLabel: 'all buckets',
-    objectsNote: 'Public R2 buckets scanned daily by disk-tree; created is each object’s upload time.',
-    // A public deploy never shows the wall (`AUTH_MODE === 'public'`); copy
-    // kept for the type, and for a gated build of the same store.
-    wall: { restrict: 'This store is public.', signIn: 'Sign in' },
-  },
-  {
     // The deploy's own storage (specs/multi-store.md): the scan + index data
     // the deployments write — the GCS snapshot bucket and its R2 mirror — as
     // a secondary store, mounted under `/meta` beside a primary (`STORES_EXTRA`).
@@ -187,6 +175,11 @@ const REGISTRY: Store[] = [
       signIn: 'Sign in with Open Athena',
     },
   },
+]
+
+const REGISTRY: Store[] = [
+  ...INLINE.filter(s => !MODULES.some(m => m.key === s.key)),
+  ...MODULES,
 ]
 
 /** The registry rows a build serves, primary first.
