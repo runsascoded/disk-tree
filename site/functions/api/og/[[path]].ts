@@ -1,5 +1,5 @@
 /**
- * Full-info share links (specs/dogi.md): a per-view token that upgrades one
+ * Full-info share links (specs/done/dogi.md): a per-view token that upgrades one
  * exact view's card from anonymous to labelled.
  *
  *   POST   /api/og/mint {url, days?}  → {url, token, exp_day}: the page URL with

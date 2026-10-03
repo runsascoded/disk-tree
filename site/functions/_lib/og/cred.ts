@@ -1,4 +1,4 @@
-/** What a full card image is backed by (specs/dogi.md): the `og=` token
+/** What a full card image is backed by (specs/done/dogi.md): the `og=` token
  * (`t`) or the share-link grant (`g`) its page was stamped from, carried in
  * the image URL under the `sig`. The image re-checks it on every fetch, so
  * revoking either reverts every later fetch to the anonymous card. Pure. */

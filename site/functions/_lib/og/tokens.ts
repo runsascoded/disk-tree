@@ -1,4 +1,4 @@
-/** Per-view preview tokens in D1 (`og_tokens`, gcs `0034`; specs/dogi.md).
+/** Per-view preview tokens in D1 (`og_tokens`, gcs `0034`; specs/done/dogi.md).
  * A token is 10 random base62 chars and the row is the whole truth: it's good
  * iff a row with that token exists for exactly the request's view (kind +
  * canonical params), unexpired and unrevoked. Each mint is a new token, so

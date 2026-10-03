@@ -1,4 +1,4 @@
-/** Which card a fetch gets (specs/dogi.md): the page's tier when it's
+/** Which card a fetch gets (specs/done/dogi.md): the page's tier when it's
  * stamped, and the full image's credential re-checked on every image fetch.
  * Kept free of the renderer (no wasm import), so tests drive it directly. */
 import type { D1Database } from '@cloudflare/workers-types'

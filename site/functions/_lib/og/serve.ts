@@ -1,4 +1,4 @@
-/** The edge half of the cards (specs/dogi.md): the deployment's OG config,
+/** The edge half of the cards (specs/done/dogi.md): the deployment's OG config,
  * page meta stamping, and `/og/<kind>.png` rendering with the colo cache. */
 import RESVG from './vendor/resvg.wasm'
 import type { Env } from '../auth.js'

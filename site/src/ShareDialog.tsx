@@ -1,4 +1,4 @@
-// The "Share…" dialog (specs/dogi.md): one choice of link to copy. A plain
+// The "Share…" dialog (specs/done/dogi.md): one choice of link to copy. A plain
 // link is the browser's job; this dialog makes the two that need minting:
 // a detailed link preview (`og=`; sign-in still required) or, for admins for
 // now, a link anyone can view (`key=`, a read-only grant; its preview is

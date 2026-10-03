@@ -1,4 +1,4 @@
-/** The card SVG (specs/dogi.md): 1200×630, a header (site, title, subtitle), a
+/** The card SVG (specs/done/dogi.md): 1200×630, a header (site, title, subtitle), a
  * treemap of the view, and a footer (totals, and the legend). Pure and
  * DOM-free (`@rdub/treemap/squarify` only), so it runs in the Worker and is
  * tested by its structure.

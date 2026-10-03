@@ -1,4 +1,4 @@
-/** Warm on unfurl (specs/dogi.md): a card is fetched when a link is pasted,
+/** Warm on unfurl (specs/done/dogi.md): a card is fetched when a link is pasted,
  * usually just before someone clicks it. So serving a map card also fills
  * the edge cache with that view's first-paint reads: the `depth=1` subtree
  * and the full one, at the page's commonest canvas. Bounded: those two

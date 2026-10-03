@@ -1,4 +1,4 @@
-/** Which card a page URL gets (specs/dogi.md): its kind, the canonical view
+/** Which card a page URL gets (specs/done/dogi.md): its kind, the canonical view
  * params the card is drawn from (and that a view token is minted over), and
  * the unfurl's title. Pure: no env, no I/O. */
 

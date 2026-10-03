@@ -1,4 +1,4 @@
-/** Card URLs and view tokens (specs/dogi.md).
+/** Card URLs and view tokens (specs/done/dogi.md).
  *
  * - **Anonymous card URL**: `/og/<kind>.png?<view>`, unsigned. Signing it
  *   would protect nothing: any page fetch yields any view's anonymous card.
