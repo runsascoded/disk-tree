@@ -1,4 +1,4 @@
-"""Incremental GCS usage-log ingest (specs/access-logs-and-cost.md § Productionize).
+"""Incremental GCS usage-log ingest (gcs:specs/access-logs-and-cost.md § Productionize).
 
 Google delivers hourly usage CSVs *flat* under ``usage/`` in the log bucket,
 with the source bucket as a filename prefix (not a directory):

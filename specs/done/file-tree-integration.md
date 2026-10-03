@@ -209,7 +209,7 @@ freeze against it.
   `size: None`. file-tree's `TreeNode.size` is `number | null` to carry that —
   confirm the treemap renders a null-size dir sanely (skip vs zero-area).
 - **Reflink / block-size sizing.** disk-tree's 512-byte-block and reflink-aware
-  sizing (`specs/reflink-aware-sizing.md`) means `size` can differ from naive
+  sizing (`local:specs/reflink-aware-sizing.md`) means `size` can differ from naive
   bytes. Fine — it's still one recursive number per node; just document which
   notion of "size" a snapshot carries so a file-tree tooltip can label it.
 

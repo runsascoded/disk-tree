@@ -400,7 +400,7 @@ def wandb_mine(
 
 @main.command("path-index")
 @option("-a", "--attribution", "attributions", multiple=True, help="Attribution parquet(s); adds per-node user overlays")
-@option("-c", "--dir-cache", "dir_cache", type=Path, default=None, help="Layer-2 cache dir (dir-stats/age-days parquet): attribution-independent rollups reused by re-attribution runs — see specs/dir-agg-cache.md")
+@option("-c", "--dir-cache", "dir_cache", type=Path, default=None, help="Layer-2 cache dir (dir-stats/age-days parquet): attribution-independent rollups reused by re-attribution runs — see gcs:specs/dir-agg-cache.md")
 @option("-d", "--asof", required=True, help="Scan date the listing came from (YYYY-MM-DD)")
 @option("-i", "--identities", "identities_path", envvar=IDENTITIES_ENV, default=None, help=f"identities.yaml path or URL, needed with -a (${IDENTITIES_ENV}): the deployment's roster, kept outside the repo")
 @option("-l", "--listing", "listings", required=True, multiple=True, help="Listing parquet glob(s): scan_gcs or SII inventory schema; repeatable — earlier sources win per bucket")
@@ -897,7 +897,7 @@ def index_dir_cmd(store: str, variant: str, date: str) -> None:
 def labels(attributions: tuple[str, ...], identities_path: str | None, listings: tuple[str, ...], out_dir: Path) -> None:
     """Export mgu's attribution as DT label tables — `(prefix, usr)` per bucket,
     prefix relative to the bucket — for `disk-tree import -e duckdb -L
-    labels-<bucket>.parquet -c usr` (spec mgu-scale-unification.md §B): the
+    labels-<bucket>.parquet -c usr` (spec specs/done/mgu-scale-unification.md §B): the
     same prefix map `path-index` attributes with, so the two cascades can be
     compared slice for slice."""
     import duckdb
@@ -1970,7 +1970,7 @@ def sheet_mirror_plan(config: str) -> None:
 @option("-n", "--top", default=10, help="Examples per mismatch class")
 @argument("dirs_tier")
 def cascade_a2a(bucket: str, index_path: str, as_json: bool, top: int, dirs_tier: str) -> None:
-    """The A.3 gate (spec mgu-scale-unification.md): DT's `import -e duckdb
+    """The A.3 gate (spec specs/done/mgu-scale-unification.md): DT's `import -e duckdb
     --label usr` dirs tier against mgu's path index for one bucket, joined on
     `(path, usr)` — rows only one side has, and per-column disagreements
     (`b`↔`size`, `o`↔`n_files`, `c2..c4`↔`sum_storage_class_id_*`,

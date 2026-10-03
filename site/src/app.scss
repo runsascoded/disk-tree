@@ -2221,9 +2221,9 @@ select.assign-sel {
 // The diff crumb's "⊕ first scanned" term: a root that entered the scan.
 .diff-move .first { color: var(--ink-3); }
 
-// The help line (specs/edu-drawer.md): one fixed strip that mirrors the
+// The help line (specs/done/edu-drawer.md): one fixed strip that mirrors the
 // hovered/focused control's explanation; nothing floats over controls.
-// The help card (specs/edu-drawer.md): a bottom-LEFT panel (the SpeedDial
+// The help card (specs/done/edu-drawer.md): a bottom-LEFT panel (the SpeedDial
 // owns bottom-right) that shows the hovered/focused control's explanation,
 // with a real border + shadow so it reads as a surface, not a status strip.
 // Idle it is a small "?" chip. It fades in; a prefers-reduced-motion reader

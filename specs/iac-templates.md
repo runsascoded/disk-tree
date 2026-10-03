@@ -15,7 +15,7 @@ Someone who isn't us should be able to stand up a disk-tree deployment from the 
 
 `infra/README.md` already sets the rule: components carry no account ids, zone ids, buckets or secret names; each deployment branch adds thin stack programs that instantiate them. `CfnDashboard` (`infra/cf/`) and `gcp_jobs.py` (`infra/gcp/`) follow it. What's missing is (1) components for the laptop/capture side (the AWS Batch ingest, the capture trigger), and (2) programs that take *all* their names from stack config, so a new deployment's program is identical to an existing one's and only the yaml differs.
 
-Supersedes `specs/iac.md` (2026-09-10, the pre-`infra/` design).
+Supersedes `specs/done/iac.md` (2026-09-10, the pre-`infra/` design).
 
 ## What stays where
 

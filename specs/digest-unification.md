@@ -93,4 +93,4 @@ Other non-posted differences: the dry-run plot's temp filename (`<slug>-YYYYMM.p
 
 [`branch-layout.md`]: branch-layout.md
 [branches carry exactly their code]: branch-layout.md#2-proposed-tree
-[`comms-notify.md`]: comms-notify.md
+[`comms-notify.md`]: done/comms-notify.md

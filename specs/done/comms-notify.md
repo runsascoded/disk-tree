@@ -1,6 +1,6 @@
 # Comms: a generic `disk_tree` notify/digest engine (seam 4)
 
-**From:** mgu `gcs` session, 2026-09-17 — `specs/gcs-toward-union.md` §5 "Seam 4 — digest content", routed here as **DT comms roadmap item 1** (`specs/mgu-cp-2026-09-16.md`). Never gated on the gcs↔cw-s3 union; startable now. Cross-repo peer, so this is a **generalize-and-upstream** (`/cp` `handoff: spec`), not a cherry-pick: DT holds the reusable engine, each deployment keeps its own profile, and mgu eventually imports the engine from `disk_tree` in place of its local copy.
+**From:** mgu `gcs` session, 2026-09-17 — `specs/gcs-toward-union.md` §5 "Seam 4 — digest content", routed here as **DT comms roadmap item 1** (`specs/done/mgu-cp-2026-09-16.md`). Never gated on the gcs↔cw-s3 union; startable now. Cross-repo peer, so this is a **generalize-and-upstream** (`/cp` `handoff: spec`), not a cherry-pick: DT holds the reusable engine, each deployment keeps its own profile, and mgu eventually imports the engine from `disk_tree` in place of its local copy.
 
 ## What mgu built (the source to generalize)
 
