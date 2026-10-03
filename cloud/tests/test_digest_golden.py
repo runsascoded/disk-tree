@@ -361,6 +361,16 @@ def test_cw_slack_provisional_6h(slack, tmp_path: Path):
     golden("cw-slack-provisional-6h.txt", _dump(slack, {"2026-09": sep, "2026-10": oct_}))
 
 
+def test_cw_redo(slack, tmp_path: Path):
+    # a month threaded under the old first-scan rule (reply_hour 0), re-threaded under the morning rule
+    root = cw_root(tmp_path)
+    converge_cw(root, SEP, "sender", reply_hour=0)
+    plan = redo_cw(root, SEP, for_real=False)
+    slack.append({"op": "-- plan", "plan": plan})
+    state = redo_cw(root, SEP, for_real=True)
+    golden("cw-redo.txt", _dump(slack, state))
+
+
 class FlakyDelete(FakeSlack):
     """`chat.delete` fails the first ``fails`` times."""
 
