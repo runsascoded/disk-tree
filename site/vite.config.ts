@@ -80,6 +80,8 @@ const STORES_EXTRA = process.env.VITE_STORES_EXTRA ?? VARS.STORES_EXTRA ?? ''
 // without a dev alias leaves them unset and gets no binding.
 const PROD_HOST = process.env.VITE_PROD_HOST ?? VARS.PROD_HOST ?? ''
 const DEV_HOST = process.env.VITE_DEV_HOST ?? VARS.DEV_HOST ?? ''
+// The source link (src/SiteKbd.tsx); unset = this repo.
+const REPO_URL = process.env.VITE_REPO_URL ?? VARS.REPO_URL ?? ''
 
 export default defineConfig({
   define: {
@@ -88,6 +90,7 @@ export default defineConfig({
     'import.meta.env.VITE_STORES_EXTRA': JSON.stringify(STORES_EXTRA),
     'import.meta.env.VITE_PROD_HOST': JSON.stringify(PROD_HOST),
     'import.meta.env.VITE_DEV_HOST': JSON.stringify(DEV_HOST),
+    'import.meta.env.VITE_REPO_URL': JSON.stringify(REPO_URL),
   },
   plugins: [react(), devSeriesIndex],
   server: {
