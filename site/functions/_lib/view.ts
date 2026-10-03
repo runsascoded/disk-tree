@@ -990,7 +990,7 @@ function kidsIndex(kept: Map<string, Agg>, path: string): Map<string, string[]> 
 }
 
 /** The store root's crumb label: `ROOT_LABEL` (wrangler var) per deployment. */
-const rootName = (path: string, env?: Env) => (path === '' ? env?.ROOT_LABEL ?? 'marin GCS' : path.split('/').pop()!)
+const rootName = (path: string, env?: Env) => (path === '' ? env?.ROOT_LABEL ?? 'all buckets' : path.split('/').pop()!)
 
 export async function buildView(env: Env, o: ViewOpts): Promise<View> {
   const { path, query } = o
