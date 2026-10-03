@@ -23,6 +23,7 @@ import { AboutModal } from './About'
 import { Avatar } from './Avatar'
 import { AUTH_MODE, signInUrl, useCanAssign, useCanStage, useIdent, useSignOut } from './auth'
 import { ShareDialog } from './ShareDialog'
+import { closeDialog, openDialog, useDialog } from './dialogs'
 import { useRegistry } from './identities'
 import { REPO_URL } from './SiteKbd'
 import { useMyUser, useUserEmails } from './owners'
@@ -120,6 +121,7 @@ export function SiteNav({ children, menu, crumbs }: {
         <NavMenu extra={menu} />
         {crumbs ? <div className="tb-crumbs" ref={crumbsRef}>{crumbs}</div> : <div className="tb-mid">{children}</div>}
         <UserMenu />
+        <SiteDialogs />
       </div>
       {hasControls && <div className="tb-row tb-row2" ref={row2Ref}><div className="tb-mid">{children}</div></div>}
     </div>
@@ -155,14 +157,27 @@ function useMenu(placement: 'bottom-start' | 'bottom-end') {
   return { open, setOpen, refs, floatingStyles, context, getReferenceProps, getFloatingProps }
 }
 
+/** The open site dialog, portaled to <body>: rendered inside the sticky bar,
+ * a modal stacks under the page's own panels (the map's info box). */
+function SiteDialogs() {
+  const d = useDialog()
+  if (!d) return null
+  return (
+    <FloatingPortal>
+      {d === 'about' && <AboutModal onClose={closeDialog} />}
+      {d === 'share' && <ShareDialog onClose={closeDialog} />}
+      {d === 'profile' && <ProfileModal onClose={closeDialog} />}
+      {d === 'token' && <TokenModal onClose={closeDialog} />}
+    </FloatingPortal>
+  )
+}
+
 function NavMenu({ extra }: { extra?: MenuEntry[] }) {
   const { pathname } = useLocation()
   const canAssign = useCanAssign()
   // Full viewers share with a detailed preview (guest links can't: a token
   // outlives the session that minted it).
   const canShare = useCanStage()
-  const [shareOpen, setShareOpen] = useState(false)
-  const [aboutOpen, setAboutOpen] = useState(false)
   const m = useMenu('bottom-start')
   // The subtree's store: its own map (`/meta`), and only the affordances it
   // has (ownership, staging are the primary's).
@@ -177,8 +192,6 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
   )
   return (
     <>
-      {aboutOpen && <AboutModal onClose={() => setAboutOpen(false)} />}
-      {shareOpen && <ShareDialog onClose={() => setShareOpen(false)} />}
       <button type="button" className="tb-menu-btn" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label="Site menu" title="Site menu">
         <MdMenu aria-hidden />
       </button>
@@ -205,9 +218,9 @@ function NavMenu({ extra }: { extra?: MenuEntry[] }) {
               )}
               <hr />
               {canShare && (
-                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setShareOpen(true) }}>Share…</button>
+                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); openDialog('share') }}>Share…</button>
               )}
-              <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setAboutOpen(true) }}>About — the data, axes &amp; colors</button>
+              <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); openDialog('about') }}>About — the data, axes &amp; colors</button>
               {extra?.map(e => (
                 <button key={e.key} type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); e.onClick() }}>{e.label}</button>
               ))}
@@ -230,8 +243,6 @@ function UserMenu() {
   const ownersOn = !!ident && DEFAULT_STORE.owners
   const myUser = useMyUser(ident?.email, ownersOn)
   const emails = useUserEmails(ownersOn)
-  const [tokenOpen, setTokenOpen] = useState(false)
-  const [profileOpen, setProfileOpen] = useState(false)
   const { units, suffixB, toggleUnits, toggleSuffixB } = useUnits()
   const m = useMenu('bottom-end')
   // Public deploys have no auth — no sign-in affordance.
@@ -244,8 +255,6 @@ function UserMenu() {
   const dispName = guest ? (ident.name ?? ident.email) : shortName(who)
   return (
     <>
-      {tokenOpen && <TokenModal onClose={() => setTokenOpen(false)} />}
-      {profileOpen && <ProfileModal onClose={() => setProfileOpen(false)} />}
       <button type="button" className="tb-avatar" ref={m.refs.setReference} {...m.getReferenceProps()} aria-label={`Signed in as ${dispName}`} title={dispName}>
         {guest || ident.avatar
           ? <Avatar src={ident.avatar} name={dispName} size={26} />
@@ -270,12 +279,12 @@ function UserMenu() {
                 </button>
               </Explain>
               {!guest && (
-                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setProfileOpen(true) }}>
+                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); openDialog('profile') }}>
                   Profile…
                 </button>
               )}
               {canAssign && (
-                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); setTokenOpen(true) }}>
+                <button type="button" role="menuitem" className="mi" onClick={() => { m.setOpen(false); openDialog('token') }}>
                   Agent / CLI Token…
                 </button>
               )}
