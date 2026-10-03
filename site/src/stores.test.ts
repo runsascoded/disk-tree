@@ -38,8 +38,8 @@ describe('resolveStores', () => {
     expect(keys(resolveStores('cw', ' meta, ,meta,'))).toEqual(['cw', 'meta'])
   })
   it('refuses an unknown key, as primary or extra', () => {
-    expect(thrown(() => resolveStores('nope', undefined))).toBe("stores: no registry store 'nope' (have cw, gcs, r2, laptop, meta)")
-    expect(thrown(() => resolveStores('cw', 'nope'))).toBe("stores: no registry store 'nope' (have cw, gcs, r2, laptop, meta)")
+    expect(thrown(() => resolveStores('nope', undefined))).toBe("stores: no registry store 'nope' (have cw, gcs, meta, laptop, r2)")
+    expect(thrown(() => resolveStores('cw', 'nope'))).toBe("stores: no registry store 'nope' (have cw, gcs, meta, laptop, r2)")
   })
   it('refuses the primary among the extras', () => {
     expect(thrown(() => resolveStores('cw', 'cw'))).toBe("stores: 'cw' is the primary store (VITE_STORE); it can't also be in VITE_STORES_EXTRA")
