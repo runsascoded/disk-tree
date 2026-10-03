@@ -181,9 +181,11 @@ const INLINE: Store[] = [
   },
 ]
 
+// A module takes its inline entry's place, so overriding an entry never
+// reorders the registry (its first store is the unconfigured build's primary).
 const REGISTRY: Store[] = [
-  ...INLINE.filter(s => !MODULES.some(m => m.key === s.key)),
-  ...MODULES,
+  ...INLINE.map(s => MODULES.find(m => m.key === s.key) ?? s),
+  ...MODULES.filter(m => !INLINE.some(s => s.key === m.key)),
 ]
 
 /** The registry rows a build serves, primary first.
