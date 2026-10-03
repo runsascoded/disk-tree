@@ -1,7 +1,7 @@
 /**
  * The capture trigger (specs/capture-ingest-trigger.md): a finished capture's
- * `_SUCCESS.json` lands in R2 → an event on the `disk-tree-captures` queue →
- * here → AWS Batch `SubmitJob` for the m3 ingest. The laptop then needs only
+ * `_SUCCESS.json` lands in R2 → an event on the captures queue (`CaptureTrigger`) →
+ * here → AWS Batch `SubmitJob` for the deployment's ingest (`BatchIngest`). The laptop then needs only
  * R2 write; nothing on it holds AWS keys.
  *
  * Queues deliver at least once, so each capture dir carries an `_INGEST.json`

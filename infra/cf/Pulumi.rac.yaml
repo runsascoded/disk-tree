@@ -10,6 +10,8 @@ config:
   # specs/done/capture-ingest-trigger.md: `<capturesBucket>/captures/**/_SUCCESS.json` → this queue
   disk-tree-m3-cf:capturesBucket: disk-tree
   disk-tree-m3-cf:capturesQueue: disk-tree-captures
+  # The queue + notification were declared at the stack root before `CaptureTrigger`.
+  disk-tree-m3-cf:capturesMovedFromRoot: "true"
   # importIds: cleared 2026-09-29 after adopting the hand-built Pages project,
   # domain, and CNAME (see infra/cf/__main__.py); set again only to adopt more.
 encryptionsalt: v1:nwPGjbzExuE=:v1:1AMvNuj6jk8rwI5V:XCst82XLfRQYbpPyOf/rRxKA3EkzDA==

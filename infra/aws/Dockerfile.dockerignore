@@ -5,5 +5,5 @@
 !src
 !cloud/pyproject.toml
 !cloud/src
-!aws/ingest.sh
+!infra/aws/ingest.sh
 **/__pycache__

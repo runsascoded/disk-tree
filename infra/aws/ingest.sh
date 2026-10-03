@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# One laptop capture → path index + snapshot, back to R2 (specs/m3-site.md).
+# One laptop capture → path index + snapshot, back to R2.
 #
-#   ingest.sh r2://disk-tree/captures/<host>/<root slug>/<stamp>
+#   ingest.sh r2://<bucket>/captures/<host>/<root slug>/<stamp>
 #
 # Mirrors .github/workflows/daily-ingest.yml's union → path-index → upload →
 # footers-to-D1 steps, with the capture's shards as the listing. R2 keys arrive

@@ -1,7 +1,7 @@
 # A laptop deployment's AWS Batch ingest (`BatchIngest`). Copy to
-# `Pulumi.<stack>.yaml`; the key prefix is `Pulumi.yaml`'s `name`.
+# `infra/aws/Pulumi.<stack>.yaml`; the key prefix is `Pulumi.yaml`'s `name`.
 # Secret values never go here: the `secrets` map names empty Secrets Manager
-# containers, filled out of band (m3: `aws/put-secrets`).
+# containers, filled out of band (`aws secretsmanager put-secret-value`).
 config:
   aws:region: us-east-1
   # Every resource name derives from it: queue `<prefix>`, job def `<prefix>-ingest`, …
@@ -33,3 +33,7 @@ config:
     AWS_ACCESS_KEY_ID: my-deployment/r2-access-key-id
     AWS_SECRET_ACCESS_KEY: my-deployment/r2-secret-access-key
     CLOUDFLARE_API_TOKEN: my-deployment/cf-d1-token
+  # --- Optional ---
+  # my-deployment:max_vcpus: "16"          # the queue's Fargate Spot ceiling
+  # my-deployment:timeout_s: "7200"        # per attempt
+  # my-deployment:moved_from_root: "true"  # adopting resources a stack declared inline (infra/README.md)

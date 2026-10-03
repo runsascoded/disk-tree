@@ -3,6 +3,8 @@ config:
   # RAC AWS (006196295121, `AWS_PROFILE=r` from the worktree's `.envrc`).
   # Sized from the Phase 0 run: path-index peaked at 1.5 GiB over 6.6M files.
   disk-tree-m3:prefix: disk-tree-m3
+  # The resources were declared at the stack root before `BatchIngest`.
+  disk-tree-m3:moved_from_root: "true"
   # The image build's inputs, relative to the repo root (zipped, content-hashed).
   disk-tree-m3:dockerfile: infra/aws/Dockerfile
   disk-tree-m3:sources:

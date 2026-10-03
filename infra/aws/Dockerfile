@@ -1,10 +1,9 @@
-# The m3 ingest image: a laptop capture (layer-1 listing shards in R2) →
-# path index + snapshot, back to R2 (see ingest.sh, specs/m3-site.md).
+# A laptop deployment's ingest image: a capture (layer-1 listing shards in R2) →
+# path index + snapshot, back to R2 (see ingest.sh).
 #
-# Built by Pulumi (`infra/aws/__main__.py`) from THIS worktree — `m3` isn't pushed
-# (it's a laptop deployment; `log.md` names local paths), so there's no
-# public ref to clone. Context is the repo root; `Dockerfile.dockerignore`
-# allowlists the Python sources. `cloud/` is a member of the root uv
+# Built on CodeBuild by `BatchIngest` (`batch_ingest.py`) from the deploying
+# checkout's sources, zipped by Pulumi; no registry ref to clone. Context is the
+# repo root; `Dockerfile.dockerignore` allowlists the Python sources. `cloud/` is a member of the root uv
 # workspace: one lockfile (`--frozen`), one venv holding `dt-cloud` and the
 # `disk-tree` engine it depends on.
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim

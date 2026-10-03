@@ -5,6 +5,7 @@
 # `CLOUDFLARE_API_TOKEN` (also in `.envrc`).
 name: disk-tree-m3-cf
 description: Cloudflare resources for disk.rbw.sh — Pages project shell, custom domain + rbw.sh CNAME, D1. Deployments + app config stay with wrangler.
+main: stack/
 runtime:
   name: python
   options:

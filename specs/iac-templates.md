@@ -2,11 +2,12 @@
 
 **From:** m3 (`wt/m3`), 2026-10-02. **For:** the root session (`cloud` / `local` components), then m3 as the first consumer.
 
-**Status (2026-10-02):** phase 1 done (root).
-- `local` be830d5: `BatchIngest` (`infra/aws/batch_ingest.py`, + `build-image`) and `CaptureTrigger` (`infra/cf/capture_trigger.py`). Both take `moved_from_root=True`, which aliases each child to its old root-level logical name. `infra/tests/` checks both under Pulumi's mocks.
+**Status (2026-10-02):** phases 1–3 done (root); phase 2 done by m3 (8042f32: previews show 0 live replacements).
+- `local` be830d5: `BatchIngest` (`infra/aws/batch_ingest.py`, + `build-image`) and `CaptureTrigger`. Both take `moved_from_root`, which aliases each child to its old root-level logical name. `infra/tests/` checks them under Pulumi's mocks.
 - `cloud` bf8ff8e: `site/wrangler.example.toml` + `functions/_lib/wranglerExample.test.ts`.
-- On `aws/` → `infra/aws/`: yes, the component already lives there. m3's program and `Pulumi.yaml` move beside it.
-- Next: m3's rewire (phase 2), then the README walkthrough (phase 3).
+- **Decided (Ryan, 2026-10-02): config-only programs live upstream.** `cloud` 23a1cc9 has `infra/cf/stack/` (the Cloudflare program, every `Store` field + optional dev site + optional capture trigger) and `CaptureTrigger`. `local` b693f3d has `infra/aws/stack/` (the AWS program), the ingest image (`Dockerfile`, `ingest.sh`), and the `capture-trigger` Worker with `put-secrets USER`. A deployment branch keeps `Pulumi.yaml` (`main: stack/`), `Pulumi.<stack>.yaml`, its real `wrangler.toml`s and its state. The shared programs sit in `stack/` dirs so gcs's and cw-s3's own `__main__.py` don't conflict until phase 4.
+- `infra/README.md` "Starting a deployment": on `cloud` (Cloudflare stack → `wrangler.toml` → migrations → secrets → deploy → the first index), plus the laptop steps L1–L3 on `local`.
+- Next: m3 drops its copies and points both `Pulumi.yaml`s at `stack/` (0-change preview). Phase 4: gcs and cw-s3 onto `infra/cf/stack/`.
 
 ## Goal
 
