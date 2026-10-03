@@ -16,8 +16,20 @@ capture=${1:?usage: ingest.sh r2://<bucket>/<capture dir>}
 export AWS_DEFAULT_REGION=auto
 bucket=${capture#r2://}; bucket=${bucket%%/*}
 key=${capture#r2://$bucket/}
-date=${DATE:-$(date -u +%F)}
-gen=${GEN:-$(date -u +%Y%m%d%H%M)}
+# The scan's date and generation come from the capture's own stamp
+# (`disk-tree capture`: `<host>/<root>/%Y-%m-%dT%H-%M-%SZ`), so a re-ingest
+# lands where the first did; the run time only stands in for a stamp that
+# doesn't parse. DATE / GEN override both.
+stamp=${key%/}; stamp=${stamp##*/}
+if [[ $stamp =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2})-([0-9]{2})-[0-9]{2}Z$ ]]; then
+  m=("${BASH_REMATCH[@]}")
+  date=${DATE:-${m[1]}-${m[2]}-${m[3]}}
+  gen=${GEN:-${m[1]}${m[2]}${m[3]}${m[4]}${m[5]}}
+else
+  echo "[ingest] capture stamp '$stamp' isn't %Y-%m-%dT%H-%M-%SZ; dating by run time" >&2
+  date=${DATE:-$(date -u +%F)}
+  gen=${GEN:-$(date -u +%Y%m%d%H%M)}
+fi
 store=${STORE:-laptop}
 work=${WORK:-/work}
 s3() { aws s3 "$@" --endpoint-url "$R2_ENDPOINT_URL" --only-show-errors; }
