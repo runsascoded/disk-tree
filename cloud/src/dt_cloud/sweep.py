@@ -36,7 +36,6 @@ if TYPE_CHECKING:
 # path-style requests and ignores the region, but boto3 requires both set.
 CW_ENDPOINT = os.environ.get("CW_ENDPOINT", "https://cwobject.com")
 CW_BUCKET = os.environ.get("CW_BUCKET", "marin-us-east-02a")
-DATA_BUCKET = os.environ.get("DATA_BUCKET", "oa-gcs-usage-dvx")
 
 # S3 `delete_objects` accepts up to 1000 keys per call.
 DELETE_BATCH = 1000

@@ -23,7 +23,7 @@ import pandas as pd
 from click import Choice, UsageError, argument, group, option
 
 from .identity import IDENTITIES_ENV, load_identities
-from .site import DEFAULT_URL as SITE_DEFAULT_URL
+from .deploy import data_bucket, site_url as resolve_site_url
 from .secrets import env_secret, secret
 from .index_footer import INDEX_VARIANTS
 from .prefixes import load_prefix_map
@@ -508,7 +508,7 @@ def rules(identities_path: str, out: Path | None) -> None:
 @option("-j", "--json", "as_json", is_flag=True, help="Emit machine-readable JSON to stdout")
 @option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ (default: $SNAPSHOTS_SUBDIR; `cw` for the CoreWeave deployment, empty for the default store)")
 @option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+@option("-u", "--url", default=None, help="Site base URL (default: $SITE_URL, else $GCS_USAGE_URL)")
 def healthcheck(date: str | None, max_age_days: int, as_json: bool, subdir: str | None, token: str | None, url: str | None) -> None:
     """Live-site health: is the latest scan actually *servable* end-to-end?
 
@@ -546,7 +546,7 @@ def healthcheck(date: str | None, max_age_days: int, as_json: bool, subdir: str 
 @option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ (default: $SNAPSHOTS_SUBDIR)")
 @option("-S", "--serial", is_flag=True, help="Send each scenario's requests one at a time (default: concurrently, as a page load does)")
 @option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN; none for a public deployment like r2.rbw.sh)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+@option("-u", "--url", default=None, help="Site base URL (default: $SITE_URL, else $GCS_USAGE_URL)")
 def probe(budget: float | None, cold: bool, as_json: bool, out: str | None, hit: str | None, subdir: str | None, serial: bool, token: str | None, url: str | None) -> None:
     """Replay the site's page loads (root, largest bucket, a matching and a
     non-matching path filter) against a live deployment.
@@ -631,7 +631,7 @@ def index_write(age_only: bool, bucket: str | None, mem: str, out_dir: Path, row
 
 
 @main.command("over-time-groups")
-@option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket the D1 `path` dirs resolve against")
+@option("-b", "--bucket", envvar="DATA_BUCKET", required=True, help="Data bucket the D1 `path` dirs resolve against; default $DATA_BUCKET")
 @option("-g", "--gen", required=True, help="Generation id for the published index dirs (the run's, e.g. the job's $GEN)")
 @option("-K", "--group-size", default=None, type=int, help="Scans per sealed group (default: dt_cloud.overtime.OVER_TIME_GROUP_SIZE)")
 @option("-l", "--layer2-prefix", default=None, help="Layer-2 dir template with `{scan}` (default: $LAYER2_PREFIX, e.g. cw-l2/{scan}/)")
@@ -746,7 +746,7 @@ def over_time_churn_cmd(groups: tuple[str, ...]) -> None:
 
 @main.command("index-sync")
 @option("-A", "--age-only", is_flag=True, help="Only the age-pyramid variants (a ladder-only backfill; the other variants keep their pointer)")
-@option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
+@option("-b", "--bucket", envvar="DATA_BUCKET", required=True, help="Data bucket holding the index tiers; default $DATA_BUCKET")
 @option("-d", "--dir", "listing_dir", default=None, help="Local/mounted dir holding the parquets (default: <bucket>/<key>)")
 @option("-F", "--sorts-only", is_flag=True, help="Only the store's sorts (path, bysize, and their by-user copies where written)")
 @option("-g", "--gen", required=True, help="Generation stamp these files belong to (the run's GEN; `legacy` for the pre-generation listing/<date>/ layout)")
@@ -811,7 +811,7 @@ def index_sync(
 
 
 @main.command("index-gc")
-@option("-b", "--base", default="oa-gcs-usage-dvx", help="Where the pointers' dirs live, for -r's cold-footer check: the data bucket (default oa-gcs-usage-dvx), a mounted dir, or an fsspec URL (`r2://bucket`)")
+@option("-b", "--base", envvar="DATA_BUCKET", default=None, help="Where the pointers' dirs live, for -r's cold-footer check: the data bucket (default $DATA_BUCKET), a mounted dir, or an fsspec URL (`r2://bucket`)")
 @option("-F", "--files", "targets", multiple=True, help="Also delete the files of generation dirs no pointer names (repeatable): `gs://<bucket>` (the scan store), `r2` (the R2 serving bucket: `$R2_BUCKET`, via publish-r2's `R2_*` env) or `r2://<bucket>`. Only under scans with a `path` pointer; never a pointed dir; never one younger than -m")
 @option("-m", "--min-age", default="2d", help="-F's grace period: a generation whose newest object is younger is kept, so an in-flight reindex is never raced; e.g. 36h, 2d (default)")
 @option("-n", "--dry-run", is_flag=True, help="Print what would go (D1 rows counted; generation dirs per store with bytes, and totals); delete nothing")
@@ -840,7 +840,7 @@ def index_gc(
     scans that have a `path` pointer, older than -m. E.g. the backlog over
     every scan, GCS + R2, dry run first:
 
-        dt-cloud index-gc -R -n -F gs://oa-gcs-usage-dvx -F r2
+        dt-cloud index-gc -R -n -F gs://$DATA_BUCKET -F r2
     """
     import time
 
@@ -866,7 +866,7 @@ def index_gc(
             path_variant=d1_variant("path", store), dates=dates or None, workers=workers,
         )
     if retain is not None:
-        retired, skipped = retire_d1(retain, store=store, base=base)
+        retired, skipped = retire_d1(retain, store=store, base=base or data_bucket())
         for d, v, n in retired:
             err(f"index-gc: retired {d} [{v}] — {n} row groups (its .groups.parquet serves it now)")
         for d, v, missing in skipped:
@@ -911,7 +911,7 @@ def labels(attributions: tuple[str, ...], identities_path: str | None, listings:
 
 @main.command("index-blob")
 @option("-a", "--all", "all_dates", is_flag=True, help="Every scan with a synced pointer (instead of DATES)")
-@option("-b", "--bucket", default="oa-gcs-usage-dvx", help="Data bucket holding the index tiers")
+@option("-b", "--bucket", envvar="DATA_BUCKET", required=True, help="Data bucket holding the index tiers; default $DATA_BUCKET")
 @option("-d", "--dir", "listing_dir", default=None, help="Local/mounted/gs:// dir holding the parquets (default: gs://<bucket>/<key>); one DATE only")
 @option("-g", "--gen", default=None, help="Generation the files belong to (`legacy` for listing/<date>/); default: each variant's D1 pointer dir")
 @option("-J", "--from-json", is_flag=True, help="Build the .groups.parquet from the .groups.json already beside the tier, not the tier's own footer (implies -P)")
@@ -1023,7 +1023,7 @@ def index_extras(attributions: tuple[str, ...], identities_path: str, out_dir: P
 @option("-n", "--dry-run", is_flag=True, help="Print the request paths; fetch nothing")
 @option("-r", "--root", help="Snapshots root (default gs://$DATA_BUCKET/snapshots)")
 @option("-t", "--token", help="Site read token (default $GCS_USAGE_TOKEN)")
-@option("-u", "--url", "site_url", default=None, help="Site base (default gcs.oa.dev)")
+@option("-u", "--url", "site_url", default=None, help="Site base (default $SITE_URL)")
 @option("-W", "--widths", default="512,1280,1536,1792,1920", help="Canvas widths to warm (the client sends ceil(innerWidth/128)*128; default = phone + common laptops)")
 def warm_cache(date: str | None, jobs: int, dry_run: bool, root: str | None, token: str | None, site_url: str | None, widths: str) -> None:
     """Warm the site's subtree + diff caches for a scan: replay the home
@@ -1033,10 +1033,9 @@ def warm_cache(date: str | None, jobs: int, dry_run: bool, root: str | None, tok
     KV). Non-fatal: a failed request just leaves that view cold."""
     from . import warm as wm
 
-    # Deployment config: SITE_URL / SNAPSHOTS_SUBDIR (the CoreWeave job exports
-    # cw-s3.oa.dev + snapshots/cw); defaults are the GCS deployment's.
-    site_url = site_url or os.environ.get("SITE_URL") or SITE_DEFAULT_URL
-    root = root or f"gs://{os.environ.get('DATA_BUCKET', 'oa-gcs-usage-dvx')}/snapshots" + (f"/{os.environ['SNAPSHOTS_SUBDIR'].strip('/')}" if os.environ.get('SNAPSHOTS_SUBDIR') else '')
+    # Deployment config: SITE_URL, DATA_BUCKET, SNAPSHOTS_SUBDIR (the job exports them).
+    site_url = resolve_site_url(site_url)
+    root = root or f"gs://{data_bucket()}/snapshots" + (f"/{os.environ['SNAPSHOTS_SUBDIR'].strip('/')}" if os.environ.get('SNAPSHOTS_SUBDIR') else '')
     dates = wm.scan_dates(root)
     if not dates:
         raise SystemExit("warm-cache: no scans under root")
@@ -1188,11 +1187,11 @@ def plan_sweep_manifest(date: str, l2_path: str | None, out: str, plan_path: str
     manifest/<bucket>.parquet + plan-summary.json under --out."""
     import json
 
-    from .sweep import DATA_BUCKET, build_manifest, load_plan
+    from .sweep import build_manifest, load_plan
 
     plan = load_plan(plan_path)
     if l2_path is None:
-        l2_path = f"/gcs/{DATA_BUCKET}/cw-l2/{date}/{plan.bucket}.parquet"
+        l2_path = f"/gcs/{data_bucket()}/cw-l2/{date}/{plan.bucket}.parquet"
     summary = build_manifest(l2_path, plan, out)
     err(f"manifest: {summary['objects']} objects, {summary['bytes']} bytes -> {summary['manifest']}")
     print(json.dumps(summary))
@@ -1261,10 +1260,10 @@ def sweep() -> None:
 @sweep.command("manifest")
 @option("-b", "--bucket", "only_buckets", multiple=True, help="Only these buckets (default: every bucket the plan names)")
 @option("-d", "--date", required=True, help="Scan date whose listing to plan from (pinned)")
-@option("-o", "--out", default=None, help="Output dir (default gs://oa-gcs-usage-dvx/sweep/<date>-p<plan_id>)")
+@option("-o", "--out", default=None, help="Output dir (default gs://$DATA_BUCKET/sweep/<date>-p<plan_id>)")
 @option("-p", "--plan", "plan_path", required=True, help="The dispatched plan.json (path or gs:// URL): its items are the delete set, and the buckets are the plan's (∩ -b)")
-@option("-r", "--root", default="gs://oa-gcs-usage-dvx", help="Listing root (gs:// or local mount)")
-def sweep_manifest(only_buckets: tuple[str, ...], date: str, out: str | None, plan_path: str, root: str) -> None:
+@option("-r", "--root", default=None, help="Listing root (gs:// or local mount; default gs://$DATA_BUCKET)")
+def sweep_manifest(only_buckets: tuple[str, ...], date: str, out: str | None, plan_path: str, root: str | None) -> None:
     """Object-level manifest of a staged plan (specs/staged-delete.md): stream
     the pinned listing and write per-bucket parquets of the ELIGIBLE keys —
     every key under a staged prefix — plus a category summary. The plan is
@@ -1280,7 +1279,8 @@ def sweep_manifest(only_buckets: tuple[str, ...], date: str, out: str | None, pl
     buckets = [b for b in sp.buckets if not only_buckets or b in only_buckets]
     if not buckets:
         raise SystemExit(f"no plan bucket among -b {', '.join(only_buckets)} (plan {sp.plan_id} names {', '.join(sp.buckets)})")
-    out = out or f"gs://oa-gcs-usage-dvx/sweep/{date}-p{sp.plan_id}"
+    root = root or f"gs://{data_bucket()}"
+    out = out or f"gs://{data_bucket()}/sweep/{date}-p{sp.plan_id}"
     err(f"sweep manifest: scan {date} from plan {sp.plan_id} ({sp.name!r}) → {out}"
         + f" · {sum(len(sp.sweep[b]) for b in buckets)} staged prefix(es) on {', '.join(buckets)}")
     # The staged prefixes are the run's bands: `sweep execute` lists one
@@ -1518,7 +1518,7 @@ def access() -> None:
 @access.command("ingest")
 @option("-b", "--bucket", "buckets", multiple=True, help="Source buckets (default: the marin fleet)")
 @option("-c", "--max-chunk-gb", default=32.0, help="Max staged CSV bytes per processing chunk")
-@option("-d", "--data-bucket", default="oa-gcs-usage-dvx", help="Output/state bucket")
+@option("-d", "--data-bucket", envvar="DATA_BUCKET", required=True, help="Output/state bucket; default $DATA_BUCKET")
 @option("-l", "--log-bucket", default=None, help="Usage-log delivery bucket (default: marin-usage-logs)")
 @option("-M", "--memory-limit", default=None, help="DuckDB memory limit (default: $DUCKDB_MEM or 8GB)")
 @option("-n", "--max-chunks", default=None, type=int, help="Stop after N chunks per bucket (smoke runs)")
@@ -1551,7 +1551,7 @@ def access_ingest(
 
 @access.command("sweep")
 @option("-b", "--bucket", "buckets", multiple=True, help="Source buckets (default: the marin fleet)")
-@option("-d", "--data-bucket", default="oa-gcs-usage-dvx", help="State bucket holding the watermarks")
+@option("-d", "--data-bucket", envvar="DATA_BUCKET", required=True, help="State bucket holding the watermarks; default $DATA_BUCKET")
 @option("-l", "--log-bucket", default=None, help="Usage-log delivery bucket (default: marin-usage-logs)")
 @option("-T", "--through-watermark", is_flag=True, help="Sweep through the watermark itself, not watermark − lag")
 @option("-w", "--workers", default=16, help="Concurrent copy+delete pairs")
@@ -1589,7 +1589,7 @@ def access_sweep(
 
 @access.command("status")
 @option("-b", "--bucket", "buckets", multiple=True, help="Source buckets (default: the marin fleet)")
-@option("-d", "--data-bucket", default="oa-gcs-usage-dvx", help="Output/state bucket")
+@option("-d", "--data-bucket", envvar="DATA_BUCKET", required=True, help="Output/state bucket; default $DATA_BUCKET")
 @option("-l", "--log-bucket", default=None, help="Usage-log delivery bucket (default: marin-usage-logs)")
 def access_status(buckets: tuple[str, ...], data_bucket: str, log_bucket: str | None) -> None:
     """Per-bucket watermark vs delivered backlog (files/bytes awaiting ingest)."""
@@ -1806,7 +1806,7 @@ def sii_status(buckets: tuple[str, ...]) -> None:
 @option("-o", "--out", default="-", help="CSV output path (default: stdout)")
 @option("-s", "--subdir", default=None, help="Snapshot subdir under /data/ for scans.json (default: $SNAPSHOTS_SUBDIR; `cw` on cw-s3)")
 @option("-t", "--token", default=None, help="Bearer token (default: $GCS_USAGE_TOKEN)")
-@option("-u", "--url", default=None, help=f"Site base URL (default: $GCS_USAGE_URL or {SITE_DEFAULT_URL})")
+@option("-u", "--url", default=None, help="Site base URL (default: $SITE_URL, else $GCS_USAGE_URL)")
 @option("-U", "--unit", default="B", type=Choice(["B", "GiB", "TiB"]), help="Byte columns as raw bytes (default) or rounded GiB / TiB, header `<col> (<unit>)`")
 @argument("source", required=False)
 def export_cmd(date: str | None, executor: str | None, list_sources: bool, out: str, subdir: str | None, token: str | None, url: str | None, unit: str, source: str | None) -> None:
@@ -2254,7 +2254,7 @@ def publish_r2(
         pointed = {d for _, _, d in pointers()}
     pub.publish(
         scan,
-        src_bucket=src_bucket or pub.DATA_BUCKET,
+        src_bucket=src_bucket or data_bucket(),
         prefixes=list(prefixes) or None,
         subdir=pub.SNAPSHOTS_SUBDIR if subdir is None else subdir,
         layer2=layer2 or pub.LAYER2_PREFIX,
