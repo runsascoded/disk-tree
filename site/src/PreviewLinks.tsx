@@ -18,7 +18,7 @@ const EPOCH_MS = Date.UTC(2026, 0, 1)
 const fmtDay = (day: number) => new Date(EPOCH_MS + day * 86400_000).toISOString().slice(0, 10)
 const fmtTs = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 
-/** `/admin`'s list of full-card share links (specs/dogi.md): who minted which
+/** `/admin`'s list of full-card share links (specs/done/dogi.md): who minted which
  * view's token, until when; revoking one turns that view's previews back to
  * the anonymous card (and every mint of the same token with it). */
 export function PreviewLinks() {

@@ -1,4 +1,4 @@
-/** Card data from the deployment's own reads (specs/dogi.md): the same
+/** Card data from the deployment's own reads (specs/done/dogi.md): the same
  * thresholded, depth-capped view the page draws, its owner colours (the
  * scan's attribution with the live ledger applied, as the map does), and the
  * header/footer text. The tier decides only what is *shown* (`card.ts`): the

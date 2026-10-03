@@ -138,7 +138,7 @@ def _cw_tree(i: int, buckets: dict[str, float]) -> dict:
     tot = buckets[P]
     tmp = 50.0 + 3 * i
     ckpt = 300.0 - 2 * i
-    users = _node("users", 40.0 + (i % 3), [_node("romain", 20.0 + (i % 3), [_node("run-a", 20.0 + (i % 3))]), _node("ahmed", 20.0)])
+    users = _node("users", 40.0 + (i % 3), [_node("dennis", 20.0 + (i % 3), [_node("run-a", 20.0 + (i % 3))]), _node("ahmed", 20.0)])
     kids = [_node("tmp", tmp, [_node("ttl=14d", tmp - 10), _node("ttl=30d", 10.0)]), _node("checkpoints", ckpt), users]
     if i >= 6:
         kids.append(_node("evals", 5.0 * (i - 5), [_node("lm", 3.0 * (i - 5)), _node("vision", 2.0 * (i - 5))]))

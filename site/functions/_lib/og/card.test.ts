@@ -13,7 +13,7 @@ const data = (tier: 'anon' | 'full'): CardData => ({
     { name: 'secret-run-b', b: 15 * T, color: '#efb118' },
     { name: 'tiny', b: 0.001 * T, color: '#9498a0' },
   ],
-  legend: [{ label: 'Chi-Heem', color: '#4269d0', b: 30 * T }, { label: 'Percy', color: '#efb118', b: 25 * T }],
+  legend: [{ label: 'Grace', color: '#4269d0', b: 30 * T }, { label: 'Hedy', color: '#efb118', b: 25 * T }],
 })
 
 const texts = (svg: string) => [...svg.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(m => m[1])
@@ -30,19 +30,19 @@ describe('cardSvg', () => {
   it('full: tiles labelled where they fit, owners named in the legend', () => {
     const svg = cardSvg(data('full'))
     expect([texts(svg), count(svg, 'tile'), count(svg, 'kid')]).toEqual([
-      ['marin GCS', 'marin-us-central2/checkpoints', 'scan 2026-10-02', 'secret-run-a 30.0 TiB', 'secret-run-b 15.0 TiB', '51.1 TiB · 179,327,698 objects', 'Chi-Heem 30.0 TiB', 'Percy 25.0 TiB'],
+      ['marin GCS', 'marin-us-central2/checkpoints', 'scan 2026-10-02', 'secret-run-a 30.0 TiB', 'secret-run-b 15.0 TiB', '51.1 TiB · 179,327,698 objects', 'Grace 30.0 TiB', 'Hedy 25.0 TiB'],
       3, 2,
     ])
   })
   it('heatmap: anon draws the grid with no names; full names rows, columns and cells', () => {
-    const grid = { rows: ['Michael', 'Ahmed'], cols: ['Michael', 'Ahmed', 'Will'], cells: [[0, 0, 178 * T], [1, 1, 50 * T], [1, 2, 0.02 * T]] as [number, number, number][] }
+    const grid = { rows: ['Katherine', 'Edsger'], cols: ['Katherine', 'Edsger', 'Alan'], cells: [[0, 0, 178 * T], [1, 1, 50 * T], [1, 2, 0.02 * T]] as [number, number, number][] }
     const d = (tier: 'anon' | 'full') => ({ ...data(tier), title: 'assigner × assignee', tiles: [], legend: undefined, grid })
     const anon = cardSvg(d('anon'))
     const full = cardSvg(d('full'))
     expect([texts(anon), count(anon, 'cell'), count(anon, 'hot'), texts(full)]).toEqual([
       ['marin GCS', 'assigner × assignee', 'scan 2026-10-02', '51.1 TiB · 179,327,698 objects'],
       6, 3,
-      ['marin GCS', 'assigner × assignee', 'scan 2026-10-02', 'Michael', 'Ahmed', 'Will', 'Michael', 'Ahmed', '178 TiB', '50.0 TiB', '20.5 GiB', '51.1 TiB · 179,327,698 objects'],
+      ['marin GCS', 'assigner × assignee', 'scan 2026-10-02', 'Katherine', 'Edsger', 'Alan', 'Katherine', 'Edsger', '178 TiB', '50.0 TiB', '20.5 GiB', '51.1 TiB · 179,327,698 objects'],
     ])
   })
   it('nothing to draw: the empty note', () => {

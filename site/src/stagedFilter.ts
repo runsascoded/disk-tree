@@ -1,8 +1,8 @@
 // `/staged`'s text filter: the map filter's own syntax (`a|b` OR, `a b` AND,
 // `-x` NOT, quotes, `*` within a segment; `parseQuery`), tested against one
 // haystack per row that holds its prefix, its owners and who staged it, each
-// on its own line so a term never matches across two fields. So `percy|chi-heem`
-// keeps rows owned by Percy or Chi-Heem, `isoflop -nemotron` narrows by path,
+// on its own line so a term never matches across two fields. So `hedy|grace`
+// keeps rows owned by Hedy or Grace, `isoflop -nemotron` narrows by path,
 // and `owner:will` keeps the rows Will owns.
 import { parseQuery } from './filterTree'
 import { QueryError } from '../functions/_lib/queryAst'
@@ -16,9 +16,9 @@ export interface StagedFields {
 }
 
 /** One row's search text: the prefix, then `owner:<id> <name>` per owner, then
- *  `staged-by:<who> <name>` — so `owner:percy` / `staged-by:david` aim a term
+ *  `staged-by:<who> <name>` — so `owner:hedy` / `staged-by:barbara` aim a term
  *  at one field. Matching is by substring, as on the map: `will` also matches
- *  `ryan.williams`; `owner:will` or `will-held` doesn't. */
+ *  `ken.alanson`; `owner:alan` or `alan-turing` doesn't. */
 export function stagedHaystack(f: StagedFields, name: (who: string) => string): string {
   return [
     f.prefix,

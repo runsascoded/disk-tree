@@ -119,7 +119,7 @@ Proposed:
 ## Open questions
 
 - **DuckDB concurrent readers/writers**: today's single-writer model is fine (scan runs in a background thread, server reads). For multi-process (e.g. scheduled scans via cron while the server is running), we need DuckDB 1.x's improved concurrency or a file-lock retry loop.
-- **Lance / LanceDB** instead of parquet-mor? Lance has built-in deletion vectors. Worth evaluating but adds a Rust dep (see [indexer.md](indexer.md)).
+- **Lance / LanceDB** instead of parquet-mor? Lance has built-in deletion vectors. Worth evaluating but adds a Rust dep (see [indexer.md](../indexer.md)).
 - **Do we need cross-scan queries?** E.g. "what's the largest file across all my scans." Today each scan is siloed in its own parquet. A DuckDB-default design makes this one SQL query. If that's desirable, it should drive the default choice.
 - **Schema evolution**: the `path`/`parent`/`uri`/`depth`/`kind`/`n_desc`/`n_children`/`mtime`/`size` schema has been churned recently. Lock it down with an explicit version column on the `Scan` table, and a loader that handles old shapes.
 

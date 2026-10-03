@@ -1,7 +1,7 @@
 """Extract a parquet's footer as hyparquet-compatible JSON (schema + per-row-group
 column metadata) and sync it to the site's D1, so the Cloudflare reader can build
 a subset ``FileMetaData`` for a prefix query without parsing the whole footer on a
-cold isolate (specs/path-agnostic-serving.md §2.1 — the footer-in-D1 seam).
+cold isolate (specs/done/path-agnostic-serving.md §2.1 — the footer-in-D1 seam).
 
 Only the fields a *read* needs are kept, in the compact form the reader revives
 (`reviveRowGroup` in `site/functions/_lib/index.ts`):

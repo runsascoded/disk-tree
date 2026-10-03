@@ -15,6 +15,8 @@ import { pathScans, storeReady } from './index.js'
 import { prefixesAt } from './prefixes.js'
 import { pathTree } from './pathTree.js'
 import { expDay, IMAGE_TTL_DAYS, imagePath, ogKey } from './og/sign.js'
+import { imageParams } from './og/cred.js'
+import { serverToken } from './og/tokens.js'
 import { loadRegistry } from './identity.js'
 
 export type { RunRow }
@@ -62,7 +64,7 @@ export interface Sized {
 
 const who = (email: string, mentions?: Record<string, string>): string => mentions?.[email.toLowerCase()] ?? email.replace(/@.*$/, '')
 
-/** `51.0 TiB · 179,327,698 objects at scan 2026-10-02 · owners: <@U1> 16.0 TiB, Percy 6.0 TiB`. */
+/** `51.0 TiB · 179,327,698 objects at scan 2026-10-02 · owners: <@U1> 16.0 TiB, Hedy 6.0 TiB`. */
 export function sizeLine(z: Sized): string {
   const owners = z.owners.length ? ` · owners: ${z.owners.map(o => `${o.label} ${fmtBytes(o.b)}`).join(', ')}` : ''
   const empty = z.empty ? ` · ${fmtN(z.empty)} empty` : ''
@@ -161,12 +163,17 @@ export type NotifyEnv = SlackEnv & { GCP_SA_KEY?: string }
 
 interface Event { text: string; blocks?: unknown[]; sender?: Sender }
 /** The plan's full-tier card for the parent message, or null when the
- * deployment draws no cards. Slack fetches it once per URL, so the view
- * carries the plan's digest (`v`): a new batch is a new image. */
-export async function stagedCardUrl(env: NotifyEnv & { OG_CARDS?: string; SESSION_SECRET?: string }, siteUrl: string, digest: string): Promise<string | null> {
+ * deployment draws no cards (or has no `og_tokens` table). Slack fetches it
+ * once per URL, so the view carries the plan's digest (`v`): a new batch is
+ * a new image. Like any full card it's backed by an `og_tokens` row, minted
+ * by `slack:staged` and reused while it has a week left, so revoking that row
+ * on /admin reverts the thread's card on its next fetch. */
+export async function stagedCardUrl(env: NotifyEnv & { OG_CARDS?: string; SESSION_SECRET?: string }, db: D1Database, siteUrl: string, digest: string, now = Math.floor(Date.now() / 1000)): Promise<string | null> {
   if (!env.OG_CARDS || !env.SESSION_SECRET || !siteUrl) return null
   const key = await ogKey(env.SESSION_SECRET)
-  return siteUrl + await imagePath(key, 'staged', { v: digest.slice(0, 8) }, 'full', expDay(Math.floor(Date.now() / 1000), IMAGE_TTL_DAYS))
+  const tok = await serverToken(db, 'staged', {}, '/staged', 'slack:staged', now, IMAGE_TTL_DAYS).catch(() => null)
+  if (!tok) return null
+  return siteUrl + await imagePath(key, 'staged', imageParams({}, digest.slice(0, 8), { t: tok.token }), 'full', Math.min(expDay(now, IMAGE_TTL_DAYS), tok.day))
 }
 
 /** A stage batch's reply, rendered here so it can carry mentions and sizes. */
@@ -217,7 +224,7 @@ export function personSender(email: string, person: SlackPerson | undefined, ver
   return { username: `${name} · ${verb}`, ...(person?.image ? { icon_url: person.image } : { icon_emoji: ':bust_in_silhouette:' }) }
 }
 
-/** A name as the site's canonical user id: `Chi-Heem Wong` → `chi-heem-wong`. */
+/** A name as the site's canonical user id: `Grace Hopper` → `grace-hopper`. */
 export const nameSlug = (name: string): string =>
   name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
 
@@ -320,7 +327,7 @@ export async function notifyPlan(env: NotifyEnv, db: D1Database, planId: number,
       sizeStaged(full, db, items).catch(() => null),
       stage ? sizeStaged(full, db, stage.prefixes).catch(() => null) : Promise.resolve(null),
     ])
-    const parent = renderParent({ ...v, mentions, size: size ?? undefined, image: await stagedCardUrl(env, siteUrl, v.digest) ?? undefined })
+    const parent = renderParent({ ...v, mentions, size: size ?? undefined, image: await stagedCardUrl(env, db, siteUrl, v.digest) ?? undefined })
     const people = stage ? await slackPeople(env, [stage.by]) : {}
     const event: Event | undefined = stage
       ? { ...stageEvent({ ...stage, mentions, size: stageSize ?? undefined }), sender: personSender(stage.by, people[stage.by.toLowerCase()], 'staged') }

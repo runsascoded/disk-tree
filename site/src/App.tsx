@@ -163,7 +163,7 @@ function AppContent() {
   const [ageModeP, setAgeModeP] = useUrlState('ac', modeCodec)
   useCanonicalParams([['c', modeCodec], ['ac', modeCodec], ['s', shadeCodec]])
   // Scan selection (`?d=YYMMDD`) + the polling scan list, shared with /users
-  // and /user/:id via useScan (specs/scan-param-all-pages.md). Absent `?d` is
+  // and /user/:id via useScan (specs/done/scan-param-all-pages.md). Absent `?d` is
   // a first-class "latest", so a parked tab follows new scans.
   const { asof, scans, dMatches, dP, setDP, span, setSpan, from, setFrom, setEndPin, setRange, scansQ } = useScan(store)
   const rulesQ = useRules()
@@ -343,7 +343,7 @@ function AppContent() {
     }
     return picks
   }, [asof, earlier])
-  // Lazy drill (specs/path-index-lazy-drill.md step 3, now the primary
+  // Lazy drill (specs/done/path-index-lazy-drill.md step 3, now the primary
   // source): the map's base is the pixel-budget subtree at the store root,
   // and every level of the drilled path gets its own subtree query, grafted
   // in depth order — interactive drills hit each level's cache as they go,

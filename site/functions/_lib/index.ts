@@ -9,7 +9,7 @@
  * row-group selections on the footer stats plus ranged reads of just those
  * groups.
  *
- * The footer stats live in D1 (specs/path-agnostic-serving.md §2.1):
+ * The footer stats live in D1 (specs/done/path-agnostic-serving.md §2.1):
  * `index_schema` is the per-(date, variant) **pointer** — the generation
  * `gen` and bucket dir `dir` of the file set a run published — and
  * `index_row_groups` holds every group's stats + compact (~250 B) metadata,
@@ -39,7 +39,6 @@ import { compressors } from './zstd.js'
 /** A leaf of the stored parquet schema (`index_schema.schema_json`). */
 export interface SchemaElement { type: string; name: string; repetition_type: string; converted_type?: string }
 
-export const BUCKET = 'oa-gcs-usage-dvx'
 
 /** One index row, named by the layer-2's columns (specs/path-store.md §1.1) —
  * the shape both generations decode to (`toRow`). A version-2 store sort
@@ -205,15 +204,17 @@ export const storeCreds = (env: Env) => ({
  *  `GCS_HMAC_*` check, so an r2 deploy passes on `STORE_*`). */
 export const storeReady = (env: Env): boolean => {
   const { accessKeyId, secretAccessKey } = storeCreds(env)
-  return !!(accessKeyId && secretAccessKey)
+  return !!(accessKeyId && secretAccessKey && storeTarget(env).bucket)
 }
 
 /** Where the index store lives: `STORE_ENDPOINT`/`STORE_BUCKET`/`STORE_REGION`
  *  point any S3-compatible store (R2: the account's S3 endpoint + `auto`);
- *  unset = the GCS defaults. One place, so every proxy resolves the same store. */
+ *  endpoint and region unset = GCS. The bucket has no default: unset, the
+ *  store isn't ready (`storeReady`). One place, so every proxy resolves the
+ *  same store. */
 export const storeTarget = (env: Env) => ({
   endpoint: env.STORE_ENDPOINT ?? 'https://storage.googleapis.com',
-  bucket: env.STORE_BUCKET ?? BUCKET,
+  bucket: env.STORE_BUCKET ?? '',
   region: env.STORE_REGION ?? 'us-east1',
 })
 

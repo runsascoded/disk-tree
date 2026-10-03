@@ -13,8 +13,9 @@ import { useUnits } from './units'
 import { useCanStage } from './auth'
 import { useShare } from './sharePreview'
 
-export const REPO_URL = 'https://github.com/Open-Athena/marin-gcs-usage'
-const CW_URL = 'https://cw-s3.oa.dev/'
+/** The source link (SpeedDial, omnibar, user menu): the deployment's
+ * `REPO_URL` (wrangler `[vars]`, read at build time), else this repo. */
+export const REPO_URL = import.meta.env.VITE_REPO_URL || 'https://github.com/runsascoded/disky'
 const HOSTS = hostPair(import.meta.env.VITE_PROD_HOST, import.meta.env.VITE_DEV_HOST)
 
 
@@ -77,7 +78,9 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
         { label: `${s.label} store (${s.path})`, group: 'Pages', handler: () => navigate(s.path) },
       ]),
     ),
-    'page:cw': { label: 'CoreWeave usage ↗ (cw-s3.oa.dev)', group: 'Pages', handler: () => window.open(CW_URL, '_blank', 'noreferrer') },
+    ...(store.peer ? {
+      'page:peer': { label: `${store.peer.label} ↗ (${new URL(store.peer.href).host})`, group: 'Pages', handler: () => window.open(store.peer!.href, '_blank', 'noreferrer') },
+    } : {}),
     'page:github': { label: 'Source on GitHub ↗', group: 'Pages', handler: () => window.open(REPO_URL, '_blank', 'noreferrer') },
     ...Object.fromEntries(
       USERS.filter(u => pathname !== `/user/${u}`).map(u => [

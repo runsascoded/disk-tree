@@ -1,5 +1,5 @@
 // Every HTML page response gets its card stamped into `<head>`
-// (specs/dogi.md): crawlers never run the React router, so the edge says what
+// (specs/done/dogi.md): crawlers never run the React router, so the edge says what
 // each URL shows. Everything else passes through untouched.
 import { stampPage, type OgEnv } from './_lib/og/serve.js'
 

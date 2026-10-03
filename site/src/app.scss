@@ -2239,9 +2239,9 @@ select.assign-sel {
 // The diff crumb's "⊕ first scanned" term: a root that entered the scan.
 .diff-move .first { color: var(--ink-3); }
 
-// The help line (specs/edu-drawer.md): one fixed strip that mirrors the
+// The help line (specs/done/edu-drawer.md): one fixed strip that mirrors the
 // hovered/focused control's explanation; nothing floats over controls.
-// The help card (specs/edu-drawer.md): a bottom-LEFT panel (the SpeedDial
+// The help card (specs/done/edu-drawer.md): a bottom-LEFT panel (the SpeedDial
 // owns bottom-right) that shows the hovered/focused control's explanation,
 // with a real border + shadow so it reads as a surface, not a status strip.
 // Idle it is a small "?" chip. It fades in; a prefers-reduced-motion reader
@@ -2531,6 +2531,7 @@ kbd { font: inherit; font-size: 11px; padding: 0 4px; border: 1px solid var(--li
     cursor: pointer;
     input { margin-top: 3px; }
     .hint { display: block; font-size: 12px; color: var(--dim, #999); margin-top: 2px; }
+    &.disabled { cursor: default; opacity: 0.55; }
   }
   .share-actions { display: flex; gap: 12px; align-items: center; margin-top: 16px; .err { color: var(--danger, #e05050); font-size: 12px; } }
   .share-url { display: block; margin-top: 10px; font-size: 11px; word-break: break-all; opacity: 0.8; }

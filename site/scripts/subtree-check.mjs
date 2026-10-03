@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Contract + perf harness for /api/subtree (specs/path-index-lazy-drill.md).
+// Contract + perf harness for /api/subtree (specs/done/path-index-lazy-drill.md).
 // The endpoint's contract is arithmetic, so assert it directly:
 //   - every non-fold child's b ≥ the (attenuated) threshold at its depth
 //   - Σ(children) + (other) ≈ parent, within the fold floor at that level
