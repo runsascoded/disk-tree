@@ -13,7 +13,7 @@ describe('hostPair', () => {
 
 describe('otherHostUrl', () => {
   it('prod → dev, keeping path, query and hash', () => {
-    expect(otherHostUrl('https://gcs.oa.dev/staged?q=percy&s=-b#x', pair)).toBe('https://dev.gcs.oa.dev/staged?q=percy&s=-b#x')
+    expect(otherHostUrl('https://gcs.oa.dev/staged?q=hedy&s=-b#x', pair)).toBe('https://dev.gcs.oa.dev/staged?q=hedy&s=-b#x')
   })
   it('dev → prod', () => {
     expect(otherHostUrl('https://dev.gcs.oa.dev/?path=marin-us-east5%2Fcheckpoints', pair)).toBe('https://gcs.oa.dev/?path=marin-us-east5%2Fcheckpoints')

@@ -7,7 +7,7 @@ describe('withoutOg: the address bar sheds the preview token, nothing else', () 
       withoutOg('https://site.example.org/marin-a/ckpt?d=261002&og=EZjUobkMrUuF&f=tomat#age'),
       withoutOg('https://site.example.org/?og=EZjUobkMrUuF'),
       withoutOg('https://site.example.org/staged?og=x&key=abc'),
-      withoutOg('https://site.example.org/staged?q=percy%7Cchi-heem'),
+      withoutOg('https://site.example.org/staged?q=hedy%7Cgrace'),
     ]).toEqual(['/marin-a/ckpt?d=261002&f=tomat#age', '/', '/staged?key=abc', null])
   })
 })
