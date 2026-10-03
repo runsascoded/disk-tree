@@ -99,7 +99,7 @@ The staged-plan parent message (`stagedSlack.ts`) gets an `image` block with the
 - **The staged Slack card is backed by an `og_tokens` row** (`serverToken`, minted by `slack:staged`, view `''`), reused while it has ≥ 7 days left and re-minted after. It's chosen over a reserved kind because it then shows on /admin's "Preview links" and revokes the same way, with no second mechanism to audit.
 
 **Open at hand-off (2026-10-02):**
-- Prod runs `0034`; this revision isn't on prod yet. Dev (`dev.gcs.oa.dev`) runs it with `OG_CARDS` on, against prod's D1.
+- Live on prod since 2026-10-02 (`0034` applied; both revisions deployed). Dev (`dev.gcs.oa.dev`) runs with `OG_CARDS` on, against prod's D1.
 - Measured on dev: cold renders 0.5–2.9 s per card (the view read dominates; the rasterize is ~100–200 ms), cached about 60 ms.
 
 ## Rollout
