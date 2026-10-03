@@ -249,5 +249,5 @@ Decisions for the user:
 - **v2 on gcs** (§3.2): the rows sidecar makes a `2019`-sized query ~1.5× faster end to end (model) and ~1.8× less CPU than merged reads on v1, for a second copy of the store's rows per scan. The reader serves either; the writer emits v2 only (a v1 option is a small revert if gcs should stay on v1).
 - **`-S` default**: off until measured; on for r2 first?
 
-[diff-and-search]: diff-and-search.md
+[diff-and-search]: done/diff-and-search.md
 [path-store]: path-store.md

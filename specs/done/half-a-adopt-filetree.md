@@ -1,6 +1,6 @@
 # Half A — disk-tree's `ui/` adopts `<FileTree>`
 
-The reciprocal-dogfood half of `specs/file-tree-integration.md`: disk-tree's `ui/`
+The reciprocal-dogfood half of `specs/done/file-tree-integration.md`: disk-tree's `ui/`
 mounts `@rdub/file-tree`'s `<FileTree>` for its browse surfaces so both libraries
 compose on one page — `<FileTree>` renders *"what's in this prefix"*,
 `@disk-tree/react` renders *"how big is everything under it, over time."* Now

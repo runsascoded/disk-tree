@@ -4,7 +4,7 @@ import { ownerIndex, type OwnerRow } from './owners'
 import { unclaimedBytes, type TreeNode } from './types'
 
 // The ownership ledger repaints the map's owner split (`us`) client-side
-// (specs/path-agnostic-serving.md §2.3): an assigned prefix moves its bytes
+// (specs/done/path-agnostic-serving.md §2.3): an assigned prefix moves its bytes
 // from their scan owner(s) to the assignee, in every drawn node at, under,
 // and above it.
 

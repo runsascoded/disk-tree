@@ -1,4 +1,4 @@
-// The ownership ledger applied to the map (specs/path-agnostic-serving.md
+// The ownership ledger applied to the map (specs/done/path-agnostic-serving.md
 // §2.3, "Owner coloring: applied client-side"): `/api/subtree` serves each
 // node's owner split (`us`) as the scan attributed it — the committed
 // state — and this overlays the live assignments (the WAL) on the drawn

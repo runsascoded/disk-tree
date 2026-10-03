@@ -1,5 +1,5 @@
 /** Per-user owned bytes for a scan — the ownership ledger folded server-side
- * and priced against the floor-free path index (specs/path-agnostic-serving.md
+ * and priced against the floor-free path index (specs/done/path-agnostic-serving.md
  * §2.3), so every consumer (`/users`, `/user/:id`, `/api/assignments`, the
  * user lens of `/api/subtree`) reads one number.
  *

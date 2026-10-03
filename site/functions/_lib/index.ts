@@ -9,7 +9,7 @@
  * row-group selections on the footer stats plus ranged reads of just those
  * groups.
  *
- * The footer stats live in D1 (specs/path-agnostic-serving.md §2.1):
+ * The footer stats live in D1 (specs/done/path-agnostic-serving.md §2.1):
  * `index_schema` is the per-(date, variant) **pointer** — the generation
  * `gen` and bucket dir `dir` of the file set a run published — and
  * `index_row_groups` holds every group's stats + compact (~250 B) metadata,

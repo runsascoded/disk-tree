@@ -4,7 +4,7 @@
 and why is a rendering cutoff baked into ETL?"
 
 Short version: **the depth cap is not a design choice, it's a symptom.** The
-fix is already specced — it's `specs/aggregation-extensions.md` § "Consumer
+fix is already specced — it's `specs/done/aggregation-extensions.md` § "Consumer
 follow-up", whose prerequisites have all landed. Folding is a separate issue
 and the current shape of it is genuinely wrong.
 
@@ -36,7 +36,7 @@ got migrated onto layer-2.
 
 ## 2. The fix already has a spec
 
-`specs/aggregation-extensions.md` § Consumer follow-up:
+`specs/done/aggregation-extensions.md` § Consumer follow-up:
 
 > marin's `webdata` splits into: per-bucket `disk-tree import` (layer-2 with
 > `n_files`, class sums, `mtime_mean`) + an overlay pass (attribution join →
