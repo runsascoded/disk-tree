@@ -93,7 +93,7 @@ dt-cloud index-sync <date> -g <gen> -b <index bucket> -k listing/<date>/index/<g
 
 **L1. The AWS ingest.** Copy `aws/stack/Pulumi.yaml.example` to `aws/Pulumi.yaml` and `aws/stack/Pulumi.stack.example.yaml` to `aws/Pulumi.<stack>.yaml`, fill them in (the `env` block takes the D1 id from step 1), and `pulumi up` in `infra/aws`. It builds the ingest image on CodeBuild, so no local Docker. Then fill the Secrets Manager containers its `secrets` map names (`aws secretsmanager put-secret-value`).
 
-**L2. The capture trigger.** Set `capturesBucket` / `capturesQueue` in the Cloudflare stack's config and `pulumi up` again. Copy `cf/capture-trigger/wrangler.example.toml` to `wrangler.toml`, fill it in from both stacks' outputs, and deploy it (`pnpm -C infra/cf/capture-trigger run deploy`). Give it an access key for the AWS stack's `capture_trigger_user`, which may only submit the ingest job; set it as the Worker's `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` secrets.
+**L2. The capture trigger.** Set `capturesBucket` / `capturesQueue` in the Cloudflare stack's config and `pulumi up` again. Copy `cf/capture-trigger/wrangler.example.toml` to `wrangler.toml`, fill it in from both stacks' outputs, and deploy it (`pnpm -C infra/cf/capture-trigger run deploy`). Then mint its AWS key straight into the Worker's secrets: `infra/cf/capture-trigger/put-secrets $(pulumi -C infra/aws stack output capture_trigger_user)`. That IAM user may only submit the ingest job, and the key is never printed or stored. Re-running it rotates the key.
 
 **L3. Captures.** On the laptop: `disk-tree capture <path> -t r2://<capturesBucket>/captures`. The trigger submits one ingest per finished capture.
 
