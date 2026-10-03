@@ -60,7 +60,7 @@ BASE_SCOPE = "my"                           # the scope every viewer needs
 
 # --- The index store (_lib/index.ts): any S3-compatible endpoint ---
 # STORE_ENDPOINT = "https://<account>.r2.cloudflarestorage.com"  # unset = GCS (`storage.googleapis.com` + GCS_HMAC_*)
-STORE_BUCKET = "my-index-bucket"
+STORE_BUCKET = "my-index-bucket"            # required: the bucket holding the index (no default)
 # STORE_REGION = "auto"
 # STORE_PREFIXES = "listing/,snapshots/"      # comma-separated key prefixes the proxies may read; unset = the default set
 # SNAPSHOTS_SUBDIR = "my"                     # this store's snapshots dir: `snapshots/<sub>/`; unset = `snapshots/`
