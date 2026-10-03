@@ -1,12 +1,12 @@
 /**
- * Full-info share links (specs/dogi.md): a per-view token that upgrades one
+ * Full-info share links (specs/done/dogi.md): a per-view token that upgrades one
  * exact view's card from anonymous to labelled.
  *
  *   POST   /api/og/mint {url, days?}  → {url, token, exp_day}: the page URL with
  *                                       `og=<token>`. Full viewers (not read-only
  *                                       guest links): a token outlives any session.
  *   GET    /api/og/tokens             → every mint, newest first (admin)
- *   DELETE /api/og/tokens/<token>     → revoke it (admin)
+ *   DELETE /api/og/tokens/<token>     → revoke it (admins any; a minter their own)
  */
 import { type Ctx, json, requireAdmin, requireStager } from '../../_lib/auth.js'
 import { deploymentKey, siteOf, type OgEnv } from '../../_lib/og/serve.js'
@@ -34,7 +34,7 @@ export const onRequest = async (ctx: Ctx & { env: OgEnv }): Promise<Response> =>
     }
     if (page.origin !== url.origin) return json({ error: 'url must be on this site' }, 400)
     try {
-      const m = await mint(env.DB, await key, siteOf(env).name, page, id.email ?? id.name ?? 'unknown', now(), Number(body?.days) || TOKEN_DAYS_DEFAULT)
+      const m = await mint(env.DB, siteOf(env).name, page, id.email ?? id.name ?? 'unknown', now(), Number(body?.days) || TOKEN_DAYS_DEFAULT)
       if (!m) return json({ error: 'this page has no card' }, 400)
       return json({ url: m.url, token: m.token, exp_day: m.expDay }, 201)
     } catch (e) {
@@ -43,14 +43,18 @@ export const onRequest = async (ctx: Ctx & { env: OgEnv }): Promise<Response> =>
     }
   }
 
-  if (segs[0] === 'tokens') {
+  // Revoke: admins any token; a minter their own (as stagers unstage their own items).
+  if (segs[0] === 'tokens' && segs.length === 2 && request.method === 'DELETE') {
+    const id = await requireStager(ctx)
+    if (id instanceof Response) return id
+    const who = id.email ?? id.name ?? 'unknown'
+    const n = await revoke(env.DB, segs[1], who, now(), id.admin ? undefined : who)
+    return n ? json({ revoked: n }) : json({ error: id.admin ? 'no live token' : 'no live token of yours' }, 404)
+  }
+  if (segs[0] === 'tokens' && segs.length === 1 && request.method === 'GET') {
     const id = await requireAdmin(ctx)
     if (id instanceof Response) return id
-    if (segs.length === 1 && request.method === 'GET') return json({ tokens: await listTokens(env.DB) })
-    if (segs.length === 2 && request.method === 'DELETE') {
-      const n = await revoke(env.DB, segs[1], id.email ?? id.name ?? 'unknown', now())
-      return n ? json({ revoked: n }) : json({ error: 'no live token' }, 404)
-    }
+    return json({ tokens: await listTokens(env.DB) })
   }
   return json({ error: 'not found' }, 404)
 }

@@ -1,4 +1,4 @@
-// Sharing a page (specs/dogi.md): a plain link (its unfurl card is anonymous:
+// Sharing a page (specs/done/dogi.md): a plain link (its unfurl card is anonymous:
 // unlabelled shapes and totals), a link whose unfurl card shows details
 // (`og=`, a per-view preview token; it grants no access), or, for admins, a
 // link that also grants access (`key=`, a share-link grant; its card is full

@@ -1,4 +1,4 @@
-/** Card data for the non-map pages (specs/dogi.md, phase 2): `/staged`,
+/** Card data for the non-map pages (specs/done/dogi.md, phase 2): `/staged`,
  * `/users`, `/user/:id` (the map card under that user's lens) and
  * `/assignments`. Same rule as the map: the data read is the page's; the tier
  * only decides what is labelled. Failures become a card that says so. */
