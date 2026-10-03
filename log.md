@@ -2,6 +2,22 @@
 
 Running record of disk-cleanup passes on this Mac. Newest first. Each entry: what was scanned (free space before/after), what was deleted, and the **measured** bytes freed (`reclaim`/`overcount`, not apparent size).
 
+## Pass 5 (2026-10-03): candidates from the scheduled capture's path index
+
+- Source: the 06:15 capture's path index (`listing/laptop/2026-10-03/index/202610031015`) via `disk-tree du -p`, then `overcount` on each candidate. The first pass driven by the scheduled scan rather than a hand-run one.
+- Free before: 12 G (98%) at the morning's check; 24 G by the start of the deletions (the `crashes` session's own cleanup, plus Ryan's `dkpra`: `Docker.raw` 20.8 G allocated in the 09-30 scan → 7.7 G after it compacted). Swap: 22.5 G used (`VM` volume 24.7 G); a reboot is the next big win.
+- Deletions (measured `df` deltas):
+
+| target | freed |
+|---|---|
+| Pulumi plugins nothing pins (aws 6.83.4 + 7.20.0, cloudflare 6.14.0, 2 stale schemas; kept aws 7.44/7.48, cloudflare 6.20/6.21, which project venvs pin) | 1.73 GiB |
+| JetBrains (app already uninstalled): `Application Support/JetBrains` (2.7 G of it plugins), `Logs/JetBrains`, `Preferences/*jetbrains*.plist`. Settings minus plugins backed up first: `nas:/mnt/user/backups/m3/jetbrains/intellij-settings-2026-10-03.tar` (98 MiB, 4,862 entries = local count) | 3.06 GiB |
+| `~/.pyenv` (unused since 2025-09; `~/.rc` dropped pyenv). Moved to `nas:/mnt/user/backups/m3/pyenv/pyenv-2026-10-03.tar` (4.08 GiB, 203,532 entries = local count) | 4.26 GiB |
+
+- Total **9.05 GiB**; free after: **34 G (93%)**.
+- Left: `~/c/disky/tmp` (root's scratch, 1.85 GiB exclusive; root is asking Ryan directly), `~/Library/Caches/go-build` (3 GiB, unused since 09-29), `wt/app` Rust `target/` (9.4 GiB exclusive; disky-app's), dormant `oa/marin/wt/*` (2.2 GiB exclusive), Chrome/Superhuman CacheStorage. Signal untouched.
+- `oa/{cubed,mamba,ops,gha-runner,plant-caduceus}` have `.python-version` files naming the archived pyenv virtualenvs; uv won't resolve those names.
+
 ## Pass 4 (2026-09-25): staged plan dispatched from the web UI
 
 - Disk hit ~0 free (swap growth); reboot cleared swap, back to 36 G free.
