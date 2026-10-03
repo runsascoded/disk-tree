@@ -68,9 +68,12 @@ export async function listTokens(db: D1Database, limit = 200): Promise<TokenRow[
   return (await db.prepare('SELECT id, token, kind, page, minted_by, minted_ts, exp_day, revoked_by, revoked_ts FROM og_tokens ORDER BY minted_ts DESC, id DESC LIMIT ?').bind(limit).all<TokenRow>()).results
 }
 
-/** Revoke `token` (one mint); returns how many rows changed. */
-export async function revoke(db: D1Database, token: string, by: string, now: number): Promise<number> {
-  const r = await db.prepare('UPDATE og_tokens SET revoked_by = ?, revoked_ts = ? WHERE token = ? AND revoked_ts IS NULL').bind(by, now, token).run()
+/** Revoke `token` (one mint); returns how many rows changed. With `minter`,
+ * only a row that minter minted (a non-admin revoking their own). */
+export async function revoke(db: D1Database, token: string, by: string, now: number, minter?: string): Promise<number> {
+  const r = minter == null
+    ? await db.prepare('UPDATE og_tokens SET revoked_by = ?, revoked_ts = ? WHERE token = ? AND revoked_ts IS NULL').bind(by, now, token).run()
+    : await db.prepare('UPDATE og_tokens SET revoked_by = ?, revoked_ts = ? WHERE token = ? AND minted_by = ? AND revoked_ts IS NULL').bind(by, now, token, minter).run()
   return r.meta.changes ?? 0
 }
 
