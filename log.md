@@ -16,7 +16,8 @@ Running record of disk-cleanup passes on this Mac. Newest first. Each entry: wha
 
 - Total **9.05 GiB**; free after: **34 G (93%)**.
 - `~/c/disky/tmp` (root, on Ryan's go): 1,008 dormant entries (2.4 G apparent, ~1.85 GiB exclusive) → `/usr/bin/trash`, not yet emptied, so `df` is unchanged until the Trash is emptied; the `local` worktree moved out first (`tmp/wt-local` → `wt/local`). Free then: 43 G (91%), counting other sessions' cleanup (`crashes`).
-- Left: `~/Library/Caches/go-build` (3 GiB, unused since 09-29), `wt/app` Rust `target/` (9.4 GiB exclusive; disky-app's), dormant `oa/marin/wt/*` (2.2 GiB exclusive), Chrome/Superhuman CacheStorage. Signal untouched.
+- `go clean -cache` (`~/Library/Caches/go-build`, unused since 09-29; the cost is one slower first Go build later): **3.02 GiB** measured. Free: 46 G (91%).
+- Left: `wt/app` Rust `target/` (9.4 GiB exclusive; disky-app's), dormant `oa/marin/wt/*` (2.2 GiB exclusive), Chrome/Superhuman CacheStorage. Signal untouched.
 - `oa/{cubed,mamba,ops,gha-runner,plant-caduceus}` have `.python-version` files naming the archived pyenv virtualenvs; uv won't resolve those names.
 
 ## Pass 4 (2026-09-25): staged plan dispatched from the web UI
