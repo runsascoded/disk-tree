@@ -4,33 +4,33 @@
 // Batch executor consumes. D1 CRUD + snapshot + the admin-edit audit trail
 // live here; the HTTP surface is api/plans/[[path]].ts.
 import type { D1Database } from "@cloudflare/workers-types"
-import { CW_BUCKET, CW_BUCKETS } from "./cwBatch.js"
 
-// A plan prefix stored as `<scheme><bucket>/<path>/` (`s3://` on the
-// CoreWeave deployment, `gs://` on gcs.oa.dev); normalized to a relative key
+// A plan prefix stored as `<scheme><bucket>/<path>/` (the deployment's
+// `STORE_SCHEME`: `s3://`, `gs://`, `file:///`); normalized to a relative key
 // prefix only at snapshot time.
 const PREFIX_RE = /^(?!\/)(?![.]{1,2}\/)[^\\]+\/$/
 const SCHEME_RE = /^[a-z0-9]+:\/\//
 
 /** The deployment's prefix convention: the URI scheme its stored prefixes
  * carry and the buckets its scan covers (first = primary). From `[vars]`
- * (`STORE_SCHEME`, `STORE_BUCKETS`); unset = the CoreWeave deployment's, so
- * an unconfigured store is unchanged. */
+ * (`STORE_SCHEME`, default `s3://`; `STORE_BUCKETS`). No buckets = no shape
+ * (null): the plans and sweep routes refuse until the deployment names them. */
 export interface PrefixShape {
   scheme: string
   buckets: readonly string[]
 }
-export const CW_SHAPE: PrefixShape = { scheme: 's3://', buckets: CW_BUCKETS }
-export function prefixShape(env: { STORE_SCHEME?: string; STORE_BUCKETS?: string }): PrefixShape {
-  const buckets = env.STORE_BUCKETS ? env.STORE_BUCKETS.split(',').map(s => s.trim()).filter(Boolean) : null
-  return { scheme: env.STORE_SCHEME ?? CW_SHAPE.scheme, buckets: buckets?.length ? buckets : CW_SHAPE.buckets }
+export function prefixShape(env: { STORE_SCHEME?: string; STORE_BUCKETS?: string }): PrefixShape | null {
+  const buckets = (env.STORE_BUCKETS ?? '').split(',').map(s => s.trim()).filter(Boolean)
+  return buckets.length ? { scheme: env.STORE_SCHEME ?? 's3://', buckets } : null
 }
+/** The 503 message when `prefixShape` is null. */
+export const NO_SHAPE = 'not configured (STORE_BUCKETS unset)'
 
 /** The bucket a raw prefix names — `<scheme><b>/…` or `<b>/…` for a scanned
  * bucket — else the primary. The treemap's paths start with the bucket, so
- * a plan item under `hero-checkpoints/…` must not canonicalize under
+ * a plan item under a second bucket's `<b>/…` must not canonicalize under
  * the primary (specs/done/cw-multi-bucket.md §4). */
-export function bucketOf(raw: string, buckets: readonly string[] = CW_BUCKETS): string {
+export function bucketOf(raw: string, buckets: readonly string[]): string {
   const s = raw.trim().replace(SCHEME_RE, "").replace(/^\/+/, "")
   // `*` (`STORE_BUCKETS = "*"`): every top-level segment is a root — a
   // filesystem-root capture's `Applications`, `Users`, … — so a prefix's
@@ -50,7 +50,7 @@ export interface PlanRow {
 }
 
 /** `s3://bucket/a/b/` (any scheme) or `/a/b` or `a/b` -> `a/b/` (relative, trailing slash). */
-export function relPrefix(raw: string, bucket: string = CW_BUCKET): string {
+export function relPrefix(raw: string, bucket: string): string {
   // Leading slashes go first: a `file:///` URI leaves `/Users/…` after the
   // scheme, which must still match its bucket.
   let s = raw.trim().replace(SCHEME_RE, "").replace(/^\/+/, "")
@@ -62,7 +62,7 @@ export function relPrefix(raw: string, bucket: string = CW_BUCKET): string {
 /** Canonical stored form of a plan-item prefix: `<scheme><bucket>/<path>/`
  * in the deployment's shape, the bucket resolved from the raw (`bucketOf`
  * over the shape's buckets) unless given. */
-export function canonicalPrefix(raw: string, shape: PrefixShape = CW_SHAPE, bucket: string = bucketOf(raw, shape.buckets)): string | null {
+export function canonicalPrefix(raw: string, shape: PrefixShape, bucket: string = bucketOf(raw, shape.buckets)): string | null {
   const rel = relPrefix(raw, bucket)
   if (!PREFIX_RE.test(rel)) return null
   return `${shape.scheme}${bucket}/${rel}`
@@ -95,8 +95,8 @@ export async function stageItems(
   db: D1Database,
   rawPrefixes: string[],
   who: string,
-  note: string | null = null,
-  shape: PrefixShape = CW_SHAPE,
+  note: string | null,
+  shape: PrefixShape,
 ): Promise<{ plan_id: number; batch_id: number; staged: string[]; covered: string[]; absorbed: string[] } | { error: string }> {
   const prefixes: string[] = []
   for (const r of rawPrefixes) {
@@ -184,11 +184,11 @@ export class PlanSpansBuckets extends Error {
 }
 
 /** The one bucket a plan's (canonical) item prefixes live in, and the items
- * relative to it; a plan with no items is the primary's. */
-export function planBucket(prefixes: string[]): { bucket: string; sweep: string[] } {
-  const buckets = [...new Set(prefixes.map(p => bucketOf(p)))]
-  if (buckets.length > 1) throw new PlanSpansBuckets(buckets)
-  const bucket = buckets[0] ?? CW_BUCKET
+ * relative to it; a plan with no items is the primary's (`buckets[0]`). */
+export function planBucket(prefixes: string[], buckets: readonly string[]): { bucket: string; sweep: string[] } {
+  const named = [...new Set(prefixes.map(p => bucketOf(p, buckets)))]
+  if (named.length > 1) throw new PlanSpansBuckets(named)
+  const bucket = named[0] ?? buckets[0]
   return { bucket, sweep: prefixes.map(p => relPrefix(p, bucket)) }
 }
 
@@ -196,7 +196,7 @@ export function planBucket(prefixes: string[]): { bucket: string; sweep: string[
  * to it, buckets and items sorted. The gcs executor takes several `-b`, so a
  * plan there MAY span buckets — this is `planBucket` without the refusal
  * (cw keeps `planBucket`: one bucket per run). */
-export function planBuckets(prefixes: string[], buckets: readonly string[] = CW_BUCKETS): Record<string, string[]> {
+export function planBuckets(prefixes: string[], buckets: readonly string[]): Record<string, string[]> {
   const by: Record<string, string[]> = {}
   for (const p of prefixes) {
     const b = bucketOf(p, buckets)
@@ -217,7 +217,7 @@ export interface PlanBucketsSnapshot {
   buckets: string[]
 }
 
-export async function snapshotPlanBuckets(db: D1Database, planId: number, shape: PrefixShape = CW_SHAPE): Promise<PlanBucketsSnapshot | null> {
+export async function snapshotPlanBuckets(db: D1Database, planId: number, shape: PrefixShape): Promise<PlanBucketsSnapshot | null> {
   const plan = await db.prepare("SELECT id, name FROM plans WHERE id = ?").bind(planId).first<{ id: number; name: string }>()
   if (!plan) return null
   const items = await db.prepare("SELECT prefix FROM plan_items WHERE plan_id = ? ORDER BY prefix").bind(planId).all<{ prefix: string }>()
@@ -246,13 +246,13 @@ export async function audit(
  * (`planBucket`; throws `PlanSpansBuckets`) and the relative sweep prefixes
  * (the plan's items — the whole intent; nothing carves out). Returns null if
  * the plan is missing. */
-export async function snapshotPlan(db: D1Database, planId: number): Promise<
+export async function snapshotPlan(db: D1Database, planId: number, shape: PrefixShape): Promise<
   { plan_id: number; name: string; bucket: string; sweep: string[] } | null
 > {
   const plan = await db.prepare("SELECT id, name FROM plans WHERE id = ?").bind(planId).first<{ id: number; name: string }>()
   if (!plan) return null
   const items = await db.prepare("SELECT prefix FROM plan_items WHERE plan_id = ? ORDER BY prefix").bind(planId).all<{ prefix: string }>()
-  const { bucket, sweep } = planBucket(items.results.map(r => r.prefix))
+  const { bucket, sweep } = planBucket(items.results.map(r => r.prefix), shape.buckets)
   return { plan_id: planId, name: plan.name, bucket, sweep }
 }
 

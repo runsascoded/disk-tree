@@ -18,15 +18,15 @@
 // that can submit Batch jobs, act as the job SA, and write the plan.json into
 // the data bucket).
 import type { D1Database } from '@cloudflare/workers-types'
+import { type BatchConfig, batchConfig, notConfigured } from './batchConfig.js'
 import { type DispatchReq, type ExecEnv, type Executor, type Prepared, refuse } from './dispatch.js'
-import { GCP_PROJECT, batchJobsUrl, batchRegionFor, gcpToken } from './gcp.js'
-import { bucketOf, type PlanBucketsSnapshot, prefixShape, snapshotPlanBuckets } from './plans.js'
+import { batchJobsUrl, batchRegionFor, gcpToken } from './gcp.js'
+import { bucketOf, NO_SHAPE, type PlanBucketsSnapshot, prefixShape, snapshotPlanBuckets } from './plans.js'
 import { listSweepJobs, reflectSweepRuns } from './sweepReflect.js'
 
-export const DATA_BUCKET = 'oa-gcs-usage-dvx'
-export const SWEEP_RUNS = `gs://${DATA_BUCKET}/sweep/runs`
-export const runDir = (jobId: string): string => `${SWEEP_RUNS}/${jobId}`
-export const planJsonPath = (jobId: string): string => `${runDir(jobId)}/plan.json`
+/** A run's dir in the data bucket (`DATA_BUCKET`). */
+export const runDir = (cfg: Pick<BatchConfig, 'dataBucket'>, jobId: string): string => `gs://${cfg.dataBucket}/sweep/runs/${jobId}`
+export const planJsonPath = (cfg: Pick<BatchConfig, 'dataBucket'>, jobId: string): string => `${runDir(cfg, jobId)}/plan.json`
 /** `plan.json`'s object name in the data bucket (the JSON upload API's `name`). */
 export const planJsonObject = (jobId: string): string => `sweep/runs/${jobId}/plan.json`
 
@@ -36,6 +36,7 @@ export const bucketCut = (planBuckets: readonly string[], requested: readonly st
   requested.length ? planBuckets.filter(b => requested.includes(b)) : [...planBuckets]
 
 export interface SweepScript {
+  cfg: Pick<BatchConfig, 'dataBucket'>
   mode: 'dry' | 'real'
   jobId: string
   buckets: readonly string[]
@@ -47,8 +48,8 @@ export interface SweepScript {
  * dir. On exit (success or failure) it pings the site's `/api/sweep/jobs`
  * with the job's read grant, so the finished run is reflected — and its
  * result posted to the plan's Slack thread — without anyone polling. */
-export const sweepScript = ({ mode, jobId, buckets, plan }: SweepScript): string => {
-  const run = runDir(jobId)
+export const sweepScript = ({ cfg, mode, jobId, buckets, plan }: SweepScript): string => {
+  const run = runDir(cfg, jobId)
   const bflags = buckets.map(b => `-b ${b}`).join(' ')
   return [
     'set -euo pipefail',
@@ -58,17 +59,18 @@ export const sweepScript = ({ mode, jobId, buckets, plan }: SweepScript): string
   ].join('\n')
 }
 
-const IMAGE = `us-central1-docker.pkg.dev/${GCP_PROJECT}/cloud-run-source-deploy/gcs-usage-snapshot:latest`
-const CF_ACCOUNT_ID = '74981a43be0de7712369306c7b19133d'
-const SECRET = (name: string) => `projects/${GCP_PROJECT}/secrets/${name}/versions/latest`
-
 async function prepare(env: ExecEnv, db: D1Database, req: DispatchReq): Promise<Prepared | ReturnType<typeof refuse>> {
   if (!env.GCP_SA_KEY) return refuse(503, 'dispatch not configured (GCP_SA_KEY secret missing)')
   if (!env.JOB_SA) return refuse(503, 'dispatch not configured (JOB_SA var missing)')
   const jobSa = env.JOB_SA
-  const requested = req.buckets ?? []
-  if (requested.some(b => !/^marin-[a-z0-9-]+$/.test(b))) return refuse(400, 'bad bucket name')
+  const cfg = batchConfig(env, ['GCP_PROJECT', 'DATA_BUCKET', 'SWEEP_IMAGE', 'CF_ACCOUNT_ID'])
+  if ('missing' in cfg) return refuse(503, notConfigured('dispatch', cfg.missing))
   const shape = prefixShape(env)
+  if (!shape) return refuse(503, `dispatch ${NO_SHAPE}`)
+  const SECRET = (name: string) => `projects/${cfg.project}/secrets/${name}/versions/latest`
+  const requested = req.buckets ?? []
+  // A cut names only scanned buckets (`STORE_BUCKETS`).
+  if (requested.some(b => !shape.buckets.includes(b))) return refuse(400, 'bad bucket name')
   const snapshot: PlanBucketsSnapshot | null = await snapshotPlanBuckets(db, req.planId, shape)
   if (!snapshot) return refuse(404, 'no such plan')
   if (!snapshot.sweep.length) return refuse(400, 'plan has no items to sweep')
@@ -78,17 +80,17 @@ async function prepare(env: ExecEnv, db: D1Database, req: DispatchReq): Promise<
   const prefixes = snapshot.sweep.filter(p => buckets.includes(bucketOf(p, shape.buckets)))
 
   const launch: Prepared['launch'] = async (date, digest) => {
-    const region = batchRegionFor(buckets)
+    const region = batchRegionFor(cfg, buckets)
     const ts = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-').toLowerCase()
     const jobId = `gcs-sweep-${req.mode}-${ts}z`
-    const plan = runDir(jobId)
-    const script = sweepScript({ mode: req.mode, jobId, buckets, plan: planJsonPath(jobId) })
+    const plan = runDir(cfg, jobId)
+    const script = sweepScript({ cfg, mode: req.mode, jobId, buckets, plan: planJsonPath(cfg, jobId) })
 
     const spec = {
       taskGroups: [{
         taskCount: 1,
         taskSpec: {
-          runnables: [{ container: { imageUri: IMAGE, entrypoint: '/bin/bash', commands: ['-c', script] } }],
+          runnables: [{ container: { imageUri: cfg.image, entrypoint: '/bin/bash', commands: ['-c', script] } }],
           computeResource: { cpuMilli: 8000, memoryMib: 60000 },
           maxRetryCount: 0,
           // 72 h: the 35M-object bucket needs ~10 h of deletes at the bucket's
@@ -99,7 +101,7 @@ async function prepare(env: ExecEnv, db: D1Database, req: DispatchReq): Promise<
               SWEEP_DATE: date,
               // `sweep execute` records the run's `actor` from $USER
               USER: req.actor,
-              CLOUDFLARE_ACCOUNT_ID: CF_ACCOUNT_ID,
+              CLOUDFLARE_ACCOUNT_ID: cfg.cfAccountId,
               // the run's item digest, for `sweepReflect` (the executor ignores it)
               PLAN_DIGEST: digest,
               SITE_URL: req.siteUrl,
@@ -122,12 +124,12 @@ async function prepare(env: ExecEnv, db: D1Database, req: DispatchReq): Promise<
     const token = await gcpToken(env.GCP_SA_KEY!)
     // Drop plan.json into the run dir; the executor reads it back over gs://.
     const up = await fetch(
-      `https://storage.googleapis.com/upload/storage/v1/b/${DATA_BUCKET}/o?uploadType=media&name=${encodeURIComponent(planJsonObject(jobId))}`,
+      `https://storage.googleapis.com/upload/storage/v1/b/${cfg.dataBucket}/o?uploadType=media&name=${encodeURIComponent(planJsonObject(jobId))}`,
       { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(snapshot) },
     )
     if (!up.ok) return refuse(500, 'plan.json write failed', { status: up.status, detail: (await up.text()).slice(0, 300) })
     const r = await fetch(
-      `${batchJobsUrl(region)}?job_id=${jobId}`,
+      `${batchJobsUrl(cfg, region)}?job_id=${jobId}`,
       { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(spec) },
     )
     const text = await r.text()
@@ -150,6 +152,8 @@ export const sweep: Executor = {
   prepare,
   async refresh(env, db) {
     if (!env.GCP_SA_KEY) return []
-    return reflectSweepRuns(db, await listSweepJobs(await gcpToken(env.GCP_SA_KEY)))
+    const cfg = batchConfig(env, ['GCP_PROJECT', 'DATA_BUCKET'])
+    if ('missing' in cfg) return []
+    return reflectSweepRuns(cfg, db, await listSweepJobs(cfg, await gcpToken(env.GCP_SA_KEY)))
   },
 }
