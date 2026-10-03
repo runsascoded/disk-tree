@@ -1442,7 +1442,7 @@ function AppContent() {
       {hasAttr && mapTree && <AttributionRules tree={mapTree} />}
 
       <SiteKbd
-        placeholder="Users, color modes, scans, pages…"
+        placeholder={store.owners ? 'Users, color modes, scans, pages…' : 'Color modes, scans, pages, actions…'}
         extra={[{ key: 'lens', label: `Class lens: ${lens ? 'on' : 'off'} (s)`, icon: <MdLayers />, onClick: () => setLens(v => !v) }]}
       />
     </main>
