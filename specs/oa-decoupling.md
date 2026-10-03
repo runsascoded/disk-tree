@@ -1,9 +1,8 @@
 # OA decoupling: OA-specific behavior leaves `cloud`, as deployment config
 
-**Status (2026-10-03):** in progress, per `branch-layout.md` §0.
-- **Done on `cloud`:** step 0 is on both branches (gcs 5ee710e, cw-s3 1011f72); steps 1–5, 6a + its client part, 7, 8, 9–10; the people's-names part of 18. Step 5's harness replayed every executor request under each branch's env, byte-identical, except one intended addition: `DATA_BUCKET` in gcs's sweep job env (a8385dd).
-- **Store modules:** gcs carries `stores/gcs.tsx`, cw-s3 `stores/{cw,meta}.ts`, and `local` `stores/laptop.ts`.
-- **Next:** 6b (remove the inline entries), 11–16 (the rest of dt-cloud; then each branch rebuilds its image once), 17, the rest of 18.
+**Status (2026-10-03):** steps 1–17 done on `cloud`, plus 18's names, comments and package name. dt-cloud carries no OA default (only a credit line in `usernames.py` mentions Marin).
+- **Next:** gcs and cw-s3 rebuild their images (one build each; their step-0 scripts cover every key), then switch to the renamed env vars at leisure. Old names (`GCS_USAGE_TOKEN`/`_URL`, `CW_BUCKET`/`_ENDPOINT`) are accepted for one release. After that, the site's job specs (`planDispatch`, `sweepDispatch`, `cwBatch`) switch to the new names too.
+- **Left:** the test fixtures' Marin-shaped bucket names (examples); the secret names (Ryan: OK as they are).
 
 ## Goal
 
