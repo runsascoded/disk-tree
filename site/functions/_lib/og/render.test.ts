@@ -18,7 +18,7 @@ const sample = (tier: 'anon' | 'full'): CardData => ({
     { name: 'llama-32b-tootsie-2', b: 40 * T, color: '#3ca951' },
     { name: 'grug', b: 18 * T, color: '#4a4943' },
   ],
-  legend: [{ label: 'Calvin', color: '#4269d0', b: 90 * T }, { label: 'Percy', color: '#efb118', b: 60 * T }],
+  legend: [{ label: 'Margaret', color: '#4269d0', b: 90 * T }, { label: 'Hedy', color: '#efb118', b: 60 * T }],
 })
 
 describe('svgToPng', () => {

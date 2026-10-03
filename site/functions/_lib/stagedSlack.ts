@@ -64,7 +64,7 @@ export interface Sized {
 
 const who = (email: string, mentions?: Record<string, string>): string => mentions?.[email.toLowerCase()] ?? email.replace(/@.*$/, '')
 
-/** `51.0 TiB · 179,327,698 objects at scan 2026-10-02 · owners: <@U1> 16.0 TiB, Percy 6.0 TiB`. */
+/** `51.0 TiB · 179,327,698 objects at scan 2026-10-02 · owners: <@U1> 16.0 TiB, Hedy 6.0 TiB`. */
 export function sizeLine(z: Sized): string {
   const owners = z.owners.length ? ` · owners: ${z.owners.map(o => `${o.label} ${fmtBytes(o.b)}`).join(', ')}` : ''
   const empty = z.empty ? ` · ${fmtN(z.empty)} empty` : ''
@@ -224,7 +224,7 @@ export function personSender(email: string, person: SlackPerson | undefined, ver
   return { username: `${name} · ${verb}`, ...(person?.image ? { icon_url: person.image } : { icon_emoji: ':bust_in_silhouette:' }) }
 }
 
-/** A name as the site's canonical user id: `Chi-Heem Wong` → `chi-heem-wong`. */
+/** A name as the site's canonical user id: `Grace Hopper` → `grace-hopper`. */
 export const nameSlug = (name: string): string =>
   name.toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '')
 

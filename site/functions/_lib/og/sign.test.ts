@@ -11,9 +11,9 @@ describe('canonical, days', () => {
     expect([
       canonical({ path: 'b/x y', d: '261002', f: '' }),
       canonical({ f: undefined, d: '261002', path: 'b/x y' }),
-      canonical({ q: 'percy|chi-heem', s: null }),
+      canonical({ q: 'hedy|grace', s: null }),
       canonical({}),
-    ]).toEqual(['d=261002&path=b%2Fx+y', 'd=261002&path=b%2Fx+y', 'q=percy%7Cchi-heem', ''])
+    ]).toEqual(['d=261002&path=b%2Fx+y', 'd=261002&path=b%2Fx+y', 'q=hedy%7Cgrace', ''])
   })
   it('expiry days pack to 2 base62 chars', () => {
     expect([expDay(NOW, 7), packDays(0), packDays(61), packDays(62), packDays(281), packDays(3843), unpackDays('Eh'), unpackDays('E'), unpackDays('E-')])

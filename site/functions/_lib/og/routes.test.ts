@@ -16,11 +16,11 @@ describe('pageView: page URL → card kind, view params, title', () => {
     ])
   })
   it('the other pages', () => {
-    expect([pv('/staged?q=percy%7Cchi-heem&s=-o'), pv('/staged'), pv('/users'), pv('/user/will-held'), pv('/assignments')]).toEqual([
-      { kind: 'staged', params: { q: 'percy|chi-heem' }, title: 'Staged for deletion: “percy|chi-heem”' },
+    expect([pv('/staged?q=hedy%7Cgrace&s=-o'), pv('/staged'), pv('/users'), pv('/user/alan-turing'), pv('/assignments')]).toEqual([
+      { kind: 'staged', params: { q: 'hedy|grace' }, title: 'Staged for deletion: “hedy|grace”' },
       { kind: 'staged', params: {}, title: 'Staged for deletion' },
       { kind: 'users', params: {}, title: 'marin GCS — users' },
-      { kind: 'user', params: { id: 'will-held' }, title: 'will-held · marin GCS' },
+      { kind: 'user', params: { id: 'alan-turing' }, title: 'alan-turing · marin GCS' },
       { kind: 'assignments', params: {}, title: 'marin GCS — assigner × assignee' },
     ])
   })

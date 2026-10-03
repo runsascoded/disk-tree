@@ -53,13 +53,13 @@ describe('run events', () => {
 
 describe('mentions and sizes', () => {
   const base = { planId: 7, siteUrl: 'https://cw-s3.oa.dev', items: 3, batches: 2, stagers: [] as string[], digest: 'D1', actions: true, closed: false, runs: [] as RunRow[] }
-  const size = { scan: '2026-10-02', b: 51 * 2 ** 40, o: 179327698, empty: 5, owners: [{ label: '<@U1>', b: 16 * 2 ** 40 }, { label: 'percy-liang', b: 6 * 2 ** 40 }] }
+  const size = { scan: '2026-10-02', b: 51 * 2 ** 40, o: 179327698, empty: 5, owners: [{ label: '<@U1>', b: 16 * 2 ** 40 }, { label: 'hedy-lamarr', b: 6 * 2 ** 40 }] }
   it('the parent names stagers by mention (else the local part) and carries the size line', () => {
     const v = { ...base, stagers: ['a.b@x.org', 'c.d@x.org'], mentions: { 'a.b@x.org': '<@UA>' }, size }
     expect((renderParent(v).blocks[0] as { text: { text: string } }).text.text.split('\n')).toEqual([
       `*Staged for deletion* · plan #${base.planId} · ${base.items} prefixes in ${base.batches} batches`,
       'staged by <@UA>, c.d',
-      '*51.0 TiB* · 179,327,698 objects at scan 2026-10-02 · 5 empty · owners: <@U1> 16.0 TiB, percy-liang 6.0 TiB',
+      '*51.0 TiB* · 179,327,698 objects at scan 2026-10-02 · 5 empty · owners: <@U1> 16.0 TiB, hedy-lamarr 6.0 TiB',
     ])
   })
   it('a stage reply: mention, size line, then the note and prefixes', () => {
@@ -75,8 +75,8 @@ describe('mentions and sizes', () => {
 
 describe('nameSlug: a Slack name as the canonical owner id', () => {
   it('lowercase, accents folded, other runs to one dash', () => {
-    expect(['Chi-Heem Wong', 'Percy Liang', 'José  Núñez', ' Will Held (he/him) '].map(nameSlug))
-      .toEqual(['chi-heem-wong', 'percy-liang', 'jose-nunez', 'will-held-he-him'])
+    expect(['Grace Hopper', 'Hedy Lamarr', 'Émilie  du Châtelet', ' Alan Turing (he/him) '].map(nameSlug))
+      .toEqual(['grace-hopper', 'hedy-lamarr', 'emilie-du-chatelet', 'alan-turing-he-him'])
   })
 })
 

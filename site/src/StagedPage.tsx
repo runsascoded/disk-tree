@@ -106,7 +106,7 @@ export function StagedPage() {
   const error = unstage.error ?? dispatch.error ?? runAction.error ?? staged.error ?? statsQ.error
 
   const rows: Row[] = useMemo(() => items.map(it => ({ ...it, name: it.prefix, to: `/${prefixToPath(it.prefix)}`, stat: stats?.[it.prefix] })), [items, stats])
-  // The view lives in the URL, so a link carries it: `?q=percy|chi-heem&s=-b`
+  // The view lives in the URL, so a link carries it: `?q=hedy|grace&s=-b`
   // (filter, sort; `-` = descending, `-b` default) and `flat=1` (one table,
   // not one per batch — implied by a filter).
   const [qP, setQ] = useUrlState('q', stringParam())
@@ -225,7 +225,7 @@ export function StagedPage() {
           </div>
 
           <div className="staged-filter">
-            <input type="search" value={q} onChange={e => setQ(e.target.value || undefined)} placeholder="filter: percy|chi-heem, isoflop -nemotron, owner:will, staged-by:david"
+            <input type="search" value={q} onChange={e => setQ(e.target.value || undefined)} placeholder="filter: hedy|grace, isoflop -nemotron, owner:will, staged-by:david"
               aria-label="filter staged prefixes" className={filtered.error ? 'bad' : undefined} />
             {filtered.error && <span className="err">{filtered.error}</span>}
             <Tooltip content={q.trim() ? 'A filter shows one table across batches.' : 'One table per staging gesture (who, when, note), or one table of everything.'}>
