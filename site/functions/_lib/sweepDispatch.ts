@@ -53,7 +53,7 @@ export const sweepScript = ({ cfg, mode, jobId, buckets, plan }: SweepScript): s
   const bflags = buckets.map(b => `-b ${b}`).join(' ')
   return [
     'set -euo pipefail',
-    `trap 'curl -fsS -m 60 -o /dev/null -H "Authorization: Bearer $GCS_USAGE_TOKEN" "$SITE_URL/api/sweep/jobs" || true' EXIT`,
+    `trap 'curl -fsS -m 60 -o /dev/null -H "Authorization: Bearer $SITE_TOKEN" "$SITE_URL/api/sweep/jobs" || true' EXIT`,
     `dt-cloud sweep manifest -d "$SWEEP_DATE" --plan "${plan}" ${bflags} -o "${run}"`,
     `dt-cloud sweep execute ${bflags} ${mode === 'real' ? '--for-real ' : ''}"${run}"`,
   ].join('\n')
@@ -110,7 +110,7 @@ async function prepare(env: ExecEnv, db: D1Database, req: DispatchReq): Promise<
               SITE_URL: req.siteUrl,
             },
             secretVariables: {
-              GCS_USAGE_TOKEN: SECRET('gcs-sheet-sync-token'),
+              SITE_TOKEN: SECRET('gcs-sheet-sync-token'),
               CLOUDFLARE_API_TOKEN: SECRET('cf-pages-token'),
             },
           },
