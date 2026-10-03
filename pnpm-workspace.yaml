@@ -2,3 +2,4 @@ packages:
   - "site"
   - "packages/*"
   - "infra/cf/capture-trigger"
+  - "infra/cf/cron-dispatch"

@@ -565,7 +565,7 @@ def retire_d1(
     retain: int,
     db_id: str = D1_DB_ID,
     store: str = PRIMARY_STORE,
-    base: str = "oa-gcs-usage-dvx",
+    base: str | None = None,
     has_cold=exists,
 ) -> tuple[list[tuple[str, str, int]], list[tuple[str, str, str]]]:
     """Retention (specs/path-store.md §1.6): drop the store sorts' row groups
@@ -584,6 +584,9 @@ def retire_d1(
     Returns ``(retired, skipped)``: (date, variant, rows deleted) per retired
     variant, (date, variant, missing path) per variant kept for want of its
     cold footer."""
+    if base is None:
+        from .deploy import data_bucket
+        base = data_bucket()
     tok, acct = _creds()
     dates = sorted({d for d, _ in synced_variants(db_id, store)})
     old = set(dates[:-retain] if retain > 0 else dates)

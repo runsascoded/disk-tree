@@ -10,7 +10,8 @@ import { useStore } from './store'
 import { STORES } from './stores'
 import { useTheme } from './theme'
 import { useUnits } from './units'
-import { useCanStage } from './auth'
+import { useCanAssign, useCanStage, useIdent, useSignOut } from './auth'
+import { openDialog } from './dialogs'
 import { useShare } from './sharePreview'
 
 /** The source link (SpeedDial, omnibar, user menu): the deployment's
@@ -27,7 +28,7 @@ const HOSTS = hostPair(import.meta.env.VITE_PROD_HOST, import.meta.env.VITE_DEV_
  * HotkeysProvider sits in Root) and can push extra SpeedDial buttons via
  * `extra`.
  */
-export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }: {
+export function SiteKbd({ extra = [], placeholder }: {
   extra?: SpeedDialAction[]
   placeholder?: string
 }) {
@@ -45,11 +46,17 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
   // the other configured stores follow as switches (a single-store build has
   // none).
   const store = useStore()
+  placeholder ??= store.owners ? 'Pages, users, actions…' : 'Pages and actions…'
+  const canShare = useCanStage()
+  const canAssign = useCanAssign()
+  const ident = useIdent()
+  const signOut = useSignOut()
+  // The ☰ menu's pages, gated as it gates them.
   const PAGES: [string, string][] = [
     [store.path, 'Map (home)'],
-    ['/users', 'Users — storage by owner'],
+    ...(canAssign && store.owners ? [['/users', 'Users — storage by owner'], ['/assignments', 'Assignments']] as [string, string][] : []),
+    ...(store.staging ? [['/staged', 'Staged deletions']] as [string, string][] : []),
   ]
-  const canShare = useCanStage()
   const { share, status: shareStatus } = useShare()
   useActions({
     ...(canShare ? {
@@ -60,6 +67,11 @@ export function SiteKbd({ extra = [], placeholder = 'Pages, users, actions…' }
         handler: () => void share('preview'),
       },
     } : {}),
+    'dialog:about': { label: 'About — the data, axes & colors', group: 'Site', handler: () => openDialog('about') },
+    ...(canShare ? { 'dialog:share': { label: 'Share…', group: 'Share', handler: () => openDialog('share') } } : {}),
+    ...(ident && !ident.guest ? { 'dialog:profile': { label: 'Profile… (name + avatar)', group: 'Site', handler: () => openDialog('profile') } } : {}),
+    ...(canAssign ? { 'dialog:token': { label: 'Agent / CLI token…', group: 'Site', handler: () => openDialog('token') } } : {}),
+    ...(ident ? { 'auth:logout': { label: 'Log out', group: 'Site', handler: signOut } } : {}),
     'help:toggle': {
       label: `Help line: ${help} (toggle)`,
       group: 'View',

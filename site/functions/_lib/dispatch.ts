@@ -5,10 +5,11 @@
  * them without a cycle.
  */
 import type { D1Database } from '@cloudflare/workers-types'
+import type { BatchEnv } from './batchConfig.js'
 import type { FinishedRun } from './plans.js'
 import type { NotifyEnv } from './stagedSlack.js'
 
-export type ExecEnv = NotifyEnv & {
+export type ExecEnv = NotifyEnv & BatchEnv & {
   DB?: D1Database
   GCP_SA_KEY?: string
   /** The service account a dispatched Batch job runs as (a `[vars]` entry;

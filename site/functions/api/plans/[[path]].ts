@@ -17,7 +17,7 @@
 // deployment's shape (`STORE_SCHEME` / `STORE_BUCKETS`).
 import type { D1Database } from "@cloudflare/workers-types"
 import { type Ctx, type Env as AuthEnv, json, requireAdmin, requireStager, requireViewer } from "../../_lib/auth.js"
-import { audit, canonicalPrefix, openPlanId, planDetail, type PlanRow, type PrefixShape, prefixShape, stageItems } from "../../_lib/plans.js"
+import { audit, canonicalPrefix, NO_SHAPE, openPlanId, planDetail, type PlanRow, type PrefixShape, prefixShape, stageItems } from "../../_lib/plans.js"
 import { notifyPlan, refreshThread, type NotifyEnv } from "../../_lib/stagedSlack.js"
 
 type Env = AuthEnv & NotifyEnv & { DB?: D1Database }
@@ -145,6 +145,7 @@ export const onRequest = async (ctx: Ctx & { env: Env; waitUntil?: Bg }): Promis
     // The full base scope: a read-only guest link can't propose.
     const gated = await requireStager(ctx)
     if (gated instanceof Response) return gated
+    if (!shape) return json({ error: `staging ${NO_SHAPE}` }, 503)
     const body = await readBody(ctx.request)
     const prefixes = Array.isArray(body.prefixes)
       ? (body.prefixes as unknown[]).filter((x): x is string => typeof x === "string")
@@ -197,6 +198,7 @@ export const onRequest = async (ctx: Ctx & { env: Env; waitUntil?: Bg }): Promis
     const gated = await (staging && method === "DELETE" ? requireStager(ctx) : requireAdmin(ctx))
     if (gated instanceof Response) return gated
     const who = gated.email ?? gated.name ?? 'guest'
+    if (!shape) return json({ error: `plan items ${NO_SHAPE}` }, 503)
     const res = await editItems(db, who, id, method === "POST", await readBody(ctx.request), shape, !gated.admin)
     if (res.ok) {
       const body = (await res.clone().json()) as { added?: string[]; removed?: string[] }

@@ -1,6 +1,9 @@
 # OA decoupling: OA-specific behavior leaves `cloud`, as deployment config
 
-**Status:** planned 2026-10-03 (root session), per `branch-layout.md` §0. Branch config (step 0) is out to gcs and cw-s3.
+**Status (2026-10-03):** in progress, per `branch-layout.md` §0.
+- **Done on `cloud`:** step 0 is on both branches (gcs 5ee710e, cw-s3 1011f72); steps 1–5, 6a + its client part, 7, 8, 9–10; the people's-names part of 18. Step 5's harness replayed every executor request under each branch's env, byte-identical, except one intended addition: `DATA_BUCKET` in gcs's sweep job env (a8385dd).
+- **Store modules:** gcs carries `stores/gcs.tsx`, cw-s3 `stores/{cw,meta}.ts`, and `local` `stores/laptop.ts`.
+- **Next:** 6b (remove the inline entries), 11–16 (the rest of dt-cloud; then each branch rebuilds its image once), 17, the rest of 18.
 
 ## Goal
 

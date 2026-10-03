@@ -529,7 +529,7 @@ function AppContent() {
   const { fmtBytes } = useUnits()
   // The treemap's drill path now lives in the URL *path* (below the store's own
   // route prefix), so a drilled prefix is a real shareable URL —
-  // `/marin-us-central1/ego-dex`, not `/?p=marin-us-central1/ego-dex`. View
+  // `/my-bucket/some/dir`, not `/?p=my-bucket/some/dir`. View
   // options stay query params (`?c`, `?mt`, …); the section stays in the `#hash`.
   const storeBase = store.path === '/' ? '' : store.path
   // A store home reads as `~` in the URL (`/~/c`); the path itself is the
@@ -1442,7 +1442,7 @@ function AppContent() {
       {hasAttr && mapTree && <AttributionRules tree={mapTree} />}
 
       <SiteKbd
-        placeholder="Users, color modes, scans, pages…"
+        placeholder={store.owners ? 'Users, color modes, scans, pages…' : 'Color modes, scans, pages, actions…'}
         extra={[{ key: 'lens', label: `Class lens: ${lens ? 'on' : 'off'} (s)`, icon: <MdLayers />, onClick: () => setLens(v => !v) }]}
       />
     </main>
