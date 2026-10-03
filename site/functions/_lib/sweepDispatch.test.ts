@@ -37,7 +37,7 @@ describe('bucketCut — the run\'s -b cut from a plan\'s buckets', () => {
 describe('sweepScript — the Batch container\'s bash', () => {
   const jobId = 'gcs-sweep-dry-20260928-1200z'
   // on exit, ping the site so the finished run is reflected (and posted to Slack) at once
-  const trap = `trap 'curl -fsS -m 60 -o /dev/null -H "Authorization: Bearer $GCS_USAGE_TOKEN" "$SITE_URL/api/sweep/jobs" || true' EXIT`
+  const trap = `trap 'curl -fsS -m 60 -o /dev/null -H "Authorization: Bearer $SITE_TOKEN" "$SITE_URL/api/sweep/jobs" || true' EXIT`
   it('dry, one bucket: `manifest --plan <run>/plan.json` then execute', () => {
     expect(sweepScript({ cfg: CFG, mode: 'dry', jobId, buckets: [E1], plan: planJsonPath(CFG, jobId) })).toBe([
       'set -euo pipefail',
