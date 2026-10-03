@@ -80,7 +80,7 @@ class DigestConfig:
     """Everything a deployment passes the digest; no code forks.
 
     ``root``/``state``/``discord_state`` are templates: ``{DATA_BUCKET}`` reads
-    the env (default `oa-gcs-usage-dvx`); ``state`` is the Slack state dir
+    the env (required); ``state`` is the Slack state dir
     under the data root (``{channel}``, ``{variant}`` interpolated),
     ``discord_state`` the Discord one (``{webhook}`` = the webhook id — a
     webhook can only edit its own messages), ``discord_webhook_env`` the env
@@ -129,7 +129,8 @@ class DigestConfig:
         return re.sub(r"\s+", "-", self.title.strip().lower())
 
     def resolve_root(self) -> str:
-        return self.root.format(DATA_BUCKET=os.environ.get("DATA_BUCKET", "oa-gcs-usage-dvx"))
+        from .deploy import data_bucket
+        return self.root.format(DATA_BUCKET=data_bucket())
 
 
 PRESETS: dict[str, DigestConfig] = {

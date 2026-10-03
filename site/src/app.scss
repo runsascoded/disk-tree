@@ -690,7 +690,7 @@ h2 { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
   // box-shadow here would lose to): depth-based widths via the `borderWidth`
   // prop and per-cell adaptive `edge` colors via `colorForCell`, both in
   // site/src/Treemap.tsx. The old class-level inset rules were dead — dropped
-  // (same cleanup cw-s3 did in `1e5ee40`; see specs/done/branch-parity-discipline.md).
+  // (same cleanup cw-s3 did in `1e5ee40`; see cw-s3:specs/done/branch-parity-discipline.md).
   .hint { color: var(--ink-3); font-size: 12px; }
 }
 

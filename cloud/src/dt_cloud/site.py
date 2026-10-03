@@ -12,8 +12,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .secrets import secret
+from .deploy import site_url
 
-DEFAULT_URL = "https://gcs.oa.dev"
 # a real UA — CF edge-blocks bot UAs (1010), same as healthcheck.UA
 UA = "gcs-usage-cli/1.0"
 
@@ -33,7 +33,7 @@ class SiteError(Exception):
 def creds(token: str | None, url: str | None) -> tuple[str, str | None]:
     """Resolve (base_url, token) from args then env, so every verb shares one
     convention: ``$GCS_USAGE_TOKEN`` / ``$GCS_USAGE_URL``."""
-    return (url or os.environ.get("GCS_USAGE_URL") or DEFAULT_URL), secret(token, "GCS_USAGE_TOKEN")
+    return site_url(url), secret(token, "GCS_USAGE_TOKEN")
 
 
 def get_json(url: str, token: str, endpoint_path: str, params: dict | None = None, timeout: int = 30) -> dict | list:

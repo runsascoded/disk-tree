@@ -43,7 +43,6 @@ if TYPE_CHECKING:
 
 err = partial(print, file=sys.stderr)
 
-DATA_BUCKET = os.environ.get("DATA_BUCKET", "oa-gcs-usage-dvx")
 # The GCS md5 rides along as object metadata: the durable identity check a
 # re-run compares against (R2's multipart ETag is not an md5).
 MD5_META = "gcs-md5"
@@ -250,7 +249,7 @@ def copy_one(src_bucket: str, s3: "S3Client", bucket: str, obj: Obj) -> None:
 def publish(
     scan: str,
     *,
-    src_bucket: str = DATA_BUCKET,
+    src_bucket: str | None = None,
     prefixes: list[str] | None = None,
     subdir: str = SNAPSHOTS_SUBDIR,
     layer2: str = LAYER2_PREFIX,
@@ -266,6 +265,9 @@ def publish(
     leaves out every `index/<gen>/` dir none of them names (`served`); None
     copies every generation."""
     prefixes = prefixes or served_prefixes(scan, subdir, layer2)
+    if src_bucket is None:
+        from .deploy import data_bucket
+        src_bucket = data_bucket()
     objs, dropped = served(list_source(src_bucket, prefixes), layer2.format(scan=scan), listings=listings, pointed=pointed)
     for d in sorted(dropped):
         n, b = dropped[d]

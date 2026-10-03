@@ -12,7 +12,9 @@
 // ends.
 import { type Env as AuthEnv, json, requireViewer } from '../../_lib/auth.js'
 import type { ExecEnv } from '../../_lib/dispatch.js'
-import { BUCKET_REGION, GCP_PROJECT, gcpToken } from '../../_lib/gcp.js'
+import { batchConfig, notConfigured } from '../../_lib/batchConfig.js'
+import { gcpToken } from '../../_lib/gcp.js'
+import { runDir } from '../../_lib/sweepDispatch.js'
 import { announceFinished } from '../../_lib/stagedSlack.js'
 import { isSweepJob, jobIdOf, listSweepJobs, reflectSweepRuns } from '../../_lib/sweepReflect.js'
 
@@ -42,15 +44,17 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
   const gated = await requireViewer(ctx)
   if (gated instanceof Response) return gated
   if (!ctx.env.GCP_SA_KEY) return json({ jobs: [], configured: false })
+  const cfg = batchConfig(ctx.env, ['GCP_PROJECT', 'DATA_BUCKET'])
+  if ('missing' in cfg) return json({ error: notConfigured('jobs', cfg.missing) }, 503)
   const token = await gcpToken(ctx.env.GCP_SA_KEY)
   // Jobs live in their bucket's region: list every region a sweep can be
   // dispatched to and merge, newest first.
-  const jobs = await listSweepJobs(token).catch(e => e as Error)
+  const jobs = await listSweepJobs(cfg, token).catch(e => e as Error)
   if (jobs instanceof Error) { console.error('batch list failed', jobs.message); return json({ error: jobs.message }, 500) }
 
   const db = ctx.env.DB
   if (db) {
-    const finished = await reflectSweepRuns(db, jobs)
+    const finished = await reflectSweepRuns(cfg, db, jobs)
     if (finished.length) {
       const p = announceFinished(ctx.env, db, finished, new URL(ctx.request.url).origin)
       if (ctx.waitUntil) ctx.waitUntil(p)
@@ -65,7 +69,7 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
       const job_id = jobIdOf(j)
       const vars = j.taskGroups?.[0]?.taskSpec?.environment?.variables ?? {}
       const script = j.taskGroups?.[0]?.taskSpec?.runnables?.[0]?.container?.commands?.join(' ') ?? ''
-      const buckets = [...new Set([...script.matchAll(/(?:^|\s)-b\s+(marin-[a-z0-9-]+)/g)].map(m => m[1]))].sort()
+      const buckets = [...new Set([...script.matchAll(/(?:^|\s)-b\s+(\S+)/g)].map(m => m[1]))].sort()
       const ev = j.status?.statusEvents ?? []
       const last = ev.length ? ev[ev.length - 1] : null
       const dur = j.status?.runDuration
@@ -80,10 +84,10 @@ export const onRequestGet = async (ctx: { request: Request; env: Env; waitUntil?
         date: vars.SWEEP_DATE ?? null,
         buckets,
         region: j.region,
-        bucket_region: buckets.length === 1 ? BUCKET_REGION[buckets[0]] ?? null : null,
-        plan: `gs://oa-gcs-usage-dvx/sweep/runs/${job_id}`,
+        bucket_region: buckets.length === 1 ? cfg.bucketRegions[buckets[0]] ?? null : null,
+        plan: runDir(cfg, job_id),
         last_event: last?.description ?? null,
-        logs: `https://console.cloud.google.com/logs/query;query=${encodeURIComponent(`labels.job_uid="${j.uid}"`)}?project=${GCP_PROJECT}`,
+        logs: `https://console.cloud.google.com/logs/query;query=${encodeURIComponent(`labels.job_uid="${j.uid}"`)}?project=${cfg.project}`,
       }
     })
   return json({ jobs: out, configured: true }, 200, { 'cache-control': 'private, max-age=10' })
