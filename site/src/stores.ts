@@ -198,7 +198,7 @@ const REGISTRY: Store[] = [
 export function resolveStores(primary: string | undefined, extra: string | undefined): Store[] {
   const find = (key: string): Store => {
     const s = REGISTRY.find(r => r.key === key)
-    if (!s) throw new Error(`stores: no registry store '${key}' (have ${REGISTRY.map(r => r.key).join(', ')})`)
+    if (!s) throw new Error(`stores: no registry store '${key}' (have ${REGISTRY.map(r => r.key).sort().join(', ')})`)
     return s
   }
   const first = primary ? find(primary) : REGISTRY[0]
