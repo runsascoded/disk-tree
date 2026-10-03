@@ -82,7 +82,7 @@ export function SiteNav({ children, menu, crumbs }: {
   }, [])
   // The crumbs scroll horizontally when they don't fit (a phone), and snap
   // to their END on every path change so the basename — the one segment the
-  // reader needs — is what shows, not `marin GCS/marin-us-…`.
+  // reader needs — is what shows, not `<root label>/<bucket>/…`.
   const crumbsRef = useRef<HTMLDivElement | null>(null)
   const { pathname } = useLocation()
   useLayoutEffect(() => {

@@ -69,8 +69,7 @@ export interface Store {
   /** The sibling deployment the site menu links to (each store is its own host). */
   peer?: { label: string; href: string }
   /** The login wall's copy — who may sign in here and how. Each deployment's
-   *  own: gcs.oa.dev admits allow-listed non-OA accounts, PINs and share links;
-   *  cw-s3.oa.dev is OA + CoreWeave staff. */
+   *  own (who's allow-listed, which sign-in methods it offers). */
   wall: { restrict: string; signIn: string; how?: string }
   /** How the store's root reads in copy: the scope word for "all of it"
    *  (`all buckets` for the six-bucket fleet, `the whole bucket` for one). */
@@ -96,102 +95,17 @@ export interface Store {
   about?: ReactNode
 }
 
-/** The registry: one module per store under `stores/` (each `export default`s a
- * `Store`), plus the inline entries below; a module wins over an inline entry
- * with its key. A deployment branch adds its store as a module, so the shared
- * base carries no deployment's entry (specs/oa-decoupling.md step 6). */
+/** The registry: one module per store under `stores/`, each `export default`ing
+ * a `Store`. `cloud` carries r2's; a deployment branch adds its own, so the
+ * shared base carries no deployment's entry (specs/oa-decoupling.md step 6). */
 const MODULES = Object.values(import.meta.glob<{ default: Store }>('./stores/*.{ts,tsx}', { eager: true })).map(m => m.default)
 
-const INLINE: Store[] = [
-  {
-    key: 'cw',
-    label: 'CoreWeave',
-    title: 'Marin CoreWeave usage',
-    desc: 'Storage usage of the Marin CoreWeave buckets — treemap, diffs over time, and reviewed deletions.',
-    path: '/',
-    scheme: 's3://',
-    base: '/data/cw',
-    ogImage: '/og.jpg',
-    prices: false,
-    staging: false,
-    owners: false,
-    executor: 'plan-sweep',
-    lifecycle: { tracked: 'job/cw-lifecycle.json', rules: 's3', recordedFrom: '2026-09-17' },
-    buckets: ['marin-us-east-02a', 'hero-checkpoints'],
-    peer: { label: 'GCS usage', href: 'https://gcs.oa.dev/' },
-    rootLabel: 'all buckets',
-    objectsNote: 'CoreWeave objects are written once by the training jobs and never rewritten in place, so created is the object’s only time.',
-    wall: {
-      restrict: 'Access is limited to Open Athena and CoreWeave staff.',
-      signIn: 'Sign in with Open Athena',
-      how: 'Use Google with your Open Athena or CoreWeave account, or have a one-time code emailed to it (no Google account needed). Invited guests can also use a personal share link.',
-    },
-  },
-  {
-    key: 'gcs',
-    label: 'GCS',
-    title: 'Marin GCS usage',
-    desc: 'Per-user storage ownership across the six marin-* GCS buckets.',
-    path: '/',
-    scheme: 'gs://',
-    base: '/data',
-    ogImage: '/og.jpg',
-    prices: true,
-    staging: true,
-    owners: true,
-    executor: 'sweep',
-    lifecycle: { tracked: 'job/lifecycle/', rules: 'gcs', grouped: true, recordedFrom: '2026-09-16' },
-    buckets: ['marin-us-central2', 'marin-us-central1', 'marin-us-east1', 'marin-us-east5', 'marin-us-west4', 'marin-eu-west4'],
-    peer: { label: 'CoreWeave usage', href: 'https://cw-s3.oa.dev/' },
-    rootLabel: 'all buckets',
-    objectsNote: 'GCS objects are written by the training jobs and rarely rewritten in place, so created is the object’s upload time; the read axis adds when it was last read.',
-    wall: {
-      restrict: 'Access is limited to marin contributors and invited collaborators.',
-      signIn: 'Sign in',
-      how: 'Use Google with any allow-listed account (Stanford, personal, or Open Athena), or have a one-time code emailed to any allow-listed address (no Google account needed). Invited guests can also use a personal share link.',
-    },
-  },
-  {
-    // The deploy's own storage (specs/multi-store.md): the scan + index data
-    // the deployments write — the GCS snapshot bucket and its R2 mirror — as
-    // a secondary store, mounted under `/meta` beside a primary (`STORES_EXTRA`).
-    // Its data is the same layer-3 shape under `snapshots/meta/`, served by the
-    // Functions with `store=meta` (`STORES_JSON` → `SNAPSHOTS_SUBDIR = meta`).
-    // Staff-only server-side (the store's `scope`); no ownership ledger, no
-    // trash gesture, no storage-class prices.
-    key: 'meta',
-    label: 'Meta',
-    title: 'Our storage — scan & index data',
-    desc: 'The scan and index data these deployments write (the GCS snapshot bucket and its R2 mirror) — treemap, sizes over time, and diffs.',
-    path: '/meta',
-    scheme: 'gs://',
-    base: '/data/meta',
-    ogImage: '/og.jpg',
-    prices: false,
-    staging: false,
-    owners: false,
-    executor: 'plan-sweep',
-    buckets: ['oa-gcs-usage-dvx', 'oa-cw-s3-usage-index'],
-    rootLabel: 'our storage',
-    objectsNote: 'Scan outputs are written once per job run and never rewritten in place, so created is the object’s publish time.',
-    wall: {
-      restrict: 'The meta store is limited to Open Athena staff.',
-      signIn: 'Sign in with Open Athena',
-    },
-  },
-]
-
-// A module takes its inline entry's place, so overriding an entry never
-// reorders the registry (its first store is the unconfigured build's primary).
-const REGISTRY: Store[] = [
-  ...INLINE.map(s => MODULES.find(m => m.key === s.key) ?? s),
-  ...MODULES.filter(m => !INLINE.some(s => s.key === m.key)),
-]
+const REGISTRY: Store[] = MODULES
 
 /** The registry rows a build serves, primary first.
  *
  * A deployment serves one **primary** store, selected by `VITE_STORE` at build
- * time (unset = the first registry store, so the cw-s3 build is unchanged) —
+ * time (unset = the registry's first store) —
  * the "deployment as configuration" seam for the shared base
  * (specs/union-of-roots.md). `VITE_STORES_EXTRA` (comma-separated keys) adds
  * **secondary** stores, each mounted under its own `path` (`/meta`) and read
@@ -199,13 +113,13 @@ const REGISTRY: Store[] = [
  * The primary keeps `/` and its requests carry no `store=` at all, so a build
  * without extras is exactly the single-store build. A misconfiguration is a
  * build-time error, not an empty page. */
-export function resolveStores(primary: string | undefined, extra: string | undefined): Store[] {
+export function resolveStores(primary: string | undefined, extra: string | undefined, registry: Store[] = REGISTRY): Store[] {
   const find = (key: string): Store => {
-    const s = REGISTRY.find(r => r.key === key)
-    if (!s) throw new Error(`stores: no registry store '${key}' (have ${REGISTRY.map(r => r.key).sort().join(', ')})`)
+    const s = registry.find(r => r.key === key)
+    if (!s) throw new Error(`stores: no registry store '${key}' (have ${registry.map(r => r.key).sort().join(', ')})`)
     return s
   }
-  const first = primary ? find(primary) : REGISTRY[0]
+  const first = primary ? find(primary) : registry[0]
   const out = [first]
   for (const key of [...new Set((extra ?? '').split(',').map(k => k.trim()).filter(Boolean))]) {
     if (key === first.key) throw new Error(`stores: '${key}' is the primary store (VITE_STORE); it can't also be in VITE_STORES_EXTRA`)
